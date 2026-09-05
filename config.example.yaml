@@ -1,0 +1,20 @@
+# Copy to config.yaml. Prefer OPENCODE_GO_API_KEY instead of writing the key here.
+api_key: ""
+base_url: "https://opencode.ai/zen/go/v1"
+chat_model: "deepseek-v4-flash"
+chat_temperature: 0.7
+llm_attempts: 2
+
+# Real semantic embeddings are enabled from Day 1.
+embedding_provider: "sentence-transformers"
+embedding_model: "BAAI/bge-small-zh-v1.5"
+
+# Alternative for any provider exposing POST /embeddings:
+# embedding_provider: "openai-compatible"
+# embedding_base_url: "https://your-provider/v1"
+# embedding_model: "your-embedding-model"
+# embedding_api_key: ""
+
+db_path: "data/character-memory.db"
+persona_path: "personas/rin/persona.yaml"
+recall_limit: 8

@@ -18,15 +18,17 @@ from character_memory.storage.sqlite import SQLiteStore
 def main():
     import streamlit as st
 
-    st.set_page_config(page_title="Character Memory Research Console", page_icon="🧠", layout="wide")
+    st.set_page_config(page_title="Character Memory Research Console", page_icon="💬", layout="wide")
     config_path = os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml")
     settings = load_settings(config_path)
 
     st.markdown(
         """
         <style>
-        .block-container {padding-top: 1.2rem; padding-bottom: 2rem;}
-        .cm-date {text-align:center;color:#8a919b;font-size:.8rem;margin:1rem 0}
+        .block-container {padding-top: 1rem; padding-bottom: 1.5rem; max-width: 1500px;}
+        .cm-date {text-align:center;color:#8a919b;font-size:.78rem;margin:.7rem 0}
+        .cm-hint {color:#8a919b;font-size:.82rem}
+        [data-testid="stForm"] {border: 0; padding: 0;}
         </style>
         """,
         unsafe_allow_html=True,
@@ -42,7 +44,7 @@ def main():
         )
 
     st.title("Character Memory · Research Console")
-    st.caption("直接聊天，同时检查时间、Recall、上下文、人物反应、Mental State、Action、Memory Write 与 Intent。")
+    st.caption("左边直接聊天；右边检查这一轮人物到底看到了什么、想了什么摘要、Recall 了什么，以及最终为什么回复或沉默。")
 
     try:
         with st.spinner(f"加载 Embedding：{settings.embedding_model} ..."):
@@ -97,91 +99,126 @@ def main():
         st.rerun()
 
     st.sidebar.divider()
-    st.sidebar.caption("这里展示开发者安全摘要，不展示模型隐藏 chain-of-thought。")
+    st.sidebar.caption("Perception / Reaction / Mental State / Action Reason 是开发者安全摘要，不是模型隐藏 chain-of-thought。")
 
-    events = store.list_events(character_id, 400)
+    events = store.list_events(character_id, 500)
     memories = store.list_memories(character_id, include_inactive=True)[-300:]
     intents = [dict(row) for row in store.list_intents(character_id, 200)]
-
-    chat_tab, trace_tab, timeline_tab, memory_tab, state_tab = st.tabs(
-        ["💬 对话", "🔬 本轮调试", "🕒 Timeline", "🧠 Memory", "📌 State / Intent"]
-    )
-
-    with chat_tab:
-        st.subheader(character_id)
-        st.caption(f"当前人物时间：{days.current_time(character_id).strftime('%Y-%m-%d %H:%M')}")
-
-        chat_events = [
-            event
-            for event in events
-            if event.event_type in {EventType.USER_MESSAGE, EventType.CHARACTER_MESSAGE}
-        ]
-        last_date = None
-        if not chat_events:
-            st.info("还没有聊天记录。直接在下面输入第一句话。")
-
-        for event in chat_events:
-            current_date = event.event_time.date()
-            if current_date != last_date:
-                st.markdown(
-                    f"<div class='cm-date'>── {current_date.isoformat()} ──</div>",
-                    unsafe_allow_html=True,
-                )
-                last_date = current_date
-
-            role = "user" if event.event_type == EventType.USER_MESSAGE else "assistant"
-            with st.chat_message(role):
-                st.write(event.content)
-                suffix = ""
-                if event.event_type == EventType.CHARACTER_MESSAGE:
-                    action_name = event.metadata.get("action", "")
-                    if action_name == "PROACTIVE_MESSAGE":
-                        suffix = " · 主动消息"
-                    elif action_name:
-                        suffix = f" · {action_name}"
-                st.caption(event.event_time.strftime("%H:%M:%S") + suffix)
-
-        message = st.chat_input("给角色发送消息")
-        if message:
-            now = days.current_time(character_id)
-            with st.spinner("人物正在感知、Recall、反应并决定是否表达 ..."):
-                result = runtime.handle(
-                    Event(
-                        character_id=character_id,
-                        event_type=EventType.USER_MESSAGE,
-                        event_time=now,
-                        content=message,
-                    )
-                )
-                store.set_world_time(character_id, now + timedelta(minutes=1))
-                st.session_state["selected_trace_source"] = result.event.id
-            store.close()
-            st.rerun()
-
+    chat_events = [
+        event
+        for event in events
+        if event.event_type in {EventType.USER_MESSAGE, EventType.CHARACTER_MESSAGE}
+    ]
     trace_events = [
         event
         for event in events
         if event.event_type == EventType.ACTION and event.metadata.get("trace")
     ]
 
-    with trace_tab:
-        st.subheader("Runtime Trace")
-        st.caption("选择任意一次 Runtime 决策，查看当时实际获得的上下文和最终对外行为。")
+    chat_col, debug_col = st.columns([1.05, 1], gap="large")
 
-        if not trace_events:
-            st.info("还没有可查看的 Runtime Trace。发送一条消息或推进时间后这里会出现。")
-        else:
-            def trace_label(action_event):
-                trace = action_event.metadata["trace"]
-                source = trace.get("event", {})
-                content = str(source.get("content", "")).replace("\n", " ")
-                if len(content) > 32:
-                    content = content[:32] + "…"
-                return (
-                    f"{action_event.event_time.strftime('%m-%d %H:%M:%S')} · "
-                    f"{source.get('event_type', '?')} · {content} · {action_event.content}"
+    # -------------------------
+    # Left: real chat surface
+    # -------------------------
+    with chat_col:
+        head1, head2 = st.columns([3, 2])
+        with head1:
+            st.subheader(character_id)
+            st.caption("直接和人物聊天")
+        with head2:
+            st.caption("当前人物时间")
+            st.code(days.current_time(character_id).strftime("%Y-%m-%d %H:%M"), language=None)
+
+        chat_box = st.container(height=610, border=True)
+        with chat_box:
+            if not chat_events:
+                st.info("还没有聊天记录。就在下面输入第一句话。")
+
+            last_date = None
+            for event in chat_events:
+                current_date = event.event_time.date()
+                if current_date != last_date:
+                    st.markdown(
+                        f"<div class='cm-date'>── {current_date.isoformat()} ──</div>",
+                        unsafe_allow_html=True,
+                    )
+                    last_date = current_date
+
+                role = "user" if event.event_type == EventType.USER_MESSAGE else "assistant"
+                with st.chat_message(role):
+                    st.write(event.content)
+                    suffix = ""
+                    if event.event_type == EventType.CHARACTER_MESSAGE:
+                        action_name = event.metadata.get("action", "")
+                        if action_name == "PROACTIVE_MESSAGE":
+                            suffix = " · 主动消息"
+                    st.caption(event.event_time.strftime("%H:%M:%S") + suffix)
+
+        # Use an ordinary form instead of st.chat_input so the input is always visibly
+        # attached to the chat panel rather than being hidden at the bottom of the page/tab.
+        with st.form("chat_form", clear_on_submit=True):
+            input_col, send_col = st.columns([6, 1])
+            message = input_col.text_input(
+                "消息",
+                placeholder=f"给 {character_id} 发消息…",
+                label_visibility="collapsed",
+            )
+            submitted = send_col.form_submit_button("发送", use_container_width=True)
+
+        st.markdown(
+            "<div class='cm-hint'>不使用流式输出。提交后会先显示“正在输入中…”，完整结果返回后一次性显示回复。</div>",
+            unsafe_allow_html=True,
+        )
+
+        if submitted and message.strip():
+            now = days.current_time(character_id)
+
+            # Show the newly submitted turn immediately. Streamlit sends these deltas to
+            # the browser before the blocking model call, so the user gets a WeChat-like
+            # typing state while the non-streaming request is running.
+            with chat_box:
+                with st.chat_message("user"):
+                    st.write(message.strip())
+                    st.caption(now.strftime("%H:%M:%S"))
+                with st.chat_message("assistant"):
+                    typing = st.empty()
+                    typing.markdown(f"**{character_id} 正在输入中…**")
+
+            try:
+                result = runtime.handle(
+                    Event(
+                        character_id=character_id,
+                        event_type=EventType.USER_MESSAGE,
+                        event_time=now,
+                        content=message.strip(),
+                    )
                 )
+                store.set_world_time(character_id, now + timedelta(minutes=1))
+                st.session_state["selected_trace_source"] = result.event.id
 
+                if result.reaction.action.message:
+                    typing.markdown(result.reaction.action.message)
+                else:
+                    typing.caption(f"未发送消息 · {result.reaction.action.type.value}")
+            except Exception as exc:
+                typing.error(f"生成失败：{exc}")
+                store.close()
+                return
+
+            store.close()
+            st.rerun()
+
+    # -------------------------
+    # Right: research/debug UI
+    # -------------------------
+    with debug_col:
+        st.subheader("本轮观察")
+        trace_tab, model_tab, memory_tab, timeline_tab, state_tab = st.tabs(
+            ["🔬 决策", "📨 模型输入", "🧠 Memory", "🕒 Timeline", "📌 State"]
+        )
+
+        selected_trace = None
+        if trace_events:
             source_preference = st.session_state.get("selected_trace_source")
             default_index = len(trace_events) - 1
             if source_preference is not None:
@@ -190,152 +227,153 @@ def main():
                         default_index = idx
                         break
 
-            selected = st.selectbox(
-                "选择一轮",
+            def trace_label(action_event):
+                trace = action_event.metadata["trace"]
+                source = trace.get("event", {})
+                content = str(source.get("content", "")).replace("\n", " ")
+                if len(content) > 24:
+                    content = content[:24] + "…"
+                return (
+                    f"{action_event.event_time.strftime('%m-%d %H:%M:%S')} · "
+                    f"{source.get('event_type', '?')} · {content} · {action_event.content}"
+                )
+
+            selected_trace = st.selectbox(
+                "查看哪一轮",
                 trace_events,
                 index=default_index,
                 format_func=trace_label,
-            )
-            trace = selected.metadata["trace"]
-            action = trace.get("action", {})
+                key="trace_selector",
+            ).metadata["trace"]
 
-            a1, a2, a3, a4 = st.columns(4)
-            a1.metric("Action", action.get("type", ""))
-            a2.metric("Model Attempt", trace.get("model_attempt", 0) or "n/a")
-            a3.metric("Recall", len(trace.get("recalled_memories", [])))
-            a4.metric("Memory Writes", len(trace.get("created_memory_ids", [])))
-
-            st.markdown("#### 用户真正收到什么")
-            if action.get("message"):
-                st.success(action["message"])
+        with trace_tab:
+            if selected_trace is None:
+                st.info("发送第一条消息后，这里会显示本轮 Runtime Trace。")
             else:
-                st.info(f"没有对外发送消息。Action = {action.get('type', '')}")
+                action = selected_trace.get("action", {})
+                a1, a2, a3 = st.columns(3)
+                a1.metric("Action", action.get("type", ""))
+                a2.metric("Recall", len(selected_trace.get("recalled_memories", [])))
+                a3.metric("Memory Write", len(selected_trace.get("created_memory_ids", [])))
 
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("#### Perception")
-                st.write(trace.get("perception", "") or "—")
-                st.markdown("#### Reaction")
-                st.write(trace.get("reaction", "") or "—")
-            with c2:
-                st.markdown("#### Action Reason")
+                st.markdown("##### 最终给用户的内容")
+                if action.get("message"):
+                    st.success(action["message"])
+                else:
+                    st.info(f"没有发送消息 · {action.get('type', '')}")
+
+                st.markdown("##### Perception")
+                st.write(selected_trace.get("perception", "") or "—")
+                st.markdown("##### Reaction")
+                st.write(selected_trace.get("reaction", "") or "—")
+                st.markdown("##### Action Reason")
                 st.write(action.get("reason", "") or "—")
-                st.markdown("#### Source Event")
-                st.json(trace.get("event", {}), expanded=False)
 
-            st.markdown("#### Mental State")
-            before, after = st.columns(2)
-            with before:
-                st.caption("Before")
-                st.write(trace.get("mental_state_before", "") or "暂无")
-            with after:
-                st.caption("After")
-                st.write(trace.get("mental_state_after", "") or "暂无")
+                before, after = st.columns(2)
+                with before:
+                    st.markdown("##### Mental State · Before")
+                    st.write(selected_trace.get("mental_state_before", "") or "暂无")
+                with after:
+                    st.markdown("##### Mental State · After")
+                    st.write(selected_trace.get("mental_state_after", "") or "暂无")
 
-            st.markdown("#### Recall 到的 Memory")
-            recalled = trace.get("recalled_memories", [])
-            if recalled:
-                st.dataframe(
-                    [
+                recalled = selected_trace.get("recalled_memories", [])
+                st.markdown("##### Recall")
+                if recalled:
+                    st.dataframe(
+                        [
+                            {
+                                "id": item.get("id"),
+                                "type": item.get("memory_type"),
+                                "importance": item.get("importance"),
+                                "content": item.get("content"),
+                            }
+                            for item in recalled
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.caption("本轮没有 Recall 到 Memory。")
+
+                with st.expander("Structured Runtime Output", expanded=False):
+                    st.json(
                         {
-                            "id": item.get("id"),
-                            "time": item.get("event_time"),
-                            "type": item.get("memory_type"),
-                            "importance": item.get("importance"),
-                            "content": item.get("content"),
-                            "source_event_id": item.get("source_event_id"),
+                            "action": selected_trace.get("action"),
+                            "memory_candidates": selected_trace.get("memory_candidates", []),
+                            "created_memory_ids": selected_trace.get("created_memory_ids", []),
+                            "intent_candidates": selected_trace.get("intent_candidates", []),
+                            "created_intent_ids": selected_trace.get("created_intent_ids", []),
                         }
-                        for item in recalled
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                    )
+
+        with model_tab:
+            if selected_trace is None:
+                st.info("还没有模型调用。")
             else:
-                st.caption("本轮没有 Recall 到 Memory。")
+                st.caption("下面是这一轮实际发送给模型的 messages，而不是事后重建。")
+                model_messages = selected_trace.get("model_messages", [])
+                if model_messages:
+                    for index, model_message in enumerate(model_messages, start=1):
+                        role = model_message.get("role", "?")
+                        with st.expander(f"{index}. {role}", expanded=index <= 2):
+                            st.code(model_message.get("content", ""), language="text")
+                else:
+                    st.caption("该模型实现没有提供 request message trace。")
 
-            st.markdown("#### 实际发送给模型的 Messages")
-            model_messages = trace.get("model_messages", [])
-            if model_messages:
-                for index, model_message in enumerate(model_messages, start=1):
-                    role = model_message.get("role", "?")
-                    with st.expander(
-                        f"{index}. {role}",
-                        expanded=role in {"system", "user"} and len(model_messages) <= 2,
-                    ):
-                        st.code(model_message.get("content", ""), language="text")
+                with st.expander("Compiled Context", expanded=False):
+                    st.code(selected_trace.get("context", ""), language="text")
+
+                raw = selected_trace.get("raw_model_response", "")
+                if raw:
+                    with st.expander("Raw Model Response", expanded=False):
+                        st.code(raw, language="json")
+
+        with memory_tab:
+            st.caption("语言 Memory、重要度、来源和 active 状态。")
+            st.dataframe(
+                [
+                    {
+                        "id": memory.id,
+                        "time": memory.event_time,
+                        "type": memory.memory_type,
+                        "importance": memory.importance,
+                        "active": memory.active,
+                        "content": memory.content,
+                        "source_event_id": memory.source_event_id,
+                    }
+                    for memory in reversed(memories)
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with timeline_tab:
+            st.dataframe(
+                [
+                    {
+                        "id": event.id,
+                        "time": event.event_time,
+                        "type": event.event_type.value,
+                        "content": event.content,
+                        "metadata": json.dumps(event.metadata, ensure_ascii=False),
+                    }
+                    for event in reversed(events)
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with state_tab:
+            st.markdown("##### Persona")
+            st.code(runtime.persona, language="text")
+            st.markdown("##### Mental State")
+            st.write(store.get_mental_state(character_id) or "暂无")
+            st.markdown("##### Pending / Historical Intents")
+            if intents:
+                st.dataframe(intents, use_container_width=True, hide_index=True)
             else:
-                st.caption("该模型实现没有提供 request message trace。")
-
-            with st.expander("Compiled Context（Person Runtime 生成）", expanded=False):
-                st.code(trace.get("context", ""), language="text")
-
-            structured = {
-                "perception": trace.get("perception"),
-                "reaction": trace.get("reaction"),
-                "mental_state_before": trace.get("mental_state_before"),
-                "mental_state_after": trace.get("mental_state_after"),
-                "action": trace.get("action"),
-                "memory_candidates": trace.get("memory_candidates", []),
-                "created_memory_ids": trace.get("created_memory_ids", []),
-                "intent_candidates": trace.get("intent_candidates", []),
-                "created_intent_ids": trace.get("created_intent_ids", []),
-            }
-            with st.expander("Structured Runtime Output", expanded=True):
-                st.json(structured)
-
-            raw = trace.get("raw_model_response", "")
-            if raw:
-                with st.expander("Raw Model Response", expanded=False):
-                    st.code(raw, language="json")
-
-    with timeline_tab:
-        st.subheader("完整 Event Timeline")
-        st.dataframe(
-            [
-                {
-                    "id": event.id,
-                    "time": event.event_time,
-                    "type": event.event_type.value,
-                    "content": event.content,
-                    "metadata": json.dumps(event.metadata, ensure_ascii=False),
-                }
-                for event in reversed(events)
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    with memory_tab:
-        st.subheader("Language Memory")
-        st.caption("Embedding 本身不直接展示；这里看 Memory 文本、类型、重要度、来源和是否 active。")
-        st.dataframe(
-            [
-                {
-                    "id": memory.id,
-                    "time": memory.event_time,
-                    "type": memory.memory_type,
-                    "importance": memory.importance,
-                    "active": memory.active,
-                    "content": memory.content,
-                    "source_event_id": memory.source_event_id,
-                }
-                for memory in reversed(memories)
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    with state_tab:
-        st.subheader("当前人物状态")
-        st.markdown("#### Persona")
-        st.code(runtime.persona, language="text")
-        st.markdown("#### Mental State")
-        st.write(store.get_mental_state(character_id) or "暂无")
-        st.markdown("#### Pending / Historical Intents")
-        if intents:
-            st.dataframe(intents, use_container_width=True, hide_index=True)
-        else:
-            st.caption("暂无 Intent。")
+                st.caption("暂无 Intent。")
 
     store.close()
 

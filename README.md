@@ -55,12 +55,15 @@ db_path: "data/character-memory.db"
 uv run character-memory inspector
 ```
 
+当前页面以聊天为主：默认不常驻大面积调试面板；发送消息时非流式等待，角色会显示“正在输入中…”，完整结果返回后再一次性显示回复。
+
 打开页面后可以直接：
 
 - 和角色聊天；
 - 查看消息对应的现实/模拟时间；
 - 同步 World Time 到现实时间；
 - `+1 小时`、`+1 天` 或批量模拟若干天；
+- 点击某条消息的“查看详情”，只展开这一轮对应的 Runtime Trace；
 - 查看每轮真正发给用户的消息，或 `NO_REPLY / DEFER`；
 - 查看开发者安全的 `Perception / Reaction / Mental State / Action Reason`；
 - 查看本轮 Recall 到哪些 Memory；
@@ -68,7 +71,7 @@ uv run character-memory inspector
 - 查看 Runtime 生成的 Compiled Context；
 - 查看 Raw Structured Model Response；
 - 查看 Memory Candidate、真正写入的 Memory ID、Intent Candidate 和 Intent ID；
-- 查看完整 Event Timeline、Memory、Persona、Mental State 和 Intent。
+- 在详情中按需查看完整 Event Timeline、Memory、Persona、Mental State 和 Intent。
 
 这里展示的“内心活动”是系统专门要求模型输出的简短开发者安全摘要，不是模型隐藏 chain-of-thought。
 

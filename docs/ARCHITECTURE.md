@@ -11,7 +11,7 @@
 - NumPy
 - Sentence Transformers（默认本地 Embedding，可选）
 - FastAPI/Uvicorn（可选 HTTP API）
-- Streamlit（可选 Inspector）
+- Streamlit（Research Console）
 - pytest
 
 V0 不使用 ORM；SQLite schema 很小，直接使用标准库 `sqlite3`。
@@ -38,11 +38,11 @@ src/character_memory/
   llm/           Provider adapter
   eval/          Regression runner
   api.py         Optional HTTP surface
-  ui.py          Optional research inspector
+  ui.py          Interactive research console
   cli.py         Local entry point
 ```
 
-Provider 和存储实现不能进入人物认知逻辑：`PersonRuntime` 不应该知道 OpenCode、Sentence Transformers、SQLite UI 等具体产品。
+Provider 和存储实现不能进入人物认知逻辑：`PersonRuntime` 不应该知道 OpenCode、Sentence Transformers、Streamlit 等具体产品。
 
 ## 4. SQLite tables
 
@@ -52,7 +52,7 @@ Provider 和存储实现不能进入人物认知逻辑：`PersonRuntime` 不应�
 - `memories`：语言 Memory + embedding BLOB + provenance。
 - `mental_states`：每个角色一份紧凑当前心理状态。
 - `intents`：未来可能执行的行为意图。
-- `world_states`：角色当前虚拟时间。
+- `world_states`：角色当前 Runtime 时间。
 
 数据库是单文件，方便复制成独立实验：
 
@@ -77,7 +77,30 @@ Embedding：
 
 Embedding 模型不是 Person Model 的附属能力，两者独立配置。
 
-## 6. 当前故意不引入
+## 6. Research Console 与 Runtime Trace
+
+V0 的主要人工评估入口是 `character-memory inspector`。它不是产品 UI，而是为了回答：人物这次为什么这么做、到底给模型提供了什么。
+
+每一次 `PersonRuntime.handle(event)` 都会把一份开发者 Trace 写进对应的 `ACTION` Event metadata。Trace 当前包含：
+
+- source event 与时间；
+- Compiled Context；
+- 实际发送给 OpenAI-compatible model 的 messages；
+- raw structured model response；
+- Recall 到的 Memory snapshot；
+- developer-safe Perception / Reaction；
+- Mental State before / after；
+- Action、Action Reason 和最终对外 message；
+- Memory Candidate / created memory IDs；
+- Intent Candidate / created intent IDs。
+
+这样历史轮次也可以重放检查，而不是只看到当前状态。
+
+这里故意不保存或展示模型隐藏 chain-of-thought；`Perception / Reaction / Action Reason` 是 Prompt 明确要求的简短、安全结构化摘要。
+
+Research Console 同时允许：聊天、同步现实时间、推进小时/天、批量时间模拟，以及查看 Timeline、Memory、Persona、Mental State、Intent。
+
+## 7. 当前故意不引入
 
 - LangChain / LangGraph
 - Redis / Celery

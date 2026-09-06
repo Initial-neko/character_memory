@@ -39,6 +39,9 @@ class OpenAICompatibleModel(PersonModel):
         self.timeout = timeout
         self.temperature = temperature
         self.attempts = attempts
+        self.last_request_messages: list[dict] = []
+        self.last_response_text: str = ""
+        self.last_attempt: int = 0
 
     @staticmethod
     def _json(text: str):
@@ -62,18 +65,35 @@ class OpenAICompatibleModel(PersonModel):
         data = r.json()
         return data["choices"][0]["message"]["content"]
 
-    def _call(self, prompt: str, schema: type[BaseModel]):
+    @staticmethod
+    def _system_prompt(schema: type[BaseModel]) -> str:
         schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
-        system = (
+        return (
             "你是持久化 AI 人物运行时的结构化认知模块。严格根据输入中的人物身份、经历、心理状态和事件做决定。"
             "不要把人物写成客服或无条件迎合用户。perception/reaction 只能是给开发者看的简短、安全摘要，不得输出隐藏推理过程。"
             "只输出一个合法 JSON 对象，不要 Markdown。JSON 必须符合这个 schema：" + schema_json
         )
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+
+    def preview_messages(self, prompt: str, schema: type[BaseModel]) -> list[dict]:
+        """Return the exact initial messages used for a structured model call."""
+        return [
+            {"role": "system", "content": self._system_prompt(schema)},
+            {"role": "user", "content": prompt},
+        ]
+
+    def _call(self, prompt: str, schema: type[BaseModel]):
+        messages = self.preview_messages(prompt, schema)
+        self.last_request_messages = []
+        self.last_response_text = ""
+        self.last_attempt = 0
         last_error: Exception | None = None
+
         for attempt in range(self.attempts):
             try:
+                self.last_request_messages = [dict(message) for message in messages]
+                self.last_attempt = attempt + 1
                 text = self._request(messages)
+                self.last_response_text = text
                 return schema.model_validate(self._json(text))
             except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
                 last_error = exc

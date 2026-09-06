@@ -96,6 +96,10 @@ class RuntimeResult(BaseModel):
     event: Event
     recalled_memories: list[Memory]
     reaction: PersonReaction
+    context: str = ""
+    mental_state_before: str = ""
+    created_memory_ids: list[int] = Field(default_factory=list)
+    created_intent_ids: list[int] = Field(default_factory=list)
 
 
 class LifeEventCandidate(BaseModel):

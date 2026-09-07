@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import re
+import uuid
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -44,6 +45,7 @@ class OpenAICompatibleModel(PersonModel):
         timeout: float = 120,
         temperature: float = 0.7,
         attempts: int = 2,
+        session_id: str | None = None,
     ):
         self.api_key = api_key
         self.model = model
@@ -51,6 +53,10 @@ class OpenAICompatibleModel(PersonModel):
         self.timeout = timeout
         self.temperature = temperature
         self.attempts = attempts
+        # OpenCode Go requires one stable ID per conversation for routing and prompt
+        # caching. A model instance is the conversation-level provider object in V0,
+        # so keep one UUID for its full lifetime and reuse it across retries/turns.
+        self.session_id = session_id or str(uuid.uuid4())
         self.last_request_messages: list[dict] = []
         self.last_response_text: str = ""
         self.last_attempt: int = 0
@@ -82,12 +88,22 @@ class OpenAICompatibleModel(PersonModel):
             text = text[:limit] + "…"
         return text
 
+    def _headers(self, include_session: bool = True) -> dict[str, str]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "character-memory/0.4",
+            "x-opencode-client": "character-memory",
+        }
+        if include_session:
+            headers["x-opencode-session"] = self.session_id
+        return headers
+
     def _request(self, messages: list[dict]) -> str:
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {"model": self.model, "messages": messages, "temperature": self.temperature}
         url = f"{self.base_url}/chat/completions"
         with httpx.Client(timeout=self.timeout) as client:
-            r = client.post(url, headers=headers, json=payload)
+            r = client.post(url, headers=self._headers(include_session=True), json=payload)
             if r.is_error:
                 request_id = (
                     r.headers.get("x-request-id")
@@ -152,10 +168,10 @@ class OpenAICompatibleModel(PersonModel):
         return self._call(context, DiaryResult)
 
     def check_remote(self) -> dict:
-        headers = {"Authorization": f"Bearer {self.api_key}"}
         url = f"{self.base_url}/models"
         with httpx.Client(timeout=min(self.timeout, 30)) as client:
-            r = client.get(url, headers=headers)
+            # /models is discovery, not an inference turn; no session header needed.
+            r = client.get(url, headers=self._headers(include_session=False))
             if r.is_error:
                 request_id = (
                     r.headers.get("x-request-id")
@@ -170,4 +186,4 @@ class OpenAICompatibleModel(PersonModel):
     def check_remote_chat(self) -> dict:
         """Probe the configured chat endpoint with the same request path used by the runtime."""
         text = self._request([{"role": "user", "content": "Reply exactly with OK"}])
-        return {"ok": True, "model": self.model, "reply": text[:120]}
+        return {"ok": True, "model": self.model, "reply": text[:120], "session_id": self.session_id}

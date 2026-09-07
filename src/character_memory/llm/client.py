@@ -10,6 +10,18 @@ from pydantic import BaseModel, ValidationError
 from character_memory.domain.models import DailyLifePlan, DiaryResult, PersonReaction
 
 
+class ProviderHTTPError(RuntimeError):
+    """HTTP failure from an upstream model provider, with a safe response excerpt."""
+
+    def __init__(self, status_code: int, url: str, body: str, request_id: str = ""):
+        self.status_code = status_code
+        self.url = url
+        self.body = body
+        self.request_id = request_id
+        suffix = f" | request_id={request_id}" if request_id else ""
+        super().__init__(f"Provider HTTP {status_code} from {url}: {body}{suffix}")
+
+
 class PersonModel(ABC):
     @abstractmethod
     def react(self, context: str) -> PersonReaction: ...
@@ -56,12 +68,34 @@ class OpenAICompatibleModel(PersonModel):
                 return json.loads(text[a : b + 1])
             raise
 
+    @staticmethod
+    def _error_body(response: httpx.Response, limit: int = 4000) -> str:
+        """Return provider error details without ever including request headers/API keys."""
+        text = (response.text or "").strip()
+        if not text:
+            return "<empty response body>"
+        try:
+            text = json.dumps(response.json(), ensure_ascii=False, separators=(",", ":"))
+        except (ValueError, TypeError):
+            pass
+        if len(text) > limit:
+            text = text[:limit] + "…"
+        return text
+
     def _request(self, messages: list[dict]) -> str:
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {"model": self.model, "messages": messages, "temperature": self.temperature}
+        url = f"{self.base_url}/chat/completions"
         with httpx.Client(timeout=self.timeout) as client:
-            r = client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
-            r.raise_for_status()
+            r = client.post(url, headers=headers, json=payload)
+            if r.is_error:
+                request_id = (
+                    r.headers.get("x-request-id")
+                    or r.headers.get("request-id")
+                    or r.headers.get("cf-ray")
+                    or ""
+                )
+                raise ProviderHTTPError(r.status_code, url, self._error_body(r), request_id)
         data = r.json()
         return data["choices"][0]["message"]["content"]
 
@@ -119,8 +153,21 @@ class OpenAICompatibleModel(PersonModel):
 
     def check_remote(self) -> dict:
         headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.base_url}/models"
         with httpx.Client(timeout=min(self.timeout, 30)) as client:
-            r = client.get(f"{self.base_url}/models", headers=headers)
-            r.raise_for_status()
+            r = client.get(url, headers=headers)
+            if r.is_error:
+                request_id = (
+                    r.headers.get("x-request-id")
+                    or r.headers.get("request-id")
+                    or r.headers.get("cf-ray")
+                    or ""
+                )
+                raise ProviderHTTPError(r.status_code, url, self._error_body(r), request_id)
         data = r.json()
         return {"ok": True, "model": self.model, "models_visible": len(data.get("data", []))}
+
+    def check_remote_chat(self) -> dict:
+        """Probe the configured chat endpoint with the same request path used by the runtime."""
+        text = self._request([{"role": "user", "content": "Reply exactly with OK"}])
+        return {"ok": True, "model": self.model, "reply": text[:120]}

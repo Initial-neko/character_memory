@@ -2,14 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import logging
 import os
+import time
 
 from character_memory.app import build_embedding, build_model
 from character_memory.config import load_persona, load_settings
 from character_memory.domain.models import Event, EventType
+from character_memory.logging_utils import configure_logging
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
 from character_memory.storage.sqlite import SQLiteStore
+
+
+configure_logging()
+logger = logging.getLogger("character_memory.ui")
 
 
 def main():
@@ -18,6 +25,17 @@ def main():
     st.set_page_config(page_title="Character Memory", page_icon="💬", layout="centered")
     config_path = os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml")
     settings = load_settings(config_path)
+
+    if not st.session_state.get("_cm_session_logged"):
+        logger.info(
+            "ui.session open config=%s db=%s model=%s embedding=%s/%s",
+            config_path,
+            settings.db_path,
+            settings.chat_model,
+            settings.embedding_provider,
+            settings.embedding_model,
+        )
+        st.session_state["_cm_session_logged"] = True
 
     st.markdown(
         """
@@ -36,16 +54,44 @@ def main():
     @st.cache_resource(show_spinner=False)
     def get_heavy_runtime(path: str):
         cached_settings = load_settings(path)
-        return (
-            build_embedding(cached_settings),
-            build_model(cached_settings),
-            load_persona(cached_settings.persona_path),
+        total_started = time.perf_counter()
+
+        logger.info(
+            "ui.runtime_load embedding start provider=%s model=%s",
+            cached_settings.embedding_provider,
+            cached_settings.embedding_model,
         )
+        stage_started = time.perf_counter()
+        embeddings = build_embedding(cached_settings)
+        logger.info(
+            "ui.runtime_load embedding ready duration_ms=%d",
+            int((time.perf_counter() - stage_started) * 1000),
+        )
+
+        logger.info("ui.runtime_load provider start model=%s", cached_settings.chat_model)
+        stage_started = time.perf_counter()
+        model = build_model(cached_settings)
+        logger.info(
+            "ui.runtime_load provider ready model=%s session=%s duration_ms=%d",
+            cached_settings.chat_model,
+            getattr(model, "session_id", "-"),
+            int((time.perf_counter() - stage_started) * 1000),
+        )
+
+        logger.info("ui.runtime_load persona start path=%s", cached_settings.persona_path)
+        persona = load_persona(cached_settings.persona_path)
+        logger.info(
+            "ui.runtime_load done total_ms=%d persona_chars=%d",
+            int((time.perf_counter() - total_started) * 1000),
+            len(persona),
+        )
+        return embeddings, model, persona
 
     try:
         with st.spinner(f"加载 Embedding：{settings.embedding_model} ..."):
             embeddings, model, persona = get_heavy_runtime(config_path)
     except Exception as exc:
+        logger.exception("ui.runtime_load failed error=%s", exc)
         st.error(f"运行时初始化失败：{exc}")
         st.info("请确认 config.yaml、OPENCODE_GO_API_KEY 和本地 embedding 依赖/模型已经准备好。")
         return
@@ -79,8 +125,20 @@ def main():
         if event.metadata["trace"].get("source_event_id") is not None
     }
 
+    if not st.session_state.get("_cm_ready_logged"):
+        logger.info(
+            "ui.ready character=%s recent_events=%d chat_messages=%d traces=%d provider_session=%s",
+            character_id,
+            len(events),
+            len(chat_events),
+            len(trace_events),
+            getattr(model, "session_id", "-"),
+        )
+        st.session_state["_cm_ready_logged"] = True
+
     @st.dialog("Runtime")
     def show_runtime():
+        logger.info("ui.runtime_dialog open character=%s", character_id)
         now = datetime.now().astimezone()
         st.caption("WebUI 使用现实时间；每次交互都会重新读取当前系统时间。")
         st.metric("现在", now.strftime("%Y-%m-%d %H:%M:%S %z"))
@@ -88,6 +146,7 @@ def main():
         st.code(
             f"chat_model = {settings.chat_model}\n"
             f"base_url = {settings.base_url}\n"
+            f"session = {getattr(model, 'session_id', '-')}\n"
             f"embedding = {settings.embedding_provider} / {settings.embedding_model}\n"
             f"db = {settings.db_path}",
             language="text",
@@ -125,6 +184,11 @@ def main():
     @st.dialog("本轮详情")
     def show_trace(trace):
         source = trace.get("event", {})
+        logger.info(
+            "ui.trace_dialog open source_event_id=%s event_type=%s",
+            trace.get("source_event_id"),
+            source.get("event_type", ""),
+        )
         source_content = source.get("content", "")
         st.caption(
             f"{source.get('event_type', '')} · {source.get('event_time', '')}"
@@ -275,10 +339,17 @@ def main():
     message = st.chat_input(f"给 {character_id} 发消息")
     if message and message.strip():
         now = datetime.now().astimezone()
+        clean_message = message.strip()
+        logger.info(
+            "ui.chat submit character=%s at=%s message_chars=%d",
+            character_id,
+            now.isoformat(),
+            len(clean_message),
+        )
         store.set_world_time(character_id, now)
 
         with st.chat_message("user"):
-            st.write(message.strip())
+            st.write(clean_message)
             st.caption(now.strftime("%H:%M:%S"))
 
         with st.chat_message("assistant"):
@@ -291,14 +362,25 @@ def main():
                     character_id=character_id,
                     event_type=EventType.USER_MESSAGE,
                     event_time=now,
-                    content=message.strip(),
+                    content=clean_message,
                 )
+            )
+            logger.info(
+                "ui.chat result character=%s event_id=%s action=%s reply_chars=%d recalled=%d memory_writes=%d intent_writes=%d",
+                character_id,
+                result.event.id,
+                result.reaction.action.type.value,
+                len(result.reaction.action.message or ""),
+                len(result.recalled_memories),
+                len(result.created_memory_ids),
+                len(result.created_intent_ids),
             )
             if result.reaction.action.message:
                 typing.markdown(result.reaction.action.message)
             else:
                 typing.caption(f"未发送消息 · {result.reaction.action.type.value}")
         except Exception as exc:
+            logger.exception("ui.chat failed character=%s error=%s", character_id, exc)
             typing.error(f"生成失败：{exc}")
             store.close()
             return

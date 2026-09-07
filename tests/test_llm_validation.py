@@ -1,7 +1,9 @@
 import json
 
+import httpx
+
 from character_memory.domain.models import ActionDecision, ActionType
-from character_memory.llm.client import OpenAICompatibleModel
+from character_memory.llm.client import OpenAICompatibleModel, ProviderHTTPError
 
 
 def test_action_message_contract():
@@ -34,3 +36,18 @@ def test_structured_output_retries_once():
     model._request = lambda messages: next(replies)
     result = model.react("context")
     assert result.action.type == ActionType.NO_REPLY
+
+
+def test_provider_error_body_is_visible_without_request_headers():
+    response = httpx.Response(
+        400,
+        json={"error": {"type": "invalid_request_error", "message": "Model is unavailable"}},
+    )
+    body = OpenAICompatibleModel._error_body(response)
+    error = ProviderHTTPError(400, "https://example.test/v1/chat/completions", body, "req-123")
+
+    text = str(error)
+    assert "400" in text
+    assert "Model is unavailable" in text
+    assert "req-123" in text
+    assert "Authorization" not in text

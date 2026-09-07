@@ -2,41 +2,65 @@
 
 一个用于研究 **Persistent AI Person / 持久化 AI 人物** 的 V0 原型。
 
-当前目标不是做完整社交产品，而是先验证：一个 AI 人物能否在长期交互中保持同一人格，拥有可追溯经历、选择性记忆、持续心理状态、回复/沉默/主动联系等行为，并在时间中继续生活。
+当前阶段只做 **Phase 1 — Prove the Person**：验证同一个 AI 人物能否在长期交互中保持人格、拥有可追溯经历、选择性记忆、持续心理状态，并自然地回复、沉默、延后或主动联系。
 
 ## 当前实现
 
 - SQLite 单文件持久化。
 - Append-only Event Log：原始经历是事实源。
-- 从第一天启用 Embedding，向量以 `float32 BLOB` 存入 SQLite。
-- Vector Recall baseline：semantic similarity + recency + importance。
-- 语言形式的 Mental State，不使用 RPG 式好感度/情绪数值作为核心状态。
-- `PersonRuntime.handle(event)`：用户消息、时间事件、主动意图走同一条认知/行为链。
-- Action：`REPLY`、`MINIMAL_RESPONSE`、`NO_REPLY`、`DEFER`、`PROACTIVE_MESSAGE`、`NO_ACTION`。
-- OpenAI-compatible `/chat/completions` 适配器，默认可接 OpenCode Go 的 `deepseek-v4-flash`。
-- 结构化 LLM 输出校验，非法 JSON/字段自动重试一次。
-- Persistent World Time、Time Tick、Pending Intent。
-- Daily Life、Life Event、Social Post 文本、Diary。
-- 30-day 虚拟时间模拟。
-- 交互式 Streamlit Research Console：聊天、时间推进、Runtime Trace、Memory、Timeline、Intent。
-- 每轮 Runtime Trace 持久化：可回看实际送给模型的 messages、Recall、Perception、Reaction、Mental State 变化、Action、Memory Write、Intent。
-- Research Console 后端结构化日志：启动、Embedding、Provider、Recall、Context、Action、Memory/Intent 与错误链路都会输出到终端。
-- JSONL Eval regression harness 与离线单元测试。
+- Embedding + SQLite `float32 BLOB` + Vector Recall。
+- 语言形式 Mental State。
+- `PersonRuntime.handle(event)` 统一处理用户消息、Time Tick、Intent。
+- Action：`REPLY` / `MINIMAL_RESPONSE` / `NO_REPLY` / `DEFER` / `PROACTIVE_MESSAGE` / `NO_ACTION`。
+- OpenAI-compatible Person Model；默认 OpenCode Go `deepseek-v4-flash`。
+- OpenCode Go conversation session header 自动处理。
+- Persistent World Time、Life Event、Diary、Pending Intent、时间模拟。
+- Runtime Trace 独立持久化，可按单轮回看 Context / Recall / Reaction / Action / Memory / Intent。
+- FastAPI + 原生 HTML/CSS/JS 聊天 WebUI。
+- Streamlit Developer Inspector。
+- 结构化后端日志。
+- JSONL Eval regression harness 与 pytest。
 
-## 推荐启动方式：uv
+## V0.4.1 收敛后的运行结构
+
+正常聊天统一经过：
+
+```text
+HTML / JS
+    ↓
+FastAPI
+    ↓
+ChatService
+    ├── RealClock
+    ├── conversation_id
+    └── per-character turn lock
+    ↓
+PersonRuntime
+    ↓
+Recall / Person Model / Mental State / Action
+    ↓
+SQLite
+```
+
+CLI 的 `chat` 也调用同一个 `ChatService`。
+
+Streamlit 不再承担正式聊天交互，只保留为 Developer Inspector。
+
+## 安装
 
 要求 Python 3.12+。
+
+推荐：
 
 ```powershell
 git clone https://github.com/Initial-neko/character_memory.git
 cd character_memory
-
 uv sync --extra all
 uv run character-memory init
 $env:OPENCODE_GO_API_KEY="YOUR_KEY"
 ```
 
-默认配置：
+默认：
 
 ```yaml
 base_url: "https://opencode.ai/zen/go/v1"
@@ -46,55 +70,47 @@ embedding_model: "BAAI/bge-small-zh-v1.5"
 db_path: "data/character-memory.db"
 ```
 
-第一次加载本地 BGE embedding 时会下载模型，之后走本地缓存。
+第一次加载本地 BGE embedding 时会下载模型。
 
-## 先启动 Research Console
+## 主要入口：HTML / JS WebUI
 
-这是当前推荐的主要测试入口，不再建议长期依赖 CLI 观察人物行为。
+```powershell
+uv run character-memory web
+```
+
+打开：
+
+```text
+http://127.0.0.1:8000
+```
+
+页面支持：
+
+- 正常聊天；
+- Enter 发送、Shift+Enter 换行；
+- 非流式等待时显示“正在输入中”；
+- 聊天历史与时间分隔；
+- 每条有 Trace 的消息通过 `···` 打开右侧详情；
+- 查看 Perception / Reaction / Action Reason；
+- 查看 Mental State Before / After；
+- 查看本轮 Recall；
+- 查看实际发送给模型的 messages；
+- 查看 Compiled Context；
+- 查看 Memory / Intent Write；
+- 查看 Raw Model Response；
+- 顶部 `Runtime` 按钮按需查看 Persona、Mental State、Memory、Intent、Provider。
+
+前端不直接操作 Runtime/SQLite，只调用 FastAPI。
+
+## Developer Inspector
 
 ```powershell
 uv run character-memory inspector
 ```
 
-打开页面后可以直接：
+Inspector 是只读研究工具，主要用于 State、Chat、Memory、Intent、Trace。它不会加载 Sentence Transformers 或 Person Model，因此不再承担聊天时的重型 Runtime 初始化。
 
-- 和角色聊天；
-- 查看消息对应的现实时间；
-- 生成回复时显示“正在输入中…”，完整返回后一次性展示；
-- 点击具体消息的 `···` 后，按需弹出该轮完整 Runtime Trace；
-- 点击顶部 `Runtime` 按钮后，按需查看 Provider、Persona、Mental State、Memory、Intent；
-- 查看每轮真正发给用户的消息，或 `NO_REPLY / DEFER`；
-- 查看开发者安全的 `Perception / Reaction / Mental State / Action Reason`；
-- 查看本轮 Recall 到哪些 Memory；
-- 查看 **实际发送给模型的 system/user messages**；
-- 查看 Runtime 生成的 Compiled Context；
-- 查看 Raw Structured Model Response；
-- 查看 Memory Candidate、真正写入的 Memory ID、Intent Candidate 和 Intent ID。
-
-这里展示的“内心活动”是系统专门要求模型输出的简短开发者安全摘要，不是模型隐藏 chain-of-thought。
-
-### 后端运行日志
-
-`character-memory inspector` 默认在启动它的终端输出 `INFO` 级别运行日志，包括：
-
-- WebUI session 启动与 Runtime 初始化；
-- Embedding / Person Model 加载耗时；
-- 用户消息进入 Runtime；
-- Event 写入、Recall 数量与耗时、Context 长度；
-- Provider 请求开始/完成、HTTP 状态、耗时、输入/输出字符数；
-- Action、Memory Write、Intent Write；
-- Provider error body 与异常 stack trace。
-
-不会输出 API Key，也不会默认把完整 Prompt / Persona / Memory 内容刷到终端。
-
-需要更细日志时：
-
-```powershell
-$env:CHARACTER_MEMORY_LOG_LEVEL="DEBUG"
-character-memory inspector
-```
-
-## CLI 仍保留用于 smoke test / 自动化
+## CLI
 
 ```powershell
 uv run character-memory doctor
@@ -106,47 +122,89 @@ uv run character-memory simulate 7
 uv run character-memory inspect
 ```
 
-## 修改 Embedding 模型后重建向量
+`chat` 默认使用现实时间；模拟命令继续使用 persistent simulated world time。
 
-```powershell
-uv run character-memory reembed
+## Runtime Trace
+
+Trace 不再放进 `ACTION.metadata_json`。
+
+当前数据库中：
+
+```text
+events
+memories
+mental_states
+intents
+world_states
+runtime_traces
 ```
 
-Event Log 和 Memory 文本不变，只重算向量层。
+旧版本 `ACTION.metadata.trace` 会在数据库初始化时自动迁移到 `runtime_traces` 并从 Event metadata 中移除。
 
-## HTTP API
+正常聊天历史只查询 `USER_MESSAGE / CHARACTER_MESSAGE`；只有点击详情时才读取对应 Trace，避免每次页面刷新解析大量 Context / Prompt / Raw Response。
 
-```powershell
-uv run character-memory serve
+## 一轮写入一致性
+
+原始用户 Event 会先持久化，因为它是 Source of Truth。
+
+LLM 成功后，以下派生状态在一个 SQLite transaction 中提交：
+
+```text
+Mental State
+Memory
+Intent
+Character Message
+Runtime Trace
+ACTION Event
 ```
 
-主要端点：
+如果派生写入失败，则整组 rollback，避免出现“状态改了一半、Trace 又没有”的半轮数据。
 
-- `GET /health`
-- `POST /v1/chat`
-- `POST /v1/simulate`
-- `GET /v1/state/{character_id}`
+## Provider
 
-## Eval
+OpenCode Go inference 会携带 `x-opencode-session` / `x-opencode-client` / `User-Agent`。
+
+Web 前端将 `conversation_id` 保存在浏览器 `localStorage`；Provider adapter 会将 conversation ID 稳定映射为 UUID。
+
+`httpx.Client` 在 Model 生命周期内复用，不再每次请求重新建立连接。
+
+## 后端日志
+
+Web/API 默认输出 `INFO` 日志：
+
+```text
+API → ChatService → Runtime Event → Recall → Context → Provider → Action → Persist
+```
+
+Provider HTTP error body 会直接输出，但不会输出 API Key。
+
+更细日志：
 
 ```powershell
-uv run character-memory eval evals/smoke.jsonl
+$env:CHARACTER_MEMORY_LOG_LEVEL="DEBUG"
+uv run character-memory web
+```
+
+## Eval / Test
+
+```powershell
 uv run pytest -q
+uv run character-memory eval evals/smoke.jsonl
 ```
 
-Eval 使用隔离的临时 SQLite，避免污染真实人物历史。
+当前 Eval 仍只是 regression harness；长期 Persona / Memory / 30-day continuity 评测见 `docs/EVALS.md`。
 
 ## 文档职责
 
-- [`docs/DESIGN.md`](docs/DESIGN.md)：产品与 Persistent Person 的已确认原则。
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：V0 工程结构、数据流、Research Console 和边界。
-- [`docs/MEMORY.md`](docs/MEMORY.md)：语言记忆、Embedding、Recall 与事实源规则。
-- [`docs/PERSON_RUNTIME.md`](docs/PERSON_RUNTIME.md)：Reaction、Mental State、Action、Silence、Intent。
-- [`docs/EVALS.md`](docs/EVALS.md)：评测目标和 30-day continuity test。
-- [`docs/RESEARCH.md`](docs/RESEARCH.md)：已经确认有参考价值的论文/系统，以及我们只借鉴什么。
+- `docs/DESIGN.md`：产品与 Persistent Person 已确认原则。
+- `docs/ARCHITECTURE.md`：当前工程边界与数据流。
+- `docs/MEMORY.md`：Memory / Embedding / Recall 原则。
+- `docs/PERSON_RUNTIME.md`：Reaction / Mental State / Action / Silence / Intent。
+- `docs/EVALS.md`：评测计划。
+- `docs/RESEARCH.md`：外部研究参考。
 
 ## 当前明确不做
 
-V0 不引入 LangChain/LangGraph、Redis、Celery、PostgreSQL、Knowledge Graph、复杂 Emotion 数值系统、Voice/TTS、Avatar、真正图片生成、完整 Feed、多用户生产架构。
+V0 不引入 LangChain/LangGraph、Redis、Celery、PostgreSQL、Knowledge Graph、复杂 Emotion 数值系统、Voice/TTS、Avatar、Video、完整 Feed、多用户生产架构。
 
-这些能力只有在 Eval 证明当前简单架构存在真实瓶颈时再加入。
+先把 **真实聊天 vertical slice** 跑稳，再继续扩展人物能力。

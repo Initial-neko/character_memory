@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Character Memory</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1 id="characterName">rin</h1>
+        <p>Persistent AI Person</p>
+      </div>
+      <div class="topbar-actions">
+        <span id="nowText" class="now"></span>
+        <button id="runtimeButton" class="ghost-button" type="button">Runtime</button>
+      </div>
+    </header>
+
+    <section id="chat" class="chat" aria-live="polite"></section>
+
+    <form id="composer" class="composer">
+      <textarea id="messageInput" rows="1" placeholder="给 rin 发消息" autocomplete="off"></textarea>
+      <button id="sendButton" type="submit">发送</button>
+    </form>
+  </main>
+
+  <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="drawer" class="drawer" aria-hidden="true">
+    <header class="drawer-header">
+      <div>
+        <h2 id="drawerTitle">详情</h2>
+        <p id="drawerSubtitle"></p>
+      </div>
+      <button id="drawerClose" class="icon-button" type="button" aria-label="关闭">×</button>
+    </header>
+    <div id="drawerBody" class="drawer-body"></div>
+  </aside>
+
+  <template id="typingTemplate">
+    <article class="message-row assistant typing-row">
+      <div class="avatar">R</div>
+      <div class="bubble-wrap">
+        <div class="bubble typing"><span></span><span></span><span></span></div>
+        <div class="message-meta">正在输入中…</div>
+      </div>
+    </article>
+  </template>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

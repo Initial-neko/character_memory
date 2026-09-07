@@ -12,7 +12,6 @@ from pathlib import Path
 
 from character_memory.app import build_app, build_app_from_settings, build_embedding, build_model
 from character_memory.config import load_settings
-from character_memory.domain.models import Event, EventType
 from character_memory.eval.runner import EvalRunner
 from character_memory.storage.sqlite import SQLiteStore
 
@@ -27,11 +26,11 @@ def _inspect(config_path: str, character: str):
     try:
         print("WORLD TIME:\n", store.get_world_time(character) or "not initialized")
         print("\nMENTAL STATE:\n", store.get_mental_state(character) or "暂无")
-        print("\nRECENT EVENTS:")
-        for e in store.list_events(character, 30):
+        print("\nRECENT CHAT:")
+        for e in store.list_chat_events(character, 30):
             print(e.event_time, e.event_type.value, e.content)
         print("\nMEMORIES:")
-        for m in store.list_memories(character)[-30:]:
+        for m in store.list_memories(character, limit=30, include_embedding=False):
             print(m.event_time, m.memory_type, m.importance, m.content, f"source={m.source_event_id}")
         print("\nINTENTS:")
         for row in store.list_intents(character):
@@ -48,18 +47,22 @@ def _doctor(config_path: str, remote: bool):
     print(f"base url: {settings.base_url}")
     print(f"embedding: {settings.embedding_provider} / {settings.embedding_model}")
     print(f"api key: {'set' if settings.api_key else 'MISSING'}")
+    print("embedding: loading ...")
     embedding = build_embedding(settings)
     vector = embedding.embed("向量检索自检")
     print(f"embedding: OK ({len(vector)} dims)")
     if remote:
         model = build_model(settings)
-        print("remote models:", model.check_remote())
         try:
-            print("remote chat:", model.check_remote_chat())
-        except Exception as exc:
-            print("remote chat: FAILED")
-            print(str(exc))
-            raise SystemExit(2) from exc
+            print("remote models:", model.check_remote())
+            try:
+                print("remote chat:", model.check_remote_chat())
+            except Exception as exc:
+                print("remote chat: FAILED")
+                print(str(exc))
+                raise SystemExit(2) from exc
+        finally:
+            model.close()
 
 
 def _reembed(config_path: str, character: str):
@@ -84,8 +87,18 @@ def _run_eval(config_path: str, path: str):
         try:
             results = EvalRunner(bundle.runtime).run_jsonl(path)
         finally:
-            bundle.store.close()
+            bundle.close()
     _print_json({"passed": sum(1 for r in results if r["pass"]), "total": len(results), "results": results})
+
+
+def _run_server(config_path: str, host: str, port: int):
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise SystemExit("Install API extras first: pip install -e '.[api]'") from exc
+    os.environ["CHARACTER_MEMORY_CONFIG"] = config_path
+    print(f"web: http://{host}:{port}")
+    uvicorn.run("character_memory.server:app", host=host, port=port, reload=False)
 
 
 def main():
@@ -99,37 +112,32 @@ def main():
     chat = sub.add_parser("chat")
     chat.add_argument("message")
     chat.add_argument("--character", default="rin")
-    chat.add_argument("--at", default=None, help="ISO datetime; default uses persistent world time")
+    chat.add_argument("--conversation", default="cli")
+    chat.add_argument("--at", default=None, help="ISO datetime; default uses RealClock")
 
     day = sub.add_parser("day")
     day.add_argument("--character", default="rin")
-
     sim = sub.add_parser("simulate")
     sim.add_argument("days", type=int)
     sim.add_argument("--character", default="rin")
-
     tick = sub.add_parser("tick")
     tick.add_argument("--character", default="rin")
-
     inspect = sub.add_parser("inspect")
     inspect.add_argument("--character", default="rin")
-
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--remote", action="store_true")
-
     reembed = sub.add_parser("reembed")
     reembed.add_argument("--character", default="rin")
-
     evaluate = sub.add_parser("eval")
     evaluate.add_argument("path", nargs="?", default="evals/smoke.jsonl")
 
-    serve = sub.add_parser("serve")
-    serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=8000)
+    for name in ("serve", "web"):
+        server = sub.add_parser(name)
+        server.add_argument("--host", default="127.0.0.1")
+        server.add_argument("--port", type=int, default=8000)
 
     inspector = sub.add_parser("inspector")
     inspector.add_argument("--port", type=int, default=8501)
-
     args = parser.parse_args()
 
     if args.cmd == "init":
@@ -151,13 +159,8 @@ def main():
     if args.cmd == "eval":
         _run_eval(args.config, args.path)
         return
-    if args.cmd == "serve":
-        try:
-            import uvicorn
-        except ImportError as exc:
-            raise SystemExit("Install API extras first: pip install -e '.[api]'") from exc
-        os.environ["CHARACTER_MEMORY_CONFIG"] = args.config
-        uvicorn.run("character_memory.server:app", host=args.host, port=args.port, reload=False)
+    if args.cmd in {"serve", "web"}:
+        _run_server(args.config, args.host, args.port)
         return
     if args.cmd == "inspector":
         try:
@@ -166,66 +169,29 @@ def main():
             raise SystemExit("Install UI extras first: pip install -e '.[ui]'") from exc
         os.environ["CHARACTER_MEMORY_CONFIG"] = args.config
         ui_path = Path(__file__).with_name("ui.py")
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "streamlit",
-                "run",
-                str(ui_path),
-                "--server.port",
-                str(args.port),
-                "--server.fileWatcherType",
-                "none",
-                "--server.runOnSave",
-                "false",
-            ],
-            check=True,
-        )
+        subprocess.run([sys.executable, "-m", "streamlit", "run", str(ui_path), "--server.port", str(args.port), "--server.fileWatcherType", "none", "--server.runOnSave", "false"], check=True)
         return
 
     bundle = build_app(args.config)
     try:
         if args.cmd == "chat":
-            now = datetime.fromisoformat(args.at) if args.at else bundle.days.current_time(args.character)
-            result = bundle.runtime.handle(
-                Event(character_id=args.character, event_type=EventType.USER_MESSAGE, event_time=now, content=args.message)
-            )
-            bundle.store.set_world_time(args.character, now + timedelta(minutes=1))
-            _print_json(
-                {
-                    "action": result.reaction.action.model_dump(mode="json"),
-                    "perception": result.reaction.perception,
-                    "reaction": result.reaction.reaction,
-                    "mental_state": result.reaction.mental_state_update,
-                    "recalled_memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in result.recalled_memories],
-                }
-            )
+            at = datetime.fromisoformat(args.at) if args.at else None
+            result = bundle.chat.send(args.message, character_id=args.character, conversation_id=args.conversation, at=at)
+            _print_json({"event_id": result.event.id, "event_time": result.event.event_time, "action": result.reaction.action.model_dump(mode="json"), "perception": result.reaction.perception, "reaction": result.reaction.reaction, "mental_state": result.reaction.mental_state_update, "recalled_memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in result.recalled_memories]})
         elif args.cmd == "day":
             _print_json(bundle.days.run_next_day(args.character))
         elif args.cmd == "simulate":
             if args.days < 1 or args.days > 3650:
                 raise SystemExit("days must be between 1 and 3650")
             for index, result in enumerate(bundle.days.simulate(args.character, args.days), start=1):
-                print(
-                    f"day {index}: {result['date']} | life={result['life_events']} | ticks={result['ticks']} | proactive={result['proactive_messages']}"
-                )
+                print(f"day {index}: {result['date']} | life={result['life_events']} | ticks={result['ticks']} | proactive={result['proactive_messages']}")
         elif args.cmd == "tick":
             now = bundle.days.current_time(args.character)
             results = bundle.ticker.tick(args.character, now)
             bundle.store.set_world_time(args.character, now + timedelta(hours=1))
-            _print_json(
-                [
-                    {
-                        "action": r.reaction.action.model_dump(mode="json"),
-                        "reaction": r.reaction.reaction,
-                        "recalled_memories": [m.id for m in r.recalled_memories],
-                    }
-                    for r in results
-                ]
-            )
+            _print_json([{"action": r.reaction.action.model_dump(mode="json"), "reaction": r.reaction.reaction, "recalled_memories": [m.id for m in r.recalled_memories]} for r in results])
     finally:
-        bundle.store.close()
+        bundle.close()
 
 
 if __name__ == "__main__":

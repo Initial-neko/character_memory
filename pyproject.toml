@@ -1,6 +1,6 @@
 [project]
 name = "character-memory"
-version = "0.4.0"
+version = "0.4.1"
 description = "Experimental persistent AI person runtime with language memory, vector recall and simulated life."
 requires-python = ">=3.12"
 dependencies = [
@@ -29,6 +29,9 @@ character-memory = "character_memory.cli:main"
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+character_memory = ["web/*.html", "web/*.js", "web/*.css"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

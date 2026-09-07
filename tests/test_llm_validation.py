@@ -51,3 +51,16 @@ def test_provider_error_body_is_visible_without_request_headers():
     assert "Model is unavailable" in text
     assert "req-123" in text
     assert "Authorization" not in text
+
+
+def test_opencode_chat_headers_have_stable_session_and_client_identity():
+    model = OpenAICompatibleModel("key", session_id="11111111-2222-3333-4444-555555555555")
+
+    chat_headers = model._headers(include_session=True)
+    discovery_headers = model._headers(include_session=False)
+
+    assert chat_headers["x-opencode-session"] == "11111111-2222-3333-4444-555555555555"
+    assert chat_headers["x-opencode-client"] == "character-memory"
+    assert chat_headers["User-Agent"].startswith("character-memory/")
+    assert "x-opencode-session" not in discovery_headers
+    assert "Authorization" in discovery_headers

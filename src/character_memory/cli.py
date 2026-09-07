@@ -160,7 +160,26 @@ def main():
             raise SystemExit("Install UI extras first: pip install -e '.[ui]'") from exc
         os.environ["CHARACTER_MEMORY_CONFIG"] = args.config
         ui_path = Path(__file__).with_name("ui.py")
-        subprocess.run([sys.executable, "-m", "streamlit", "run", str(ui_path), "--server.port", str(args.port)], check=True)
+        # transformers exposes many lazy image modules. Streamlit's default source
+        # watcher probes those modules and can accidentally import torchvision-only
+        # paths even though this project never uses vision. Disable the dev watcher for
+        # the Research Console: it also avoids a large amount of needless module scans.
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(ui_path),
+                "--server.port",
+                str(args.port),
+                "--server.fileWatcherType",
+                "none",
+                "--server.runOnSave",
+                "false",
+            ],
+            check=True,
+        )
         return
 
     bundle = build_app(args.config)

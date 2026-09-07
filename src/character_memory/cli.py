@@ -53,7 +53,13 @@ def _doctor(config_path: str, remote: bool):
     print(f"embedding: OK ({len(vector)} dims)")
     if remote:
         model = build_model(settings)
-        print("remote:", model.check_remote())
+        print("remote models:", model.check_remote())
+        try:
+            print("remote chat:", model.check_remote_chat())
+        except Exception as exc:
+            print("remote chat: FAILED")
+            print(str(exc))
+            raise SystemExit(2) from exc
 
 
 def _reembed(config_path: str, character: str):
@@ -160,10 +166,6 @@ def main():
             raise SystemExit("Install UI extras first: pip install -e '.[ui]'") from exc
         os.environ["CHARACTER_MEMORY_CONFIG"] = args.config
         ui_path = Path(__file__).with_name("ui.py")
-        # transformers exposes many lazy image modules. Streamlit's default source
-        # watcher probes those modules and can accidentally import torchvision-only
-        # paths even though this project never uses vision. Disable the dev watcher for
-        # the Research Console: it also avoids a large amount of needless module scans.
         subprocess.run(
             [
                 sys.executable,

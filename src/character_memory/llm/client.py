@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import json
+import logging
 import re
+import time
 import uuid
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
 from character_memory.domain.models import DailyLifePlan, DiaryResult, PersonReaction
+
+
+logger = logging.getLogger("character_memory.llm")
 
 
 class ProviderHTTPError(RuntimeError):
@@ -60,6 +65,14 @@ class OpenAICompatibleModel(PersonModel):
         self.last_request_messages: list[dict] = []
         self.last_response_text: str = ""
         self.last_attempt: int = 0
+        logger.info(
+            "provider.ready model=%s base_url=%s session=%s attempts=%s timeout=%ss",
+            self.model,
+            self.base_url,
+            self.session_id,
+            self.attempts,
+            self.timeout,
+        )
 
     @staticmethod
     def _json(text: str):
@@ -99,11 +112,33 @@ class OpenAICompatibleModel(PersonModel):
             headers["x-opencode-session"] = self.session_id
         return headers
 
+    @staticmethod
+    def _message_chars(messages: list[dict]) -> int:
+        return sum(len(str(message.get("content", ""))) for message in messages)
+
     def _request(self, messages: list[dict]) -> str:
         payload = {"model": self.model, "messages": messages, "temperature": self.temperature}
         url = f"{self.base_url}/chat/completions"
+        started = time.perf_counter()
+        logger.info(
+            "provider.request start model=%s session=%s messages=%d input_chars=%d",
+            self.model,
+            self.session_id,
+            len(messages),
+            self._message_chars(messages),
+        )
         with httpx.Client(timeout=self.timeout) as client:
-            r = client.post(url, headers=self._headers(include_session=True), json=payload)
+            try:
+                r = client.post(url, headers=self._headers(include_session=True), json=payload)
+            except Exception:
+                logger.exception(
+                    "provider.request transport_error model=%s session=%s duration_ms=%d",
+                    self.model,
+                    self.session_id,
+                    int((time.perf_counter() - started) * 1000),
+                )
+                raise
+            duration_ms = int((time.perf_counter() - started) * 1000)
             if r.is_error:
                 request_id = (
                     r.headers.get("x-request-id")
@@ -111,9 +146,28 @@ class OpenAICompatibleModel(PersonModel):
                     or r.headers.get("cf-ray")
                     or ""
                 )
-                raise ProviderHTTPError(r.status_code, url, self._error_body(r), request_id)
+                body = self._error_body(r)
+                logger.error(
+                    "provider.request failed status=%s model=%s session=%s duration_ms=%d request_id=%s body=%s",
+                    r.status_code,
+                    self.model,
+                    self.session_id,
+                    duration_ms,
+                    request_id or "-",
+                    body,
+                )
+                raise ProviderHTTPError(r.status_code, url, body, request_id)
         data = r.json()
-        return data["choices"][0]["message"]["content"]
+        text = data["choices"][0]["message"]["content"]
+        logger.info(
+            "provider.request done status=%s model=%s session=%s duration_ms=%d output_chars=%d",
+            r.status_code,
+            self.model,
+            self.session_id,
+            duration_ms,
+            len(text or ""),
+        )
+        return text
 
     @staticmethod
     def _system_prompt(schema: type[BaseModel]) -> str:
@@ -142,11 +196,30 @@ class OpenAICompatibleModel(PersonModel):
             try:
                 self.last_request_messages = [dict(message) for message in messages]
                 self.last_attempt = attempt + 1
+                logger.info(
+                    "provider.structured_call attempt=%d/%d schema=%s",
+                    attempt + 1,
+                    self.attempts,
+                    schema.__name__,
+                )
                 text = self._request(messages)
                 self.last_response_text = text
-                return schema.model_validate(self._json(text))
+                result = schema.model_validate(self._json(text))
+                logger.info(
+                    "provider.structured_call valid attempt=%d schema=%s",
+                    attempt + 1,
+                    schema.__name__,
+                )
+                return result
             except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
                 last_error = exc
+                logger.warning(
+                    "provider.structured_call invalid attempt=%d/%d schema=%s error=%s",
+                    attempt + 1,
+                    self.attempts,
+                    schema.__name__,
+                    exc,
+                )
                 if attempt + 1 >= self.attempts:
                     break
                 messages.append({"role": "assistant", "content": text if "text" in locals() else ""})
@@ -169,6 +242,8 @@ class OpenAICompatibleModel(PersonModel):
 
     def check_remote(self) -> dict:
         url = f"{self.base_url}/models"
+        started = time.perf_counter()
+        logger.info("provider.models start base_url=%s", self.base_url)
         with httpx.Client(timeout=min(self.timeout, 30)) as client:
             # /models is discovery, not an inference turn; no session header needed.
             r = client.get(url, headers=self._headers(include_session=False))
@@ -179,8 +254,22 @@ class OpenAICompatibleModel(PersonModel):
                     or r.headers.get("cf-ray")
                     or ""
                 )
-                raise ProviderHTTPError(r.status_code, url, self._error_body(r), request_id)
+                body = self._error_body(r)
+                logger.error(
+                    "provider.models failed status=%s duration_ms=%d request_id=%s body=%s",
+                    r.status_code,
+                    int((time.perf_counter() - started) * 1000),
+                    request_id or "-",
+                    body,
+                )
+                raise ProviderHTTPError(r.status_code, url, body, request_id)
         data = r.json()
+        logger.info(
+            "provider.models done status=%s duration_ms=%d models_visible=%d",
+            r.status_code,
+            int((time.perf_counter() - started) * 1000),
+            len(data.get("data", [])),
+        )
         return {"ok": True, "model": self.model, "models_visible": len(data.get("data", []))}
 
     def check_remote_chat(self) -> dict:

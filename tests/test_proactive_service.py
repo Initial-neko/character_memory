@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from character_memory.application.proactive_service import ProactiveService
-from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, PersonReaction
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -77,4 +77,31 @@ def test_dispatch_error_does_not_retry_forever(tmp_path):
     assert service.has_due(["haru"], now) is False
     row = next(row for row in store.list_intents("haru") if row["id"] == intent_id)
     assert row["status"] == "ERROR"
+    store.close()
+
+
+def test_unanswered_proactive_message_blocks_another_proactive_turn(tmp_path):
+    now = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
+    store = SQLiteStore(tmp_path / "x.db")
+    _intent(store, "momo", now)
+    store.append_event(
+        Event(
+            character_id="momo",
+            event_type=EventType.CHARACTER_MESSAGE,
+            event_time=now - timedelta(minutes=10),
+            content="汇报结束了吗？",
+            metadata={
+                "source_event_id": 10,
+                "source_event_type": EventType.PROACTIVE_INTENT.value,
+                "action": ActionType.MESSAGE.value,
+            },
+        )
+    )
+    chat = FakeChat()
+    service = ProactiveService(store, chat)
+
+    assert service.has_due(["momo"], now) is False
+    assert service.dispatch_due(["momo"], now) == []
+    assert chat.calls == []
+    assert any(row["status"] == "PENDING" for row in store.list_intents("momo"))
     store.close()

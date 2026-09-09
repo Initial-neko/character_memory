@@ -7,7 +7,7 @@ import time
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import Clock, RealClock
-from character_memory.config import Settings, load_persona, load_settings
+from character_memory.config import Settings, discover_character_profiles, load_persona, load_settings
 from character_memory.life.runner import DayRunner
 from character_memory.life.simulator import LifeSimulator
 from character_memory.life.ticker import TimeTicker
@@ -30,6 +30,8 @@ class AppBundle:
     settings: Settings
     store: SQLiteStore
     runtime: PersonRuntime
+    runtimes: dict[str, PersonRuntime]
+    characters: list[dict[str, str]]
     chat: ChatService
     life: LifeSimulator
     ticker: TimeTicker
@@ -65,6 +67,16 @@ def build_model(settings: Settings):
     return OpenAICompatibleModel(settings.api_key, settings.chat_model, settings.base_url, temperature=settings.chat_temperature, attempts=settings.llm_attempts)
 
 
+def _default_character_id(settings: Settings, profiles: list[dict[str, str]]) -> str:
+    configured = Path(settings.persona_path)
+    for profile in profiles:
+        if Path(profile["persona_path"]) == configured:
+            return profile["id"]
+    if any(profile["id"] == "rin" for profile in profiles):
+        return "rin"
+    return profiles[0]["id"]
+
+
 def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -> AppBundle:
     if not settings.api_key:
         raise ValueError("Missing OPENCODE_GO_API_KEY or api_key in config.yaml")
@@ -88,19 +100,34 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
         timings["model_init_ms"] = _ms(stage)
 
         stage = time.perf_counter()
-        persona = load_persona(settings.persona_path)
+        profiles = discover_character_profiles(settings)
+        persona_by_id = {profile["id"]: load_persona(profile["persona_path"]) for profile in profiles}
         timings["persona_ms"] = _ms(stage)
 
         recall = VectorRecall(store, embeddings, limit=settings.recall_limit)
-        runtime = PersonRuntime(store, recall, embeddings, model, persona)
+        runtimes = {
+            character_id: PersonRuntime(store, recall, embeddings, model, persona)
+            for character_id, persona in persona_by_id.items()
+        }
+        default_character_id = _default_character_id(settings, profiles)
+        runtime = runtimes[default_character_id]
         app_clock = clock or RealClock()
-        chat = ChatService(store, runtime, app_clock)
-        life = LifeSimulator(store, embeddings, model, persona, runtime)
+        chat = ChatService(store, runtimes, app_clock)
+
+        # Life simulation is frozen in the current phase and continues to use
+        # the configured default character until multi-character life is needed.
+        default_persona = persona_by_id[default_character_id]
+        life = LifeSimulator(store, embeddings, model, default_persona, runtime)
         ticker = TimeTicker(store, runtime)
         days = DayRunner(store, life, ticker)
+
         timings["total_ms"] = _ms(total)
-        logger.info("app.init timings %s", " ".join(f"{key}={value:.1f}ms" for key, value in timings.items()))
-        return AppBundle(settings, store, runtime, chat, life, ticker, days, embeddings, model, app_clock, timings)
+        logger.info(
+            "app.init timings characters=%d %s",
+            len(profiles),
+            " ".join(f"{key}={value:.1f}ms" for key, value in timings.items()),
+        )
+        return AppBundle(settings, store, runtime, runtimes, profiles, chat, life, ticker, days, embeddings, model, app_clock, timings)
     except Exception:
         store.close()
         raise

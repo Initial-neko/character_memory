@@ -1,2 +1,2 @@
-{"id":"arrival_home","event_time":"2026-09-05T18:30:00+08:00","content":"到家了","allowed_actions":["REPLY","MINIMAL_RESPONSE","NO_REPLY"]}
-{"id":"conversation_close","event_time":"2026-09-05T23:00:00+08:00","content":"嗯，那我先睡了，晚安","allowed_actions":["REPLY","MINIMAL_RESPONSE","NO_REPLY"]}
+{"id":"arrival_home","event_time":"2026-09-05T18:30:00+08:00","content":"到家了","allowed_actions":["MESSAGE","EMOJI","REPLY","MINIMAL_RESPONSE","NO_REPLY"],"max_messages":3}
+{"id":"conversation_close","event_time":"2026-09-05T23:00:00+08:00","content":"嗯，那我先睡了，晚安","allowed_actions":["MESSAGE","EMOJI","REPLY","MINIMAL_RESPONSE","NO_REPLY"],"max_messages":3}

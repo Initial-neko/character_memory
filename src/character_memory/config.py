@@ -34,5 +34,67 @@ def load_settings(path: str = "config.yaml") -> Settings:
     return Settings.model_validate(data)
 
 
-def load_persona(path: str) -> str:
+def load_persona(path: str | Path) -> str:
     return Path(path).read_text(encoding="utf-8")
+
+
+def _persona_root(settings: Settings) -> Path:
+    configured = Path(settings.persona_path)
+    if configured.name == "persona.yaml" and configured.parent.parent != configured.parent:
+        return configured.parent.parent
+    return Path("personas")
+
+
+def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
+    """Discover characters directly from personas/*/persona.yaml.
+
+    Persona files stay the single character definition source. The UI/API does
+    not need a second character registry or duplicated config list.
+    """
+
+    root = _persona_root(settings)
+    paths = sorted(root.glob("*/persona.yaml")) if root.exists() else []
+    configured = Path(settings.persona_path)
+    if configured.exists() and configured not in paths:
+        paths.insert(0, configured)
+
+    profiles: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        character_id = str(data.get("id") or path.parent.name).strip()
+        if not character_id or character_id in seen:
+            continue
+        seen.add(character_id)
+        profiles.append(
+            {
+                "id": character_id,
+                "name": str(data.get("name") or character_id),
+                "identity": str(data.get("identity") or ""),
+                "tagline": str(data.get("tagline") or ""),
+                "persona_path": str(path),
+            }
+        )
+
+    if not profiles:
+        profiles.append(
+            {
+                "id": "rin",
+                "name": "Rin",
+                "identity": "",
+                "tagline": "",
+                "persona_path": settings.persona_path,
+            }
+        )
+    return profiles
+
+
+def resolve_persona_path(settings: Settings, character_id: str) -> str:
+    for profile in discover_character_profiles(settings):
+        if profile["id"] == character_id:
+            return profile["persona_path"]
+    known = ", ".join(profile["id"] for profile in discover_character_profiles(settings))
+    raise KeyError(f"unknown character_id={character_id!r}; known={known}")

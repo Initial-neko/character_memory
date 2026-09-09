@@ -3,7 +3,7 @@ import uuid
 
 import httpx
 
-from character_memory.domain.models import ActionDecision, ActionType
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.llm.client import OpenAICompatibleModel, ProviderHTTPError
 
 
@@ -16,13 +16,49 @@ def test_action_message_contract():
         raise AssertionError("REPLY without message must be rejected")
 
 
+def test_sparse_person_reaction_is_valid():
+    result = PersonReaction.model_validate({"action": {"type": "NO_REPLY"}})
+    assert result.action.type == ActionType.NO_REPLY
+    assert result.action.reason == ""
+    assert result.perception == ""
+    assert result.reaction == ""
+    assert result.mental_state_update == ""
+    assert result.memory_candidates == []
+    assert result.intent_candidates == []
+
+
 def test_structured_output_retries_once():
     model = OpenAICompatibleModel("key", attempts=2)
-    replies = iter(["not json", json.dumps({"perception": "看到了", "reaction": "平静", "mental_state_update": "平静", "action": {"type": "NO_REPLY", "reason": "对话自然结束", "message": None}, "memory_candidates": [], "intent_candidates": []}, ensure_ascii=False)])
+    replies = iter(["not json", json.dumps({"action": {"type": "NO_REPLY"}}, ensure_ascii=False)])
     model._request = lambda messages, **kwargs: next(replies)
     try:
         result = model.react("context")
         assert result.action.type == ActionType.NO_REPLY
+    finally:
+        model.close()
+
+
+def test_structured_call_uses_json_object_response_format():
+    captured = {}
+
+    def handler(request: httpx.Request):
+        captured.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": '{"action":{"type":"NO_REPLY"}}'}}]},
+        )
+
+    model = OpenAICompatibleModel("key", attempts=1)
+    model.client.close()
+    model.client = httpx.Client(transport=httpx.MockTransport(handler), timeout=30)
+    try:
+        result = model.react("context")
+        assert result.action.type == ActionType.NO_REPLY
+        assert captured["response_format"] == {"type": "json_object"}
+        system = captured["messages"][0]["content"]
+        assert "model_json_schema" not in system
+        assert '"properties"' not in system
     finally:
         model.close()
 

@@ -294,6 +294,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-setInterval(() => {
-  if (!drawer.classList.contains("open")) loadHistory().catch(() => {});
-}, 15000);

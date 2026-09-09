@@ -38,7 +38,7 @@ class SimulateRequest(BaseModel):
 class PersonaDraftRequest(BaseModel):
     description: str = Field(min_length=3, max_length=4000)
     name: str = Field(default="", max_length=48)
-    age: int | None = Field(default=None, ge=18, le=120)
+    age: int | None = Field(default=None, ge=1, le=120)
     tags: list[str] = Field(default_factory=list, max_length=8)
 
 

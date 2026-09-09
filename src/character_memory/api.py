@@ -103,10 +103,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             else:
                 role = "assistant"
                 source_event_id = event.metadata.get("source_event_id")
-            messages.append({"id": event.id, "role": role, "content": event.content, "event_time": event.event_time.isoformat(), "action": event.metadata.get("action"), "source_event_id": source_event_id, "has_trace": source_event_id in trace_sources})
+            messages.append({"id": event.id, "role": role, "content": event.content, "event_time": event.event_time.isoformat(), "action": event.metadata.get("action"), "action_index": event.metadata.get("action_index"), "source_event_id": source_event_id, "has_trace": source_event_id in trace_sources})
         return {"character_id": character_id, "messages": messages}
 
-    app = FastAPI(title="character-memory", version="0.4.4")
+    app = FastAPI(title="character-memory", version="0.5.0")
     web_dir = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
@@ -168,7 +168,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "event_id": out.event.id,
             "event_time": out.event.event_time.isoformat(),
             "character_id": req.character_id,
-            "action": out.reaction.action.model_dump(mode="json"),
+            "action": out.reaction.action.model_dump(mode="json") if out.reaction.action is not None else None,
+            "actions": [action.model_dump(mode="json") for action in out.reaction.actions],
             "perception": out.reaction.perception,
             "reaction": out.reaction.reaction,
             "mental_state": out.reaction.mental_state_update,

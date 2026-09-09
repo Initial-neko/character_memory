@@ -8,8 +8,10 @@ import threading
 from pydantic import BaseModel, Field
 
 from character_memory.app import AppBundle, build_app
-from character_memory.config import load_settings
+from character_memory.config import load_persona, load_settings
+from character_memory.domain.models import EventType
 from character_memory.logging_utils import configure_logging
+from character_memory.storage.sqlite import SQLiteStore
 
 
 logger = logging.getLogger("character_memory.api")
@@ -36,6 +38,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     own_bundle = bundle is None
     settings = bundle.settings if bundle is not None else load_settings(config_path)
     app_bundle = bundle
+    read_store = bundle.store if bundle is not None else SQLiteStore(settings.db_path)
     runtime_error: str | None = None
     init_lock = threading.Lock()
 
@@ -63,14 +66,40 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Runtime 初始化失败：{exc}") from exc
 
+    def history_payload(character_id: str, limit: int) -> dict:
+        events = read_store.list_chat_events(character_id, limit=limit)
+        trace_sources = read_store.list_runtime_trace_sources(character_id)
+        messages = []
+        for event in events:
+            if event.event_type == EventType.USER_MESSAGE:
+                role = "user"
+                source_event_id = event.id
+            else:
+                role = "assistant"
+                source_event_id = event.metadata.get("source_event_id")
+            messages.append(
+                {
+                    "id": event.id,
+                    "role": role,
+                    "content": event.content,
+                    "event_time": event.event_time.isoformat(),
+                    "action": event.metadata.get("action"),
+                    "source_event_id": source_event_id,
+                    "has_trace": source_event_id in trace_sources,
+                }
+            )
+        return {"character_id": character_id, "messages": messages}
+
     app = FastAPI(title="character-memory", version="0.4.2")
     web_dir = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
     @app.on_event("shutdown")
     def _shutdown():
-        if own_bundle and app_bundle is not None:
-            app_bundle.close()
+        if own_bundle:
+            if app_bundle is not None:
+                app_bundle.close()
+            read_store.close()
 
     @app.get("/")
     def web_index():
@@ -90,9 +119,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     @app.get("/v1/chat/history")
     def history(character_id: str = "rin", limit: int = 160):
-        current = require_bundle()
-        limit = max(1, min(limit, 500))
-        return current.chat.history(character_id, limit)
+        return history_payload(character_id, max(1, min(limit, 500)))
 
     @app.post("/v1/chat")
     def chat(req: ChatRequest):
@@ -113,30 +140,29 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     @app.get("/v1/traces/{source_event_id}")
     def trace(source_event_id: int):
-        current = require_bundle()
-        value = current.store.get_runtime_trace(source_event_id)
+        value = read_store.get_runtime_trace(source_event_id)
         if value is None:
             raise HTTPException(status_code=404, detail="trace not found")
         return value
 
     @app.get("/v1/runtime/{character_id}")
     def runtime_state(character_id: str):
-        current = require_bundle()
-        memories = current.store.list_memories(character_id, include_inactive=True, limit=80, include_embedding=False)
-        intents = [dict(row) for row in current.store.list_intents(character_id, limit=80)]
+        memories = read_store.list_memories(character_id, include_inactive=True, limit=80, include_embedding=False)
+        intents = [dict(row) for row in read_store.list_intents(character_id, limit=80)]
         return {
             "character_id": character_id,
-            "now": current.clock.now().isoformat(),
+            "now": datetime.now().astimezone().isoformat(),
             "provider": {
-                "chat_model": current.settings.chat_model,
-                "base_url": current.settings.base_url,
-                "embedding_provider": current.settings.embedding_provider,
-                "embedding_model": current.settings.embedding_model,
-                "db_path": current.settings.db_path,
-                "session_strategy": "conversation_id -> stable UUID",
+                "chat_model": settings.chat_model,
+                "base_url": settings.base_url,
+                "embedding_provider": settings.embedding_provider,
+                "embedding_model": settings.embedding_model,
+                "db_path": settings.db_path,
             },
-            "persona": current.runtime.persona,
-            "mental_state": current.store.get_mental_state(character_id),
+            "runtime_loaded": app_bundle is not None,
+            "runtime_error": runtime_error,
+            "persona": load_persona(settings.persona_path),
+            "mental_state": read_store.get_mental_state(character_id),
             "memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in reversed(memories)],
             "intents": intents,
         }
@@ -148,13 +174,12 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     @app.get("/v1/state/{character_id}")
     def state(character_id: str):
-        current = require_bundle()
         return {
-            "world_time": current.store.get_world_time(character_id),
-            "mental_state": current.store.get_mental_state(character_id),
-            "recent_events": [e.model_dump(mode="json") for e in current.store.list_events(character_id, 30)],
-            "memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in current.store.list_memories(character_id, limit=30, include_embedding=False)],
-            "intents": [dict(r) for r in current.store.list_intents(character_id)],
+            "world_time": read_store.get_world_time(character_id),
+            "mental_state": read_store.get_mental_state(character_id),
+            "recent_events": [e.model_dump(mode="json") for e in read_store.list_events(character_id, 30)],
+            "memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in read_store.list_memories(character_id, limit=30, include_embedding=False)],
+            "intents": [dict(r) for r in read_store.list_intents(character_id)],
         }
 
     return app

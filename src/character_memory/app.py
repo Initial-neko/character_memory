@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
+import time
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import Clock, RealClock
@@ -16,6 +18,13 @@ from character_memory.runtime.person_runtime import PersonRuntime
 from character_memory.storage.sqlite import SQLiteStore
 
 
+logger = logging.getLogger("character_memory.app")
+
+
+def _ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 1)
+
+
 @dataclass
 class AppBundle:
     settings: Settings
@@ -28,6 +37,7 @@ class AppBundle:
     embeddings: object
     model: OpenAICompatibleModel
     clock: Clock
+    init_timings: dict[str, float]
 
     def close(self) -> None:
         try:
@@ -56,16 +66,31 @@ def build_model(settings: Settings):
 
 
 def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -> AppBundle:
-    # Fail on obvious configuration problems before loading the heavy embedding model.
     if not settings.api_key:
         raise ValueError("Missing OPENCODE_GO_API_KEY or api_key in config.yaml")
 
+    total = time.perf_counter()
+    timings: dict[str, float] = {}
+    logger.info("app.init start model=%s embedding=%s/%s", settings.chat_model, settings.embedding_provider, settings.embedding_model)
+
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
+    stage = time.perf_counter()
     store = SQLiteStore(settings.db_path)
+    timings["store_ms"] = _ms(stage)
     try:
+        stage = time.perf_counter()
         embeddings = build_embedding(settings)
+        timings["embedding_load_ms"] = _ms(stage)
+        logger.info("app.init embedding ready duration_ms=%.1f", timings["embedding_load_ms"])
+
+        stage = time.perf_counter()
         model = build_model(settings)
+        timings["model_init_ms"] = _ms(stage)
+
+        stage = time.perf_counter()
         persona = load_persona(settings.persona_path)
+        timings["persona_ms"] = _ms(stage)
+
         recall = VectorRecall(store, embeddings, limit=settings.recall_limit)
         runtime = PersonRuntime(store, recall, embeddings, model, persona)
         app_clock = clock or RealClock()
@@ -73,7 +98,9 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
         life = LifeSimulator(store, embeddings, model, persona, runtime)
         ticker = TimeTicker(store, runtime)
         days = DayRunner(store, life, ticker)
-        return AppBundle(settings, store, runtime, chat, life, ticker, days, embeddings, model, app_clock)
+        timings["total_ms"] = _ms(total)
+        logger.info("app.init timings %s", " ".join(f"{key}={value:.1f}ms" for key, value in timings.items()))
+        return AppBundle(settings, store, runtime, chat, life, ticker, days, embeddings, model, app_clock, timings)
     except Exception:
         store.close()
         raise

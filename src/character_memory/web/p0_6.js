@@ -24,6 +24,7 @@ function previewFor(profile) {
 }
 function bootstrapUnreadBaseline() {
   if (localStorage.getItem(unreadBootstrapKey)) return;
+  if (!characters.length || !characters.every(profile => characterSummaries.has(profile.id))) return;
   for (const profile of characters) {
     const latest = latestAssistantId(profile.id);
     if (latest > 0) localStorage.setItem(lastReadKey(profile.id), String(latest));
@@ -48,6 +49,21 @@ renderCharacterList = function renderCharacterListWithUnread() {
         </span>
       </button>`;
   }).join("");
+};
+
+const p06AddMessage = addMessage;
+addMessage = function addMessageWithProactiveBadge(message) {
+  const row = p06AddMessage(message);
+  if (message?.proactive) {
+    const meta = row.querySelector(".message-meta");
+    if (meta && !meta.querySelector(".proactive-badge")) {
+      const badge = document.createElement("span");
+      badge.className = "proactive-badge";
+      badge.textContent = "主动消息";
+      meta.appendChild(badge);
+    }
+  }
+  return row;
 };
 
 const p06LoadHistory = loadHistory;
@@ -88,7 +104,7 @@ async function loadCharacterSummaries() {
       renderCharacterList();
     }
 
-    if (currentLatest > before && characterId === currentProfile().id) {
+    if (currentLatest > before) {
       console.info("[unread] current character received new message", characterId, currentLatest);
     }
   } catch (error) {

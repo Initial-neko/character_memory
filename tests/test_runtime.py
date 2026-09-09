@@ -52,6 +52,37 @@ def test_runtime_writes_action_message_memory_and_trace(tmp_path):
     assert trace["created_memory_ids"] == result.created_memory_ids
 
 
+class SparseModel(PersonModel):
+    def react(self, context):
+        self.last_request_messages = []
+        self.last_response_text = '{"action":{"type":"NO_REPLY"}}'
+        self.last_attempt = 1
+        return PersonReaction(action=ActionDecision(type=ActionType.NO_REPLY))
+
+    def plan_day(self, context):
+        return DailyLifePlan()
+
+    def write_diary(self, context):
+        return DiaryResult(diary="", mental_state_update="")
+
+
+def test_empty_mental_state_update_keeps_previous_state(tmp_path):
+    store = SQLiteStore(tmp_path / "x.db")
+    now = datetime.now(timezone.utc)
+    store.set_mental_state("rin", "原来的状态", now)
+    emb = DeterministicEmbedding()
+    runtime = PersonRuntime(store, VectorRecall(store, emb), emb, SparseModel(), "persona")
+
+    result = runtime.handle(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=now, content="嗯"))
+
+    assert result.reaction.mental_state_update == ""
+    assert store.get_mental_state("rin") == "原来的状态"
+    trace = store.get_runtime_trace(result.event.id)
+    assert trace["mental_state_before"] == "原来的状态"
+    assert trace["mental_state_after"] == "原来的状态"
+    assert trace["mental_state_updated"] is False
+
+
 class FailingCandidateEmbedding(DeterministicEmbedding):
     def embed(self, text):
         if text == "用户今天说到家了":

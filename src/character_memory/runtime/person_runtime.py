@@ -47,6 +47,16 @@ class PersonRuntime:
         self.model = model
         self.persona = persona
 
+    def _last_chat_before(self, character_id: str, event_time):
+        candidates = []
+        for event_type in (EventType.USER_MESSAGE, EventType.CHARACTER_MESSAGE):
+            rows = self.store.list_events(character_id, limit=1, event_type=event_type.value, before=event_time)
+            if rows:
+                candidates.append(rows[-1])
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: (_aware(item.event_time), item.id or 0))
+
     def _prepare_memory_writes(self, character_id: str, event_time, candidates):
         """Small V0 admission gate: reject low-value and near-duplicate memories."""
         existing = [
@@ -54,10 +64,11 @@ class PersonRuntime:
             for memory in self.store.list_memories(character_id)
             if _aware(memory.event_time) <= _aware(event_time)
         ]
+        # Keep records without embeddings too: exact duplicate detection must still
+        # work for migrated/legacy rows whose vectors have not been rebuilt yet.
         comparison = [
             (memory.id, memory.content.strip().casefold(), memory.embedding)
             for memory in existing
-            if memory.embedding
         ]
         accepted = []
         decisions = []
@@ -84,11 +95,12 @@ class PersonRuntime:
                     duplicate_id = memory_id
                     duplicate_similarity = 1.0
                     break
-                similarity = _cosine(embedding, other_embedding)
-                if similarity is not None and similarity >= _MEMORY_DUPLICATE_SIMILARITY:
-                    duplicate_id = memory_id
-                    duplicate_similarity = round(similarity, 4)
-                    break
+                if other_embedding:
+                    similarity = _cosine(embedding, other_embedding)
+                    if similarity is not None and similarity >= _MEMORY_DUPLICATE_SIMILARITY:
+                        duplicate_id = memory_id
+                        duplicate_similarity = round(similarity, 4)
+                        break
 
             if duplicate_similarity is not None:
                 decision["decision"] = "SKIP_DUPLICATE"
@@ -108,9 +120,8 @@ class PersonRuntime:
         timings: dict[str, float] = {}
         logger.info("runtime.handle start character=%s event_type=%s event_time=%s content_chars=%d", event.character_id, event.event_type.value, event.event_time.isoformat(), len(event.content or ""))
 
-        # Capture the relationship gap before appending the new user event.
-        previous_chat = self.store.list_chat_events(event.character_id, limit=1)
-        last_chat_event = previous_chat[-1] if previous_chat else None
+        # Relationship time uses the same future barrier as Memory Recall.
+        last_chat_event = self._last_chat_before(event.character_id, event.event_time)
 
         stage = time.perf_counter()
         event = self.store.append_event(event)

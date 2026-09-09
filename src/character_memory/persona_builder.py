@@ -12,7 +12,7 @@ import yaml
 
 class PersonaDraft(BaseModel):
     name: str = Field(min_length=1, max_length=48)
-    age: int | None = Field(default=None, ge=18, le=120)
+    age: int | None = Field(default=None, ge=1, le=120)
     identity: str = Field(min_length=1, max_length=240)
     tagline: str = Field(min_length=1, max_length=120)
     description: str = Field(min_length=1, max_length=1600)
@@ -129,7 +129,7 @@ def build_persona_prompt(description: str, *, name: str = "", age: int | None = 
 - 关系应该通过长期共同经历发展，不预设必须喜欢用户、依赖用户或迅速亲密。
 - 表达方式要具体到真实聊天：句长、标点、emoji、追问、沉默、主动、分歧、关心方式都要有辨识度，但不要机械规则化。
 - 可以有反差、怪癖、幽默感和鲜明兴趣，让长期聊天有可记忆的共同经历，但不要为了“留住用户”优化成瘾或 engagement。
-- 不生成色情、擦边、性化或未成年性化内容。
+- 不生成色情、擦边、性化内容；如果人物设定为未成年人，也不得包含任何性化元素。
 - description 是给普通用户阅读的自然人物说明，不要写成系统提示词。
 - personality 3~6 条；boundaries 2~5 条。
 - 只返回 JSON，不要返回 Markdown。

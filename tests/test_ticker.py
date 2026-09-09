@@ -25,12 +25,17 @@ class IntentModel(PersonModel):
         return DiaryResult(diary="平静。", mental_state_update="平静")
 
 
-def test_due_intent_executes_through_same_runtime(tmp_path):
-    store = SQLiteStore(tmp_path / "x.db")
-    emb = DeterministicEmbedding()
-    runtime = PersonRuntime(store, VectorRecall(store, emb), emb, IntentModel(), "persona")
-    now = datetime(2026, 9, 5, 18, tzinfo=timezone.utc)
-    intent_id = store.add_intent(
+class NewMessageIntentModel(IntentModel):
+    def react(self, context):
+        return PersonReaction(
+            perception="想起了之前的事",
+            reaction="想问一下结果",
+            actions=[ActionDecision(type=ActionType.MESSAGE, message="所以，汇报怎么样了？")],
+        )
+
+
+def _add_due_intent(store, now):
+    return store.add_intent(
         "rin",
         "问用户下午汇报怎么样",
         "PROACTIVE_MESSAGE",
@@ -40,9 +45,31 @@ def test_due_intent_executes_through_same_runtime(tmp_path):
         "之前提到过汇报",
     )
 
+
+def test_due_intent_executes_through_same_runtime(tmp_path):
+    store = SQLiteStore(tmp_path / "x.db")
+    emb = DeterministicEmbedding()
+    runtime = PersonRuntime(store, VectorRecall(store, emb), emb, IntentModel(), "persona")
+    now = datetime(2026, 9, 5, 18, tzinfo=timezone.utc)
+    intent_id = _add_due_intent(store, now)
+
     results = TimeTicker(store, runtime).tick("rin", now)
 
     assert len(results) == 1
     assert results[0].reaction.action.type == ActionType.PROACTIVE_MESSAGE
+    row = next(r for r in store.list_intents("rin") if r["id"] == intent_id)
+    assert row["status"] == "EXECUTED"
+
+
+def test_due_intent_new_message_action_is_also_executed(tmp_path):
+    store = SQLiteStore(tmp_path / "x.db")
+    emb = DeterministicEmbedding()
+    runtime = PersonRuntime(store, VectorRecall(store, emb), emb, NewMessageIntentModel(), "persona")
+    now = datetime(2026, 9, 5, 18, tzinfo=timezone.utc)
+    intent_id = _add_due_intent(store, now)
+
+    results = TimeTicker(store, runtime).tick("rin", now)
+
+    assert results[0].reaction.action.type == ActionType.MESSAGE
     row = next(r for r in store.list_intents("rin") if r["id"] == intent_id)
     assert row["status"] == "EXECUTED"

@@ -8,10 +8,11 @@ import time
 
 from pydantic import BaseModel, Field
 
-from character_memory.app import AppBundle, build_app
+from character_memory.app import AppBundle, build_app, build_model
 from character_memory.config import discover_character_profiles, load_persona, load_settings, resolve_persona_path
 from character_memory.domain.models import EventType
 from character_memory.logging_utils import configure_logging
+from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -34,6 +35,18 @@ class SimulateRequest(BaseModel):
     character_id: str = "rin"
 
 
+class PersonaDraftRequest(BaseModel):
+    description: str = Field(min_length=3, max_length=4000)
+    name: str = Field(default="", max_length=48)
+    age: int | None = Field(default=None, ge=18, le=120)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+
+
+class CreateCharacterRequest(BaseModel):
+    draft: PersonaDraft
+    character_id: str = Field(default="", max_length=32)
+
+
 def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = None):
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import FileResponse
@@ -46,6 +59,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     read_store = bundle.store if bundle is not None else SQLiteStore(settings.db_path)
     runtime_error: str | None = None
     init_lock = threading.Lock()
+    character_write_lock = threading.RLock()
 
     def get_bundle() -> AppBundle:
         nonlocal app_bundle, runtime_error
@@ -84,6 +98,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         except (AttributeError, OSError):
             return [{"id": "rin", "name": "Rin", "identity": "", "tagline": "", "persona_path": getattr(settings, "persona_path", "personas/rin/persona.yaml")}]
 
+    def public_profile(profile: dict[str, str]) -> dict[str, str]:
+        return {key: value for key, value in profile.items() if key != "persona_path"}
+
     def ensure_character(character_id: str) -> dict[str, str]:
         for profile in character_profiles():
             if profile["id"] == character_id:
@@ -106,7 +123,26 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             messages.append({"id": event.id, "role": role, "content": event.content, "event_time": event.event_time.isoformat(), "action": event.metadata.get("action"), "action_index": event.metadata.get("action_index"), "source_event_id": source_event_id, "has_trace": source_event_id in trace_sources})
         return {"character_id": character_id, "messages": messages}
 
-    app = FastAPI(title="character-memory", version="0.5.0")
+    def register_runtime_character(profile: dict[str, str]) -> None:
+        if app_bundle is None:
+            return
+        if not hasattr(app_bundle, "runtimes") or not hasattr(app_bundle, "embeddings") or not hasattr(app_bundle, "model"):
+            raise RuntimeError("loaded runtime bundle does not support dynamic character registration")
+
+        from character_memory.memory.recall import VectorRecall
+        from character_memory.runtime.person_runtime import PersonRuntime
+
+        character_id = profile["id"]
+        persona = load_persona(profile["persona_path"])
+        recall = VectorRecall(app_bundle.store, app_bundle.embeddings, limit=getattr(settings, "recall_limit", 8))
+        runtime = PersonRuntime(app_bundle.store, recall, app_bundle.embeddings, app_bundle.model, persona)
+        app_bundle.runtimes[character_id] = runtime
+        if isinstance(getattr(app_bundle.chat, "runtime", None), dict):
+            app_bundle.chat.runtime[character_id] = runtime
+        if hasattr(app_bundle, "characters"):
+            app_bundle.characters[:] = discover_character_profiles(settings)
+
+    app = FastAPI(title="character-memory", version="0.6.0")
     web_dir = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
@@ -127,12 +163,56 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     @app.get("/v1/characters")
     def characters():
-        return {
-            "characters": [
-                {key: value for key, value in profile.items() if key != "persona_path"}
-                for profile in character_profiles()
-            ]
-        }
+        return {"characters": [public_profile(profile) for profile in character_profiles()]}
+
+    @app.post("/v1/characters/draft")
+    def generate_character_draft(req: PersonaDraftRequest):
+        started = time.perf_counter()
+        temporary_model = None
+        try:
+            if app_bundle is not None and hasattr(app_bundle, "model"):
+                model = app_bundle.model
+            else:
+                temporary_model = build_model(settings)
+                model = temporary_model
+            draft = PersonaBuilder(model).generate(req.description, name=req.name, age=req.age, tags=req.tags)
+            logger.info("api.persona_draft done name=%s duration_ms=%.1f", draft.name, _ms(started))
+            return {"draft": draft.model_dump(mode="json")}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("api.persona_draft failed duration_ms=%.1f error=%s", _ms(started), exc)
+            raise HTTPException(status_code=502, detail=f"人物草稿生成失败：{exc}") from exc
+        finally:
+            if temporary_model is not None:
+                temporary_model.close()
+
+    @app.post("/v1/characters")
+    def create_character(req: CreateCharacterRequest):
+        with character_write_lock:
+            character_id = normalize_character_id(req.draft.name, req.character_id)
+            try:
+                path = save_persona(settings.persona_path, req.draft, character_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except FileExistsError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+            try:
+                profiles = discover_character_profiles(settings)
+                profile = next(profile for profile in profiles if profile["id"] == character_id)
+                register_runtime_character(profile)
+            except Exception as exc:
+                try:
+                    path.unlink(missing_ok=True)
+                    path.parent.rmdir()
+                except OSError:
+                    logger.exception("api.character rollback_file failed character=%s", character_id)
+                logger.exception("api.character create failed character=%s error=%s", character_id, exc)
+                raise HTTPException(status_code=500, detail=f"人物创建失败：{exc}") from exc
+
+            logger.info("api.character created character=%s path=%s runtime_loaded=%s", character_id, path, app_bundle is not None)
+            return {"character": public_profile(profile), "description": req.draft.description}
 
     @app.get("/v1/chat/history")
     def history(character_id: str = "rin", limit: int = 160):
@@ -198,7 +278,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             persona = load_persona(persona_path)
         return {
             "character_id": character_id,
-            "profile": {key: value for key, value in profile.items() if key != "persona_path"},
+            "profile": public_profile(profile),
             "now": datetime.now().astimezone().isoformat(),
             "provider": {"chat_model": settings.chat_model, "base_url": settings.base_url, "embedding_provider": settings.embedding_provider, "embedding_model": settings.embedding_model, "db_path": settings.db_path},
             "runtime_loaded": app_bundle is not None,

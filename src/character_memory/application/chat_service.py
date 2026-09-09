@@ -13,11 +13,14 @@ logger = logging.getLogger("character_memory.application.chat")
 
 
 class ChatService:
-    """Single application entry point for one conversational turn.
+    """Single application entry point for conversational turns.
 
     A single runtime is still accepted for tests/backward compatibility. The
     application bundle passes a character_id -> PersonRuntime mapping so each
     character uses its own persona while sharing storage/embedding/provider.
+
+    User turns and proactive-intent turns both use the same per-character lock,
+    so a due intent cannot interleave with a user message for the same person.
     """
 
     def __init__(self, store, runtime, clock: Clock):
@@ -39,6 +42,14 @@ class ChatService:
                 raise KeyError(f"unknown character_id={character_id!r}; known={known}")
             return selected
         return self.runtime
+
+    def _latest_conversation_id(self, character_id: str) -> str:
+        events = self.store.list_chat_events(character_id, limit=1)
+        if events:
+            value = str(events[-1].metadata.get("conversation_id") or "").strip()
+            if value:
+                return value
+        return f"{character_id}:proactive"
 
     def send(
         self,
@@ -63,7 +74,7 @@ class ChatService:
                 now.isoformat(),
                 len(content),
             )
-            result = runtime.handle(
+            return runtime.handle(
                 Event(
                     character_id=character_id,
                     event_type=EventType.USER_MESSAGE,
@@ -72,7 +83,40 @@ class ChatService:
                     metadata={"conversation_id": conversation_id},
                 )
             )
-            return result
+
+    def dispatch_proactive_intent(
+        self,
+        *,
+        character_id: str,
+        intent_id: int,
+        content: str,
+        at: datetime,
+    ):
+        """Re-evaluate one due persisted intent as an ordinary Runtime event."""
+
+        runtime = self._runtime_for(character_id)
+        with self._lock_for(character_id):
+            conversation_id = self._latest_conversation_id(character_id)
+            self.store.set_world_time(character_id, at)
+            logger.info(
+                "chat.proactive character=%s intent_id=%s conversation=%s at=%s",
+                character_id,
+                intent_id,
+                conversation_id,
+                at.isoformat(),
+            )
+            return runtime.handle(
+                Event(
+                    character_id=character_id,
+                    event_type=EventType.PROACTIVE_INTENT,
+                    event_time=at,
+                    content=f"之前留下的意图：{content}。现在重新判断是否自然执行、保持沉默或放弃。",
+                    metadata={
+                        "intent_id": intent_id,
+                        "conversation_id": conversation_id,
+                    },
+                )
+            )
 
     def history(self, character_id: str = "rin", limit: int = 160) -> dict:
         events = self.store.list_chat_events(character_id, limit=limit)
@@ -94,6 +138,7 @@ class ChatService:
                     "content": event.content,
                     "event_time": event.event_time.isoformat(),
                     "action": event.metadata.get("action"),
+                    "source_event_type": event.metadata.get("source_event_type"),
                     "source_event_id": source_event_id,
                     "has_trace": source_event_id in trace_sources,
                 }

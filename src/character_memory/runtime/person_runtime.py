@@ -64,8 +64,6 @@ class PersonRuntime:
             for memory in self.store.list_memories(character_id)
             if _aware(memory.event_time) <= _aware(event_time)
         ]
-        # Keep records without embeddings too: exact duplicate detection must still
-        # work for migrated/legacy rows whose vectors have not been rebuilt yet.
         comparison = [
             (memory.id, memory.content.strip().casefold(), memory.embedding)
             for memory in existing
@@ -120,7 +118,6 @@ class PersonRuntime:
         timings: dict[str, float] = {}
         logger.info("runtime.handle start character=%s event_type=%s event_time=%s content_chars=%d", event.character_id, event.event_type.value, event.event_time.isoformat(), len(event.content or ""))
 
-        # Relationship time uses the same future barrier as Memory Recall.
         last_chat_event = self._last_chat_before(event.character_id, event.event_time)
 
         stage = time.perf_counter()
@@ -148,7 +145,6 @@ class PersonRuntime:
         action_types = [action.type.value for action in reaction.actions]
         logger.info("runtime.model react done event_id=%s actions=%s duration_ms=%.1f memory_candidates=%d intent_candidates=%d", event.id, action_types or ["NO_REPLY"], timings["model_ms"], len(reaction.memory_candidates), len(reaction.intent_candidates))
 
-        # Empty means "no mental-state change this turn", not "erase state".
         state_after = (reaction.mental_state_update or "").strip() or state_before
 
         stage = time.perf_counter()
@@ -186,6 +182,7 @@ class PersonRuntime:
                                 "action": action.type.value,
                                 "action_index": index,
                                 "source_event_id": event.id,
+                                "source_event_type": event.event_type.value,
                                 "conversation_id": conversation_id,
                             },
                         )

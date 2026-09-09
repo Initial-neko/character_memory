@@ -9,6 +9,7 @@ import time
 from pydantic import BaseModel, Field
 
 from character_memory.app import AppBundle, build_app, build_model
+from character_memory.application.proactive_service import ProactiveService
 from character_memory.config import discover_character_profiles, load_persona, load_settings, resolve_persona_path
 from character_memory.domain.models import EventType
 from character_memory.logging_utils import configure_logging
@@ -17,6 +18,7 @@ from character_memory.storage.sqlite import SQLiteStore
 
 
 logger = logging.getLogger("character_memory.api")
+_PROACTIVE_POLL_SECONDS = 30.0
 
 
 def _ms(started: float) -> float:
@@ -60,6 +62,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     runtime_error: str | None = None
     init_lock = threading.Lock()
     character_write_lock = threading.RLock()
+    proactive_stop = threading.Event()
+    proactive_thread: threading.Thread | None = None
 
     def get_bundle() -> AppBundle:
         nonlocal app_bundle, runtime_error
@@ -108,20 +112,53 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         known = ", ".join(profile["id"] for profile in character_profiles())
         raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}. Known: {known}")
 
+    def message_payload(event) -> dict:
+        if event.event_type == EventType.USER_MESSAGE:
+            role = "user"
+            source_event_id = event.id
+            source_event_type = EventType.USER_MESSAGE.value
+        else:
+            role = "assistant"
+            source_event_id = event.metadata.get("source_event_id")
+            source_event_type = event.metadata.get("source_event_type")
+        return {
+            "id": event.id,
+            "role": role,
+            "content": event.content,
+            "event_time": event.event_time.isoformat(),
+            "action": event.metadata.get("action"),
+            "action_index": event.metadata.get("action_index"),
+            "source_event_type": source_event_type,
+            "source_event_id": source_event_id,
+            "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,
+        }
+
     def history_payload(character_id: str, limit: int) -> dict:
         ensure_character(character_id)
         events = read_store.list_chat_events(character_id, limit=limit)
         trace_sources = read_store.list_runtime_trace_sources(character_id)
         messages = []
         for event in events:
-            if event.event_type == EventType.USER_MESSAGE:
-                role = "user"
-                source_event_id = event.id
-            else:
-                role = "assistant"
-                source_event_id = event.metadata.get("source_event_id")
-            messages.append({"id": event.id, "role": role, "content": event.content, "event_time": event.event_time.isoformat(), "action": event.metadata.get("action"), "action_index": event.metadata.get("action_index"), "source_event_id": source_event_id, "has_trace": source_event_id in trace_sources})
+            item = message_payload(event)
+            item["has_trace"] = item["source_event_id"] in trace_sources
+            messages.append(item)
         return {"character_id": character_id, "messages": messages}
+
+    def character_summary(profile: dict[str, str]) -> dict:
+        character_id = profile["id"]
+        latest_chat_rows = read_store.list_chat_events(character_id, limit=1)
+        latest_assistant_rows = read_store.list_events(
+            character_id,
+            limit=1,
+            event_type=EventType.CHARACTER_MESSAGE.value,
+        )
+        latest_message = message_payload(latest_chat_rows[-1]) if latest_chat_rows else None
+        latest_assistant_id = latest_assistant_rows[-1].id if latest_assistant_rows else None
+        return {
+            "id": character_id,
+            "latest_message": latest_message,
+            "latest_assistant_message_id": latest_assistant_id,
+        }
 
     def register_runtime_character(profile: dict[str, str]) -> None:
         if app_bundle is None:
@@ -142,12 +179,51 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         if hasattr(app_bundle, "characters"):
             app_bundle.characters[:] = discover_character_profiles(settings)
 
-    app = FastAPI(title="character-memory", version="0.6.0")
+    def dispatch_proactive_once() -> list[dict]:
+        if not getattr(settings, "api_key", ""):
+            return []
+        now = datetime.now().astimezone()
+        character_ids = [profile["id"] for profile in character_profiles()]
+        gate = ProactiveService(read_store)
+        if not character_ids or not gate.has_due(character_ids, now):
+            return []
+        current = get_bundle()
+        service = ProactiveService(current.store, current.chat)
+        outcomes = service.dispatch_due(character_ids, now)
+        if outcomes:
+            logger.info("api.proactive dispatched=%d", len(outcomes))
+        return outcomes
+
+    def proactive_loop() -> None:
+        logger.info("api.proactive loop_start poll_seconds=%.0f", _PROACTIVE_POLL_SECONDS)
+        while not proactive_stop.is_set():
+            try:
+                dispatch_proactive_once()
+            except Exception:
+                logger.exception("api.proactive loop_error")
+            proactive_stop.wait(_PROACTIVE_POLL_SECONDS)
+        logger.info("api.proactive loop_stop")
+
+    app = FastAPI(title="character-memory", version="0.7.0")
     web_dir = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
+    @app.on_event("startup")
+    def _startup():
+        nonlocal proactive_thread
+        if own_bundle and (proactive_thread is None or not proactive_thread.is_alive()):
+            proactive_thread = threading.Thread(
+                target=proactive_loop,
+                name="character-memory-proactive",
+                daemon=True,
+            )
+            proactive_thread.start()
+
     @app.on_event("shutdown")
     def _shutdown():
+        proactive_stop.set()
+        if proactive_thread is not None and proactive_thread.is_alive():
+            proactive_thread.join(timeout=1.0)
         if own_bundle:
             if app_bundle is not None:
                 app_bundle.close()
@@ -159,11 +235,25 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     @app.get("/health")
     def health():
-        return {"ok": True, "web": "ready", "runtime_loaded": app_bundle is not None, "runtime_error": runtime_error, "model": settings.chat_model, "embedding_provider": settings.embedding_provider, "db_path": settings.db_path, "characters": len(character_profiles())}
+        return {
+            "ok": True,
+            "web": "ready",
+            "runtime_loaded": app_bundle is not None,
+            "runtime_error": runtime_error,
+            "model": settings.chat_model,
+            "embedding_provider": settings.embedding_provider,
+            "db_path": settings.db_path,
+            "characters": len(character_profiles()),
+            "proactive_poll_seconds": _PROACTIVE_POLL_SECONDS,
+        }
 
     @app.get("/v1/characters")
     def characters():
         return {"characters": [public_profile(profile) for profile in character_profiles()]}
+
+    @app.get("/v1/characters/summaries")
+    def character_summaries():
+        return {"characters": [character_summary(profile) for profile in character_profiles()]}
 
     @app.post("/v1/characters/draft")
     def generate_character_draft(req: PersonaDraftRequest):

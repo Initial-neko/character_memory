@@ -56,19 +56,27 @@ def build_model(settings: Settings):
 
 
 def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -> AppBundle:
+    # Fail on obvious configuration problems before loading the heavy embedding model.
+    if not settings.api_key:
+        raise ValueError("Missing OPENCODE_GO_API_KEY or api_key in config.yaml")
+
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     store = SQLiteStore(settings.db_path)
-    embeddings = build_embedding(settings)
-    model = build_model(settings)
-    persona = load_persona(settings.persona_path)
-    recall = VectorRecall(store, embeddings, limit=settings.recall_limit)
-    runtime = PersonRuntime(store, recall, embeddings, model, persona)
-    app_clock = clock or RealClock()
-    chat = ChatService(store, runtime, app_clock)
-    life = LifeSimulator(store, embeddings, model, persona, runtime)
-    ticker = TimeTicker(store, runtime)
-    days = DayRunner(store, life, ticker)
-    return AppBundle(settings, store, runtime, chat, life, ticker, days, embeddings, model, app_clock)
+    try:
+        embeddings = build_embedding(settings)
+        model = build_model(settings)
+        persona = load_persona(settings.persona_path)
+        recall = VectorRecall(store, embeddings, limit=settings.recall_limit)
+        runtime = PersonRuntime(store, recall, embeddings, model, persona)
+        app_clock = clock or RealClock()
+        chat = ChatService(store, runtime, app_clock)
+        life = LifeSimulator(store, embeddings, model, persona, runtime)
+        ticker = TimeTicker(store, runtime)
+        days = DayRunner(store, life, ticker)
+        return AppBundle(settings, store, runtime, chat, life, ticker, days, embeddings, model, app_clock)
+    except Exception:
+        store.close()
+        raise
 
 
 def build_app(config_path: str = "config.yaml", *, clock: Clock | None = None) -> AppBundle:

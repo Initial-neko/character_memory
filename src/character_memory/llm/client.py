@@ -139,6 +139,7 @@ class OpenAICompatibleModel(PersonModel):
                 "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State 和 Behavioral Contract。"
                 "返回一个 JSON 对象。action 必填，至少包含 type；REPLY、MINIMAL_RESPONSE、PROACTIVE_MESSAGE 时 message 必须非空。"
                 "reason、perception、reaction、mental_state_update 可以是空字符串；memory_candidates、intent_candidates 可以是空数组。"
+                "内部字段可以稀疏，但对外 message 必须像这个人物本人自然聊天：不要刻意惜字，标点、停顿、emoji、颜文字和自然追问都按 Persona 使用。"
                 "不要为了填字段而编造内部活动，也不要把人物写成客服或无条件迎合用户。"
             )
         if schema is DailyLifePlan:

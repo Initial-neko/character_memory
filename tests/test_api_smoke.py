@@ -43,14 +43,21 @@ def test_html_and_chat_share_same_application_service(tmp_path):
     index = client.get("/")
     assert index.status_code == 200
     assert "Character Memory" in index.text
+
     response = client.post("/v1/chat", json={"message": "你好", "character_id": "rin", "conversation_id": "browser-test"})
     assert response.status_code == 200
-    assert response.json()["action"]["message"] == "你好"
+    body = response.json()
+    assert body["action"]["message"] == "你好"
+    assert body["timings"]["runtime_total_ms"] >= 0
+    assert body["timings"]["api_total_ms"] >= body["timings"]["runtime_total_ms"]
+
     history = client.get("/v1/chat/history").json()
     assert [m["role"] for m in history["messages"]] == ["user", "assistant"]
     assert history["messages"][0]["has_trace"] is True
     source_event_id = history["messages"][0]["source_event_id"]
     trace = client.get(f"/v1/traces/{source_event_id}")
     assert trace.status_code == 200
-    assert trace.json()["conversation_id"] == "browser-test"
+    trace_body = trace.json()
+    assert trace_body["conversation_id"] == "browser-test"
+    assert trace_body["timings"]["model_ms"] >= 0
     store.close()

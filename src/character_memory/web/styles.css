@@ -13,7 +13,7 @@ button,textarea { font:inherit; }
 .character-item { width:100%; border:0; background:transparent; border-radius:10px; padding:10px; display:grid; grid-template-columns:38px minmax(0,1fr); gap:10px; text-align:left; cursor:pointer; color:var(--text); }
 .character-item:hover { background:rgba(0,0,0,.045); }.character-item.active { background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.05); }
 .character-avatar { width:38px; height:38px; border-radius:50%; background:#dedfe3; display:grid; place-items:center; font-weight:650; font-size:13px; }
-.character-copy { min-width:0; }.character-name { display:block; font-size:13px; font-weight:600; margin:1px 0 3px; }.character-tagline { display:block; color:var(--muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.character-copy { min-width:0; }.character-name { display:block; font-size:13px; font-weight:600; margin:1px 0 3px; }.character-pending { color:#6f7782; font-size:10px; font-weight:500; }.character-tagline { display:block; color:var(--muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sidebar-foot { margin-top:auto; padding:12px 10px 3px; color:#9b9da3; font-size:10px; }
 .chat-shell { grid-column:2; min-height:100vh; display:flex; flex-direction:column; background:#fff; }
 .topbar { position:sticky; top:0; z-index:10; min-height:68px; padding:12px 24px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.94); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:space-between; }

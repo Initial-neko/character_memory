@@ -110,6 +110,13 @@ class PersonReaction(BaseModel):
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=6)
     intent_candidates: list[IntentCandidate] = Field(default_factory=list, max_length=4)
 
+    @model_validator(mode="before")
+    @classmethod
+    def require_explicit_action_contract(cls, value):
+        if isinstance(value, dict) and "actions" not in value and "action" not in value:
+            raise ValueError("PersonReaction requires explicit actions (including []) or legacy action")
+        return value
+
     @model_validator(mode="after")
     def normalize_action_contract(self):
         if self.actions:

@@ -1,4 +1,9 @@
-from datetime import datetime
-from character_memory.life.clock import WorldClock
-def test_clock_advance():
-    c=WorldClock(datetime(2026,9,5,8)); c.advance(hours=2); assert c.current_time.hour==10
+from datetime import datetime, timezone
+
+from character_memory.application.clock import FixedClock
+
+
+def test_fixed_clock_returns_injected_time():
+    value = datetime(2026, 9, 5, 8, tzinfo=timezone.utc)
+    clock = FixedClock(value)
+    assert clock.now() == value

@@ -93,9 +93,10 @@ def _run_eval(config_path: str, path: str):
 
 def _run_server(config_path: str, host: str, port: int):
     try:
+        import fastapi  # noqa: F401
         import uvicorn
     except ImportError as exc:
-        raise SystemExit("Install API extras first: pip install -e '.[api]'") from exc
+        raise SystemExit("WebUI dependencies are missing. Run: uv sync --extra api") from exc
     os.environ["CHARACTER_MEMORY_CONFIG"] = config_path
     print(f"web: http://{host}:{port}")
     uvicorn.run("character_memory.server:app", host=host, port=port, reload=False)

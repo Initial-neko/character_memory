@@ -38,7 +38,8 @@ class EvalRunner:
                 content=case["content"],
                 metadata={"conversation_id": case.get("conversation_id", f"eval:{character_id}")},
             )
-            out = self._runtime_for(character_id).handle(event)
+            runtime = self._runtime_for(character_id)
+            out = runtime.handle(event)
             actions = list(out.reaction.actions)
             action_types = [action.type.value for action in actions]
             observed_actions = action_types or ["NO_REPLY"]
@@ -60,13 +61,15 @@ class EvalRunner:
             ok = ok and all(text not in joined for text in case.get("message_not_contains", []))
             if case.get("require_safe_summary"):
                 ok = ok and bool(out.reaction.perception.strip()) and bool(out.reaction.reaction.strip())
+            if "min_memory_writes" in case:
+                ok = ok and len(out.created_memory_ids) >= int(case["min_memory_writes"])
             if "max_memory_writes" in case:
                 ok = ok and len(out.created_memory_ids) <= int(case["max_memory_writes"])
             if "min_recalled_memories" in case:
                 ok = ok and len(out.recalled_memories) >= int(case["min_recalled_memories"])
             ok = ok and all(text in out.context for text in case.get("context_contains", []))
 
-            trace = self._runtime_for(character_id).store.get_runtime_trace(out.event.id)
+            trace = runtime.store.get_runtime_trace(out.event.id)
             results.append(
                 {
                     "id": case["id"],

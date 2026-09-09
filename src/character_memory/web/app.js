@@ -1,7 +1,7 @@
 const activeCharacterKey = "character-memory:active-character";
 let characterId = localStorage.getItem(activeCharacterKey) || "rin";
 let characters = [];
-let sending = false;
+const pendingCharacters = new Set();
 let lastRenderedSignature = "";
 
 const chat = document.getElementById("chat");
@@ -36,31 +36,47 @@ function conversationIdFor(id) {
   if (!value) { value = crypto.randomUUID(); localStorage.setItem(key, value); }
   return value;
 }
+function isCurrentPending() { return pendingCharacters.has(characterId); }
 
 function updateNow() { nowText.textContent = new Date().toLocaleString([], {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}); }
 updateNow(); setInterval(updateNow, 30000);
 
+function updateComposerState() {
+  const pending = isCurrentPending();
+  sendButton.disabled = pending;
+  input.disabled = pending;
+  if (!pending) input.focus();
+}
+
 function updateHeader() {
   const profile = currentProfile();
   characterName.textContent = profile.name || profile.id;
-  characterIdentity.textContent = profile.identity || profile.tagline || "Persistent AI Person";
+  characterIdentity.textContent = pendingCharacters.has(characterId)
+    ? `${profile.identity || profile.tagline || "Persistent AI Person"} · 正在回复`
+    : (profile.identity || profile.tagline || "Persistent AI Person");
   headerAvatar.textContent = initialFor(profile);
-  input.placeholder = `给 ${profile.name || profile.id} 发消息`;
+  input.placeholder = pendingCharacters.has(characterId)
+    ? `${profile.name || profile.id} 正在回复…`
+    : `给 ${profile.name || profile.id} 发消息`;
+  updateComposerState();
 }
 
 function renderCharacterList() {
-  characterList.innerHTML = characters.map(profile => `
-    <button class="character-item ${profile.id === characterId ? "active" : ""}" type="button" data-character="${escapeHtml(profile.id)}" ${sending ? "disabled" : ""}>
-      <span class="character-avatar">${escapeHtml(initialFor(profile))}</span>
-      <span class="character-copy">
-        <span class="character-name">${escapeHtml(profile.name)}</span>
-        <span class="character-tagline">${escapeHtml(profile.tagline || profile.identity || "Persistent AI Person")}</span>
-      </span>
-    </button>`).join("");
+  characterList.innerHTML = characters.map(profile => {
+    const pending = pendingCharacters.has(profile.id);
+    return `
+      <button class="character-item ${profile.id === characterId ? "active" : ""}" type="button" data-character="${escapeHtml(profile.id)}">
+        <span class="character-avatar">${escapeHtml(initialFor(profile))}</span>
+        <span class="character-copy">
+          <span class="character-name">${escapeHtml(profile.name)}${pending ? '<span class="character-pending"> · 回复中</span>' : ""}</span>
+          <span class="character-tagline">${escapeHtml(profile.tagline || profile.identity || "Persistent AI Person")}</span>
+        </span>
+      </button>`;
+  }).join("");
 }
 
 async function switchCharacter(nextId) {
-  if (sending || nextId === characterId) return;
+  if (nextId === characterId) return;
   characterId = nextId;
   localStorage.setItem(activeCharacterKey, characterId);
   lastRenderedSignature = "";
@@ -69,7 +85,7 @@ async function switchCharacter(nextId) {
   renderCharacterList();
   chat.innerHTML = '<div class="empty">正在加载聊天记录…</div>';
   await loadHistory();
-  input.focus();
+  updateComposerState();
 }
 
 function openDrawer(title, subtitle = "") { drawerTitle.textContent = title; drawerSubtitle.textContent = subtitle; drawerBackdrop.classList.remove("hidden"); drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false"); }
@@ -94,6 +110,7 @@ function renderHistory(messages) {
   if (!messages.length) {
     chat.innerHTML = `<div class="empty">还没有和 ${escapeHtml(currentProfile().name || characterId)} 的聊天记录。<br>从第一句话开始认识彼此。</div>`;
     lastRenderedSignature = signature;
+    if (isCurrentPending()) appendTypingForCurrent();
     return;
   }
   let lastDate = null;
@@ -104,8 +121,16 @@ function renderHistory(messages) {
     }
     addMessage(message);
   }
+  if (isCurrentPending()) appendTypingForCurrent();
   lastRenderedSignature = signature;
   scrollToBottom(false);
+}
+
+function appendTypingForCurrent() {
+  if (chat.querySelector(".typing-row")) return;
+  const typing = typingTemplate.content.cloneNode(true);
+  typing.querySelector(".avatar").textContent = initialFor(currentProfile());
+  chat.appendChild(typing);
 }
 
 function scrollToBottom(smooth = true) { window.scrollTo({top: document.body.scrollHeight, behavior: smooth ? "smooth" : "auto"}); }
@@ -176,38 +201,66 @@ input.addEventListener("keydown", event => { if (event.key === "Enter" && !event
 composer.addEventListener("submit", async event => {
   event.preventDefault();
   const message = input.value.trim();
-  if (!message || sending) return;
   const sentCharacter = characterId;
+  if (!message || pendingCharacters.has(sentCharacter)) return;
+
   const conversationId = conversationIdFor(sentCharacter);
   const browserStarted = performance.now();
-  sending = true; sendButton.disabled = true; input.disabled = true; renderCharacterList();
+  pendingCharacters.add(sentCharacter);
+  renderCharacterList();
+  updateHeader();
+
   if (chat.querySelector(".empty")) chat.innerHTML = "";
   addMessage({role:"user", content:message, event_time:new Date().toISOString(), has_trace:false});
-  const typing = typingTemplate.content.cloneNode(true); typing.querySelector(".avatar").textContent = initialFor(currentProfile()); chat.appendChild(typing);
-  scrollToBottom(); input.value = ""; input.style.height = "auto";
+  appendTypingForCurrent();
+  scrollToBottom();
+  input.value = "";
+  input.style.height = "auto";
+
   try {
     const result = await api("/v1/chat", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, message})});
     const browserTotal = performance.now() - browserStarted;
-    chat.querySelector(".typing-row")?.remove();
-    console.info("[chat timings]", {...(result.timings || {}), browser_total_ms:Number(browserTotal.toFixed(1))});
+    console.info("[chat timings]", sentCharacter, {...(result.timings || {}), browser_total_ms:Number(browserTotal.toFixed(1))});
+
     if (sentCharacter === characterId) {
-      if (result.action?.message) addMessage({role:"assistant", content:result.action.message, event_time:result.event_time, action:result.action.type, source_event_id:result.event_id, has_trace:true, latency_ms:browserTotal});
-      else { const note = document.createElement("div"); note.className = "date-separator"; note.textContent = `未发送消息 · ${result.action?.type || ""} · ${fmtMs(browserTotal)}`; chat.appendChild(note); }
+      chat.querySelector(".typing-row")?.remove();
+      if (result.action?.message) {
+        addMessage({role:"assistant", content:result.action.message, event_time:result.event_time, action:result.action.type, source_event_id:result.event_id, has_trace:true, latency_ms:browserTotal});
+      } else {
+        const note = document.createElement("div");
+        note.className = "date-separator";
+        note.textContent = `未发送消息 · ${result.action?.type || ""} · ${fmtMs(browserTotal)}`;
+        chat.appendChild(note);
+      }
       scrollToBottom();
-      setTimeout(() => loadHistory().catch(error => console.warn("history refresh failed", error)), 250);
     }
   } catch (error) {
-    chat.querySelector(".typing-row")?.remove();
-    const box = document.createElement("div"); box.className = "error"; box.textContent = `生成失败：${error.message}`; chat.appendChild(box); console.error("[chat failed]", error);
+    console.error("[chat failed]", sentCharacter, error);
+    if (sentCharacter === characterId) {
+      chat.querySelector(".typing-row")?.remove();
+      const box = document.createElement("div");
+      box.className = "error";
+      box.textContent = `生成失败：${error.message}`;
+      chat.appendChild(box);
+    }
   } finally {
-    sending = false; sendButton.disabled = false; input.disabled = false; renderCharacterList(); input.focus(); scrollToBottom();
+    pendingCharacters.delete(sentCharacter);
+    renderCharacterList();
+    updateHeader();
+    if (sentCharacter === characterId) {
+      await loadHistory().catch(error => console.warn("history refresh failed", error));
+      updateComposerState();
+      scrollToBottom();
+    }
   }
 });
 
 async function bootstrap() {
-  try { await loadCharacters(); await loadHistory(); input.focus(); }
+  try { await loadCharacters(); await loadHistory(); updateComposerState(); }
   catch (error) { chat.innerHTML = `<div class="error">页面初始化失败：${escapeHtml(error.message)}</div>`; console.error(error); }
 }
 
 bootstrap();
-setInterval(() => { if (!sending && !drawer.classList.contains("open")) loadHistory().catch(() => {}); }, 15000);
+setInterval(() => {
+  if (!drawer.classList.contains("open")) loadHistory().catch(() => {});
+}, 15000);

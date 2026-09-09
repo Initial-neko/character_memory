@@ -1,6 +1,6 @@
 # Memory Design
 
-本文只定义已经确认的 Memory 原则和 V0 baseline。
+本文只定义已经确认的 Memory 原则和当前 baseline。
 
 ## 1. Event Log 才是历史事实源
 
@@ -34,43 +34,79 @@ Memory 不只是“用户事实”。至少包括：
 
 ## 3. 从第一天就 Embedding
 
-不采用“先把所有 Memory 扔进大模型扫描，后面再加向量检索”的过渡方案。
-
 正式链路从 V0 即为：
 
 `Memory text -> Embedding -> SQLite BLOB -> Vector Recall -> Runtime`
 
 SQLite 负责持久化；Vector Retrieval 是可替换索引层。当前用 NumPy 扫描 active memory，未来只有在 benchmark 证明性能不够时才换 ANN/sqlite-vec/FAISS 等实现。
 
-## 4. V0 Recall baseline
+## 4. P0 Memory Admission
 
-当前只是实验基线：
+模型给出 `memory_candidates` 不等于数据库必须全部接受。
+
+当前增加一层非常小的 deterministic admission gate：
+
+```text
+Memory Candidate
+      ↓
+低价值？ ──是──> SKIP_LOW_VALUE
+      ↓否
+与已有 Memory 完全相同 / 近重复？ ──是──> SKIP_DUPLICATE
+      ↓否
+     WRITE
+```
+
+当前 baseline：
+
+- `importance < 0.35`：`SKIP_LOW_VALUE`
+- 文本规范化后完全相同：`SKIP_DUPLICATE`
+- Embedding cosine `>= 0.93`：`SKIP_DUPLICATE`
+- 其余：`WRITE`
+
+这些阈值是 **Eval baseline，不是最终产品结论**。
+
+Admission 不使用第二次 LLM 调用，避免普通聊天为了“判断要不要记”增加额外模型延迟。
+
+每个候选的结果会写入 Runtime Trace：
+
+```text
+candidate
+ decision = WRITE / SKIP_LOW_VALUE / SKIP_DUPLICATE
+ duplicate_memory_id
+ similarity
+```
+
+这样 Memory Precision 可以被实际调试，而不是只能看到最后数据库里剩了什么。
+
+未来如果 Eval 证明单纯 importance + duplicate gate 不够，再讨论 Memory Writer/Consolidation，不提前增加复杂架构。
+
+## 5. Recall baseline
+
+当前实验基线：
 
 `score = 0.70 * semantic + 0.20 * recency + 0.10 * importance`
 
-这些权重不是产品结论，必须通过 Eval 调整。
-
-Recall 还有两条硬规则：
+Recall 有两条硬规则：
 
 - 只能 Recall `event_time <= now` 的 Memory，防止虚拟时间中的未来泄漏。
 - Embedding 维度变化后，旧向量不混用；使用 `character-memory reembed` 重建。
 
-长期 Recall 方向是：semantic relevance、recency、importance、emotional salience、relationship relevance、associative activation 等信号共同作用，但 V0 不提前实现未验证复杂度。
+长期 Recall 方向是 semantic relevance、recency、importance、emotional salience、relationship relevance、associative activation 等信号共同作用，但当前不提前实现未验证复杂度。
 
-## 5. 多粒度记忆方向
+## 6. 多粒度记忆方向
 
-已经确认长期需要保留多层信息，而不是“不断总结然后删除原文”：
+长期需要保留多层信息，而不是“不断总结然后删除原文”：
 
 `Raw Event -> Episode -> Daily/Diary -> Long-term Landmark`
 
 高层 Memory 不能替代底层 Event。未来做 consolidation 时，应保留 landmark，并允许追溯到真实经历。
 
-## 6. 尚未决定的部分
+## 7. 尚未决定的部分
 
 以下故意没有写死：
 
-- 什么 Event 一定写入长期 Memory。
 - Memory Writer 的最终 Prompt/算法。
+- `0.35 / 0.93` 是否应该调整或按 Memory Type 区分。
 - Consolidation 周期与阈值。
 - Forgetting / Reconsolidation 具体策略。
 - 最终 Recall ranking 公式。

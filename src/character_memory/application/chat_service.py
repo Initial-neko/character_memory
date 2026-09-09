@@ -15,8 +15,9 @@ logger = logging.getLogger("character_memory.application.chat")
 class ChatService:
     """Single application entry point for one conversational turn.
 
-    UI/API/CLI should call this service instead of deciding clock/session/runtime
-    semantics on their own.
+    A single runtime is still accepted for tests/backward compatibility. The
+    application bundle passes a character_id -> PersonRuntime mapping so each
+    character uses its own persona while sharing storage/embedding/provider.
     """
 
     def __init__(self, store, runtime, clock: Clock):
@@ -30,6 +31,15 @@ class ChatService:
         with self._locks_guard:
             return self._character_locks[character_id]
 
+    def _runtime_for(self, character_id: str):
+        if isinstance(self.runtime, dict):
+            selected = self.runtime.get(character_id)
+            if selected is None:
+                known = ", ".join(sorted(self.runtime))
+                raise KeyError(f"unknown character_id={character_id!r}; known={known}")
+            return selected
+        return self.runtime
+
     def send(
         self,
         message: str,
@@ -42,6 +52,7 @@ class ChatService:
         if not content:
             raise ValueError("message must not be empty")
 
+        runtime = self._runtime_for(character_id)
         with self._lock_for(character_id):
             now = at or self.clock.now()
             self.store.set_world_time(character_id, now)
@@ -52,7 +63,7 @@ class ChatService:
                 now.isoformat(),
                 len(content),
             )
-            result = self.runtime.handle(
+            result = runtime.handle(
                 Event(
                     character_id=character_id,
                     event_type=EventType.USER_MESSAGE,

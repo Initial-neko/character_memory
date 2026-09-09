@@ -9,15 +9,16 @@ from character_memory.llm.client import OpenAICompatibleModel, ProviderHTTPError
 
 def test_action_message_contract():
     try:
-        ActionDecision(type=ActionType.REPLY, reason="回应")
+        ActionDecision(type=ActionType.MESSAGE)
     except ValueError:
         pass
     else:
-        raise AssertionError("REPLY without message must be rejected")
+        raise AssertionError("MESSAGE without message must be rejected")
 
 
-def test_sparse_person_reaction_is_valid():
-    result = PersonReaction.model_validate({"action": {"type": "NO_REPLY"}})
+def test_sparse_person_reaction_is_valid_and_silent():
+    result = PersonReaction.model_validate({"actions": []})
+    assert result.actions == []
     assert result.action.type == ActionType.NO_REPLY
     assert result.action.reason == ""
     assert result.perception == ""
@@ -27,12 +28,30 @@ def test_sparse_person_reaction_is_valid():
     assert result.intent_candidates == []
 
 
+def test_legacy_single_action_is_normalized_to_actions():
+    result = PersonReaction.model_validate({"action": {"type": "REPLY", "message": "嗯"}})
+    assert len(result.actions) == 1
+    assert result.actions[0].message == "嗯"
+    assert result.action.message == "嗯"
+
+
+def test_multi_action_uses_first_action_for_legacy_compatibility():
+    result = PersonReaction.model_validate({"actions": [
+        {"type": "MESSAGE", "message": "等等"},
+        {"type": "EMOJI", "message": "🥺"},
+    ]})
+    assert [action.type for action in result.actions] == [ActionType.MESSAGE, ActionType.EMOJI]
+    assert result.action.type == ActionType.MESSAGE
+    assert result.action.message == "等等"
+
+
 def test_structured_output_retries_once():
     model = OpenAICompatibleModel("key", attempts=2)
-    replies = iter(["not json", json.dumps({"action": {"type": "NO_REPLY"}}, ensure_ascii=False)])
+    replies = iter(["not json", json.dumps({"actions": []}, ensure_ascii=False)])
     model._request = lambda messages, **kwargs: next(replies)
     try:
         result = model.react("context")
+        assert result.actions == []
         assert result.action.type == ActionType.NO_REPLY
     finally:
         model.close()
@@ -46,7 +65,7 @@ def test_structured_call_uses_json_object_response_format():
         return httpx.Response(
             200,
             request=request,
-            json={"choices": [{"message": {"content": '{"action":{"type":"NO_REPLY"}}'}}]},
+            json={"choices": [{"message": {"content": '{"actions":[]}'}}]},
         )
 
     model = OpenAICompatibleModel("key", attempts=1)
@@ -54,13 +73,16 @@ def test_structured_call_uses_json_object_response_format():
     model.client = httpx.Client(transport=httpx.MockTransport(handler), timeout=30)
     try:
         result = model.react("context")
-        assert result.action.type == ActionType.NO_REPLY
+        assert result.actions == []
         assert captured["response_format"] == {"type": "json_object"}
         system = captured["messages"][0]["content"]
         assert "model_json_schema" not in system
         assert '"properties"' not in system
+        assert "actions" in system
+        assert "0 到 3" in system
+        assert "actions 必须可以是空数组" in system
         assert "不要刻意惜字" in system
-        assert "自然追问" in system
+        assert "隐藏思维链" in system
     finally:
         model.close()
 

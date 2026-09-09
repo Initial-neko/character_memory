@@ -41,6 +41,7 @@ def compile_context(persona: str, mental_state: str, memories, event, recent_eve
 本事件允许的外部 action：{allowed}。
 不要无条件迎合，也不要为了提高互动率而主动联系。
 action.type 是关键决策；表达型 action 必须有自然的 message。action.reason、perception、reaction 都可以为空字符串。
+内部结构可以稀疏，但对外 message 不以“最短输出”为目标。严格服从 Persona 的表达习惯，自然使用标点、停顿、emoji 或颜文字；需要理解、好奇或关心时可以自然追问，但不要机械地用问题维持对话。
 mental_state_update 只在本轮确实产生了值得延续的心理变化时填写；否则留空，系统会沿用上一状态。
 只把未来确实值得想起的内容放进 memory_candidates；没有值得记忆的内容就保持空数组。
 只有确实存在未来行动意图时才填写 intent_candidates，否则保持空数组。

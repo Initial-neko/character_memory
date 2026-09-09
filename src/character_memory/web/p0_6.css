@@ -21,3 +21,7 @@
   white-space: nowrap;
   max-width: 100%;
 }
+
+.proactive-badge {
+  opacity: 0.72;
+}

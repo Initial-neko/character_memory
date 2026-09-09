@@ -27,7 +27,7 @@ class TimeTicker:
             )
             results.append(result)
             action = result.reaction.action.type
-            if action in {ActionType.PROACTIVE_MESSAGE, ActionType.REPLY, ActionType.MINIMAL_RESPONSE}:
+            if action in {ActionType.PROACTIVE_MESSAGE, ActionType.REPLY, ActionType.MINIMAL_RESPONSE, ActionType.MESSAGE, ActionType.EMOJI}:
                 status = "EXECUTED"
             elif action == ActionType.DEFER:
                 status = "DEFERRED"

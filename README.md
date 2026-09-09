@@ -14,16 +14,15 @@
 - Action：`REPLY` / `MINIMAL_RESPONSE` / `NO_REPLY` / `DEFER` / `PROACTIVE_MESSAGE` / `NO_ACTION`。
 - OpenAI-compatible Person Model；默认 OpenCode Go `deepseek-v4-flash`。
 - OpenCode Go conversation session header 自动处理。
+- 多 Character：每个 Character 独立 Persona、聊天历史、Mental State、Memory、conversation session；Embedding / Provider / SQLite 共享。
 - Persistent World Time、Life Event、Diary、Pending Intent、时间模拟。
-- Runtime Trace 独立持久化，可按单轮回看 Context / Recall / Reaction / Action / Memory / Intent。
+- Runtime Trace 独立持久化，可按单轮回看 Context / Recall / Reaction / Action / Memory / Intent / timings。
 - FastAPI + 原生 HTML/CSS/JS 聊天 WebUI。
 - Streamlit Developer Inspector。
-- 结构化后端日志。
+- 结构化后端日志与单轮耗时指标。
 - JSONL Eval regression harness 与 pytest。
 
-## V0.4.1 收敛后的运行结构
-
-正常聊天统一经过：
+## 当前聊天结构
 
 ```text
 HTML / JS
@@ -35,22 +34,18 @@ ChatService
     ├── conversation_id
     └── per-character turn lock
     ↓
-PersonRuntime
+PersonRuntime(character persona)
     ↓
 Recall / Person Model / Mental State / Action
     ↓
 SQLite
 ```
 
-CLI 的 `chat` 也调用同一个 `ChatService`。
-
-Streamlit 不再承担正式聊天交互，只保留为 Developer Inspector。
+CLI 的 `chat` 也调用同一个 `ChatService`。Streamlit 不再承担正式聊天交互，只保留为 Developer Inspector。
 
 ## 安装
 
 要求 Python 3.12+。
-
-推荐：
 
 ```powershell
 git clone https://github.com/Initial-neko/character_memory.git
@@ -84,8 +79,11 @@ uv run character-memory web
 http://127.0.0.1:8000
 ```
 
+页面采用聊天优先的双栏结构：左侧是 Character 列表，右侧是当前 Character 的聊天。切换 Character 时，历史记录和 conversation session 都跟随角色切换。
+
 页面支持：
 
+- 左侧 Character 切换；
 - 正常聊天；
 - Enter 发送、Shift+Enter 换行；
 - 非流式等待时显示“正在输入中”；
@@ -98,9 +96,29 @@ http://127.0.0.1:8000
 - 查看 Compiled Context；
 - 查看 Memory / Intent Write；
 - 查看 Raw Model Response；
-- 顶部 `Runtime` 按钮按需查看 Persona、Mental State、Memory、Intent、Provider。
+- 查看本轮 `runtime_init / recall / model / memory_embedding / persist / API / browser` 等耗时；
+- 顶部 `Runtime` 按钮按需查看当前 Character 的 Persona、Mental State、Memory、Intent、Provider。
 
 前端不直接操作 Runtime/SQLite，只调用 FastAPI。
+
+## Character / Persona
+
+Character 直接从以下目录自动发现：
+
+```text
+personas/<character_id>/persona.yaml
+```
+
+不维护第二份 Character 注册表。新增人物只需新增一个 persona 文件。
+
+当前内置：
+
+- `rin`：现有 Rin；
+- `momo`：22 岁，可爱、活泼、有主见的女生；
+- `haru`：24 岁，非常温柔、耐心但有稳定判断的男生；
+- `rei`：23 岁，表面冷淡、真正感兴趣时会明显热情的女生。
+
+Persona 不只控制语气，也描述追问、沉默、主动、关心、分歧和边界行为。
 
 ## Developer Inspector
 
@@ -164,7 +182,7 @@ ACTION Event
 
 OpenCode Go inference 会携带 `x-opencode-session` / `x-opencode-client` / `User-Agent`。
 
-Web 前端将 `conversation_id` 保存在浏览器 `localStorage`；Provider adapter 会将 conversation ID 稳定映射为 UUID。
+Web 前端为每个 Character 分别把 `conversation_id` 保存在浏览器 `localStorage`；Provider adapter 会将 conversation ID 稳定映射为 UUID。
 
 `httpx.Client` 在 Model 生命周期内复用，不再每次请求重新建立连接。
 
@@ -176,7 +194,7 @@ Web/API 默认输出 `INFO` 日志：
 API → ChatService → Runtime Event → Recall → Context → Provider → Action → Persist
 ```
 
-Provider HTTP error body 会直接输出，但不会输出 API Key。
+单轮日志会输出各阶段耗时。Provider HTTP error body 会直接输出，但不会输出 API Key。
 
 更细日志：
 

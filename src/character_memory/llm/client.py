@@ -108,12 +108,14 @@ class OpenAICompatibleModel(PersonModel):
     def _message_chars(messages: list[dict]) -> int:
         return sum(len(str(message.get("content", ""))) for message in messages)
 
-    def _request(self, messages: list[dict], *, conversation_id: str | None = None) -> str:
+    def _request(self, messages: list[dict], *, conversation_id: str | None = None, json_object: bool = False) -> str:
         payload = {"model": self.model, "messages": messages, "temperature": self.temperature}
+        if json_object:
+            payload["response_format"] = {"type": "json_object"}
         url = f"{self.base_url}/chat/completions"
         session_id = self.resolve_session_id(conversation_id)
         started = time.perf_counter()
-        logger.info("provider.request start model=%s session=%s messages=%d input_chars=%d", self.model, session_id, len(messages), self._message_chars(messages))
+        logger.info("provider.request start model=%s session=%s messages=%d input_chars=%d json_object=%s", self.model, session_id, len(messages), self._message_chars(messages), json_object)
         try:
             r = self.client.post(url, headers=self._headers(include_session=True, conversation_id=conversation_id), json=payload)
         except Exception:
@@ -132,8 +134,18 @@ class OpenAICompatibleModel(PersonModel):
 
     @staticmethod
     def _system_prompt(schema: type[BaseModel]) -> str:
-        schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
-        return "你是持久化 AI 人物运行时的结构化认知模块。严格根据输入中的人物身份、经历、心理状态和事件做决定。不要把人物写成客服或无条件迎合用户。perception/reaction 只能是给开发者看的简短、安全摘要，不得输出隐藏推理过程。只输出一个合法 JSON 对象，不要 Markdown。JSON 必须符合这个 schema：" + schema_json
+        if schema is PersonReaction:
+            return (
+                "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State 和 Behavioral Contract。"
+                "返回一个 JSON 对象。action 必填，至少包含 type；REPLY、MINIMAL_RESPONSE、PROACTIVE_MESSAGE 时 message 必须非空。"
+                "reason、perception、reaction、mental_state_update 可以是空字符串；memory_candidates、intent_candidates 可以是空数组。"
+                "不要为了填字段而编造内部活动，也不要把人物写成客服或无条件迎合用户。"
+            )
+        if schema is DailyLifePlan:
+            return "根据输入规划人物当天少量自然生活事件。返回 JSON 对象：events 为数组；social_post、image_prompt 可以为空。不要为了填满字段而编造事件。"
+        if schema is DiaryResult:
+            return "根据输入写简短日记并返回 JSON 对象，包含 diary、mental_state_update、memory_candidates。没有值得记忆的内容时 memory_candidates 可以为空数组。"
+        return "根据输入返回符合目标对象语义的 JSON 对象，不要添加 JSON 之外的解释。"
 
     def preview_messages(self, prompt: str, schema: type[BaseModel]) -> list[dict]:
         return [{"role": "system", "content": self._system_prompt(schema)}, {"role": "user", "content": prompt}]
@@ -150,7 +162,7 @@ class OpenAICompatibleModel(PersonModel):
                     self.last_request_messages = [dict(message) for message in messages]
                     self.last_attempt = attempt + 1
                     logger.info("provider.structured_call attempt=%d/%d schema=%s", attempt + 1, self.attempts, schema.__name__)
-                    text = self._request(messages, conversation_id=conversation_id)
+                    text = self._request(messages, conversation_id=conversation_id, json_object=True)
                     self.last_response_text = text
                     result = schema.model_validate(self._json(text))
                     logger.info("provider.structured_call valid attempt=%d schema=%s", attempt + 1, schema.__name__)
@@ -160,8 +172,8 @@ class OpenAICompatibleModel(PersonModel):
                     logger.warning("provider.structured_call invalid attempt=%d/%d schema=%s error=%s", attempt + 1, self.attempts, schema.__name__, exc)
                     if attempt + 1 >= self.attempts:
                         break
-                    messages.append({"role": "assistant", "content": text if "text" in locals() else ""})
-                    messages.append({"role": "user", "content": "上一份输出不是合法的目标 JSON。请重新生成完整 JSON，只修正结构/字段约束，不添加解释或 Markdown。"})
+                    messages.append({"role": "assistant", "content": text if "text" in locals() else "{}"})
+                    messages.append({"role": "user", "content": "上一份 JSON 不符合目标对象约束。只修正缺失或错误字段；非关键内部字段可以留空。"})
             raise RuntimeError(f"Model returned invalid structured output after {self.attempts} attempts: {last_error}") from last_error
 
     def react(self, context: str) -> PersonReaction:

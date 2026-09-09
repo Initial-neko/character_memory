@@ -20,7 +20,10 @@ from character_memory.storage.sqlite import SQLiteStore
 
 class ApiFakeModel(PersonModel):
     def react(self, context):
-        return PersonReaction(perception="收到", reaction="回应", mental_state_update="平静", action=ActionDecision(type=ActionType.REPLY, reason="测试", message="你好"))
+        return PersonReaction(perception="收到", reaction="回应", mental_state_update="平静", actions=[
+            ActionDecision(type=ActionType.MESSAGE, message="你好"),
+            ActionDecision(type=ActionType.EMOJI, message="🙂"),
+        ])
 
     def plan_day(self, context):
         return DailyLifePlan()
@@ -48,16 +51,20 @@ def test_html_and_chat_share_same_application_service(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["action"]["message"] == "你好"
+    assert [action["message"] for action in body["actions"]] == ["你好", "🙂"]
     assert body["timings"]["runtime_total_ms"] >= 0
     assert body["timings"]["api_total_ms"] >= body["timings"]["runtime_total_ms"]
 
     history = client.get("/v1/chat/history").json()
-    assert [m["role"] for m in history["messages"]] == ["user", "assistant"]
+    assert [m["role"] for m in history["messages"]] == ["user", "assistant", "assistant"]
+    assert [m["content"] for m in history["messages"][1:]] == ["你好", "🙂"]
+    assert [m["action_index"] for m in history["messages"][1:]] == [0, 1]
     assert history["messages"][0]["has_trace"] is True
     source_event_id = history["messages"][0]["source_event_id"]
     trace = client.get(f"/v1/traces/{source_event_id}")
     assert trace.status_code == 200
     trace_body = trace.json()
     assert trace_body["conversation_id"] == "browser-test"
+    assert [action["type"] for action in trace_body["actions"]] == ["MESSAGE", "EMOJI"]
     assert trace_body["timings"]["model_ms"] >= 0
     store.close()

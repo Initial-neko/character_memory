@@ -51,7 +51,7 @@ class Memory(BaseModel):
 
 class ActionDecision(BaseModel):
     type: ActionType
-    reason: str
+    reason: str = ""
     message: str | None = None
 
     @model_validator(mode="after")
@@ -84,9 +84,11 @@ class IntentCandidate(BaseModel):
 
 
 class PersonReaction(BaseModel):
-    perception: str = Field(description="Concise perception summary, not chain-of-thought")
-    reaction: str = Field(description="Short developer-safe reaction summary, not chain-of-thought")
-    mental_state_update: str = Field(description="Complete compact mental state after this event")
+    # Internal/debug summaries are intentionally optional. A normal conversational
+    # turn does not need to manufacture a visible explanation for every layer.
+    perception: str = ""
+    reaction: str = ""
+    mental_state_update: str = ""
     action: ActionDecision
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=6)
     intent_candidates: list[IntentCandidate] = Field(default_factory=list, max_length=4)

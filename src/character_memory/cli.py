@@ -85,10 +85,18 @@ def _run_eval(config_path: str, path: str):
         isolated = settings.model_copy(update={"db_path": str(Path(tmp) / "eval.db")})
         bundle = build_app_from_settings(isolated)
         try:
-            results = EvalRunner(bundle.runtime).run_jsonl(path)
+            runtimes = getattr(bundle, "runtimes", None) or bundle.runtime
+            results = EvalRunner(runtimes).run_jsonl(path)
         finally:
             bundle.close()
-    _print_json({"passed": sum(1 for r in results if r["pass"]), "total": len(results), "results": results})
+
+    by_tag = {}
+    for result in results:
+        for tag in result.get("tags", []):
+            bucket = by_tag.setdefault(tag, {"passed": 0, "total": 0})
+            bucket["total"] += 1
+            bucket["passed"] += int(result["pass"])
+    _print_json({"passed": sum(1 for r in results if r["pass"]), "total": len(results), "by_tag": by_tag, "results": results})
 
 
 def _run_server(config_path: str, host: str, port: int):
@@ -178,7 +186,7 @@ def main():
         if args.cmd == "chat":
             at = datetime.fromisoformat(args.at) if args.at else None
             result = bundle.chat.send(args.message, character_id=args.character, conversation_id=args.conversation, at=at)
-            _print_json({"event_id": result.event.id, "event_time": result.event.event_time, "action": result.reaction.action.model_dump(mode="json"), "perception": result.reaction.perception, "reaction": result.reaction.reaction, "mental_state": result.reaction.mental_state_update, "recalled_memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in result.recalled_memories]})
+            _print_json({"event_id": result.event.id, "event_time": result.event.event_time, "action": result.reaction.action.model_dump(mode="json") if result.reaction.action else None, "actions": [action.model_dump(mode="json") for action in result.reaction.actions], "perception": result.reaction.perception, "reaction": result.reaction.reaction, "mental_state": result.reaction.mental_state_update, "recalled_memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in result.recalled_memories]})
         elif args.cmd == "day":
             _print_json(bundle.days.run_next_day(args.character))
         elif args.cmd == "simulate":
@@ -190,7 +198,7 @@ def main():
             now = bundle.days.current_time(args.character)
             results = bundle.ticker.tick(args.character, now)
             bundle.store.set_world_time(args.character, now + timedelta(hours=1))
-            _print_json([{"action": r.reaction.action.model_dump(mode="json"), "reaction": r.reaction.reaction, "recalled_memories": [m.id for m in r.recalled_memories]} for r in results])
+            _print_json([{"action": r.reaction.action.model_dump(mode="json") if r.reaction.action else None, "actions": [action.model_dump(mode="json") for action in r.reaction.actions], "reaction": r.reaction.reaction, "recalled_memories": [m.id for m in r.recalled_memories]} for r in results])
     finally:
         bundle.close()
 

@@ -30,6 +30,17 @@ def test_web_starts_before_runtime_and_without_api_key(tmp_path):
     assert health.json()["web"] == "ready"
     assert health.json()["runtime_loaded"] is False
 
+    history = client.get("/v1/chat/history")
+    assert history.status_code == 200
+    assert history.json()["messages"] == []
+
+    runtime = client.get("/v1/runtime/rin")
+    assert runtime.status_code == 200
+    assert runtime.json()["runtime_loaded"] is False
+
+    health_after_reads = client.get("/health")
+    assert health_after_reads.json()["runtime_loaded"] is False
+
     chat = client.post("/v1/chat", json={"message": "你好"})
     assert chat.status_code == 503
     assert "Missing OPENCODE_GO_API_KEY" in chat.json()["detail"]

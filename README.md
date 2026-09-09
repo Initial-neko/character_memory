@@ -2,22 +2,26 @@
 
 一个用于研究 **Persistent AI Person / 持久化 AI 人物** 的 V0 原型。
 
-当前阶段只做 **Phase 1 — Prove the Person**：验证同一个 AI 人物能否在长期交互中保持人格、拥有可追溯经历、选择性记忆、持续心理状态，并自然地回复、沉默、延后或主动联系。
+当前阶段只做 **Phase 1 — Prove the Person / Relationship**：验证同一个 AI 人物能否在长期交互中保持人格、拥有可追溯经历、选择性记忆、持续心理状态，并自然地表达、追问、沉默和再次相遇。
 
 ## 当前实现
 
 - SQLite 单文件持久化。
 - Append-only Event Log：原始经历是事实源。
 - Embedding + SQLite `float32 BLOB` + Vector Recall。
-- 语言形式 Mental State。
+- Memory Admission：低价值/近重复 Memory Candidate 可跳过，并记录决策 Trace。
+- 语言形式 Mental State；空 update 表示本轮沿用旧状态。
+- Relationship Time：Runtime 知道最近一次聊天和距今时间，不写死机械问候。
 - `PersonRuntime.handle(event)` 统一处理用户消息、Time Tick、Intent。
-- Action：`REPLY` / `MINIMAL_RESPONSE` / `NO_REPLY` / `DEFER` / `PROACTIVE_MESSAGE` / `NO_ACTION`。
-- OpenAI-compatible Person Model；默认 OpenCode Go `deepseek-v4-flash`。
+- P0 对外行为：`actions[0..3]`，当前支持 `MESSAGE / EMOJI`；`actions=[]` 是真正沉默。
+- 旧 `REPLY / MINIMAL_RESPONSE / NO_REPLY / DEFER / PROACTIVE_MESSAGE / NO_ACTION` 保留兼容，不再是新聊天主 contract。
+- OpenAI-compatible Person Model；默认 OpenCode Go `deepseek-v4-flash`，结构化请求使用 `response_format=json_object` + Pydantic validation。
 - OpenCode Go conversation session header 自动处理。
 - 多 Character：每个 Character 独立 Persona、聊天历史、Mental State、Memory、conversation session；Embedding / Provider / SQLite 共享。
-- Persistent World Time、Life Event、Diary、Pending Intent、时间模拟。
-- Runtime Trace 独立持久化，可按单轮回看 Context / Recall / Reaction / Action / Memory / Intent / timings。
+- Persistent World Time、Life Event、Diary、Pending Intent、时间模拟（当前冻结，不作为 P0 扩展重点）。
+- Runtime Trace 独立持久化，可按单轮回看 Context / Recall / Reaction / Actions / Memory Admission / Intent / timings。
 - FastAPI + 原生 HTML/CSS/JS 聊天 WebUI。
+- 用户可选「想法」视图：只展示安全 `perception / reaction` 摘要，不展示 raw chain-of-thought。
 - Streamlit Developer Inspector。
 - 结构化后端日志与单轮耗时指标。
 - JSONL Eval regression harness 与 pytest。
@@ -35,10 +39,14 @@ ChatService
     └── per-character turn lock
     ↓
 PersonRuntime(character persona)
+    ├── Relationship Time
+    ├── Vector Recall
+    ├── Person Model
+    ├── Mental State
+    ├── actions[0..3]
+    └── Memory Admission
     ↓
-Recall / Person Model / Mental State / Action
-    ↓
-SQLite
+SQLite Event / Memory / Trace
 ```
 
 CLI 的 `chat` 也调用同一个 `ChatService`。Streamlit 不再承担正式聊天交互，只保留为 Developer Inspector。
@@ -79,22 +87,25 @@ uv run character-memory web
 http://127.0.0.1:8000
 ```
 
-页面采用聊天优先的双栏结构：左侧是 Character 列表，右侧是当前 Character 的聊天。切换 Character 时，历史记录和 conversation session 都跟随角色切换。
+页面采用聊天优先的双栏结构：左侧是 Character 列表，右侧是当前 Character 的聊天。切换 Character 时，历史记录和 conversation session 都跟随角色切换；某个 Character 等待模型回复时仍可切换到其他 Character 继续聊天。
 
 页面支持：
 
 - 左侧 Character 切换；
-- 正常聊天；
 - Enter 发送、Shift+Enter 换行；
+- 每个 Character 独立 pending 状态；
+- 一轮按顺序显示 0~3 条 MESSAGE / EMOJI；
+- 真正沉默时不伪造角色消息，只显示轻量 `已读 · 没有回复`；
 - 非流式等待时显示“正在输入中”；
 - 聊天历史与时间分隔；
-- 每条有 Trace 的消息通过 `···` 打开右侧详情；
-- 查看 Perception / Reaction / Action Reason；
+- 每条有 Trace 的角色消息可点 `想法` 查看安全 Perception / Reaction 摘要；
+- 每条有 Trace 的消息通过 `···` 打开 Developer Detail；
 - 查看 Mental State Before / After；
 - 查看本轮 Recall；
 - 查看实际发送给模型的 messages；
-- 查看 Compiled Context；
-- 查看 Memory / Intent Write；
+- 查看 Compiled Context / Relationship Time；
+- 查看 Memory Candidate 的 WRITE / SKIP_LOW_VALUE / SKIP_DUPLICATE；
+- 查看 Intent；
 - 查看 Raw Model Response；
 - 查看本轮 `runtime_init / recall / model / memory_embedding / persist / API / browser` 等耗时；
 - 顶部 `Runtime` 按钮按需查看当前 Character 的 Persona、Mental State、Memory、Intent、Provider。
@@ -113,20 +124,104 @@ personas/<character_id>/persona.yaml
 
 当前内置：
 
-- `rin`：现有 Rin；
+- `rin`：25 岁，慢热、有自己的节奏；
 - `momo`：22 岁，可爱、活泼、有主见的女生；
 - `haru`：24 岁，非常温柔、耐心但有稳定判断的男生；
 - `rei`：23 岁，表面冷淡、真正感兴趣时会明显热情的女生。
 
-Persona 不只控制语气，也描述追问、沉默、主动、关心、分歧和边界行为。
+Persona 不只控制语气，也描述：
 
-## Developer Inspector
+- 标点、emoji、颜文字和句子节奏；
+- 自然追问；
+- 沉默；
+- 主动；
+- 关心；
+- 分歧；
+- 边界行为。
 
-```powershell
-uv run character-memory inspector
+## Multi-action / Silence
+
+新聊天主 contract：
+
+```json
+{
+  "perception": "可选的一句安全摘要",
+  "reaction": "可选的一句安全摘要",
+  "mental_state_update": "没有持续变化时可以为空",
+  "actions": [
+    {"type": "MESSAGE", "message": "诶？？"},
+    {"type": "EMOJI", "message": "🥺"},
+    {"type": "MESSAGE", "message": "怎么回事呀？"}
+  ],
+  "memory_candidates": [],
+  "intent_candidates": []
+}
 ```
 
-Inspector 是只读研究工具，主要用于 State、Chat、Memory、Intent、Trace。它不会加载 Sentence Transformers 或 Person Model，因此不再承担聊天时的重型 Runtime 初始化。
+一轮最多 3 个 action，但不要求拆分；普通一条消息仍然是默认情况。
+
+真正不想回复：
+
+```json
+{"actions": []}
+```
+
+用户发了消息 ≠ 人物必须回复。明确说“不用回复”、对话自然结束、需要空间或确实没有想说的话时，沉默是合法产品行为。
+
+## Memory Admission / Recall
+
+Memory Candidate 不再无条件落库。
+
+当前 admission baseline：
+
+```text
+importance < 0.35       -> SKIP_LOW_VALUE
+exact duplicate         -> SKIP_DUPLICATE
+embedding cosine >= .93 -> SKIP_DUPLICATE
+otherwise               -> WRITE
+```
+
+这些阈值只是 Eval baseline，后续根据真实数据调整。
+
+Recall 继续使用：
+
+```text
+0.70 semantic + 0.20 recency + 0.10 importance
+```
+
+并保持 future-memory barrier：只能 Recall `event_time <= now` 的 Memory。
+
+## Relationship Time / Re-encounter
+
+每轮 Runtime 会看到：
+
+```text
+# Relationship Time
+- 上次聊天时间：...
+- 距离上次聊天：7 天
+```
+
+人物自己决定是否提旧事、问结果、还是完全不提。
+
+不会写死：
+
+```text
+if gap > N:
+    say("好久不见")
+```
+
+目标是让“昨天说过的事”“隔几天回来”自然影响行为，而不是机械时间模板。
+
+## Developer Inspector / Safe Thought Summary
+
+用户聊天页中的 `想法` 只展示：
+
+- `perception`
+- `reaction`
+
+它们是简短、安全、可调试的人物反应摘要，**不是模型隐藏 chain-of-thought**。
+
+完整 Developer Trace 仍用于开发调试，包括 Context、Recall、Actions、Memory Admission、Mental State、Raw Structured Response 和 timings。
 
 ## CLI
 
@@ -144,7 +239,7 @@ uv run character-memory inspect
 
 ## Runtime Trace
 
-Trace 不再放进 `ACTION.metadata_json`。
+Trace 不放进 `ACTION.metadata_json`，使用独立 `runtime_traces`。
 
 当前数据库中：
 
@@ -157,8 +252,6 @@ world_states
 runtime_traces
 ```
 
-旧版本 `ACTION.metadata.trace` 会在数据库初始化时自动迁移到 `runtime_traces` 并从 Event metadata 中移除。
-
 正常聊天历史只查询 `USER_MESSAGE / CHARACTER_MESSAGE`；只有点击详情时才读取对应 Trace，避免每次页面刷新解析大量 Context / Prompt / Raw Response。
 
 ## 一轮写入一致性
@@ -169,9 +262,9 @@ LLM 成功后，以下派生状态在一个 SQLite transaction 中提交：
 
 ```text
 Mental State
-Memory
+Accepted Memory
 Intent
-Character Message
+0..3 Character Messages
 Runtime Trace
 ACTION Event
 ```
@@ -182,6 +275,14 @@ ACTION Event
 
 OpenCode Go inference 会携带 `x-opencode-session` / `x-opencode-client` / `User-Agent`。
 
+结构化调用使用：
+
+```json
+{"response_format":{"type":"json_object"}}
+```
+
+JSON 语法由 Provider 约束，业务 contract 继续由 Pydantic validation 负责。
+
 Web 前端为每个 Character 分别把 `conversation_id` 保存在浏览器 `localStorage`；Provider adapter 会将 conversation ID 稳定映射为 UUID。
 
 `httpx.Client` 在 Model 生命周期内复用，不再每次请求重新建立连接。
@@ -191,7 +292,7 @@ Web 前端为每个 Character 分别把 `conversation_id` 保存在浏览器 `lo
 Web/API 默认输出 `INFO` 日志：
 
 ```text
-API → ChatService → Runtime Event → Recall → Context → Provider → Action → Persist
+API → ChatService → Runtime Event → Recall → Context → Provider → Actions → Memory Admission → Persist
 ```
 
 单轮日志会输出各阶段耗时。Provider HTTP error body 会直接输出，但不会输出 API Key。
@@ -208,21 +309,32 @@ uv run character-memory web
 ```powershell
 uv run pytest -q
 uv run character-memory eval evals/smoke.jsonl
+uv run character-memory eval evals/p0_relationship.jsonl
 ```
 
-当前 Eval 仍只是 regression harness；长期 Persona / Memory / 30-day continuity 评测见 `docs/EVALS.md`。
+P0 Relationship suite 当前是：
+
+```text
+4 Characters × 6 scenarios = 24 cases
+```
+
+覆盖普通聊天、Memory Precision、情绪/追问、观点冲突、明确沉默、重要事件写入、7 天后 Recall / Re-encounter，并按 tag 汇总 pass/fail。
+
+Persona 主观自然度仍需要后续 blind judge；当前 harness 只验证可观测 contract。
 
 ## 文档职责
 
 - `docs/DESIGN.md`：产品与 Persistent Person 已确认原则。
 - `docs/ARCHITECTURE.md`：当前工程边界与数据流。
-- `docs/MEMORY.md`：Memory / Embedding / Recall 原则。
-- `docs/PERSON_RUNTIME.md`：Reaction / Mental State / Action / Silence / Intent。
-- `docs/EVALS.md`：评测计划。
+- `docs/MEMORY.md`：Memory / Embedding / Admission / Recall 原则。
+- `docs/PERSON_RUNTIME.md`：Reaction / Multi-action / Mental State / Silence / Re-encounter / Safe Thought。
+- `docs/EVALS.md`：评测计划与 P0 Relationship suite。
 - `docs/RESEARCH.md`：外部研究参考。
 
 ## 当前明确不做
 
 V0 不引入 LangChain/LangGraph、Redis、Celery、PostgreSQL、Knowledge Graph、复杂 Emotion 数值系统、Voice/TTS、Avatar、Video、完整 Feed、多用户生产架构。
 
-先把 **真实聊天 vertical slice** 跑稳，再继续扩展人物能力。
+**本轮也不做 External Information / Web Tool Agent。** 当前人物不知道实时事实时应承认不知道或自然询问；后续如果加入外部能力，再采用 `人物决定查询 -> 外部结果 Event -> Person Runtime 再反应` 的路径。
+
+先把 **同一个人持续聊天、会记、会沉默、会再次相遇** 跑稳，再扩展外部能力。

@@ -39,6 +39,11 @@ function conversationIdFor(id) {
   return value;
 }
 function isCurrentPending() { return pendingCharacters.has(characterId); }
+function visibleActions(result) {
+  const actions = Array.isArray(result?.actions) ? result.actions : [];
+  if (actions.length) return actions.filter(action => String(action?.message || "").trim());
+  return result?.action?.message ? [result.action] : [];
+}
 
 function updateNow() { nowText.textContent = new Date().toLocaleString([], {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}); }
 updateNow(); setInterval(updateNow, 30000);
@@ -100,7 +105,13 @@ function addMessage(message) {
   row.dataset.messageId = message.id ?? "";
   const latency = message.latency_ms ? `<span>耗时 ${fmtMs(message.latency_ms)}</span>` : "";
   const avatar = message.role === "assistant" ? initialFor(currentProfile()) : "";
-  row.innerHTML = `<div class="avatar">${escapeHtml(avatar)}</div><div class="bubble-wrap"><div class="bubble">${escapeHtml(message.content)}</div><div class="message-meta"><span>${fmtTime(message.event_time)}</span>${latency}${message.action === "PROACTIVE_MESSAGE" ? "<span>主动消息</span>" : ""}${message.has_trace && message.source_event_id ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮详情">···</button>` : ""}</div></div>`;
+  const thought = message.role === "assistant" && message.has_trace && message.source_event_id
+    ? `<button class="detail-button" type="button" data-thought="${message.source_event_id}" title="查看安全的思考摘要">想法</button>`
+    : "";
+  const trace = message.has_trace && message.source_event_id
+    ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮开发详情">···</button>`
+    : "";
+  row.innerHTML = `<div class="avatar">${escapeHtml(avatar)}</div><div class="bubble-wrap"><div class="bubble">${escapeHtml(message.content)}</div><div class="message-meta"><span>${fmtTime(message.event_time)}</span>${latency}${message.action === "PROACTIVE_MESSAGE" ? "<span>主动消息</span>" : ""}${thought}${trace}</div></div>`;
   chat.appendChild(row);
   return row;
 }
@@ -174,13 +185,26 @@ function timingHtml(timings) {
   return `<div class="kv">${entries.map(([key, value]) => `<div>${escapeHtml(key)}</div><div>${escapeHtml(fmtMs(value))}</div>`).join("")}</div>`;
 }
 
+async function showThought(sourceEventId) {
+  openDrawer(`${currentProfile().name} · 想法`, "安全摘要，不是隐藏思维链");
+  drawerBody.innerHTML = "<p>正在回想这一轮…</p>";
+  try {
+    const trace = await api(`/v1/traces/${sourceEventId}`);
+    drawerBody.innerHTML = `<section class="section"><h3>她/他注意到了什么</h3><p>${escapeHtml(hiddenIfEmpty(trace.perception))}</p></section><section class="section"><h3>这一刻的反应</h3><p>${escapeHtml(hiddenIfEmpty(trace.reaction))}</p></section><p class="muted">这里只展示开发者安全摘要，不展示模型隐藏推理过程。</p>`;
+  } catch (error) { drawerBody.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; }
+}
+
 async function showTrace(sourceEventId) {
   openDrawer(`${currentProfile().name} · 本轮详情`, `source_event_id = ${sourceEventId}`);
   drawerBody.innerHTML = "<p>正在加载…</p>";
   try {
     const trace = await api(`/v1/traces/${sourceEventId}`);
-    const action = trace.action || {};
-    drawerBody.innerHTML = `<section class="section"><h3>耗时</h3>${timingHtml(trace.timings)}</section><section class="section"><h3>决策</h3><div class="kv"><div>Action</div><div>${escapeHtml(action.type || hiddenText)}</div><div>Action Reason</div><div>${escapeHtml(hiddenIfEmpty(action.reason))}</div><div>Perception</div><div>${escapeHtml(hiddenIfEmpty(trace.perception))}</div><div>Reaction</div><div>${escapeHtml(hiddenIfEmpty(trace.reaction))}</div><div>Model Attempt</div><div>${escapeHtml(trace.model_attempt || "—")}</div></div></section><section class="section"><h3>最终对外表达</h3><p>${escapeHtml(action.message || `没有发送消息 · ${action.type || ""}`)}</p></section><section class="section"><h3>Mental State · Before</h3><pre>${escapeHtml(hiddenIfEmpty(trace.mental_state_before))}</pre></section><section class="section"><h3>Mental State · After</h3><pre>${escapeHtml(hiddenIfEmpty(trace.mental_state_after))}</pre></section><section class="section"><h3>Recall</h3><div class="card-list">${(trace.recalled_memories || []).map(m => `<div class="card"><strong>${escapeHtml(m.memory_type)}</strong><span> · importance ${escapeHtml(m.importance)}</span><div>${escapeHtml(m.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div></section><section class="section"><h3>实际发送给模型的 messages</h3>${(trace.model_messages || []).map((m, i) => `<p><strong>${i + 1}. ${escapeHtml(m.role)}</strong></p><pre>${escapeHtml(m.content)}</pre>`).join("") || `<p>${escapeHtml(hiddenText)}</p>`}</section><section class="section"><h3>Compiled Context</h3><pre>${escapeHtml(hiddenIfEmpty(trace.context))}</pre></section><section class="section"><h3>Memory Write</h3><pre>${escapeHtml(JSON.stringify({candidates:trace.memory_candidates || [], created_memory_ids:trace.created_memory_ids || []}, null, 2))}</pre></section><section class="section"><h3>Intent</h3><pre>${escapeHtml(JSON.stringify({candidates:trace.intent_candidates || [], created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre></section><section class="section"><h3>Raw Model Response</h3><pre>${escapeHtml(hiddenIfEmpty(trace.raw_model_response))}</pre></section>`;
+    const actions = Array.isArray(trace.actions) ? trace.actions : (trace.action ? [trace.action] : []);
+    const actionText = actions.length
+      ? actions.map((action, index) => `${index + 1}. ${action.type}: ${action.message || action.reason || ""}`).join("\n")
+      : "没有发送消息";
+    const firstAction = trace.action || actions[0] || {};
+    drawerBody.innerHTML = `<section class="section"><h3>耗时</h3>${timingHtml(trace.timings)}</section><section class="section"><h3>决策</h3><div class="kv"><div>Actions</div><div>${escapeHtml(actions.map(a => a.type).join(" / ") || "NO_REPLY")}</div><div>Action Reason</div><div>${escapeHtml(hiddenIfEmpty(firstAction.reason))}</div><div>Perception</div><div>${escapeHtml(hiddenIfEmpty(trace.perception))}</div><div>Reaction</div><div>${escapeHtml(hiddenIfEmpty(trace.reaction))}</div><div>Model Attempt</div><div>${escapeHtml(trace.model_attempt || "—")}</div></div></section><section class="section"><h3>最终对外表达</h3><pre>${escapeHtml(actionText)}</pre></section><section class="section"><h3>Mental State · Before</h3><pre>${escapeHtml(hiddenIfEmpty(trace.mental_state_before))}</pre></section><section class="section"><h3>Mental State · After</h3><pre>${escapeHtml(hiddenIfEmpty(trace.mental_state_after))}</pre></section><section class="section"><h3>Recall</h3><div class="card-list">${(trace.recalled_memories || []).map(m => `<div class="card"><strong>${escapeHtml(m.memory_type)}</strong><span> · importance ${escapeHtml(m.importance)}</span><div>${escapeHtml(m.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div></section><section class="section"><h3>实际发送给模型的 messages</h3>${(trace.model_messages || []).map((m, i) => `<p><strong>${i + 1}. ${escapeHtml(m.role)}</strong></p><pre>${escapeHtml(m.content)}</pre>`).join("") || `<p>${escapeHtml(hiddenText)}</p>`}</section><section class="section"><h3>Compiled Context</h3><pre>${escapeHtml(hiddenIfEmpty(trace.context))}</pre></section><section class="section"><h3>Memory Admission</h3><pre>${escapeHtml(JSON.stringify(trace.memory_decisions || [], null, 2))}</pre></section><section class="section"><h3>Memory Write</h3><pre>${escapeHtml(JSON.stringify({candidates:trace.memory_candidates || [], created_memory_ids:trace.created_memory_ids || []}, null, 2))}</pre></section><section class="section"><h3>Intent</h3><pre>${escapeHtml(JSON.stringify({candidates:trace.intent_candidates || [], created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre></section><section class="section"><h3>Raw Model Response</h3><pre>${escapeHtml(hiddenIfEmpty(trace.raw_model_response))}</pre></section>`;
   } catch (error) { drawerBody.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; }
 }
 
@@ -197,7 +221,12 @@ async function showRuntime() {
 
 runtimeButton.addEventListener("click", showRuntime);
 characterList.addEventListener("click", event => { const button = event.target.closest("[data-character]"); if (button) switchCharacter(button.dataset.character).catch(console.error); });
-chat.addEventListener("click", event => { const button = event.target.closest("[data-trace]"); if (button) showTrace(button.dataset.trace); });
+chat.addEventListener("click", event => {
+  const thought = event.target.closest("[data-thought]");
+  if (thought) { showThought(thought.dataset.thought); return; }
+  const trace = event.target.closest("[data-trace]");
+  if (trace) showTrace(trace.dataset.trace);
+});
 input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight, 150)}px`; });
 input.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
 
@@ -227,12 +256,13 @@ composer.addEventListener("submit", async event => {
 
     if (sentCharacter === characterId) {
       chat.querySelector(".typing-row")?.remove();
-      if (result.action?.message) {
-        addMessage({role:"assistant", content:result.action.message, event_time:result.event_time, action:result.action.type, source_event_id:result.event_id, has_trace:true, latency_ms:browserTotal});
+      const actions = visibleActions(result);
+      if (actions.length) {
+        actions.forEach((action, index) => addMessage({role:"assistant", content:action.message, event_time:result.event_time, action:action.type, source_event_id:result.event_id, has_trace:true, latency_ms:index === 0 ? browserTotal : 0}));
       } else {
         const note = document.createElement("div");
         note.className = "date-separator";
-        note.textContent = `未发送消息 · ${result.action?.type || ""} · ${fmtMs(browserTotal)}`;
+        note.textContent = `已读 · 没有回复 · ${fmtMs(browserTotal)}`;
         chat.appendChild(note);
       }
       scrollToBottom();

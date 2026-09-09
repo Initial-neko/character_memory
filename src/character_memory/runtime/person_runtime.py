@@ -11,6 +11,10 @@ from character_memory.runtime.context import compile_context
 logger = logging.getLogger("character_memory.runtime")
 
 
+def _ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 1)
+
+
 class PersonRuntime:
     def __init__(self, store, recall, embeddings, model, persona: str):
         self.store = store
@@ -21,29 +25,40 @@ class PersonRuntime:
 
     def handle(self, event: Event):
         started = time.perf_counter()
+        timings: dict[str, float] = {}
         logger.info("runtime.handle start character=%s event_type=%s event_time=%s content_chars=%d", event.character_id, event.event_type.value, event.event_time.isoformat(), len(event.content or ""))
+
+        stage = time.perf_counter()
         event = self.store.append_event(event)
-        logger.info("runtime.event stored id=%s", event.id)
+        timings["event_store_ms"] = _ms(stage)
+        logger.info("runtime.event stored id=%s duration_ms=%.1f", event.id, timings["event_store_ms"])
 
-        recall_started = time.perf_counter()
+        stage = time.perf_counter()
         memories = self.recall.recall(event.character_id, event.content, now=event.event_time)
-        logger.info("runtime.recall done count=%d ids=%s duration_ms=%d", len(memories), [memory.id for memory in memories], int((time.perf_counter() - recall_started) * 1000))
+        timings["recall_ms"] = _ms(stage)
+        logger.info("runtime.recall done count=%d ids=%s duration_ms=%.1f", len(memories), [memory.id for memory in memories], timings["recall_ms"])
 
+        stage = time.perf_counter()
         state_before = self.store.get_mental_state(event.character_id)
         recent = [e for e in self.store.list_events(event.character_id, limit=10, before=event.event_time) if e.id != event.id][-8:]
         context = compile_context(self.persona, state_before, memories, event, recent)
-        logger.info("runtime.context ready chars=%d recent_events=%d has_state=%s", len(context), len(recent), bool(state_before))
+        timings["context_ms"] = _ms(stage)
+        logger.info("runtime.context ready chars=%d recent_events=%d has_state=%s duration_ms=%.1f", len(context), len(recent), bool(state_before), timings["context_ms"])
 
         conversation_id = str(event.metadata.get("conversation_id") or f"{event.character_id}:default")
-        model_started = time.perf_counter()
+        stage = time.perf_counter()
         logger.info("runtime.model react start event_id=%s conversation=%s", event.id, conversation_id)
         reaction = self.model.react_for_session(context, conversation_id)
-        logger.info("runtime.model react done event_id=%s action=%s duration_ms=%d memory_candidates=%d intent_candidates=%d", event.id, reaction.action.type.value, int((time.perf_counter() - model_started) * 1000), len(reaction.memory_candidates), len(reaction.intent_candidates))
+        timings["model_ms"] = _ms(stage)
+        logger.info("runtime.model react done event_id=%s action=%s duration_ms=%.1f memory_candidates=%d intent_candidates=%d", event.id, reaction.action.type.value, timings["model_ms"], len(reaction.memory_candidates), len(reaction.intent_candidates))
 
+        stage = time.perf_counter()
         candidate_embeddings = [(candidate, self.embeddings.embed(candidate.content)) for candidate in reaction.memory_candidates]
+        timings["memory_embedding_ms"] = _ms(stage)
         created_memory_ids: list[int] = []
         created_intent_ids: list[int] = []
 
+        stage = time.perf_counter()
         try:
             with self.store.transaction():
                 self.store.set_mental_state(event.character_id, reaction.mental_state_update, event.event_time, event.id)
@@ -59,6 +74,8 @@ class PersonRuntime:
                 if reaction.action.type in {ActionType.REPLY, ActionType.MINIMAL_RESPONSE, ActionType.PROACTIVE_MESSAGE}:
                     self.store.append_event(Event(character_id=event.character_id, event_type=EventType.CHARACTER_MESSAGE, event_time=event.event_time, content=reaction.action.message or "", metadata={"action": reaction.action.type.value, "source_event_id": event.id, "conversation_id": conversation_id}))
 
+                timings["persist_ms"] = _ms(stage)
+                timings["runtime_total_ms"] = _ms(started)
                 model_messages = getattr(self.model, "last_request_messages", [])
                 raw_model_response = getattr(self.model, "last_response_text", "")
                 model_attempt = getattr(self.model, "last_attempt", 0)
@@ -80,6 +97,7 @@ class PersonRuntime:
                     "created_memory_ids": created_memory_ids,
                     "intent_candidates": [candidate.model_dump(mode="json") for candidate in reaction.intent_candidates],
                     "created_intent_ids": created_intent_ids,
+                    "timings": timings,
                 }
                 trace_id = self.store.add_runtime_trace(event.character_id, int(event.id), event.event_time, trace)
                 self.store.append_event(Event(character_id=event.character_id, event_type=EventType.ACTION, event_time=event.event_time, content=reaction.action.type.value, metadata={"reason": reaction.action.reason, "source_event_id": event.id, "conversation_id": conversation_id, "trace_id": trace_id}))
@@ -87,6 +105,8 @@ class PersonRuntime:
             logger.exception("runtime.derived_transaction failed event_id=%s character=%s", event.id, event.character_id)
             raise
 
-        logger.info("runtime.derived stored event_id=%s mental_state_chars=%d memories=%d intents=%d expression=%s", event.id, len(reaction.mental_state_update or ""), len(created_memory_ids), len(created_intent_ids), bool(reaction.action.message))
-        logger.info("runtime.handle done event_id=%s action=%s total_ms=%d", event.id, reaction.action.type.value, int((time.perf_counter() - started) * 1000))
-        return RuntimeResult(event=event, recalled_memories=memories, reaction=reaction, context=context, mental_state_before=state_before, created_memory_ids=created_memory_ids, created_intent_ids=created_intent_ids)
+        timings["persist_ms"] = _ms(stage)
+        timings["runtime_total_ms"] = _ms(started)
+        logger.info("runtime.timings event_id=%s %s", event.id, " ".join(f"{key}={value:.1f}ms" for key, value in timings.items()))
+        logger.info("runtime.handle done event_id=%s action=%s total_ms=%.1f", event.id, reaction.action.type.value, timings["runtime_total_ms"])
+        return RuntimeResult(event=event, recalled_memories=memories, reaction=reaction, context=context, mental_state_before=state_before, created_memory_ids=created_memory_ids, created_intent_ids=created_intent_ids, timings=timings)

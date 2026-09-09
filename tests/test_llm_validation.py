@@ -2,6 +2,7 @@ import json
 import uuid
 
 import httpx
+from pydantic import ValidationError
 
 from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.llm.client import OpenAICompatibleModel, ProviderHTTPError
@@ -28,6 +29,15 @@ def test_sparse_person_reaction_is_valid_and_silent():
     assert result.intent_candidates == []
 
 
+def test_missing_action_contract_is_not_interpreted_as_silence():
+    try:
+        PersonReaction.model_validate({})
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("{} must be invalid; explicit silence is actions=[]")
+
+
 def test_legacy_single_action_is_normalized_to_actions():
     result = PersonReaction.model_validate({"action": {"type": "REPLY", "message": "嗯"}})
     assert len(result.actions) == 1
@@ -47,12 +57,13 @@ def test_multi_action_uses_first_action_for_legacy_compatibility():
 
 def test_structured_output_retries_once():
     model = OpenAICompatibleModel("key", attempts=2)
-    replies = iter(["not json", json.dumps({"actions": []}, ensure_ascii=False)])
+    replies = iter(["{}", json.dumps({"actions": []}, ensure_ascii=False)])
     model._request = lambda messages, **kwargs: next(replies)
     try:
         result = model.react("context")
         assert result.actions == []
         assert result.action.type == ActionType.NO_REPLY
+        assert model.last_attempt == 2
     finally:
         model.close()
 

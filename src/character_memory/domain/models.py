@@ -19,12 +19,16 @@ class EventType(str, Enum):
 
 
 class ActionType(str, Enum):
+    # V0 legacy decision names remain readable for old traces and callers.
     REPLY = "REPLY"
     MINIMAL_RESPONSE = "MINIMAL_RESPONSE"
     NO_REPLY = "NO_REPLY"
     DEFER = "DEFER"
     PROACTIVE_MESSAGE = "PROACTIVE_MESSAGE"
     NO_ACTION = "NO_ACTION"
+    # P0 visible expression primitives.
+    MESSAGE = "MESSAGE"
+    EMOJI = "EMOJI"
 
 
 class Event(BaseModel):
@@ -56,7 +60,13 @@ class ActionDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_message_contract(self):
-        expressive = {ActionType.REPLY, ActionType.MINIMAL_RESPONSE, ActionType.PROACTIVE_MESSAGE}
+        expressive = {
+            ActionType.REPLY,
+            ActionType.MINIMAL_RESPONSE,
+            ActionType.PROACTIVE_MESSAGE,
+            ActionType.MESSAGE,
+            ActionType.EMOJI,
+        }
         if self.type in expressive and not (self.message or "").strip():
             raise ValueError(f"{self.type.value} requires a non-empty message")
         if self.type not in expressive:
@@ -84,14 +94,32 @@ class IntentCandidate(BaseModel):
 
 
 class PersonReaction(BaseModel):
-    # Internal/debug summaries are intentionally optional. A normal conversational
-    # turn does not need to manufacture a visible explanation for every layer.
+    # Internal/debug summaries are intentionally sparse. They are safe summaries,
+    # never raw hidden chain-of-thought.
     perception: str = ""
     reaction: str = ""
     mental_state_update: str = ""
-    action: ActionDecision
+
+    # P0 primary contract: zero to three outward actions. [] means genuine silence.
+    actions: list[ActionDecision] = Field(default_factory=list, max_length=3)
+
+    # Legacy compatibility for existing callers/traces. Models do not need to emit
+    # this field; it is normalized from actions. Old single-action JSON remains valid.
+    action: ActionDecision | None = None
+
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=6)
     intent_candidates: list[IntentCandidate] = Field(default_factory=list, max_length=4)
+
+    @model_validator(mode="after")
+    def normalize_action_contract(self):
+        if self.actions:
+            self.action = self.actions[0]
+        elif self.action is not None:
+            if self.action.type not in {ActionType.NO_REPLY, ActionType.NO_ACTION}:
+                self.actions = [self.action]
+        if self.action is None:
+            self.action = ActionDecision(type=ActionType.NO_REPLY)
+        return self
 
 
 class RuntimeResult(BaseModel):

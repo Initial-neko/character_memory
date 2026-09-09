@@ -100,6 +100,7 @@ class RuntimeResult(BaseModel):
     mental_state_before: str = ""
     created_memory_ids: list[int] = Field(default_factory=list)
     created_intent_ids: list[int] = Field(default_factory=list)
+    timings: dict[str, float] = Field(default_factory=dict)
 
 
 class LifeEventCandidate(BaseModel):

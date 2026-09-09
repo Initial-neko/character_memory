@@ -52,6 +52,9 @@ class PersonRuntime:
         timings["model_ms"] = _ms(stage)
         logger.info("runtime.model react done event_id=%s action=%s duration_ms=%.1f memory_candidates=%d intent_candidates=%d", event.id, reaction.action.type.value, timings["model_ms"], len(reaction.memory_candidates), len(reaction.intent_candidates))
 
+        # Empty means "no mental-state change this turn", not "erase state".
+        state_after = (reaction.mental_state_update or "").strip() or state_before
+
         stage = time.perf_counter()
         candidate_embeddings = [(candidate, self.embeddings.embed(candidate.content)) for candidate in reaction.memory_candidates]
         timings["memory_embedding_ms"] = _ms(stage)
@@ -61,7 +64,9 @@ class PersonRuntime:
         stage = time.perf_counter()
         try:
             with self.store.transaction():
-                self.store.set_mental_state(event.character_id, reaction.mental_state_update, event.event_time, event.id)
+                if state_after:
+                    self.store.set_mental_state(event.character_id, state_after, event.event_time, event.id)
+
                 for candidate, embedding in candidate_embeddings:
                     saved = self.store.add_memory(Memory(character_id=event.character_id, content=candidate.content, memory_type=candidate.memory_type, event_time=event.event_time, importance=candidate.importance, source_event_id=event.id, embedding=embedding))
                     if saved.id is not None:
@@ -88,7 +93,8 @@ class PersonRuntime:
                     "raw_model_response": raw_model_response,
                     "model_attempt": model_attempt,
                     "mental_state_before": state_before,
-                    "mental_state_after": reaction.mental_state_update,
+                    "mental_state_after": state_after,
+                    "mental_state_updated": bool((reaction.mental_state_update or "").strip()),
                     "recalled_memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in memories],
                     "perception": reaction.perception,
                     "reaction": reaction.reaction,

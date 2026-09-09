@@ -59,6 +59,8 @@ def test_structured_call_uses_json_object_response_format():
         system = captured["messages"][0]["content"]
         assert "model_json_schema" not in system
         assert '"properties"' not in system
+        assert "不要刻意惜字" in system
+        assert "自然追问" in system
     finally:
         model.close()
 

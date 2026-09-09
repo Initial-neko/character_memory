@@ -112,7 +112,6 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         known = ", ".join(profile["id"] for profile in character_profiles())
         raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}. Known: {known}")
 
-    @staticmethod
     def message_payload(event) -> dict:
         if event.event_type == EventType.USER_MESSAGE:
             role = "user"
@@ -180,19 +179,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         if hasattr(app_bundle, "characters"):
             app_bundle.characters[:] = discover_character_profiles(settings)
 
-    def has_due_intent(now: datetime, character_ids: list[str]) -> bool:
-        for character_id in character_ids:
-            read_store.expire_intents(character_id, now)
-            if read_store.due_intents(character_id, now):
-                return True
-        return False
-
     def dispatch_proactive_once() -> list[dict]:
         if not getattr(settings, "api_key", ""):
             return []
         now = datetime.now().astimezone()
         character_ids = [profile["id"] for profile in character_profiles()]
-        if not character_ids or not has_due_intent(now, character_ids):
+        gate = ProactiveService(read_store)
+        if not character_ids or not gate.has_due(character_ids, now):
             return []
         current = get_bundle()
         service = ProactiveService(current.store, current.chat)

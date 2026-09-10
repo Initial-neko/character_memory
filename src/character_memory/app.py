@@ -7,7 +7,7 @@ import time
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import Clock, RealClock
-from character_memory.config import Settings, discover_character_profiles, load_persona, load_settings
+from character_memory.config import Settings, discover_character_profiles, load_persona, load_settings, resolve_sticker_dir
 from character_memory.images import load_image_catalog
 from character_memory.life.runner import DayRunner
 from character_memory.life.simulator import LifeSimulator
@@ -16,7 +16,7 @@ from character_memory.llm.client import OpenAICompatibleModel
 from character_memory.memory.embedding import DeterministicEmbedding, OpenAICompatibleEmbedding, SentenceTransformerEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
-from character_memory.stickers import load_sticker_catalog
+from character_memory.stickers import load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -111,7 +111,10 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
         stage = time.perf_counter()
         profiles = discover_character_profiles(settings)
         persona_by_id = {profile["id"]: load_persona(profile["persona_path"]) for profile in profiles}
-        sticker_by_id = {profile["id"]: load_sticker_catalog(profile["persona_path"]) for profile in profiles}
+        global_stickers = load_global_sticker_catalog(
+            resolve_sticker_dir(settings),
+            persona_paths=[profile["persona_path"] for profile in profiles],
+        )
         image_by_id = {profile["id"]: load_image_catalog(profile["persona_path"]) for profile in profiles}
         timings["persona_ms"] = _ms(stage)
 
@@ -123,7 +126,7 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
                 embeddings,
                 model,
                 persona,
-                sticker_by_id[character_id],
+                global_stickers,
                 image_by_id[character_id],
             )
             for character_id, persona in persona_by_id.items()

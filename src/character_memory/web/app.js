@@ -1,296 +1,435 @@
-const activeCharacterKey = "character-memory:active-character";
-const hiddenText = "╭(╯^╰)╮不给看";
-let characterId = localStorage.getItem(activeCharacterKey) || "rin";
-let characters = [];
-const pendingCharacters = new Set();
-let lastRenderedSignature = "";
+(() => {
+  const activeCharacterKey = "character-memory:active-character";
+  const hiddenText = "╭(╯^╰)╮不给看";
 
-const chat = document.getElementById("chat");
-const composer = document.getElementById("composer");
-const input = document.getElementById("messageInput");
-const sendButton = document.getElementById("sendButton");
-const runtimeButton = document.getElementById("runtimeButton");
-const nowText = document.getElementById("nowText");
-const characterList = document.getElementById("characterList");
-const characterName = document.getElementById("characterName");
-const characterIdentity = document.getElementById("characterIdentity");
-const headerAvatar = document.getElementById("headerAvatar");
-const drawer = document.getElementById("drawer");
-const drawerBackdrop = document.getElementById("drawerBackdrop");
-const drawerClose = document.getElementById("drawerClose");
-const drawerTitle = document.getElementById("drawerTitle");
-const drawerSubtitle = document.getElementById("drawerSubtitle");
-const drawerBody = document.getElementById("drawerBody");
-const typingTemplate = document.getElementById("typingTemplate");
+  const CM = window.CM = {
+    state: {
+      characterId: localStorage.getItem(activeCharacterKey) || "rin",
+      characters: [],
+      pendingCharacters: new Set(),
+      lastRenderedSignature: "",
+      conversation: {type: "DIRECT", groupId: null},
+    },
+    features: {},
+    listeners: new Map(),
+  };
 
-function escapeHtml(value) {
-  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
-}
-function fmtTime(iso) { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"}); }
-function fmtDate(iso) { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(); }
-function fmtMs(value) { const n = Number(value || 0); return n >= 1000 ? `${(n / 1000).toFixed(2)}s` : `${n.toFixed(0)}ms`; }
-function hiddenIfEmpty(value) { return String(value ?? "").trim() || hiddenText; }
-function initialFor(profile) { return (profile?.name || profile?.id || "AI").trim().slice(0, 1).toUpperCase(); }
-function currentProfile() { return characters.find(item => item.id === characterId) || {id: characterId, name: characterId, identity:"", tagline:""}; }
-function conversationIdFor(id) {
-  const key = `character-memory:conversation:${id}`;
-  let value = localStorage.getItem(key);
-  if (!value) { value = crypto.randomUUID(); localStorage.setItem(key, value); }
-  return value;
-}
-function isCurrentPending() { return pendingCharacters.has(characterId); }
-function visibleActions(result) {
-  const actions = Array.isArray(result?.actions) ? result.actions : [];
-  if (actions.length) return actions.filter(action => String(action?.message || "").trim());
-  return result?.action?.message ? [result.action] : [];
-}
+  CM.dom = {
+    chat: document.getElementById("chat"),
+    composer: document.getElementById("composer"),
+    input: document.getElementById("messageInput"),
+    sendButton: document.getElementById("sendButton"),
+    runtimeButton: document.getElementById("runtimeButton"),
+    nowText: document.getElementById("nowText"),
+    characterList: document.getElementById("characterList"),
+    characterName: document.getElementById("characterName"),
+    characterIdentity: document.getElementById("characterIdentity"),
+    headerAvatar: document.getElementById("headerAvatar"),
+    drawer: document.getElementById("drawer"),
+    drawerBackdrop: document.getElementById("drawerBackdrop"),
+    drawerClose: document.getElementById("drawerClose"),
+    drawerTitle: document.getElementById("drawerTitle"),
+    drawerSubtitle: document.getElementById("drawerSubtitle"),
+    drawerBody: document.getElementById("drawerBody"),
+    typingTemplate: document.getElementById("typingTemplate"),
+  };
 
-function updateNow() { nowText.textContent = new Date().toLocaleString([], {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}); }
-updateNow(); setInterval(updateNow, 30000);
+  CM.escapeHtml = value => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+  CM.fmtTime = iso => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"}); };
+  CM.fmtDate = iso => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(); };
+  CM.fmtMs = value => { const n = Number(value || 0); return n >= 1000 ? `${(n / 1000).toFixed(2)}s` : `${n.toFixed(0)}ms`; };
+  CM.hiddenIfEmpty = value => String(value ?? "").trim() || hiddenText;
+  CM.initialFor = profile => (profile?.name || profile?.id || "AI").trim().slice(0, 1).toUpperCase();
+  CM.currentProfile = () => CM.state.characters.find(item => item.id === CM.state.characterId) || {id: CM.state.characterId, name: CM.state.characterId, identity:"", tagline:""};
+  CM.isGroupConversation = () => CM.state.conversation.type === "GROUP" && Boolean(CM.state.conversation.groupId);
+  CM.registerFeature = (name, feature) => { CM.features[name] = feature; return feature; };
+  CM.on = (name, fn) => {
+    if (!CM.listeners.has(name)) CM.listeners.set(name, []);
+    CM.listeners.get(name).push(fn);
+  };
+  CM.emit = async (name, payload) => {
+    for (const fn of CM.listeners.get(name) || []) await fn(payload);
+  };
 
-function updateComposerState() {
-  const pending = isCurrentPending();
-  sendButton.disabled = pending;
-  input.disabled = pending;
-  if (!pending) input.focus();
-}
+  CM.conversationIdFor = id => {
+    const key = `character-memory:conversation:${id}`;
+    let value = localStorage.getItem(key);
+    if (!value) { value = crypto.randomUUID(); localStorage.setItem(key, value); }
+    return value;
+  };
 
-function updateHeader() {
-  const profile = currentProfile();
-  characterName.textContent = profile.name || profile.id;
-  characterIdentity.textContent = pendingCharacters.has(characterId)
-    ? `${profile.identity || profile.tagline || "Persistent AI Person"} · 正在回复`
-    : (profile.identity || profile.tagline || "Persistent AI Person");
-  headerAvatar.textContent = initialFor(profile);
-  input.placeholder = pendingCharacters.has(characterId)
-    ? `${profile.name || profile.id} 正在回复…`
-    : `给 ${profile.name || profile.id} 发消息`;
-  updateComposerState();
-}
-
-function renderCharacterList() {
-  characterList.innerHTML = characters.map(profile => {
-    const pending = pendingCharacters.has(profile.id);
-    return `
-      <button class="character-item ${profile.id === characterId ? "active" : ""}" type="button" data-character="${escapeHtml(profile.id)}">
-        <span class="character-avatar">${escapeHtml(initialFor(profile))}</span>
-        <span class="character-copy">
-          <span class="character-name">${escapeHtml(profile.name)}${pending ? '<span class="character-pending"> · 回复中</span>' : ""}</span>
-          <span class="character-tagline">${escapeHtml(profile.tagline || profile.identity || "Persistent AI Person")}</span>
-        </span>
-      </button>`;
-  }).join("");
-}
-
-async function switchCharacter(nextId) {
-  if (nextId === characterId) return;
-  characterId = nextId;
-  localStorage.setItem(activeCharacterKey, characterId);
-  lastRenderedSignature = "";
-  closeDrawer();
-  updateHeader();
-  renderCharacterList();
-  chat.innerHTML = '<div class="empty">正在加载聊天记录…</div>';
-  await loadHistory();
-  updateComposerState();
-}
-
-function openDrawer(title, subtitle = "") { drawerTitle.textContent = title; drawerSubtitle.textContent = subtitle; drawerBackdrop.classList.remove("hidden"); drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false"); }
-function closeDrawer() { drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true"); setTimeout(() => drawerBackdrop.classList.add("hidden"), 180); }
-drawerClose.addEventListener("click", closeDrawer); drawerBackdrop.addEventListener("click", closeDrawer);
-
-function addMessage(message) {
-  const row = document.createElement("article");
-  row.className = `message-row ${message.role}`;
-  row.dataset.messageId = message.id ?? "";
-  const latency = message.latency_ms ? `<span>耗时 ${fmtMs(message.latency_ms)}</span>` : "";
-  const avatar = message.role === "assistant" ? initialFor(currentProfile()) : "";
-  const thought = message.role === "assistant" && message.has_trace && message.source_event_id
-    ? `<button class="detail-button" type="button" data-thought="${message.source_event_id}" title="查看安全的思考摘要">想法</button>`
-    : "";
-  const trace = message.has_trace && message.source_event_id
-    ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮开发详情">···</button>`
-    : "";
-  row.innerHTML = `<div class="avatar">${escapeHtml(avatar)}</div><div class="bubble-wrap"><div class="bubble">${escapeHtml(message.content)}</div><div class="message-meta"><span>${fmtTime(message.event_time)}</span>${latency}${message.action === "PROACTIVE_MESSAGE" ? "<span>主动消息</span>" : ""}${thought}${trace}</div></div>`;
-  chat.appendChild(row);
-  return row;
-}
-
-function renderHistory(messages) {
-  const signature = `${characterId}|` + messages.map(m => `${m.id}:${m.event_time}:${m.content}`).join("|");
-  if (signature === lastRenderedSignature && chat.children.length) return;
-  chat.innerHTML = "";
-  if (!messages.length) {
-    chat.innerHTML = `<div class="empty">还没有和 ${escapeHtml(currentProfile().name || characterId)} 的聊天记录。<br>从第一句话开始认识彼此。</div>`;
-    lastRenderedSignature = signature;
-    if (isCurrentPending()) appendTypingForCurrent();
-    return;
-  }
-  let lastDate = null;
-  for (const message of messages) {
-    const date = fmtDate(message.event_time);
-    if (date !== lastDate) {
-      const sep = document.createElement("div"); sep.className = "date-separator"; sep.textContent = `── ${date} ──`; chat.appendChild(sep); lastDate = date;
+  CM.api = async (path, options = {}) => {
+    const started = performance.now();
+    const response = await fetch(path, {headers:{"Content-Type":"application/json", ...(options.headers || {})}, ...options});
+    const elapsed = performance.now() - started;
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("[api]", path, response.status, `${elapsed.toFixed(1)}ms`, text);
+      throw new Error(`${response.status} ${response.statusText}: ${text}`);
     }
-    addMessage(message);
-  }
-  if (isCurrentPending()) appendTypingForCurrent();
-  lastRenderedSignature = signature;
-  scrollToBottom(false);
-}
+    const data = await response.json();
+    console.info("[api]", path, `${elapsed.toFixed(1)}ms`);
+    return data;
+  };
 
-function appendTypingForCurrent() {
-  if (chat.querySelector(".typing-row")) return;
-  const typing = typingTemplate.content.cloneNode(true);
-  typing.querySelector(".avatar").textContent = initialFor(currentProfile());
-  chat.appendChild(typing);
-}
+  CM.openDrawer = (title, subtitle = "") => {
+    const d = CM.dom;
+    d.drawerTitle.textContent = title;
+    d.drawerSubtitle.textContent = subtitle;
+    d.drawerBackdrop.classList.remove("hidden");
+    d.drawer.classList.add("open");
+    d.drawer.setAttribute("aria-hidden", "false");
+  };
+  CM.closeDrawer = () => {
+    const d = CM.dom;
+    d.drawer.classList.remove("open");
+    d.drawer.setAttribute("aria-hidden", "true");
+    setTimeout(() => d.drawerBackdrop.classList.add("hidden"), 180);
+  };
 
-function scrollToBottom(smooth = true) { window.scrollTo({top: document.body.scrollHeight, behavior: smooth ? "smooth" : "auto"}); }
+  CM.visibleActions = result => {
+    const actions = Array.isArray(result?.actions) ? result.actions : [];
+    const valid = action => {
+      if (action?.type === "STICKER") return Boolean(action?.sticker_id);
+      if (action?.type === "IMAGE") return Boolean(action?.image_id);
+      return Boolean(String(action?.message || "").trim());
+    };
+    if (actions.length) return actions.filter(valid);
+    return valid(result?.action) ? [result.action] : [];
+  };
 
-async function api(path, options = {}) {
-  const started = performance.now();
-  const response = await fetch(path, {headers:{"Content-Type":"application/json", ...(options.headers || {})}, ...options});
-  const elapsed = performance.now() - started;
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("[api]", path, response.status, `${elapsed.toFixed(1)}ms`, text);
-    throw new Error(`${response.status} ${response.statusText}: ${text}`);
-  }
-  const data = await response.json();
-  console.info("[api]", path, `${elapsed.toFixed(1)}ms`);
-  return data;
-}
+  CM.deliveryDelay = action => {
+    const type = String(action?.type || "MESSAGE");
+    const text = String(action?.message || "");
+    if (["EMOJI", "STICKER", "IMAGE"].includes(type)) return 180 + Math.floor(Math.random() * 260);
+    const base = 300 + Math.min(text.length * 14, 700);
+    const jitter = Math.floor(Math.random() * 260) - 80;
+    return Math.max(260, Math.min(base + jitter, 1200));
+  };
 
-async function loadCharacters() {
-  const data = await api("/v1/characters");
-  characters = data.characters || [];
-  if (!characters.length) throw new Error("没有发现任何 Persona");
-  if (!characters.some(item => item.id === characterId)) characterId = characters[0].id;
-  localStorage.setItem(activeCharacterKey, characterId);
-  renderCharacterList();
-  updateHeader();
-}
+  CM.addMessage = message => {
+    const d = CM.dom;
+    const row = document.createElement("article");
+    row.className = `message-row ${message.role}`;
+    row.dataset.messageId = message.id ?? "";
+    const latency = message.latency_ms ? `<span>耗时 ${CM.fmtMs(message.latency_ms)}</span>` : "";
+    const avatar = message.role === "assistant" ? CM.initialFor(CM.currentProfile()) : "";
+    const thought = message.role === "assistant" && message.has_trace && message.source_event_id
+      ? `<button class="detail-button" type="button" data-thought="${message.source_event_id}" title="查看安全的思考摘要">想法</button>` : "";
+    const trace = message.has_trace && message.source_event_id
+      ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮开发详情">···</button>` : "";
 
-async function loadHistory() {
-  const requestedCharacter = characterId;
-  const data = await api(`/v1/chat/history?character_id=${encodeURIComponent(requestedCharacter)}&limit=180`);
-  if (requestedCharacter !== characterId) return;
-  renderHistory(data.messages);
-}
+    const sticker = message.sticker || (message.sticker_id ? {
+      id: message.sticker_id,
+      label: message.sticker_label || "表情包",
+      url: `/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset`,
+    } : null);
+    const image = message.image || null;
+    const hideStoredResourceText = (message.action === "STICKER" && sticker) || (message.action === "IMAGE" && image);
+    const text = hideStoredResourceText ? "" : String(message.content || "").trim();
+    const textHtml = text ? `<div class="bubble">${CM.escapeHtml(text)}</div>` : "";
+    const stickerHtml = sticker?.url
+      ? `<div class="sticker-bubble"><img src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>` : "";
+    const imageHtml = image?.url
+      ? `<div class="image-bubble"><img src="${CM.escapeHtml(image.url)}" alt="${CM.escapeHtml(image.label || "图片")}" loading="lazy"><div class="image-caption">${CM.escapeHtml(image.label || "图片")}</div></div>` : "";
+    const proactive = message.proactive || message.action === "PROACTIVE_MESSAGE";
+    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${textHtml}${stickerHtml}${imageHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${latency}${proactive ? '<span class="proactive-badge">主动消息</span>' : ""}${thought}${trace}</div></div>`;
+    row.querySelectorAll(".sticker-bubble img").forEach(img => img.addEventListener("error", () => img.closest(".sticker-bubble")?.classList.add("broken"), {once:true}));
+    d.chat.appendChild(row);
+    return row;
+  };
 
-function timingHtml(timings) {
-  const entries = Object.entries(timings || {});
-  if (!entries.length) return "<p>暂无 timing 数据。</p>";
-  return `<div class="kv">${entries.map(([key, value]) => `<div>${escapeHtml(key)}</div><div>${escapeHtml(fmtMs(value))}</div>`).join("")}</div>`;
-}
-
-async function showThought(sourceEventId) {
-  openDrawer(`${currentProfile().name} · 想法`, "安全摘要，不是隐藏思维链");
-  drawerBody.innerHTML = "<p>正在回想这一轮…</p>";
-  try {
-    const trace = await api(`/v1/traces/${sourceEventId}`);
-    drawerBody.innerHTML = `<section class="section"><h3>她/他注意到了什么</h3><p>${escapeHtml(hiddenIfEmpty(trace.perception))}</p></section><section class="section"><h3>这一刻的反应</h3><p>${escapeHtml(hiddenIfEmpty(trace.reaction))}</p></section><p class="muted">这里只展示开发者安全摘要，不展示模型隐藏推理过程。</p>`;
-  } catch (error) { drawerBody.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; }
-}
-
-async function showTrace(sourceEventId) {
-  openDrawer(`${currentProfile().name} · 本轮详情`, `source_event_id = ${sourceEventId}`);
-  drawerBody.innerHTML = "<p>正在加载…</p>";
-  try {
-    const trace = await api(`/v1/traces/${sourceEventId}`);
-    const actions = Array.isArray(trace.actions) ? trace.actions : (trace.action ? [trace.action] : []);
-    const actionText = actions.length
-      ? actions.map((action, index) => `${index + 1}. ${action.type}: ${action.message || action.reason || ""}`).join("\n")
-      : "没有发送消息";
-    const firstAction = trace.action || actions[0] || {};
-    drawerBody.innerHTML = `<section class="section"><h3>耗时</h3>${timingHtml(trace.timings)}</section><section class="section"><h3>决策</h3><div class="kv"><div>Actions</div><div>${escapeHtml(actions.map(a => a.type).join(" / ") || "NO_REPLY")}</div><div>Action Reason</div><div>${escapeHtml(hiddenIfEmpty(firstAction.reason))}</div><div>Perception</div><div>${escapeHtml(hiddenIfEmpty(trace.perception))}</div><div>Reaction</div><div>${escapeHtml(hiddenIfEmpty(trace.reaction))}</div><div>Model Attempt</div><div>${escapeHtml(trace.model_attempt || "—")}</div></div></section><section class="section"><h3>最终对外表达</h3><pre>${escapeHtml(actionText)}</pre></section><section class="section"><h3>Mental State · Before</h3><pre>${escapeHtml(hiddenIfEmpty(trace.mental_state_before))}</pre></section><section class="section"><h3>Mental State · After</h3><pre>${escapeHtml(hiddenIfEmpty(trace.mental_state_after))}</pre></section><section class="section"><h3>Recall</h3><div class="card-list">${(trace.recalled_memories || []).map(m => `<div class="card"><strong>${escapeHtml(m.memory_type)}</strong><span> · importance ${escapeHtml(m.importance)}</span><div>${escapeHtml(m.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div></section><section class="section"><h3>实际发送给模型的 messages</h3>${(trace.model_messages || []).map((m, i) => `<p><strong>${i + 1}. ${escapeHtml(m.role)}</strong></p><pre>${escapeHtml(m.content)}</pre>`).join("") || `<p>${escapeHtml(hiddenText)}</p>`}</section><section class="section"><h3>Compiled Context</h3><pre>${escapeHtml(hiddenIfEmpty(trace.context))}</pre></section><section class="section"><h3>Memory Admission</h3><pre>${escapeHtml(JSON.stringify(trace.memory_decisions || [], null, 2))}</pre></section><section class="section"><h3>Memory Write</h3><pre>${escapeHtml(JSON.stringify({candidates:trace.memory_candidates || [], created_memory_ids:trace.created_memory_ids || []}, null, 2))}</pre></section><section class="section"><h3>Intent</h3><pre>${escapeHtml(JSON.stringify({candidates:trace.intent_candidates || [], created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre></section><section class="section"><h3>Raw Model Response</h3><pre>${escapeHtml(hiddenIfEmpty(trace.raw_model_response))}</pre></section>`;
-  } catch (error) { drawerBody.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; }
-}
-
-async function showRuntime() {
-  const requestedCharacter = characterId;
-  openDrawer(`${currentProfile().name} · Runtime`, "按需读取当前人物状态");
-  drawerBody.innerHTML = "<p>正在加载…</p>";
-  try {
-    const data = await api(`/v1/runtime/${encodeURIComponent(requestedCharacter)}`); if (requestedCharacter !== characterId) return;
-    const p = data.provider || {};
-    drawerBody.innerHTML = `<section class="section"><h3>Runtime 初始化耗时</h3>${timingHtml(data.runtime_init_timings)}</section><section class="section"><h3>Provider</h3><div class="kv"><div>Chat Model</div><div>${escapeHtml(p.chat_model)}</div><div>Embedding</div><div>${escapeHtml(`${p.embedding_provider} / ${p.embedding_model}`)}</div><div>Runtime Loaded</div><div>${escapeHtml(data.runtime_loaded)}</div></div></section><section class="section"><h3>Mental State</h3><pre>${escapeHtml(hiddenIfEmpty(data.mental_state))}</pre></section><section class="section"><h3>Persona</h3><pre>${escapeHtml(hiddenIfEmpty(data.persona))}</pre></section><section class="section"><h3>Memory · 最近 ${data.memories.length} 条</h3><div class="card-list">${data.memories.map(m => `<div class="card"><strong>${escapeHtml(m.memory_type)}</strong><span> · ${escapeHtml(fmtTime(m.event_time))}</span><div>${escapeHtml(m.content)}</div></div>`).join("") || "<p>暂无 Memory。</p>"}</div></section><section class="section"><h3>Intent · 最近 ${data.intents.length} 条</h3><pre>${escapeHtml(JSON.stringify(data.intents, null, 2))}</pre></section>`;
-  } catch (error) { drawerBody.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; }
-}
-
-runtimeButton.addEventListener("click", showRuntime);
-characterList.addEventListener("click", event => { const button = event.target.closest("[data-character]"); if (button) switchCharacter(button.dataset.character).catch(console.error); });
-chat.addEventListener("click", event => {
-  const thought = event.target.closest("[data-thought]");
-  if (thought) { showThought(thought.dataset.thought); return; }
-  const trace = event.target.closest("[data-trace]");
-  if (trace) showTrace(trace.dataset.trace);
-});
-input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight, 150)}px`; });
-input.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
-
-composer.addEventListener("submit", async event => {
-  event.preventDefault();
-  const message = input.value.trim();
-  const sentCharacter = characterId;
-  if (!message || pendingCharacters.has(sentCharacter)) return;
-
-  const conversationId = conversationIdFor(sentCharacter);
-  const browserStarted = performance.now();
-  pendingCharacters.add(sentCharacter);
-  renderCharacterList();
-  updateHeader();
-
-  if (chat.querySelector(".empty")) chat.innerHTML = "";
-  addMessage({role:"user", content:message, event_time:new Date().toISOString(), has_trace:false});
-  appendTypingForCurrent();
-  scrollToBottom();
-  input.value = "";
-  input.style.height = "auto";
-
-  try {
-    const result = await api("/v1/chat", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, message})});
-    const browserTotal = performance.now() - browserStarted;
-    console.info("[chat timings]", sentCharacter, {...(result.timings || {}), browser_total_ms:Number(browserTotal.toFixed(1))});
-
-    if (sentCharacter === characterId) {
-      chat.querySelector(".typing-row")?.remove();
-      const actions = visibleActions(result);
-      if (actions.length) {
-        actions.forEach((action, index) => addMessage({role:"assistant", content:action.message, event_time:result.event_time, action:action.type, source_event_id:result.event_id, has_trace:true, latency_ms:index === 0 ? browserTotal : 0}));
-      } else {
-        const note = document.createElement("div");
-        note.className = "date-separator";
-        note.textContent = `已读 · 没有回复 · ${fmtMs(browserTotal)}`;
-        chat.appendChild(note);
+  CM.renderHistory = messages => {
+    const d = CM.dom;
+    const signature = `${CM.state.characterId}|` + messages.map(m => `${m.id}:${m.event_time}:${m.content}:${m.sticker_id || ""}:${m.image_id || m.media_id || ""}`).join("|");
+    if (signature === CM.state.lastRenderedSignature && d.chat.children.length) return;
+    d.chat.innerHTML = "";
+    if (!messages.length) {
+      d.chat.innerHTML = `<div class="empty">还没有和 ${CM.escapeHtml(CM.currentProfile().name || CM.state.characterId)} 的聊天记录。<br>从第一句话开始认识彼此。</div>`;
+      CM.state.lastRenderedSignature = signature;
+      if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
+      return;
+    }
+    let lastDate = null;
+    for (const message of messages) {
+      const date = CM.fmtDate(message.event_time);
+      if (date !== lastDate) {
+        const sep = document.createElement("div");
+        sep.className = "date-separator";
+        sep.textContent = `── ${date} ──`;
+        d.chat.appendChild(sep);
+        lastDate = date;
       }
-      scrollToBottom();
+      CM.addMessage(message);
     }
-  } catch (error) {
-    console.error("[chat failed]", sentCharacter, error);
-    if (sentCharacter === characterId) {
-      chat.querySelector(".typing-row")?.remove();
-      const box = document.createElement("div");
-      box.className = "error";
-      box.textContent = `生成失败：${error.message}`;
-      chat.appendChild(box);
-    }
-  } finally {
-    pendingCharacters.delete(sentCharacter);
-    renderCharacterList();
-    updateHeader();
-    if (sentCharacter === characterId) {
-      await loadHistory().catch(error => console.warn("history refresh failed", error));
-      updateComposerState();
-      scrollToBottom();
-    }
-  }
-});
+    if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
+    CM.state.lastRenderedSignature = signature;
+    CM.scrollToBottom(false);
+  };
 
-async function bootstrap() {
-  try { await loadCharacters(); await loadHistory(); updateComposerState(); }
-  catch (error) { chat.innerHTML = `<div class="error">页面初始化失败：${escapeHtml(error.message)}</div>`; console.error(error); }
-}
+  CM.appendTypingForCurrent = () => {
+    const d = CM.dom;
+    if (d.chat.querySelector(".typing-row")) return;
+    const typing = d.typingTemplate.content.cloneNode(true);
+    typing.querySelector(".avatar").textContent = CM.initialFor(CM.currentProfile());
+    d.chat.appendChild(typing);
+  };
+  CM.scrollToBottom = (smooth = true) => window.scrollTo({top: document.body.scrollHeight, behavior: smooth ? "smooth" : "auto"});
 
-bootstrap();
+  CM.renderCharacterList = () => {
+    const d = CM.dom;
+    const unread = CM.features.unread;
+    d.characterList.innerHTML = CM.state.characters.map(profile => {
+      const pending = CM.state.pendingCharacters.has(profile.id);
+      const hasUnread = unread?.isUnread?.(profile.id) || false;
+      const preview = unread?.preview?.(profile) || profile.tagline || profile.identity || "Persistent AI Person";
+      const active = !CM.isGroupConversation() && profile.id === CM.state.characterId;
+      return `<button class="character-item ${active ? "active" : ""}" type="button" data-character="${CM.escapeHtml(profile.id)}">
+        <span class="character-avatar">${CM.escapeHtml(CM.initialFor(profile))}</span>
+        <span class="character-copy"><span class="character-name character-name-line"><span>${CM.escapeHtml(profile.name)}${pending ? '<span class="character-pending"> · 回复中</span>' : ""}</span>${hasUnread ? '<span class="unread-dot" title="有新消息" aria-label="有新消息"></span>' : ""}</span><span class="character-tagline character-preview">${CM.escapeHtml(preview)}</span></span>
+      </button>`;
+    }).join("");
+  };
+
+  CM.updateComposerState = () => {
+    if (CM.isGroupConversation() && CM.features.groups?.applyComposerState?.()) return;
+    const pending = CM.state.pendingCharacters.has(CM.state.characterId);
+    CM.dom.sendButton.disabled = pending;
+    CM.dom.input.disabled = pending;
+    CM.features.stickers?.setDisabled?.(pending);
+    CM.features.images?.setDisabled?.(pending);
+    if (!pending) CM.dom.input.focus();
+  };
+
+  CM.updateHeader = () => {
+    if (CM.isGroupConversation() && CM.features.groups?.applyHeader?.()) {
+      CM.updateComposerState();
+      return;
+    }
+    const profile = CM.currentProfile();
+    const pending = CM.state.pendingCharacters.has(CM.state.characterId);
+    CM.dom.characterName.textContent = profile.name || profile.id;
+    CM.dom.characterIdentity.textContent = pending
+      ? `${profile.identity || profile.tagline || "Persistent AI Person"} · 正在回复`
+      : (profile.identity || profile.tagline || "Persistent AI Person");
+    CM.dom.headerAvatar.textContent = CM.initialFor(profile);
+    CM.dom.input.placeholder = pending ? `${profile.name || profile.id} 正在回复…` : `给 ${profile.name || profile.id} 发消息`;
+    CM.dom.runtimeButton.disabled = false;
+    CM.dom.runtimeButton.title = "";
+    CM.features.intent?.setDisabled?.(false);
+    CM.updateComposerState();
+  };
+
+  CM.loadCharacters = async () => {
+    const data = await CM.api("/v1/characters");
+    CM.state.characters = data.characters || [];
+    if (!CM.state.characters.length) throw new Error("没有发现任何 Persona");
+    if (!CM.state.characters.some(item => item.id === CM.state.characterId)) CM.state.characterId = CM.state.characters[0].id;
+    localStorage.setItem(activeCharacterKey, CM.state.characterId);
+    CM.renderCharacterList();
+    CM.updateHeader();
+    await CM.emit("charactersLoaded", CM.state.characters);
+  };
+
+  CM.loadDirectHistory = async () => {
+    const requested = CM.state.characterId;
+    const data = await CM.api(`/v1/chat/history?character_id=${encodeURIComponent(requested)}&limit=180`);
+    if (CM.isGroupConversation() || requested !== CM.state.characterId) return;
+    CM.renderHistory(data.messages || []);
+    CM.features.unread?.markRead?.(requested);
+    CM.renderCharacterList();
+    await CM.emit("historyLoaded", {type:"DIRECT", characterId:requested, messages:data.messages || []});
+  };
+
+  CM.loadHistory = async () => {
+    if (CM.isGroupConversation()) return CM.features.groups?.loadHistory?.();
+    return CM.loadDirectHistory();
+  };
+
+  CM.switchCharacter = async nextId => {
+    const wasGroup = CM.isGroupConversation();
+    CM.features.groups?.leave?.();
+    if (!wasGroup && nextId === CM.state.characterId) return;
+    CM.features.stickers?.close?.();
+    CM.features.images?.close?.();
+    CM.features.unread?.markRead?.(nextId);
+    CM.state.characterId = nextId;
+    localStorage.setItem(activeCharacterKey, nextId);
+    CM.state.lastRenderedSignature = "";
+    CM.closeDrawer();
+    CM.updateHeader();
+    CM.renderCharacterList();
+    CM.dom.chat.innerHTML = '<div class="empty">正在加载聊天记录…</div>';
+    await CM.loadDirectHistory();
+    CM.updateComposerState();
+    await CM.emit("conversationChanged", {type:"DIRECT", characterId:nextId});
+  };
+
+  CM.revealActionsWithRhythm = async (result, sentCharacter, browserTotal) => {
+    const actions = CM.visibleActions(result);
+    if (!actions.length) {
+      const note = document.createElement("div");
+      note.className = "date-separator quiet-read";
+      note.textContent = `已读 · 没有回复 · ${CM.fmtMs(browserTotal)}`;
+      CM.dom.chat.appendChild(note);
+      return;
+    }
+    for (let index = 0; index < actions.length; index += 1) {
+      if (CM.isGroupConversation() || sentCharacter !== CM.state.characterId) return;
+      if (index > 0) {
+        CM.appendTypingForCurrent();
+        CM.scrollToBottom();
+        await new Promise(resolve => setTimeout(resolve, CM.deliveryDelay(actions[index])));
+        if (CM.isGroupConversation() || sentCharacter !== CM.state.characterId) return;
+        CM.dom.chat.querySelector(".typing-row")?.remove();
+      }
+      const action = actions[index];
+      CM.addMessage({
+        role:"assistant",
+        character_id:sentCharacter,
+        content:action.message || "",
+        sticker_id:action.sticker_id,
+        sticker:action.sticker,
+        image_id:action.image_id,
+        image:action.image,
+        event_time:result.event_time,
+        action:action.type,
+        source_event_id:result.event_id,
+        has_trace:true,
+        latency_ms:index === 0 ? browserTotal : 0,
+      });
+      CM.scrollToBottom();
+    }
+  };
+
+  CM.sendDirectText = async message => {
+    const sentCharacter = CM.state.characterId;
+    if (!message || CM.state.pendingCharacters.has(sentCharacter)) return;
+    const conversationId = CM.conversationIdFor(sentCharacter);
+    const browserStarted = performance.now();
+    CM.state.pendingCharacters.add(sentCharacter);
+    CM.renderCharacterList();
+    CM.updateHeader();
+    if (CM.dom.chat.querySelector(".empty")) CM.dom.chat.innerHTML = "";
+    CM.addMessage({role:"user", content:message, event_time:new Date().toISOString(), has_trace:false});
+    CM.appendTypingForCurrent();
+    CM.scrollToBottom();
+    CM.dom.input.value = "";
+    CM.dom.input.style.height = "auto";
+    try {
+      const result = await CM.api("/v1/chat", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, message})});
+      const browserTotal = performance.now() - browserStarted;
+      console.info("[chat timings]", sentCharacter, {...(result.timings || {}), browser_total_ms:Number(browserTotal.toFixed(1))});
+      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
+        CM.dom.chat.querySelector(".typing-row")?.remove();
+        await CM.revealActionsWithRhythm(result, sentCharacter, browserTotal);
+      }
+    } catch (error) {
+      console.error("[chat failed]", sentCharacter, error);
+      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
+        CM.dom.chat.querySelector(".typing-row")?.remove();
+        const box = document.createElement("div");
+        box.className = "error";
+        box.textContent = `生成失败：${error.message}`;
+        CM.dom.chat.appendChild(box);
+      }
+    } finally {
+      CM.state.pendingCharacters.delete(sentCharacter);
+      CM.renderCharacterList();
+      CM.updateHeader();
+      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
+        await CM.loadDirectHistory().catch(error => console.warn("history refresh failed", error));
+        CM.updateComposerState();
+        CM.scrollToBottom();
+      }
+    }
+  };
+
+  CM.submitCurrentText = async () => {
+    const message = CM.dom.input.value.trim();
+    if (!message) return;
+    if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message);
+    return CM.sendDirectText(message);
+  };
+
+  CM.timingHtml = timings => {
+    const entries = Object.entries(timings || {});
+    if (!entries.length) return "<p>暂无 timing 数据。</p>";
+    return `<div class="kv">${entries.map(([key, value]) => `<div>${CM.escapeHtml(key)}</div><div>${CM.escapeHtml(CM.fmtMs(value))}</div>`).join("")}</div>`;
+  };
+
+  CM.showThought = async sourceEventId => {
+    CM.openDrawer(`${CM.currentProfile().name} · 想法`, "安全摘要，不是隐藏思维链");
+    CM.dom.drawerBody.innerHTML = "<p>正在回想这一轮…</p>";
+    try {
+      const trace = await CM.api(`/v1/traces/${sourceEventId}`);
+      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>她/他注意到了什么</h3><p>${CM.escapeHtml(CM.hiddenIfEmpty(trace.perception))}</p></section><section class="section"><h3>这一刻的反应</h3><p>${CM.escapeHtml(CM.hiddenIfEmpty(trace.reaction))}</p></section><p class="muted">这里只展示开发者安全摘要，不展示模型隐藏推理过程。</p>`;
+    } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
+  };
+
+  CM.showTrace = async sourceEventId => {
+    CM.openDrawer(`${CM.currentProfile().name} · 本轮详情`, `source_event_id = ${sourceEventId}`);
+    CM.dom.drawerBody.innerHTML = "<p>正在加载…</p>";
+    try {
+      const trace = await CM.api(`/v1/traces/${sourceEventId}`);
+      const actions = Array.isArray(trace.actions) ? trace.actions : (trace.action ? [trace.action] : []);
+      const actionText = actions.length ? actions.map((action, index) => `${index + 1}. ${action.type}: ${action.message || action.sticker_id || action.image_id || action.reason || ""}`).join("\n") : "没有发送消息";
+      const firstAction = trace.action || actions[0] || {};
+      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>耗时</h3>${CM.timingHtml(trace.timings)}</section><section class="section"><h3>决策</h3><div class="kv"><div>Actions</div><div>${CM.escapeHtml(actions.map(a => a.type).join(" / ") || "NO_REPLY")}</div><div>Action Reason</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(firstAction.reason))}</div><div>Perception</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.perception))}</div><div>Reaction</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.reaction))}</div><div>Model Attempt</div><div>${CM.escapeHtml(trace.model_attempt || "—")}</div></div></section><section class="section"><h3>最终对外表达</h3><pre>${CM.escapeHtml(actionText)}</pre></section><section class="section"><h3>Mental State · Before</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_before))}</pre></section><section class="section"><h3>Mental State · After</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_after))}</pre></section><section class="section"><h3>Recall</h3><div class="card-list">${(trace.recalled_memories || []).map(m => `<div class="card"><strong>${CM.escapeHtml(m.memory_type)}</strong><span> · importance ${CM.escapeHtml(m.importance)}</span><div>${CM.escapeHtml(m.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div></section><section class="section"><h3>实际发送给模型的 messages</h3>${(trace.model_messages || []).map((m, i) => `<p><strong>${i + 1}. ${CM.escapeHtml(m.role)}</strong></p><pre>${CM.escapeHtml(m.content)}</pre>`).join("") || `<p>${CM.escapeHtml(hiddenText)}</p>`}</section><section class="section"><h3>Compiled Context</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.context))}</pre></section><section class="section"><h3>Memory Admission</h3><pre>${CM.escapeHtml(JSON.stringify(trace.memory_decisions || [], null, 2))}</pre></section><section class="section"><h3>Memory Write</h3><pre>${CM.escapeHtml(JSON.stringify({candidates:trace.memory_candidates || [], created_memory_ids:trace.created_memory_ids || []}, null, 2))}</pre></section><section class="section"><h3>Intent</h3><pre>${CM.escapeHtml(JSON.stringify({candidates:trace.intent_candidates || [], created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre></section><section class="section"><h3>Raw Model Response</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.raw_model_response))}</pre></section>`;
+    } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
+  };
+
+  CM.showRuntime = async () => {
+    if (CM.isGroupConversation()) return;
+    const requested = CM.state.characterId;
+    CM.openDrawer(`${CM.currentProfile().name} · Runtime`, "按需读取当前人物状态");
+    CM.dom.drawerBody.innerHTML = "<p>正在加载…</p>";
+    try {
+      const data = await CM.api(`/v1/runtime/${encodeURIComponent(requested)}`);
+      if (CM.isGroupConversation() || requested !== CM.state.characterId) return;
+      const p = data.provider || {};
+      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>Runtime 初始化耗时</h3>${CM.timingHtml(data.runtime_init_timings)}</section><section class="section"><h3>Provider</h3><div class="kv"><div>Chat Model</div><div>${CM.escapeHtml(p.chat_model)}</div><div>Embedding</div><div>${CM.escapeHtml(`${p.embedding_provider} / ${p.embedding_model}`)}</div><div>Runtime Loaded</div><div>${CM.escapeHtml(data.runtime_loaded)}</div></div></section><section class="section"><h3>Mental State</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.mental_state))}</pre></section><section class="section"><h3>Persona</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.persona))}</pre></section><section class="section"><h3>Memory · 最近 ${data.memories.length} 条</h3><div class="card-list">${data.memories.map(m => `<div class="card"><strong>${CM.escapeHtml(m.memory_type)}</strong><span> · ${CM.escapeHtml(CM.fmtTime(m.event_time))}</span><div>${CM.escapeHtml(m.content)}</div></div>`).join("") || "<p>暂无 Memory。</p>"}</div></section><section class="section"><h3>Intent · 最近 ${data.intents.length} 条</h3><pre>${CM.escapeHtml(JSON.stringify(data.intents, null, 2))}</pre></section>`;
+    } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
+  };
+
+  CM.bootstrap = async () => {
+    const d = CM.dom;
+    d.drawerClose.addEventListener("click", CM.closeDrawer);
+    d.drawerBackdrop.addEventListener("click", CM.closeDrawer);
+    d.runtimeButton.addEventListener("click", CM.showRuntime);
+    d.characterList.addEventListener("click", event => {
+      const button = event.target.closest("[data-character]");
+      if (button) CM.switchCharacter(button.dataset.character).catch(console.error);
+    });
+    d.chat.addEventListener("click", event => {
+      const thought = event.target.closest("[data-thought]");
+      if (thought) { CM.showThought(thought.dataset.thought); return; }
+      const trace = event.target.closest("[data-trace]");
+      if (trace) CM.showTrace(trace.dataset.trace);
+    });
+    d.input.addEventListener("input", () => { d.input.style.height = "auto"; d.input.style.height = `${Math.min(d.input.scrollHeight, 150)}px`; });
+    d.input.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); d.composer.requestSubmit(); }
+    });
+    // Single submit owner. DIRECT/GROUP routing happens here and nowhere else.
+    d.composer.addEventListener("submit", event => {
+      event.preventDefault();
+      CM.submitCurrentText().catch(error => console.error("submit failed", error));
+    });
+    const updateNow = () => { d.nowText.textContent = new Date().toLocaleString([], {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}); };
+    updateNow();
+    setInterval(updateNow, 30000);
+
+    try {
+      await CM.loadCharacters();
+      await CM.emit("ready");
+      await CM.loadHistory();
+      CM.updateComposerState();
+    } catch (error) {
+      d.chat.innerHTML = `<div class="error">页面初始化失败：${CM.escapeHtml(error.message)}</div>`;
+      console.error(error);
+    }
+  };
+
+  window.addEventListener("DOMContentLoaded", () => CM.bootstrap(), {once:true});
+})();

@@ -48,7 +48,7 @@ class PersonModel(ABC):
 
 
 class OpenAICompatibleModel(PersonModel):
-    def __init__(self, api_key: str, model: str = "deepseek-v4-flash", base_url: str = "https://opencode.ai/zen/go/v1", timeout: float = 120, temperature: float = 0.7, attempts: int = 2, session_id: str | None = None):
+    def __init__(self, api_key: str, model: str = "deepseek-flash", base_url: str = "https://opencode.ai/zen/go/v1", timeout: float = 120, temperature: float = 0.7, attempts: int = 2, session_id: str | None = None):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -136,12 +136,13 @@ class OpenAICompatibleModel(PersonModel):
     def _system_prompt(schema: type[BaseModel]) -> str:
         if schema is PersonReaction:
             return (
-                "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State 和 Behavioral Contract。"
-                "返回一个 JSON 对象。主要对外字段是 actions：0 到 3 个动作；通常使用 MESSAGE，单独表情可用 EMOJI，每个动作包含 type 和 message。"
+                "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State、Available Stickers 和 Behavioral Contract。"
+                "返回一个 JSON 对象。主要对外字段是 actions：0 到 3 个动作；通常使用 MESSAGE，单独字符表情可用 EMOJI；若输入列出了 Available Stickers，也可以用 STICKER 并填写 sticker_id。"
+                "STICKER 只能选择 Available Stickers 中真实存在的 id，不要编造 sticker_id，也不要为了显得活泼而强行发表情包。"
                 "没有真正想回复的内容时 actions 必须可以是空数组，不要因为用户发了消息就强行回复。"
                 "perception 和 reaction 在有明确内容时尽量各写一句非常短的开发者安全摘要；mental_state_update 没有持续变化时留空。"
                 "memory_candidates、intent_candidates 没有必要时都用空数组。不要输出隐藏思维链，也不要为了填字段编造内部活动。"
-                "对外表达必须像这个人物本人自然聊天：不要刻意惜字，标点、停顿、emoji、颜文字、自然追问和连续两三条消息都按 Persona 使用，但不要机械拆句或刷屏。"
+                "对外表达必须像这个人物本人自然聊天：不要刻意惜字，标点、停顿、emoji、颜文字、自然追问、表情包和连续两三条消息都按 Persona 使用，但不要机械拆句或刷屏。"
                 "不要把人物写成客服，也不要无条件迎合用户。"
             )
         if schema is DailyLifePlan:
@@ -176,7 +177,7 @@ class OpenAICompatibleModel(PersonModel):
                     if attempt + 1 >= self.attempts:
                         break
                     messages.append({"role": "assistant", "content": text if "text" in locals() else "{}"})
-                    messages.append({"role": "user", "content": "上一份 JSON 不符合目标对象约束。只修正结构：actions 为 0~3 个 MESSAGE/EMOJI；没有想回复时 actions=[]；非关键内部字段可以留空。"})
+                    messages.append({"role": "user", "content": "上一份 JSON 不符合目标对象约束。只修正结构：actions 为 0~3 个 MESSAGE/EMOJI/STICKER；STICKER 必须使用已列出的 sticker_id；没有想回复时 actions=[]；非关键内部字段可以留空。"})
             raise RuntimeError(f"Model returned invalid structured output after {self.attempts} attempts: {last_error}") from last_error
 
     def react(self, context: str) -> PersonReaction:

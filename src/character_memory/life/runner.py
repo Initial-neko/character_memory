@@ -23,9 +23,21 @@ class DayRunner:
         target = (base + timedelta(days=days_ahead)).date()
         return datetime.combine(target, time.min, tzinfo=base.tzinfo)
 
+    @staticmethod
+    def _next_simulation_day(base: datetime) -> datetime:
+        """Treat exact midnight as an unconsumed simulation cursor.
+
+        `run_next_day()` leaves world time at the next day's 00:00. The next
+        invocation must simulate that date, not add another day again.
+        """
+        midnight = base.replace(hour=0, minute=0, second=0, microsecond=0)
+        if base == midnight:
+            return midnight
+        return DayRunner._day_start(base, 1)
+
     def run_next_day(self, character_id: str, tick_hours: tuple[int, ...] = (9, 15, 20)):
         current = self.current_time(character_id)
-        day = self._day_start(current, 1)
+        day = self._next_simulation_day(current)
         self.store.set_world_time(character_id, day)
         life_events = self.life.simulate_day(character_id, day)
         tick_results = []

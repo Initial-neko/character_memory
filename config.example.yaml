@@ -22,5 +22,7 @@ db_path: "data/character-memory.db"
 # Empty means <db parent>/media. User-uploaded image bytes live here, not in SQLite.
 media_dir: ""
 media_max_bytes: 8388608
+# Empty means <db parent>/stickers. Web-imported sticker packs are global to all characters/groups.
+sticker_dir: ""
 persona_path: "personas/rin/persona.yaml"
 recall_limit: 8

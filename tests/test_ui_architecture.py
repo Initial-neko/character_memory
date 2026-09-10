@@ -35,3 +35,14 @@ def test_group_text_sticker_and_image_are_all_routed_by_conversation_mode():
     assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendSticker?.(sticker);' in stickers
     assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendImage?.(currentDraft, caption);' in images
     assert '/v1/groups/${encodeURIComponent(groupId)}/chat' in groups
+
+
+def test_group_routes_reuse_create_api_application_runtime_instead_of_building_another_bundle():
+    group_web = (ROOT / "src" / "character_memory" / "group_web.py").read_text(encoding="utf-8")
+    api = (ROOT / "src" / "character_memory" / "api.py").read_text(encoding="utf-8")
+
+    assert "GroupRuntimeManager" not in group_web
+    assert "build_app(" not in group_web
+    assert 'app.state, "character_memory"' in group_web
+    assert "app.state.character_memory" in api
+    assert "access.get_bundle()" in group_web

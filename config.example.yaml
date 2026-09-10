@@ -1,7 +1,8 @@
 # Copy to config.yaml. Prefer OPENCODE_GO_API_KEY instead of writing the key here.
 api_key: ""
 base_url: "https://opencode.ai/zen/go/v1"
-chat_model: "deepseek-v4-flash"
+# OpenCode Go model id for DeepSeek V4.1 Flash.
+chat_model: "deepseek-flash"
 chat_temperature: 0.7
 llm_attempts: 2
 

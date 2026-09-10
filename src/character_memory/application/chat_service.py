@@ -114,17 +114,18 @@ class ChatService:
                 metadata.get("sticker_id") or "-",
                 metadata.get("media_id") or "-",
             )
-            image_inputs = [vision_image_data_url] if vision_image_data_url else None
-            return runtime.handle(
-                Event(
-                    character_id=character_id,
-                    event_type=EventType.USER_MESSAGE,
-                    event_time=now,
-                    content=runtime_content,
-                    metadata=metadata,
-                ),
-                image_data_urls=image_inputs,
+            event = Event(
+                character_id=character_id,
+                event_type=EventType.USER_MESSAGE,
+                event_time=now,
+                content=runtime_content,
+                metadata=metadata,
             )
+            if vision_image_data_url:
+                return runtime.handle(event, image_data_urls=[vision_image_data_url])
+            # Keep the long-standing handle(event) contract untouched for every
+            # ordinary text/sticker turn and for lightweight test runtimes.
+            return runtime.handle(event)
 
     def dispatch_proactive_intent(
         self,

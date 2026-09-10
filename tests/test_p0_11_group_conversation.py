@@ -3,9 +3,9 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from character_memory.api import create_api
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService
 from character_memory.domain.models import (
@@ -92,30 +92,20 @@ def test_group_turn_has_one_shared_fact_and_independent_character_reactions(tmp_
     result = service.send(group.id, "终于修好了")
 
     events = service.repo.list_events(group.id)
-    assert [(item.actor_type, item.actor_id) for item in events] == [
-        ("USER", "user"),
-        ("CHARACTER", "rin"),
-    ]
+    assert [(item.actor_type, item.actor_id) for item in events] == [("USER", "user"), ("CHARACTER", "rin")]
     assert events[0].content == "终于修好了"
     assert events[1].content == "总算修好了。"
     assert result["speaker_order"] == ["rin", "momo"]
-
-    # The shared user fact is NOT copied into either character-local chat log.
     assert store.list_chat_events("rin") == []
     assert store.list_chat_events("momo") == []
-
-    # Later speakers see earlier character actions from the same group turn.
     assert "Rin: 总算修好了。" in model.contexts[1]
     assert model.sessions == [f"group:{group.id}:rin", f"group:{group.id}:momo"]
 
-    # Group memory remains private to the character and points back through metadata.
     rin_memories = store.list_memories("rin", include_embedding=False)
     assert len(rin_memories) == 1
     assert rin_memories[0].metadata["origin"] == "GROUP"
     assert rin_memories[0].metadata["conversation_id"] == group.id
     assert rin_memories[0].metadata["source_conversation_event_id"] == events[0].id
-
-    # P0.11 V0 explicitly discards group proactive intents.
     assert store.list_intents("rin") == []
 
     traces = service.repo.list_turn_traces(group.id, result["turn_id"])
@@ -124,19 +114,48 @@ def test_group_turn_has_one_shared_fact_and_independent_character_reactions(tmp_
     store.close()
 
 
+def test_group_user_sticker_is_one_shared_semantic_fact_not_direct_chat(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "sticker-group.db")
+    now = datetime(2026, 9, 10, 20, 0, tzinfo=timezone.utc)
+    embeddings = DeterministicEmbedding()
+    model = SequenceModel([PersonReaction(actions=[]), PersonReaction(actions=[])])
+    runtimes = {
+        "rin": runtime_for(store, embeddings, model, "Rin"),
+        "momo": runtime_for(store, embeddings, model, "Momo"),
+    }
+    service = GroupConversationService(store, runtimes, FixedClock(now), profiles=[{"id":"rin","name":"Rin"},{"id":"momo","name":"Momo"}])
+    group = service.create_group("表情群", ["rin", "momo"])
+
+    service.send(
+        group.id,
+        "",
+        sticker={"id":"happy_01","label":"开心","tags":["开心","好耶"],"description":"庆祝时使用"},
+    )
+
+    events = service.repo.list_events(group.id)
+    assert len(events) == 1
+    assert events[0].actor_type == "USER"
+    assert events[0].metadata["action"] == "STICKER"
+    assert events[0].metadata["sticker_id"] == "happy_01"
+    assert "开心" in events[0].content
+    assert "好耶" in events[0].content
+    assert store.list_chat_events("rin") == []
+    assert store.list_chat_events("momo") == []
+    assert all("用户发送表情包" in context for context in model.contexts)
+    store.close()
+
+
 def test_group_first_speaker_rotates_between_user_turns(tmp_path: Path):
     store = SQLiteStore(tmp_path / "rotate.db")
     now = datetime(2026, 9, 10, 20, 0, tzinfo=timezone.utc)
-    clock = FixedClock(now)
     embeddings = DeterministicEmbedding()
     model = SequenceModel([PersonReaction(actions=[]), PersonReaction(actions=[]), PersonReaction(actions=[]), PersonReaction(actions=[])])
     runtimes = {
         "rin": runtime_for(store, embeddings, model, "Rin"),
         "momo": runtime_for(store, embeddings, model, "Momo"),
     }
-    service = GroupConversationService(store, runtimes, clock)
+    service = GroupConversationService(store, runtimes, FixedClock(now))
     group = service.create_group("轮转群", ["rin", "momo"])
-
     first = service.send(group.id, "第一轮")
     second = service.send(group.id, "第二轮")
     assert first["speaker_order"] == ["rin", "momo"]
@@ -158,41 +177,52 @@ def test_group_create_and_list_api_do_not_initialize_model(tmp_path: Path):
         ),
         encoding="utf-8",
     )
-    app = FastAPI()
+    app = create_api(str(config))
     attach_group_routes(app, str(config))
-    manager = app.state.group_runtime_manager
-    profiles = manager.profiles()
-    assert len(profiles) >= 2
 
     with TestClient(app) as client:
-        response = client.post(
-            "/v1/groups",
-            json={"name": "测试群", "member_ids": [profiles[0]["id"], profiles[1]["id"]]},
-        )
+        assert client.get("/health").json()["runtime_loaded"] is False
+        profiles = client.get("/v1/characters").json()["characters"]
+        assert len(profiles) >= 2
+        response = client.post("/v1/groups", json={"name":"测试群","member_ids":[profiles[0]["id"],profiles[1]["id"]]})
         assert response.status_code == 200
         group = response.json()["group"]
         listed = client.get("/v1/groups")
         assert listed.status_code == 200
         assert listed.json()["groups"][0]["id"] == group["id"]
-        assert manager.bundle is None
+        assert client.get("/health").json()["runtime_loaded"] is False
 
 
-def test_p0_11_web_assets_are_loaded_and_group_submit_is_captured():
+def test_web_has_one_submit_owner_and_group_module_never_installs_competing_submit_handler():
     root = Path(__file__).resolve().parents[1]
     web = root / "src" / "character_memory" / "web"
     index = (web / "index.html").read_text(encoding="utf-8")
-    js_path = web / "p0_11.js"
-    js = js_path.read_text(encoding="utf-8")
+    core_path = web / "app.js"
+    core = core_path.read_text(encoding="utf-8")
+    groups_path = web / "groups.js"
+    groups = groups_path.read_text(encoding="utf-8")
     css = (web / "p0_11.css").read_text(encoding="utf-8")
 
-    assert "/static/p0_11.css" in index
-    assert "/static/p0_11.js" in index
-    assert 'composer.addEventListener("submit"' in js
-    assert "event.stopImmediatePropagation();" in js
-    assert "/v1/groups/" in js
+    assert "/static/groups.js" in index
+    assert "/static/p0_11.js" not in index
+    assert core.count('addEventListener("submit"') == 1
+    assert "CM.submitCurrentText" in core
+    assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message);' in core
+    assert 'addEventListener("submit"' not in groups
+    assert "stopImmediatePropagation" not in core
+    assert "stopImmediatePropagation" not in groups
+    assert "/v1/groups/" in groups
+    assert "sendSticker" in groups
     assert "group-message-sticker" in css
 
     node = shutil.which("node")
     if node:
-        checked = subprocess.run([node, "--check", str(js_path)], capture_output=True, text=True)
-        assert checked.returncode == 0, checked.stderr
+        for path in [core_path, web / "persona.js", web / "unread.js", web / "stickers.js", web / "images.js", groups_path, web / "intent.js"]:
+            checked = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+            assert checked.returncode == 0, f"{path.name}: {checked.stderr}"
+
+
+def test_old_version_override_scripts_are_removed():
+    web = Path(__file__).resolve().parents[1] / "src" / "character_memory" / "web"
+    for name in ["p0_5.js", "p0_6.js", "p0_7.js", "p0_8.js", "p0_11.js"]:
+        assert not (web / name).exists(), name

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+import threading
 import time
 from uuid import uuid4
 
-from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory
+from character_memory.domain.models import ActionType, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.runtime.context import compile_context
 
@@ -35,15 +36,29 @@ class GroupConversationService:
     writes only private derived cognition (Mental State / Memory) to its own
     character state. Visible character actions are appended back to the shared
     conversation, never copied into the character-local chat Event Log.
+
+    `turn_lock` must be application-shared for Web requests. It protects the
+    complete user-input -> all-member-reactions turn so a later user message
+    cannot leak into an earlier member's context.
     """
 
-    def __init__(self, store, runtimes: dict, clock, *, chat_service=None, profiles: list[dict] | None = None):
+    def __init__(
+        self,
+        store,
+        runtimes: dict,
+        clock,
+        *,
+        chat_service=None,
+        profiles: list[dict] | None = None,
+        turn_lock=None,
+    ):
         self.store = store
         self.runtimes = runtimes
         self.clock = clock
         self.chat_service = chat_service
         self.repo = GroupRepository(store)
         self.profile_by_id = {item["id"]: item for item in (profiles or [])}
+        self.turn_lock = turn_lock or threading.RLock()
 
     def _name(self, actor_id: str) -> str:
         if actor_id == "user":
@@ -118,7 +133,6 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
     def _member_lock(self, character_id: str):
         if self.chat_service is not None and hasattr(self.chat_service, "_lock_for"):
             return self.chat_service._lock_for(character_id)
-        import threading
         return threading.RLock()
 
     def _react_member(
@@ -134,7 +148,7 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
         with self._member_lock(character_id):
             now = source_event.event_time
             self.store.set_world_time(character_id, now)
-            state_before = self.store.get_mental_state(character_id)
+            state_before = self.store.get_mental_state(character_id, at=now)
             recall_query = str(source_event.metadata.get("display_text") or source_event.content or "").strip()
             if source_event.metadata.get("media_id"):
                 recall_query = f"{recall_query} 群聊图片".strip()
@@ -166,11 +180,11 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
             session_id = f"group:{group.id}:{character_id}"
             model_started = time.perf_counter()
             if image_data_url:
-                reaction = runtime.model.react_with_images_for_session(context, [image_data_url], session_id)
+                model_call = runtime.model.react_call_with_images_for_session(context, [image_data_url], session_id)
             else:
-                reaction = runtime.model.react_for_session(context, session_id)
+                model_call = runtime.model.react_call_for_session(context, session_id)
+            reaction = model_call.value
             reaction, sticker_decisions, image_decisions = runtime._sanitize_resource_actions(reaction)
-            # Group proactive intent is deliberately out of current V0 scope.
             reaction = reaction.model_copy(update={"intent_candidates": []})
             model_ms = _ms(model_started)
 
@@ -261,7 +275,10 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
                     "created_memory_ids": created_memory_ids,
                     "sticker_decisions": sticker_decisions,
                     "image_decisions": image_decisions,
-                    "model_used": getattr(runtime.model, "last_model", getattr(runtime.model, "model", "")),
+                    "model_messages": model_call.trace.request_messages,
+                    "raw_model_response": model_call.trace.response_text,
+                    "model_attempt": model_call.trace.attempt,
+                    "model_used": model_call.trace.model or str(getattr(runtime.model, "model", "") or ""),
                     "model_ms": model_ms,
                     "total_ms": _ms(started),
                 }
@@ -294,7 +311,7 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
                 "model_ms": model_ms,
             }
 
-    def send(
+    def _send_locked(
         self,
         conversation_id: str,
         message: str,
@@ -352,8 +369,6 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
             )
         )
 
-        # Rotate the first speaker between turns. Later characters see actions
-        # already emitted earlier in the same turn, preserving group causality.
         members = list(group.member_ids)
         user_turn_count = self.repo.count_user_turns(conversation_id)
         offset = (user_turn_count - 1) % len(members)
@@ -376,7 +391,12 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
                     image_data_url=image_data_url,
                 )
             )
-        logger.info("group.turn done conversation=%s turn=%s responders=%d", conversation_id, turn_id, sum(bool(item["actions"]) for item in decisions))
+        logger.info(
+            "group.turn done conversation=%s turn=%s responders=%d",
+            conversation_id,
+            turn_id,
+            sum(bool(item["actions"]) for item in decisions),
+        )
         return {
             "conversation_id": conversation_id,
             "turn_id": turn_id,
@@ -385,3 +405,23 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
             "decisions": decisions,
             "events": self.repo.list_events(conversation_id, limit=180),
         }
+
+    def send(
+        self,
+        conversation_id: str,
+        message: str,
+        *,
+        at: datetime | None = None,
+        image: dict | None = None,
+        image_data_url: str | None = None,
+        sticker: dict | None = None,
+    ) -> dict:
+        with self.turn_lock:
+            return self._send_locked(
+                conversation_id,
+                message,
+                at=at,
+                image=image,
+                image_data_url=image_data_url,
+                sticker=sticker,
+            )

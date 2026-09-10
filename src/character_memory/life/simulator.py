@@ -14,7 +14,7 @@ class LifeSimulator:
         self.runtime = runtime
 
     def _base(self, character_id: str, now: datetime):
-        state = self.store.get_mental_state(character_id)
+        state = self.store.get_mental_state(character_id, at=now)
         recent = self.store.list_events(character_id, limit=20, before=now)
         recent_memories = [m for m in self.store.list_memories(character_id) if m.event_time <= now][-12:]
         history = "\n".join(f"- {e.event_time.isoformat()} {e.event_type.value}: {e.content}" for e in recent) or "- 无"

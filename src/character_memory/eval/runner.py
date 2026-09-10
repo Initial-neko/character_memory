@@ -4,7 +4,18 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from character_memory.domain.models import Event, EventType
+from character_memory.domain.models import ActionType, Event, EventType
+
+
+_VISIBLE_ACTIONS = {
+    ActionType.REPLY,
+    ActionType.MINIMAL_RESPONSE,
+    ActionType.PROACTIVE_MESSAGE,
+    ActionType.MESSAGE,
+    ActionType.EMOJI,
+    ActionType.STICKER,
+    ActionType.IMAGE,
+}
 
 
 class EvalRunner:
@@ -45,7 +56,8 @@ class EvalRunner:
             observed_actions = action_types or ["NO_REPLY"]
             messages = [action.message or "" for action in actions if action.message]
             joined = "\n".join(messages)
-            silent = not messages
+            visible_actions = [action for action in actions if action.type in _VISIBLE_ACTIONS]
+            silent = not visible_actions
 
             ok = True
             allowed = case.get("allowed_actions")

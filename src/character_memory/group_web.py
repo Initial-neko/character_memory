@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+import threading
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -49,16 +50,26 @@ class GroupChatRequest(BaseModel):
 def attach_group_routes(app, config_path: str = "config.yaml"):
     """Attach group routes using the exact same application runtime as 1:1 chat.
 
-    P0.11 originally created a second lazy model/store holder here. That made
-    direct and group chat live in separate runtime lifecycles. `create_api()` now
-    exposes one internal application access object through `app.state`, so group
-    routes reuse the same bundle, locks, model, embeddings and SQLite lifecycle.
+    Direct and group chat share the same AppBundle. Per-group turn locks also
+    live for the application lifetime here; creating a new service per HTTP
+    request must never create a new concurrency boundary.
     """
     from fastapi import HTTPException
 
     access = getattr(app.state, "character_memory", None)
     if access is None:
         raise RuntimeError("create_api() must expose app.state.character_memory before group routes are attached")
+
+    turn_locks_guard = threading.Lock()
+    turn_locks: dict[str, threading.RLock] = {}
+
+    def turn_lock_for(conversation_id: str) -> threading.RLock:
+        with turn_locks_guard:
+            lock = turn_locks.get(conversation_id)
+            if lock is None:
+                lock = threading.RLock()
+                turn_locks[conversation_id] = lock
+            return lock
 
     def profiles_by_id() -> dict[str, dict[str, str]]:
         return {item["id"]: item for item in access.character_profiles()}
@@ -175,7 +186,6 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         if unknown:
             raise HTTPException(status_code=404, detail=f"Unknown characters: {', '.join(unknown)}")
         now = datetime.now().astimezone()
-        # Creating/listing groups is metadata-only and does not initialize LLMs.
         try:
             group = repo().create_group(req.name, req.member_ids, now)
         except ValueError as exc:
@@ -231,6 +241,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 bundle.clock,
                 chat_service=bundle.chat,
                 profiles=access.character_profiles(),
+                turn_lock=turn_lock_for(conversation_id),
             )
 
             selected_sticker = None

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, Event, EventType, Memory, MemoryCandidate, PersonReaction
-from character_memory.llm.client import PersonModel
+from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
@@ -11,11 +11,23 @@ from character_memory.storage.sqlite import SQLiteStore
 
 
 class FakeModel(PersonModel):
-    def react(self, context):
-        self.last_request_messages = [{"role": "system", "content": "test system"}, {"role": "user", "content": context}]
-        self.last_response_text = '{"action":"fake"}'
-        self.last_attempt = 1
+    @staticmethod
+    def _reaction():
         return PersonReaction(perception="看到了", reaction="记住", mental_state_update="有点在意", action=ActionDecision(type=ActionType.REPLY, reason="自然回应", message="知道了"), memory_candidates=[MemoryCandidate(content="用户今天说到家了", memory_type="SHARED", importance=.7)])
+
+    def react(self, context):
+        return self._reaction()
+
+    def react_call_for_session(self, context, session_id):
+        return ModelCallResult(
+            value=self._reaction(),
+            trace=ModelCallTrace(
+                request_messages=[{"role": "system", "content": "test system"}, {"role": "user", "content": context}],
+                response_text='{"action":"fake"}',
+                attempt=1,
+                model="fake-model",
+            ),
+        )
 
     def plan_day(self, context):
         return DailyLifePlan()
@@ -46,6 +58,9 @@ def test_runtime_writes_action_message_memory_and_trace(tmp_path):
     assert trace["source_event_id"] == result.event.id
     assert trace["conversation_id"] == "test-conversation"
     assert trace["model_messages"][1]["content"] == result.context
+    assert trace["raw_model_response"] == '{"action":"fake"}'
+    assert trace["model_attempt"] == 1
+    assert trace["model_used"] == "fake-model"
     assert trace["perception"] == "看到了"
     assert trace["reaction"] == "记住"
     assert trace["action"]["message"] == "知道了"

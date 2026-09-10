@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 import json
 import logging
 import re
@@ -15,6 +16,20 @@ from character_memory.domain.models import DailyLifePlan, DiaryResult, PersonRea
 
 
 logger = logging.getLogger("character_memory.llm")
+
+
+@dataclass(frozen=True)
+class ModelCallTrace:
+    request_messages: list[dict] = field(default_factory=list)
+    response_text: str = ""
+    attempt: int = 0
+    model: str = ""
+
+
+@dataclass(frozen=True)
+class ModelCallResult:
+    value: BaseModel
+    trace: ModelCallTrace
 
 
 class ProviderHTTPError(RuntimeError):
@@ -36,8 +51,19 @@ class PersonModel(ABC):
         return self.react(context)
 
     def react_with_images_for_session(self, context: str, image_data_urls: list[str], session_id: str) -> PersonReaction:
-        # Backward-compatible fallback for local/fake PersonModel implementations.
         return self.react_for_session(context, session_id)
+
+    def react_call_for_session(self, context: str, session_id: str) -> ModelCallResult:
+        return ModelCallResult(
+            value=self.react_for_session(context, session_id),
+            trace=ModelCallTrace(model=str(getattr(self, "model", "") or "")),
+        )
+
+    def react_call_with_images_for_session(self, context: str, image_data_urls: list[str], session_id: str) -> ModelCallResult:
+        return ModelCallResult(
+            value=self.react_with_images_for_session(context, image_data_urls, session_id),
+            trace=ModelCallTrace(model=str(getattr(self, "vision_model", getattr(self, "model", "")) or "")),
+        )
 
     def structured_with_images_for_session(
         self,
@@ -81,6 +107,8 @@ class OpenAICompatibleModel(PersonModel):
         self.attempts = attempts
         self.default_session_id = session_id or str(uuid.uuid4())
         self.session_id = self.default_session_id
+        # Compatibility/debug fields only. Runtime persistence must use the
+        # ModelCallTrace returned from the same invocation, never these globals.
         self.last_request_messages: list[dict] = []
         self.last_response_text: str = ""
         self.last_attempt: int = 0
@@ -132,7 +160,12 @@ class OpenAICompatibleModel(PersonModel):
             return str(uuid.uuid5(uuid.NAMESPACE_URL, f"character-memory:{conversation_id}"))
 
     def _headers(self, include_session: bool = True, conversation_id: str | None = None) -> dict[str, str]:
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "User-Agent": "character-memory/0.4", "x-opencode-client": "character-memory"}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "character-memory/0.4",
+            "x-opencode-client": "character-memory",
+        }
         if include_session:
             headers["x-opencode-session"] = self.resolve_session_id(conversation_id)
         return headers
@@ -178,21 +211,52 @@ class OpenAICompatibleModel(PersonModel):
         url = f"{self.base_url}/chat/completions"
         session_id = self.resolve_session_id(conversation_id)
         started = time.perf_counter()
-        logger.info("provider.request start model=%s session=%s messages=%d input_chars=%d json_object=%s", selected_model, session_id, len(messages), self._message_chars(messages), json_object)
+        logger.info(
+            "provider.request start model=%s session=%s messages=%d input_chars=%d json_object=%s",
+            selected_model,
+            session_id,
+            len(messages),
+            self._message_chars(messages),
+            json_object,
+        )
         try:
-            r = self.client.post(url, headers=self._headers(include_session=True, conversation_id=conversation_id), json=payload)
+            r = self.client.post(
+                url,
+                headers=self._headers(include_session=True, conversation_id=conversation_id),
+                json=payload,
+            )
         except Exception:
-            logger.exception("provider.request transport_error model=%s session=%s duration_ms=%d", selected_model, session_id, int((time.perf_counter() - started) * 1000))
+            logger.exception(
+                "provider.request transport_error model=%s session=%s duration_ms=%d",
+                selected_model,
+                session_id,
+                int((time.perf_counter() - started) * 1000),
+            )
             raise
         duration_ms = int((time.perf_counter() - started) * 1000)
         if r.is_error:
             request_id = r.headers.get("x-request-id") or r.headers.get("request-id") or r.headers.get("cf-ray") or ""
             body = self._error_body(r)
-            logger.error("provider.request failed status=%s model=%s session=%s duration_ms=%d request_id=%s body=%s", r.status_code, selected_model, session_id, duration_ms, request_id or "-", body)
+            logger.error(
+                "provider.request failed status=%s model=%s session=%s duration_ms=%d request_id=%s body=%s",
+                r.status_code,
+                selected_model,
+                session_id,
+                duration_ms,
+                request_id or "-",
+                body,
+            )
             raise ProviderHTTPError(r.status_code, url, body, request_id)
         data = r.json()
         text = data["choices"][0]["message"]["content"]
-        logger.info("provider.request done status=%s model=%s session=%s duration_ms=%d output_chars=%d", r.status_code, selected_model, session_id, duration_ms, len(text or ""))
+        logger.info(
+            "provider.request done status=%s model=%s session=%s duration_ms=%d output_chars=%d",
+            r.status_code,
+            selected_model,
+            session_id,
+            duration_ms,
+            len(text or ""),
+        )
         return text
 
     @staticmethod
@@ -221,7 +285,86 @@ class OpenAICompatibleModel(PersonModel):
             user_content.extend({"type": "image_url", "image_url": {"url": value}} for value in image_data_urls)
         else:
             user_content = prompt
-        return [{"role": "system", "content": self._system_prompt(schema)}, {"role": "user", "content": user_content}]
+        return [
+            {"role": "system", "content": self._system_prompt(schema)},
+            {"role": "user", "content": user_content},
+        ]
+
+    def _call_result(
+        self,
+        prompt: str,
+        schema: type[BaseModel],
+        *,
+        conversation_id: str | None = None,
+        image_data_urls: list[str] | None = None,
+    ) -> ModelCallResult:
+        with self._call_lock:
+            selected_model = self.vision_model if image_data_urls else self.model
+            if image_data_urls and not selected_model:
+                raise RuntimeError("vision_model is required for image input")
+            messages = self.preview_messages(prompt, schema, image_data_urls=image_data_urls)
+            last_error: Exception | None = None
+            for attempt in range(self.attempts):
+                safe_messages = self._trace_safe_messages(messages)
+                attempt_number = attempt + 1
+                # Keep these only for backward-compatible ad-hoc inspection.
+                self.last_request_messages = safe_messages
+                self.last_response_text = ""
+                self.last_attempt = attempt_number
+                self.last_model = selected_model
+                try:
+                    logger.info(
+                        "provider.structured_call attempt=%d/%d schema=%s model=%s images=%d",
+                        attempt_number,
+                        self.attempts,
+                        schema.__name__,
+                        selected_model,
+                        len(image_data_urls or []),
+                    )
+                    text = self._request(
+                        messages,
+                        conversation_id=conversation_id,
+                        json_object=True,
+                        model=selected_model,
+                    )
+                    self.last_response_text = text
+                    result = schema.model_validate(self._json(text))
+                    logger.info(
+                        "provider.structured_call valid attempt=%d schema=%s model=%s",
+                        attempt_number,
+                        schema.__name__,
+                        selected_model,
+                    )
+                    return ModelCallResult(
+                        value=result,
+                        trace=ModelCallTrace(
+                            request_messages=safe_messages,
+                            response_text=text,
+                            attempt=attempt_number,
+                            model=selected_model,
+                        ),
+                    )
+                except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
+                    last_error = exc
+                    logger.warning(
+                        "provider.structured_call invalid attempt=%d/%d schema=%s error=%s",
+                        attempt_number,
+                        self.attempts,
+                        schema.__name__,
+                        exc,
+                    )
+                    if attempt_number >= self.attempts:
+                        break
+                    messages.append({"role": "assistant", "content": text if "text" in locals() else "{}"})
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "上一份 JSON 不符合目标对象约束。只修正结构：actions 为 0~3 个 MESSAGE/EMOJI/STICKER/IMAGE；STICKER/IMAGE 必须使用已列出的资源 id；没有想回复时 actions=[]；非关键内部字段可以留空。",
+                        }
+                    )
+            raise RuntimeError(
+                f"Model returned invalid structured output after {self.attempts} attempts: {last_error}"
+            ) from last_error
 
     def _call(
         self,
@@ -231,34 +374,12 @@ class OpenAICompatibleModel(PersonModel):
         conversation_id: str | None = None,
         image_data_urls: list[str] | None = None,
     ):
-        with self._call_lock:
-            selected_model = self.vision_model if image_data_urls else self.model
-            if image_data_urls and not selected_model:
-                raise RuntimeError("vision_model is required for image input")
-            messages = self.preview_messages(prompt, schema, image_data_urls=image_data_urls)
-            self.last_request_messages = []
-            self.last_response_text = ""
-            self.last_attempt = 0
-            self.last_model = selected_model
-            last_error: Exception | None = None
-            for attempt in range(self.attempts):
-                try:
-                    self.last_request_messages = self._trace_safe_messages(messages)
-                    self.last_attempt = attempt + 1
-                    logger.info("provider.structured_call attempt=%d/%d schema=%s model=%s images=%d", attempt + 1, self.attempts, schema.__name__, selected_model, len(image_data_urls or []))
-                    text = self._request(messages, conversation_id=conversation_id, json_object=True, model=selected_model)
-                    self.last_response_text = text
-                    result = schema.model_validate(self._json(text))
-                    logger.info("provider.structured_call valid attempt=%d schema=%s model=%s", attempt + 1, schema.__name__, selected_model)
-                    return result
-                except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
-                    last_error = exc
-                    logger.warning("provider.structured_call invalid attempt=%d/%d schema=%s error=%s", attempt + 1, self.attempts, schema.__name__, exc)
-                    if attempt + 1 >= self.attempts:
-                        break
-                    messages.append({"role": "assistant", "content": text if "text" in locals() else "{}"})
-                    messages.append({"role": "user", "content": "上一份 JSON 不符合目标对象约束。只修正结构：actions 为 0~3 个 MESSAGE/EMOJI/STICKER/IMAGE；STICKER/IMAGE 必须使用已列出的资源 id；没有想回复时 actions=[]；非关键内部字段可以留空。"})
-            raise RuntimeError(f"Model returned invalid structured output after {self.attempts} attempts: {last_error}") from last_error
+        return self._call_result(
+            prompt,
+            schema,
+            conversation_id=conversation_id,
+            image_data_urls=image_data_urls,
+        ).value
 
     def react(self, context: str) -> PersonReaction:
         return self._call(context, PersonReaction)
@@ -267,7 +388,23 @@ class OpenAICompatibleModel(PersonModel):
         return self._call(context, PersonReaction, conversation_id=session_id)
 
     def react_with_images_for_session(self, context: str, image_data_urls: list[str], session_id: str) -> PersonReaction:
-        return self._call(context, PersonReaction, conversation_id=session_id, image_data_urls=image_data_urls)
+        return self._call(
+            context,
+            PersonReaction,
+            conversation_id=session_id,
+            image_data_urls=image_data_urls,
+        )
+
+    def react_call_for_session(self, context: str, session_id: str) -> ModelCallResult:
+        return self._call_result(context, PersonReaction, conversation_id=session_id)
+
+    def react_call_with_images_for_session(self, context: str, image_data_urls: list[str], session_id: str) -> ModelCallResult:
+        return self._call_result(
+            context,
+            PersonReaction,
+            conversation_id=session_id,
+            image_data_urls=image_data_urls,
+        )
 
     def structured_with_images_for_session(
         self,
@@ -276,7 +413,12 @@ class OpenAICompatibleModel(PersonModel):
         schema: type[BaseModel],
         session_id: str,
     ):
-        return self._call(prompt, schema, conversation_id=session_id, image_data_urls=image_data_urls)
+        return self._call(
+            prompt,
+            schema,
+            conversation_id=session_id,
+            image_data_urls=image_data_urls,
+        )
 
     def plan_day(self, context: str) -> DailyLifePlan:
         return self._call(context, DailyLifePlan)
@@ -288,18 +430,40 @@ class OpenAICompatibleModel(PersonModel):
         url = f"{self.base_url}/models"
         started = time.perf_counter()
         logger.info("provider.models start base_url=%s", self.base_url)
-        r = self.client.get(url, headers=self._headers(include_session=False), timeout=min(self.timeout, 30))
+        r = self.client.get(
+            url,
+            headers=self._headers(include_session=False),
+            timeout=min(self.timeout, 30),
+        )
         if r.is_error:
             request_id = r.headers.get("x-request-id") or r.headers.get("request-id") or r.headers.get("cf-ray") or ""
             body = self._error_body(r)
             raise ProviderHTTPError(r.status_code, url, body, request_id)
         data = r.json()
-        logger.info("provider.models done status=%s duration_ms=%d models_visible=%d", r.status_code, int((time.perf_counter() - started) * 1000), len(data.get("data", [])))
-        return {"ok": True, "model": self.model, "vision_model": self.vision_model, "models_visible": len(data.get("data", []))}
+        logger.info(
+            "provider.models done status=%s duration_ms=%d models_visible=%d",
+            r.status_code,
+            int((time.perf_counter() - started) * 1000),
+            len(data.get("data", [])),
+        )
+        return {
+            "ok": True,
+            "model": self.model,
+            "vision_model": self.vision_model,
+            "models_visible": len(data.get("data", [])),
+        }
 
     def check_remote_chat(self) -> dict:
-        text = self._request([{"role": "user", "content": "Reply exactly with OK"}], conversation_id="doctor")
-        return {"ok": True, "model": self.model, "reply": text[:120], "session_id": self.resolve_session_id("doctor")}
+        text = self._request(
+            [{"role": "user", "content": "Reply exactly with OK"}],
+            conversation_id="doctor",
+        )
+        return {
+            "ok": True,
+            "model": self.model,
+            "reply": text[:120],
+            "session_id": self.resolve_session_id("doctor"),
+        }
 
     def close(self) -> None:
         self.client.close()

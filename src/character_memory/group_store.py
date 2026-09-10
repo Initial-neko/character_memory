@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from character_memory.time_utils import epoch_us, parse_datetime
+
 
 class GroupConversation(BaseModel):
     id: str
@@ -29,7 +31,7 @@ class GroupEvent(BaseModel):
 
 
 class GroupRepository:
-    """Incremental P0.11 storage for shared group facts.
+    """Storage for shared group facts.
 
     Group events intentionally do not reuse the character-local `events` table.
     The same group fact must exist only once even though several characters may
@@ -51,8 +53,6 @@ class GroupRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
-                CREATE INDEX IF NOT EXISTS idx_conversations_updated
-                    ON conversations(updated_at DESC);
 
                 CREATE TABLE IF NOT EXISTS conversation_members(
                     conversation_id TEXT NOT NULL,
@@ -76,8 +76,6 @@ class GroupRepository:
                     content TEXT NOT NULL,
                     metadata_json TEXT NOT NULL DEFAULT '{}'
                 );
-                CREATE INDEX IF NOT EXISTS idx_conversation_events_time
-                    ON conversation_events(conversation_id, event_time, id);
                 CREATE INDEX IF NOT EXISTS idx_conversation_events_turn
                     ON conversation_events(conversation_id, turn_id, id);
 
@@ -95,6 +93,24 @@ class GroupRepository:
                     ON conversation_runtime_traces(conversation_id, turn_id, character_id);
                 """
             )
+            specs = [
+                ("conversations", "created_at", "created_at_epoch"),
+                ("conversations", "updated_at", "updated_at_epoch"),
+                ("conversation_members", "joined_at", "joined_at_epoch"),
+                ("conversation_events", "event_time", "event_time_epoch"),
+                ("conversation_runtime_traces", "created_at", "created_at_epoch"),
+            ]
+            for table, time_column, epoch_column in specs:
+                self.store._ensure_column_locked(table, epoch_column, "INTEGER")
+                self.store._backfill_epoch_locked(table, time_column, epoch_column)
+            self.store.conn.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_conversations_updated_epoch
+                    ON conversations(updated_at_epoch DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_conversation_events_time_epoch
+                    ON conversation_events(conversation_id, event_time_epoch, id);
+                """
+            )
             self.store.conn.commit()
 
     @staticmethod
@@ -106,7 +122,7 @@ class GroupRepository:
             actor_type=row["actor_type"],
             actor_id=row["actor_id"],
             event_type=row["event_type"],
-            event_time=datetime.fromisoformat(row["event_time"]),
+            event_time=parse_datetime(row["event_time"]),
             content=row["content"],
             metadata=json.loads(row["metadata_json"]),
         )
@@ -114,19 +130,20 @@ class GroupRepository:
     def create_group(self, name: str, member_ids: list[str], now: datetime) -> GroupConversation:
         conversation_id = f"group-{uuid4().hex[:12]}"
         cleaned_name = name.strip() or "新群聊"
+        stamp = epoch_us(now)
         with self.store.transaction():
             self.store.conn.execute(
-                "INSERT INTO conversations(id,type,name,created_at,updated_at) VALUES(?,?,?,?,?)",
-                (conversation_id, "GROUP", cleaned_name, now.isoformat(), now.isoformat()),
+                "INSERT INTO conversations(id,type,name,created_at,created_at_epoch,updated_at,updated_at_epoch) VALUES(?,?,?,?,?,?,?)",
+                (conversation_id, "GROUP", cleaned_name, now.isoformat(), stamp, now.isoformat(), stamp),
             )
             self.store.conn.execute(
-                "INSERT INTO conversation_members(conversation_id,actor_type,actor_id,position,joined_at) VALUES(?,?,?,?,?)",
-                (conversation_id, "USER", "user", 0, now.isoformat()),
+                "INSERT INTO conversation_members(conversation_id,actor_type,actor_id,position,joined_at,joined_at_epoch) VALUES(?,?,?,?,?,?)",
+                (conversation_id, "USER", "user", 0, now.isoformat(), stamp),
             )
             for position, character_id in enumerate(member_ids, start=1):
                 self.store.conn.execute(
-                    "INSERT INTO conversation_members(conversation_id,actor_type,actor_id,position,joined_at) VALUES(?,?,?,?,?)",
-                    (conversation_id, "CHARACTER", character_id, position, now.isoformat()),
+                    "INSERT INTO conversation_members(conversation_id,actor_type,actor_id,position,joined_at,joined_at_epoch) VALUES(?,?,?,?,?,?)",
+                    (conversation_id, "CHARACTER", character_id, position, now.isoformat(), stamp),
                 )
         return GroupConversation(
             id=conversation_id,
@@ -156,30 +173,31 @@ class GroupRepository:
             id=row["id"],
             name=row["name"],
             member_ids=self._member_ids(conversation_id),
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
+            created_at=parse_datetime(row["created_at"]),
+            updated_at=parse_datetime(row["updated_at"]),
         )
 
     def list_groups(self) -> list[GroupConversation]:
         with self.store._lock:
             rows = self.store.conn.execute(
-                "SELECT * FROM conversations WHERE type='GROUP' ORDER BY updated_at DESC, id DESC"
+                "SELECT * FROM conversations WHERE type='GROUP' ORDER BY updated_at_epoch DESC, id DESC"
             ).fetchall()
         return [
             GroupConversation(
                 id=row["id"],
                 name=row["name"],
                 member_ids=self._member_ids(row["id"]),
-                created_at=datetime.fromisoformat(row["created_at"]),
-                updated_at=datetime.fromisoformat(row["updated_at"]),
+                created_at=parse_datetime(row["created_at"]),
+                updated_at=parse_datetime(row["updated_at"]),
             )
             for row in rows
         ]
 
     def append_event(self, event: GroupEvent) -> GroupEvent:
+        stamp = epoch_us(event.event_time)
         with self.store._lock:
             cur = self.store.conn.execute(
-                "INSERT INTO conversation_events(conversation_id,turn_id,actor_type,actor_id,event_type,event_time,content,metadata_json) VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO conversation_events(conversation_id,turn_id,actor_type,actor_id,event_type,event_time,event_time_epoch,content,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)",
                 (
                     event.conversation_id,
                     event.turn_id,
@@ -187,13 +205,14 @@ class GroupRepository:
                     event.actor_id,
                     event.event_type,
                     event.event_time.isoformat(),
+                    stamp,
                     event.content,
                     json.dumps(event.metadata, ensure_ascii=False),
                 ),
             )
             self.store.conn.execute(
-                "UPDATE conversations SET updated_at=? WHERE id=?",
-                (event.event_time.isoformat(), event.conversation_id),
+                "UPDATE conversations SET updated_at=?,updated_at_epoch=? WHERE id=?",
+                (event.event_time.isoformat(), stamp, event.conversation_id),
             )
             self.store._maybe_commit()
         return event.model_copy(update={"id": cur.lastrowid})
@@ -224,16 +243,18 @@ class GroupRepository:
         created_at: datetime,
         trace: dict[str, Any],
     ) -> int:
+        stamp = epoch_us(created_at)
         with self.store._lock:
             cur = self.store.conn.execute(
-                "INSERT INTO conversation_runtime_traces(conversation_id,turn_id,character_id,source_conversation_event_id,created_at,trace_json) VALUES(?,?,?,?,?,?) "
-                "ON CONFLICT(source_conversation_event_id,character_id) DO UPDATE SET created_at=excluded.created_at,trace_json=excluded.trace_json",
+                "INSERT INTO conversation_runtime_traces(conversation_id,turn_id,character_id,source_conversation_event_id,created_at,created_at_epoch,trace_json) VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(source_conversation_event_id,character_id) DO UPDATE SET created_at=excluded.created_at,created_at_epoch=excluded.created_at_epoch,trace_json=excluded.trace_json",
                 (
                     conversation_id,
                     turn_id,
                     character_id,
                     source_conversation_event_id,
                     created_at.isoformat(),
+                    stamp,
                     json.dumps(trace, ensure_ascii=False),
                 ),
             )

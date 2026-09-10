@@ -29,6 +29,7 @@ class ActionType(str, Enum):
     # P0 visible expression primitives.
     MESSAGE = "MESSAGE"
     EMOJI = "EMOJI"
+    STICKER = "STICKER"
 
 
 class Event(BaseModel):
@@ -57,20 +58,30 @@ class ActionDecision(BaseModel):
     type: ActionType
     reason: str = ""
     message: str | None = None
+    sticker_id: str | None = None
 
     @model_validator(mode="after")
     def validate_message_contract(self):
-        expressive = {
+        message_actions = {
             ActionType.REPLY,
             ActionType.MINIMAL_RESPONSE,
             ActionType.PROACTIVE_MESSAGE,
             ActionType.MESSAGE,
             ActionType.EMOJI,
         }
-        if self.type in expressive and not (self.message or "").strip():
-            raise ValueError(f"{self.type.value} requires a non-empty message")
-        if self.type not in expressive:
+        if self.type in message_actions:
+            if not (self.message or "").strip():
+                raise ValueError(f"{self.type.value} requires a non-empty message")
+            self.sticker_id = None
+            return self
+        if self.type == ActionType.STICKER:
+            if not (self.sticker_id or "").strip():
+                raise ValueError("STICKER requires sticker_id")
             self.message = None
+            self.sticker_id = self.sticker_id.strip()
+            return self
+        self.message = None
+        self.sticker_id = None
         return self
 
 

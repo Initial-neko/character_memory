@@ -1,6 +1,9 @@
 const stickerCache = new Map();
 const stickerPackSelection = new Map();
 let stickerPanel = null;
+let stickerImportInput = null;
+let stickerImportFile = null;
+let stickerImportNotice = "";
 
 function stickerAsset(character, stickerId) {
   return `/v1/stickers/${encodeURIComponent(character)}/${encodeURIComponent(stickerId)}/asset`;
@@ -141,10 +144,14 @@ function wireStickerImageFallbacks() {
   });
 }
 
+function stickerPanelToolbar() {
+  return `<div class="sticker-panel-toolbar"><strong>表情包</strong><button type="button" class="sticker-import-open" data-sticker-import-open title="导入自定义表情包">＋</button></div>`;
+}
+
 function renderStickerPanel(stickers, character) {
   if (!stickerPanel) return;
   if (!stickers.length) {
-    stickerPanel.innerHTML = '<div class="sticker-loading">这个人物还没有可用表情包。</div>';
+    stickerPanel.innerHTML = `${stickerPanelToolbar()}<div class="sticker-loading">这个人物还没有可用表情包。</div>`;
     return;
   }
   const packs = stickerPacks(stickers);
@@ -156,7 +163,8 @@ function renderStickerPanel(stickers, character) {
     ? `<div class="sticker-pack-tabs">${packs.map(pack => `<button type="button" class="sticker-pack-tab${pack.id === active.id ? " active" : ""}" data-sticker-pack="${escapeHtml(pack.id)}" title="${escapeHtml(pack.name)}">${escapeHtml(pack.name)}</button>`).join("")}</div>`
     : "";
   const grid = `<div class="sticker-grid">${active.stickers.map(item => `<button type="button" class="sticker-choice" data-sticker-id="${escapeHtml(item.id)}" title="${escapeHtml(item.label)}"><img src="${escapeHtml(item.url || stickerAsset(character, item.id))}" alt="${escapeHtml(item.label)}"><span class="sticker-choice-fallback">表情</span></button>`).join("")}</div>`;
-  stickerPanel.innerHTML = `${tabs}${grid}<div class="sticker-pack-foot">${escapeHtml(active.name)} · ${active.stickers.length} 张</div>`;
+  const notice = stickerImportNotice ? `<div class="sticker-import-notice">${escapeHtml(stickerImportNotice)}</div>` : "";
+  stickerPanel.innerHTML = `${stickerPanelToolbar()}${notice}${tabs}${grid}<div class="sticker-pack-foot">${escapeHtml(active.name)} · ${active.stickers.length} 张</div>`;
   wireStickerImageFallbacks();
 }
 
@@ -171,6 +179,65 @@ async function openStickerPanel({refresh = false} = {}) {
     renderStickerPanel(stickers, requested);
   } catch (error) {
     stickerPanel.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function showStickerImportDialog(file) {
+  stickerImportFile = file;
+  stickerPanel.classList.remove("hidden");
+  stickerPanel.innerHTML = `
+    <div class="sticker-import-card">
+      <div class="sticker-import-title">导入自定义表情包</div>
+      <div class="sticker-import-file">${escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div>
+      <div class="sticker-import-help">推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>。如果只有图片，也可以让 AI Vision 自动生成聊天语义标签。</div>
+      <label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>仅缺标签时调用 Vision；已有标签不会重打</small></span></label>
+      <div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="sticker-import-confirm" data-sticker-import-confirm>导入</button></div>
+    </div>`;
+}
+
+function stickerImportErrorMessage(payload, status) {
+  const detail = payload?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map(item => item?.msg || JSON.stringify(item)).join("；");
+  return `导入失败（HTTP ${status}）`;
+}
+
+async function importStickerFile() {
+  const file = stickerImportFile;
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".zip")) {
+    stickerPanel.innerHTML = '<div class="error">目前 Web 导入使用 ZIP 格式。</div>';
+    return;
+  }
+  if (file.size > 64 * 1024 * 1024) {
+    stickerPanel.innerHTML = '<div class="error">表情包 ZIP 不能超过 64 MiB。</div>';
+    return;
+  }
+  const sentCharacter = characterId;
+  const autoTag = Boolean(stickerPanel.querySelector("[data-sticker-auto-tag]")?.checked);
+  stickerPanel.innerHTML = `<div class="sticker-loading"><strong>正在导入 ${escapeHtml(file.name)}</strong><br><span>${autoTag ? "缺标签的图片会调用 Vision，请不要关闭页面。" : "只读取 ZIP 内现有标签。"}</span></div>`;
+  const params = new URLSearchParams({
+    character_id: sentCharacter,
+    filename: file.name,
+    auto_tag: autoTag ? "true" : "false",
+  });
+  try {
+    const response = await fetch(`/v1/stickers/import?${params.toString()}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/zip"},
+      body: file,
+    });
+    let payload = {};
+    try { payload = await response.json(); } catch (_) { payload = {}; }
+    if (!response.ok) throw new Error(stickerImportErrorMessage(payload, response.status));
+    stickerCache.delete(sentCharacter);
+    const importedPack = payload.packs?.[0]?.id;
+    if (importedPack) stickerPackSelection.set(sentCharacter, importedPack);
+    stickerImportNotice = `已导入 ${payload.imported || 0} 张${payload.ai_tagged ? ` · AI 标注 ${payload.ai_tagged} 张` : ""} · AI 已可直接使用`;
+    stickerImportFile = null;
+    if (sentCharacter === characterId) await openStickerPanel({refresh:true});
+  } catch (error) {
+    stickerPanel.innerHTML = `${stickerPanelToolbar()}<div class="error">${escapeHtml(error.message)}</div><div class="sticker-import-retry"><button type="button" data-sticker-import-open>重新选择 ZIP</button></div>`;
   }
 }
 
@@ -228,11 +295,36 @@ stickerPanel = document.createElement("div");
 stickerPanel.className = "sticker-panel hidden";
 document.querySelector(".composer-wrap")?.appendChild(stickerPanel);
 
+stickerImportInput = document.createElement("input");
+stickerImportInput.type = "file";
+stickerImportInput.accept = ".zip,application/zip";
+stickerImportInput.className = "sticker-import-input";
+document.body.appendChild(stickerImportInput);
+
 stickerButton.addEventListener("click", event => {
   event.stopPropagation();
   if (stickerPanel.classList.contains("hidden")) openStickerPanel(); else closeStickerPanel();
 });
+stickerImportInput.addEventListener("change", () => {
+  const file = stickerImportInput.files?.[0];
+  if (file) showStickerImportDialog(file);
+  stickerImportInput.value = "";
+});
 stickerPanel.addEventListener("click", async event => {
+  if (event.target.closest("[data-sticker-import-open]")) {
+    stickerImportFile = null;
+    stickerImportInput.click();
+    return;
+  }
+  if (event.target.closest("[data-sticker-import-cancel]")) {
+    stickerImportFile = null;
+    await openStickerPanel();
+    return;
+  }
+  if (event.target.closest("[data-sticker-import-confirm]")) {
+    await importStickerFile();
+    return;
+  }
   const packButton = event.target.closest("[data-sticker-pack]");
   if (packButton) {
     stickerPackSelection.set(characterId, packButton.dataset.stickerPack);
@@ -296,5 +388,6 @@ drawerBody.addEventListener("click", event => {
 const p07SwitchCharacter = switchCharacter;
 switchCharacter = async function switchCharacterWithStickerReset(nextId) {
   closeStickerPanel();
+  stickerImportFile = null;
   return p07SwitchCharacter(nextId);
 };

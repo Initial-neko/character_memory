@@ -1,4 +1,5 @@
 const stickerCache = new Map();
+const stickerPackSelection = new Map();
 let stickerPanel = null;
 
 function stickerAsset(character, stickerId) {
@@ -28,19 +29,24 @@ addMessage = function addMessageWithSticker(message) {
   const trace = message.has_trace && message.source_event_id
     ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮开发详情">···</button>`
     : "";
+  const messageCharacter = message.character_id || characterId;
   const sticker = message.sticker || (message.sticker_id ? {
     id: message.sticker_id,
     label: message.sticker_label || "表情包",
-    url: stickerAsset(characterId, message.sticker_id),
+    url: stickerAsset(messageCharacter, message.sticker_id),
   } : null);
   const hideStoredStickerText = message.action === "STICKER" && sticker;
   const text = hideStoredStickerText ? "" : String(message.content || "").trim();
   const textHtml = text ? `<div class="bubble">${escapeHtml(text)}</div>` : "";
-  const stickerHtml = sticker?.url
-    ? `<div class="sticker-bubble"><img src="${escapeHtml(sticker.url)}" alt="${escapeHtml(sticker.label || "表情包")}" loading="lazy"></div>`
+  const stickerUrl = sticker?.url || (sticker?.id ? stickerAsset(messageCharacter, sticker.id) : "");
+  const stickerHtml = stickerUrl
+    ? `<div class="sticker-bubble"><img src="${escapeHtml(stickerUrl)}" alt="${escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>`
     : "";
   const proactive = message.proactive || message.action === "PROACTIVE_MESSAGE";
   row.innerHTML = `<div class="avatar">${escapeHtml(avatar)}</div><div class="bubble-wrap">${textHtml}${stickerHtml}<div class="message-meta"><span>${fmtTime(message.event_time)}</span>${latency}${proactive ? "<span>主动消息</span>" : ""}${thought}${trace}</div></div>`;
+  row.querySelectorAll(".sticker-bubble img").forEach(img => {
+    img.addEventListener("error", () => img.closest(".sticker-bubble")?.classList.add("broken"), {once:true});
+  });
   chat.appendChild(row);
   return row;
 };
@@ -76,6 +82,7 @@ revealActionsWithRhythm = async function revealActionsWithStickerRhythm(result, 
     const action = actions[index];
     addMessage({
       role: "assistant",
+      character_id: sentCharacter,
       content: action.message || "",
       sticker_id: action.sticker_id,
       sticker: action.sticker,
@@ -100,10 +107,16 @@ if (typeof previewFor === "function") {
   };
 }
 
-async function loadStickers(character = characterId) {
+async function loadStickers(character = characterId, {refresh = false} = {}) {
+  if (refresh) stickerCache.delete(character);
   if (stickerCache.has(character)) return stickerCache.get(character);
   const data = await api(`/v1/stickers?character_id=${encodeURIComponent(character)}`);
-  const values = data.stickers || [];
+  const values = (data.stickers || []).map(item => ({
+    ...item,
+    pack_id: item.pack_id || "default",
+    pack_name: item.pack_name || "内置",
+    url: item.url || stickerAsset(character, item.id),
+  }));
   stickerCache.set(character, values);
   return values;
 }
@@ -112,17 +125,50 @@ function closeStickerPanel() {
   if (stickerPanel) stickerPanel.classList.add("hidden");
 }
 
-async function openStickerPanel() {
+function stickerPacks(stickers) {
+  const packs = new Map();
+  for (const item of stickers) {
+    const id = item.pack_id || "default";
+    if (!packs.has(id)) packs.set(id, {id, name:item.pack_name || "表情包", stickers:[]});
+    packs.get(id).stickers.push(item);
+  }
+  return [...packs.values()];
+}
+
+function wireStickerImageFallbacks() {
+  stickerPanel?.querySelectorAll(".sticker-choice img").forEach(img => {
+    img.addEventListener("error", () => img.closest(".sticker-choice")?.classList.add("broken"), {once:true});
+  });
+}
+
+function renderStickerPanel(stickers, character) {
+  if (!stickerPanel) return;
+  if (!stickers.length) {
+    stickerPanel.innerHTML = '<div class="sticker-loading">这个人物还没有可用表情包。</div>';
+    return;
+  }
+  const packs = stickerPacks(stickers);
+  const remembered = stickerPackSelection.get(character);
+  const selected = packs.some(pack => pack.id === remembered) ? remembered : packs[0].id;
+  stickerPackSelection.set(character, selected);
+  const active = packs.find(pack => pack.id === selected) || packs[0];
+  const tabs = packs.length > 1
+    ? `<div class="sticker-pack-tabs">${packs.map(pack => `<button type="button" class="sticker-pack-tab${pack.id === active.id ? " active" : ""}" data-sticker-pack="${escapeHtml(pack.id)}" title="${escapeHtml(pack.name)}">${escapeHtml(pack.name)}</button>`).join("")}</div>`
+    : "";
+  const grid = `<div class="sticker-grid">${active.stickers.map(item => `<button type="button" class="sticker-choice" data-sticker-id="${escapeHtml(item.id)}" title="${escapeHtml(item.label)}"><img src="${escapeHtml(item.url || stickerAsset(character, item.id))}" alt="${escapeHtml(item.label)}"><span class="sticker-choice-fallback">表情</span></button>`).join("")}</div>`;
+  stickerPanel.innerHTML = `${tabs}${grid}<div class="sticker-pack-foot">${escapeHtml(active.name)} · ${active.stickers.length} 张</div>`;
+  wireStickerImageFallbacks();
+}
+
+async function openStickerPanel({refresh = false} = {}) {
   if (!stickerPanel) return;
   stickerPanel.classList.remove("hidden");
   stickerPanel.innerHTML = '<div class="sticker-loading">正在拿表情包…</div>';
   try {
     const requested = characterId;
-    const stickers = await loadStickers(requested);
+    const stickers = await loadStickers(requested, {refresh});
     if (requested !== characterId) return closeStickerPanel();
-    stickerPanel.innerHTML = stickers.length
-      ? `<div class="sticker-grid">${stickers.map(item => `<button type="button" class="sticker-choice" data-sticker-id="${escapeHtml(item.id)}" title="${escapeHtml(item.label)}"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.label)}"><span>${escapeHtml(item.label)}</span></button>`).join("")}</div>`
-      : '<div class="sticker-loading">这个人物还没有可用表情包。</div>';
+    renderStickerPanel(stickers, requested);
   } catch (error) {
     stickerPanel.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
   }
@@ -139,7 +185,7 @@ async function sendSticker(sticker) {
   updateHeader();
 
   if (chat.querySelector(".empty")) chat.innerHTML = "";
-  addMessage({role:"user", content:"", sticker, sticker_id:sticker.id, event_time:new Date().toISOString(), has_trace:false});
+  addMessage({role:"user", character_id:sentCharacter, content:"", sticker, sticker_id:sticker.id, event_time:new Date().toISOString(), has_trace:false});
   appendTypingForCurrent();
   scrollToBottom();
 
@@ -187,6 +233,13 @@ stickerButton.addEventListener("click", event => {
   if (stickerPanel.classList.contains("hidden")) openStickerPanel(); else closeStickerPanel();
 });
 stickerPanel.addEventListener("click", async event => {
+  const packButton = event.target.closest("[data-sticker-pack]");
+  if (packButton) {
+    stickerPackSelection.set(characterId, packButton.dataset.stickerPack);
+    const stickers = await loadStickers(characterId);
+    renderStickerPanel(stickers, characterId);
+    return;
+  }
   const button = event.target.closest("[data-sticker-id]");
   if (!button) return;
   const stickers = await loadStickers(characterId);

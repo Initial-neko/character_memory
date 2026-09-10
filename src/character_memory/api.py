@@ -4,6 +4,7 @@ import base64
 from datetime import datetime
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 import threading
 import time
 
@@ -11,13 +12,20 @@ from pydantic import BaseModel, Field, model_validator
 
 from character_memory.app import AppBundle, build_app, build_model
 from character_memory.application.proactive_service import ProactiveService
-from character_memory.config import discover_character_profiles, load_persona, load_settings, resolve_media_dir, resolve_persona_path
+from character_memory.config import (
+    discover_character_profiles,
+    load_persona,
+    load_settings,
+    resolve_media_dir,
+    resolve_persona_path,
+    resolve_sticker_dir,
+)
 from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
 from character_memory.logging_utils import configure_logging
 from character_memory.media import MediaStorage
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
-from character_memory.stickers import StickerTagSuggestion, import_sticker_bundle, load_sticker_catalog
+from character_memory.stickers import StickerTagSuggestion, import_sticker_bundle, load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -143,22 +151,28 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         known = ", ".join(profile["id"] for profile in character_profiles())
         raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}. Known: {known}")
 
+    def global_sticker_catalog():
+        profiles = character_profiles()
+        return load_global_sticker_catalog(
+            resolve_sticker_dir(settings),
+            persona_paths=[profile["persona_path"] for profile in profiles],
+        )
+
     def sticker_catalog_for(character_id: str):
-        profile = ensure_character(character_id)
+        ensure_character(character_id)
         if app_bundle is not None and hasattr(app_bundle, "runtimes"):
             runtime = app_bundle.runtimes.get(character_id)
             if runtime is not None and getattr(runtime, "sticker_catalog", None) is not None:
                 return runtime.sticker_catalog
-        return load_sticker_catalog(profile["persona_path"])
+        return global_sticker_catalog()
 
-    def refresh_runtime_sticker_catalog(character_id: str, catalog) -> None:
+    def refresh_runtime_sticker_catalog(catalog) -> None:
         if app_bundle is None or not hasattr(app_bundle, "runtimes"):
             return
-        runtime = app_bundle.runtimes.get(character_id)
-        if runtime is not None:
+        for runtime in app_bundle.runtimes.values():
             runtime.sticker_catalog = catalog
 
-    def ai_sticker_tagger(character_id: str):
+    def ai_sticker_tagger(scope: str = "global"):
         model_holder: dict[str, object] = {}
 
         def tagger(filename: str, payload: bytes) -> StickerTagSuggestion:
@@ -183,10 +197,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                     prompt,
                     [data_url],
                     StickerTagSuggestion,
-                    f"sticker-tag:{character_id}:{filename}",
+                    f"sticker-tag:{scope}:{filename}",
                 )
             except Exception as exc:
-                logger.exception("api.sticker auto_tag failed character=%s file=%s error=%s", character_id, filename, exc)
+                logger.exception("api.sticker auto_tag failed scope=%s file=%s error=%s", scope, filename, exc)
                 raise RuntimeError(f"AI 自动标注失败：{filename}: {exc}") from exc
             return result
 
@@ -209,7 +223,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             return None
         return {
             **sticker.model_dump(mode="json"),
-            "url": f"/v1/stickers/{character_id}/{sticker.id}/asset",
+            "url": f"/v1/stickers/{sticker.id}/asset",
         }
 
     def character_image_payload(character_id: str, image_id: str | None) -> dict | None:
@@ -334,13 +348,14 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
         character_id = profile["id"]
         persona = load_persona(profile["persona_path"])
-        stickers = load_sticker_catalog(profile["persona_path"])
+        stickers = global_sticker_catalog()
         images = load_image_catalog(profile["persona_path"])
         recall = VectorRecall(app_bundle.store, app_bundle.embeddings, limit=getattr(settings, "recall_limit", 8))
         runtime = PersonRuntime(app_bundle.store, recall, app_bundle.embeddings, app_bundle.model, persona, stickers, images)
         app_bundle.runtimes[character_id] = runtime
         if isinstance(getattr(app_bundle.chat, "runtime", None), dict):
             app_bundle.chat.runtime[character_id] = runtime
+        refresh_runtime_sticker_catalog(stickers)
         if hasattr(app_bundle, "characters"):
             app_bundle.characters[:] = discover_character_profiles(settings)
 
@@ -369,9 +384,23 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             proactive_stop.wait(_PROACTIVE_POLL_SECONDS)
         logger.info("api.proactive loop_stop")
 
-    app = FastAPI(title="character-memory", version="0.10.0")
+    app = FastAPI(title="character-memory", version="0.12.0")
     web_dir = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
+
+    # One application runtime access point. Feature route modules (group chat,
+    # future media tools) reuse this instead of creating their own model/store.
+    app.state.character_memory = SimpleNamespace(
+        settings=settings,
+        get_bundle=get_bundle,
+        require_bundle=require_bundle,
+        store=lambda: app_bundle.store if app_bundle is not None else read_store,
+        read_store=read_store,
+        media_storage=media_storage,
+        character_profiles=character_profiles,
+        global_sticker_catalog=global_sticker_catalog,
+        refresh_runtime_sticker_catalog=refresh_runtime_sticker_catalog,
+    )
 
     @app.on_event("startup")
     def _startup():
@@ -410,6 +439,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "embedding_provider": settings.embedding_provider,
             "db_path": settings.db_path,
             "media_dir": str(resolve_media_dir(settings)),
+            "sticker_dir": str(resolve_sticker_dir(settings)),
             "characters": len(character_profiles()),
             "proactive_poll_seconds": _PROACTIVE_POLL_SECONDS,
         }
@@ -423,43 +453,52 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         return {"characters": [character_summary(profile) for profile in character_profiles()]}
 
     @app.get("/v1/stickers")
-    def stickers(character_id: str = "rin"):
-        catalog = sticker_catalog_for(character_id)
+    def stickers(character_id: str | None = None):
+        # character_id is accepted for backward compatibility but user-imported
+        # stickers are now global and identical across direct/group chats.
+        if character_id:
+            ensure_character(character_id)
+        catalog = global_sticker_catalog()
         return {
-            "character_id": character_id,
+            "scope": "global",
             "source": catalog.source,
-            "stickers": catalog.public_items(character_id),
+            "stickers": catalog.public_items(),
         }
 
     @app.post("/v1/stickers/import")
     def import_stickers_web(
         archive: bytes = Body(..., media_type="application/zip"),
-        character_id: str = "rin",
+        character_id: str | None = None,
         filename: str = "stickers.zip",
         auto_tag: bool = True,
     ):
-        profile = ensure_character(character_id)
+        # character_id is intentionally ignored for storage ownership. Old Web
+        # clients may still send it; imports now belong to the global user library.
+        if character_id:
+            ensure_character(character_id)
+        profiles = character_profiles()
+        compatibility_persona = profiles[0]["persona_path"] if profiles else settings.persona_path
         pack_name = Path(filename).stem.strip()[:80] or "自定义表情包"
         started = time.perf_counter()
         try:
             result = import_sticker_bundle(
-                profile["persona_path"],
+                compatibility_persona,
                 archive,
-                tagger=ai_sticker_tagger(character_id) if auto_tag else None,
+                tagger=ai_sticker_tagger("global") if auto_tag else None,
                 default_pack_name=pack_name,
+                target_dir=resolve_sticker_dir(settings),
             )
-            catalog = load_sticker_catalog(profile["persona_path"])
-            refresh_runtime_sticker_catalog(character_id, catalog)
+            catalog = global_sticker_catalog()
+            refresh_runtime_sticker_catalog(catalog)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except HTTPException:
             raise
         except Exception as exc:
-            logger.exception("api.sticker import_failed character=%s file=%s error=%s", character_id, filename, exc)
+            logger.exception("api.sticker import_failed scope=global file=%s error=%s", filename, exc)
             raise HTTPException(status_code=502, detail=f"表情包导入失败：{exc}") from exc
         logger.info(
-            "api.sticker imported character=%s file=%s count=%d ai_tagged=%d duration_ms=%.1f",
-            character_id,
+            "api.sticker imported scope=global file=%s count=%d ai_tagged=%d duration_ms=%.1f",
             filename,
             result["imported"],
             result["ai_tagged"],
@@ -467,14 +506,23 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         )
         return {
             **result,
-            "character_id": character_id,
+            "scope": "global",
             "source": catalog.source,
-            "stickers": catalog.public_items(character_id),
+            "stickers": catalog.public_items(),
         }
 
+    @app.get("/v1/stickers/{sticker_id}/asset")
+    def global_sticker_asset(sticker_id: str):
+        catalog = global_sticker_catalog()
+        path = catalog.asset_path(sticker_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="sticker not found")
+        return FileResponse(path)
+
     @app.get("/v1/stickers/{character_id}/{sticker_id}/asset")
-    def sticker_asset(character_id: str, sticker_id: str):
-        catalog = sticker_catalog_for(character_id)
+    def legacy_sticker_asset(character_id: str, sticker_id: str):
+        ensure_character(character_id)
+        catalog = global_sticker_catalog()
         path = catalog.asset_path(sticker_id)
         if path is None:
             raise HTTPException(status_code=404, detail="sticker not found")
@@ -683,7 +731,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "mental_state": read_store.get_mental_state(character_id),
             "memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in reversed(memories)],
             "intents": intents,
-            "stickers": stickers.public_items(character_id),
+            "stickers": stickers.public_items(),
             "sticker_source": stickers.source,
             "images": images.public_items(character_id),
             "image_source": images.source,

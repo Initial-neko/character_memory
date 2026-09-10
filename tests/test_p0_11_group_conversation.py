@@ -1,5 +1,10 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
+import subprocess
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService
@@ -12,6 +17,7 @@ from character_memory.domain.models import (
     MemoryCandidate,
     PersonReaction,
 )
+from character_memory.group_web import attach_group_routes
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -138,11 +144,45 @@ def test_group_first_speaker_rotates_between_user_turns(tmp_path: Path):
     store.close()
 
 
+def test_group_create_and_list_api_do_not_initialize_model(tmp_path: Path):
+    root = Path(__file__).resolve().parents[1]
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                'api_key: ""',
+                'embedding_provider: "deterministic"',
+                f'db_path: "{(tmp_path / "group-api.db").as_posix()}"',
+                f'persona_path: "{(root / "personas" / "rin" / "persona.yaml").as_posix()}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    app = FastAPI()
+    attach_group_routes(app, str(config))
+    manager = app.state.group_runtime_manager
+    profiles = manager.profiles()
+    assert len(profiles) >= 2
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/groups",
+            json={"name": "测试群", "member_ids": [profiles[0]["id"], profiles[1]["id"]]},
+        )
+        assert response.status_code == 200
+        group = response.json()["group"]
+        listed = client.get("/v1/groups")
+        assert listed.status_code == 200
+        assert listed.json()["groups"][0]["id"] == group["id"]
+        assert manager.bundle is None
+
+
 def test_p0_11_web_assets_are_loaded_and_group_submit_is_captured():
     root = Path(__file__).resolve().parents[1]
     web = root / "src" / "character_memory" / "web"
     index = (web / "index.html").read_text(encoding="utf-8")
-    js = (web / "p0_11.js").read_text(encoding="utf-8")
+    js_path = web / "p0_11.js"
+    js = js_path.read_text(encoding="utf-8")
     css = (web / "p0_11.css").read_text(encoding="utf-8")
 
     assert "/static/p0_11.css" in index
@@ -151,3 +191,8 @@ def test_p0_11_web_assets_are_loaded_and_group_submit_is_captured():
     assert "event.stopImmediatePropagation();" in js
     assert "/v1/groups/" in js
     assert "group-message-sticker" in css
+
+    node = shutil.which("node")
+    if node:
+        checked = subprocess.run([node, "--check", str(js_path)], capture_output=True, text=True)
+        assert checked.returncode == 0, checked.stderr

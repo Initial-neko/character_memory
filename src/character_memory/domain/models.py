@@ -58,12 +58,20 @@ class Memory(BaseModel):
 class ActionDecision(BaseModel):
     type: ActionType
     reason: str = ""
-    # Providers occasionally drift to `text` for a textual action. Accept that
-    # narrow alias at the schema boundary, but keep `message` as our canonical
-    # persisted/API field and still reject genuinely empty MESSAGE/EMOJI actions.
-    message: str | None = Field(default=None, validation_alias=AliasChoices("message", "text"))
+    # Some providers drift among `message`, `text` and `content` for textual
+    # actions. Normalize those narrow aliases at the schema boundary while
+    # keeping `message` as the only canonical persisted/API field.
+    message: str | None = Field(default=None, validation_alias=AliasChoices("message", "text", "content"))
     sticker_id: str | None = None
     image_id: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_nullable_reason(cls, value):
+        if isinstance(value, dict) and value.get("reason") is None:
+            value = dict(value)
+            value["reason"] = ""
+        return value
 
     @model_validator(mode="after")
     def validate_message_contract(self):
@@ -139,10 +147,26 @@ class PersonReaction(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def require_explicit_action_contract(cls, value):
-        if isinstance(value, dict) and "actions" not in value and "action" not in value:
+    def normalize_provider_shape(cls, value):
+        if not isinstance(value, dict):
+            return value
+
+        normalized = dict(value)
+        # Providers often use JSON null to mean "no update / no summary". Internally
+        # these fields stay canonical strings so Runtime code never has to branch on None.
+        for key in ("perception", "reaction", "mental_state_update"):
+            if normalized.get(key) is None:
+                normalized[key] = ""
+
+        # The same applies to optional candidate arrays. Treat an explicit null as
+        # an empty list, but still require an explicit action contract below.
+        for key in ("actions", "memory_candidates", "intent_candidates"):
+            if key in normalized and normalized[key] is None:
+                normalized[key] = []
+
+        if "actions" not in normalized and "action" not in normalized:
             raise ValueError("PersonReaction requires explicit actions (including []) or legacy action")
-        return value
+        return normalized
 
     @model_validator(mode="after")
     def normalize_action_contract(self):

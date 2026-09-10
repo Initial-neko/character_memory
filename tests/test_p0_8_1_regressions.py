@@ -24,6 +24,56 @@ def test_provider_text_alias_is_normalized_to_canonical_message():
     assert "text" not in dumped["actions"][0]
 
 
+def test_provider_content_alias_and_null_summaries_are_normalized():
+    # Regression for a real DeepSeek/OpenCode response shape observed in local chat:
+    # mental_state_update=null and MESSAGE content stored under `content`.
+    result = PersonReaction.model_validate(
+        {
+            "perception": None,
+            "reaction": None,
+            "mental_state_update": None,
+            "actions": [
+                {"type": "MESSAGE", "content": "。你在哇什么。", "reason": None},
+            ],
+            "memory_candidates": None,
+            "intent_candidates": None,
+        }
+    )
+
+    assert result.perception == ""
+    assert result.reaction == ""
+    assert result.mental_state_update == ""
+    assert result.actions[0].message == "。你在哇什么。"
+    assert result.actions[0].reason == ""
+    assert result.memory_candidates == []
+    assert result.intent_candidates == []
+    dumped = result.model_dump(mode="json")
+    assert dumped["actions"][0]["message"] == "。你在哇什么。"
+    assert "content" not in dumped["actions"][0]
+
+
+def test_null_actions_is_treated_as_explicit_silence_but_missing_contract_is_not():
+    result = PersonReaction.model_validate({"actions": None})
+    assert result.actions == []
+    assert result.action.type == ActionType.NO_REPLY
+
+    try:
+        PersonReaction.model_validate({"mental_state_update": None})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("missing actions/action must still be rejected")
+
+
+def test_empty_message_remains_invalid_after_alias_normalization():
+    try:
+        PersonReaction.model_validate({"actions": [{"type": "MESSAGE", "content": "   "}]})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("empty MESSAGE must remain invalid")
+
+
 def test_sticker_css_does_not_break_original_fixed_composer_layout():
     css = (WEB / "p0_7.css").read_text(encoding="utf-8")
     assert ".composer-wrap { position: relative; }" not in css

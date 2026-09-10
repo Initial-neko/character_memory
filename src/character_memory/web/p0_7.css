@@ -14,17 +14,19 @@
 
 .sticker-panel {
   position: absolute;
-  left: 18px;
-  right: 18px;
+  left: 50%;
+  right: auto;
   bottom: calc(100% - 2px);
   z-index: 20;
-  max-height: 330px;
+  width: min(390px, calc(100% - 48px));
+  max-height: 286px;
   overflow: auto;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid rgba(120, 113, 108, 0.18);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 18px 45px rgba(41, 37, 36, 0.16);
+  transform: translateX(-50%);
 }
 
 .sticker-panel.hidden { display: none; }
@@ -32,33 +34,43 @@
 
 .sticker-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(6, 52px);
+  justify-content: center;
+  gap: 6px;
 }
 
 .sticker-choice {
-  min-width: 0;
-  padding: 8px 6px;
+  width: 52px;
+  min-width: 52px;
+  height: 52px;
+  padding: 3px;
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: 10px;
   background: transparent;
   cursor: pointer;
 }
 
 .sticker-choice:hover { background: #faf7f5; border-color: #ebe4df; }
-.sticker-choice img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; }
-.sticker-choice span { display: block; overflow: hidden; margin-top: 4px; color: #786b65; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.sticker-choice img {
+  display: block;
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+}
+.sticker-choice span { display: none; }
 
 .sticker-bubble {
-  width: min(168px, 48vw);
-  padding: 4px;
+  width: auto;
+  max-width: 112px;
+  padding: 0;
 }
 
 .sticker-bubble img {
   display: block;
-  width: 100%;
+  width: auto;
+  max-width: 112px;
   height: auto;
-  max-height: 190px;
+  max-height: 112px;
   object-fit: contain;
 }
 
@@ -77,9 +89,9 @@
 .intent-source { margin-top: 10px; padding: 0; border: 0; background: none; color: #6d5dca; cursor: pointer; font-size: 12px; }
 .intent-reason { margin-top: 8px; color: #8b817b; font-size: 12px; line-height: 1.45; }
 
-.composer-wrap { position: relative; }
-
 @media (max-width: 720px) {
-  .sticker-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .sticker-panel { left: 10px; right: 10px; }
+  .sticker-panel { width: min(336px, calc(100% - 20px)); }
+  .sticker-grid { grid-template-columns: repeat(5, 52px); }
+  .sticker-bubble,
+  .sticker-bubble img { max-width: 96px; max-height: 96px; }
 }

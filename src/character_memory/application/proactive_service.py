@@ -14,6 +14,7 @@ _EXPRESSIVE = {
     ActionType.MINIMAL_RESPONSE,
     ActionType.MESSAGE,
     ActionType.EMOJI,
+    ActionType.STICKER,
 }
 
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class Settings(BaseModel):
     api_key: str = ""
     base_url: str = "https://opencode.ai/zen/go/v1"
-    chat_model: str = "deepseek-v4-flash"
+    chat_model: str = "deepseek-flash"
     chat_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     llm_attempts: int = Field(default=2, ge=1, le=4)
 

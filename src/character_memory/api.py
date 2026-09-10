@@ -10,9 +10,11 @@ from pydantic import BaseModel, Field, model_validator
 
 from character_memory.app import AppBundle, build_app, build_model
 from character_memory.application.proactive_service import ProactiveService
-from character_memory.config import discover_character_profiles, load_persona, load_settings, resolve_persona_path
+from character_memory.config import discover_character_profiles, load_persona, load_settings, resolve_media_dir, resolve_persona_path
 from character_memory.domain.models import EventType
+from character_memory.images import load_image_catalog
 from character_memory.logging_utils import configure_logging
+from character_memory.media import MediaStorage
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
 from character_memory.stickers import load_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
@@ -26,17 +28,25 @@ def _ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
+class ChatImageRequest(BaseModel):
+    filename: str = Field(default="image", min_length=1, max_length=180)
+    data_url: str = Field(min_length=16)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(default="", max_length=12000)
     sticker_id: str | None = Field(default=None, max_length=64)
+    image: ChatImageRequest | None = None
     character_id: str = "rin"
     conversation_id: str = "default"
     at: datetime | None = None
 
     @model_validator(mode="after")
     def require_content(self):
-        if not self.message.strip() and not (self.sticker_id or "").strip():
-            raise ValueError("message or sticker_id is required")
+        if not self.message.strip() and not (self.sticker_id or "").strip() and self.image is None:
+            raise ValueError("message, sticker_id or image is required")
+        if self.sticker_id and self.image is not None:
+            raise ValueError("send a sticker or image in one user turn, not both")
         return self
 
 
@@ -67,6 +77,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     settings = bundle.settings if bundle is not None else load_settings(config_path)
     app_bundle = bundle
     read_store = bundle.store if bundle is not None else SQLiteStore(settings.db_path)
+    media_storage = MediaStorage(
+        resolve_media_dir(settings),
+        max_bytes=int(getattr(settings, "media_max_bytes", 8 * 1024 * 1024)),
+    )
     runtime_error: str | None = None
     init_lock = threading.Lock()
     character_write_lock = threading.RLock()
@@ -85,8 +99,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 app_bundle = build_app(config_path)
                 runtime_error = None
                 logger.info(
-                    "api.runtime lazy_init ready model=%s characters=%d total_ms=%.1f",
+                    "api.runtime lazy_init ready model=%s vision_model=%s characters=%d total_ms=%.1f",
                     app_bundle.settings.chat_model,
+                    app_bundle.settings.vision_model,
                     len(app_bundle.characters),
                     app_bundle.init_timings.get("total_ms", 0.0),
                 )
@@ -128,6 +143,14 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 return runtime.sticker_catalog
         return load_sticker_catalog(profile["persona_path"])
 
+    def image_catalog_for(character_id: str):
+        profile = ensure_character(character_id)
+        if app_bundle is not None and hasattr(app_bundle, "runtimes"):
+            runtime = app_bundle.runtimes.get(character_id)
+            if runtime is not None and getattr(runtime, "image_catalog", None) is not None:
+                return runtime.image_catalog
+        return load_image_catalog(profile["persona_path"])
+
     def sticker_payload(character_id: str, sticker_id: str | None) -> dict | None:
         if not sticker_id:
             return None
@@ -140,11 +163,42 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "url": f"/v1/stickers/{character_id}/{sticker.id}/asset",
         }
 
+    def character_image_payload(character_id: str, image_id: str | None) -> dict | None:
+        if not image_id:
+            return None
+        catalog = image_catalog_for(character_id)
+        image = catalog.get(image_id)
+        if image is None or catalog.asset_path(image_id) is None:
+            return None
+        return {
+            **image.model_dump(mode="json"),
+            "source": "CHARACTER_LIBRARY",
+            "url": f"/v1/images/{character_id}/{image.id}/asset",
+        }
+
+    def uploaded_media_payload(media_id: str | None) -> dict | None:
+        if not media_id:
+            return None
+        asset = read_store.get_media_asset(media_id)
+        if asset is None or media_storage.asset_path(asset) is None:
+            return None
+        return {
+            "id": asset.id,
+            "label": asset.original_name,
+            "mime_type": asset.mime_type,
+            "size_bytes": asset.size_bytes,
+            "source": asset.source,
+            "url": f"/v1/media/{asset.id}",
+        }
+
     def action_payload(character_id: str, action) -> dict:
         item = action.model_dump(mode="json")
         sticker = sticker_payload(character_id, item.get("sticker_id"))
         if sticker is not None:
             item["sticker"] = sticker
+        image = character_image_payload(character_id, item.get("image_id"))
+        if image is not None:
+            item["image"] = image
         return item
 
     def message_payload(event) -> dict:
@@ -158,13 +212,23 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             source_event_id = event.metadata.get("source_event_id")
             source_event_type = event.metadata.get("source_event_type")
             content = event.content
+
         sticker_id = event.metadata.get("sticker_id")
         sticker = sticker_payload(event.character_id, sticker_id)
+        character_image_id = event.metadata.get("image_id")
+        image = character_image_payload(event.character_id, character_image_id)
+        media_id = event.metadata.get("media_id")
+        if media_id:
+            image = uploaded_media_payload(media_id)
+
         preview = content
-        if sticker is not None and not str(content or "").strip():
+        if sticker is not None and (not str(content or "").strip() or event.metadata.get("action") == "STICKER"):
             preview = f"[表情包] {sticker['label']}"
-        elif sticker is not None and event.metadata.get("action") == "STICKER":
-            preview = f"[表情包] {sticker['label']}"
+        if image is not None and (not str(content or "").strip() or event.metadata.get("action") == "IMAGE" or media_id):
+            prefix = str(content or "").strip()
+            media_preview = f"[图片] {image['label']}"
+            preview = f"{prefix} {media_preview}".strip() if prefix else media_preview
+
         return {
             "id": event.id,
             "role": role,
@@ -175,6 +239,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "action_index": event.metadata.get("action_index"),
             "sticker_id": sticker_id,
             "sticker": sticker,
+            "image_id": character_image_id,
+            "media_id": media_id,
+            "image": image,
             "source_event_type": source_event_type,
             "source_event_id": source_event_id,
             "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,
@@ -219,8 +286,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         character_id = profile["id"]
         persona = load_persona(profile["persona_path"])
         stickers = load_sticker_catalog(profile["persona_path"])
+        images = load_image_catalog(profile["persona_path"])
         recall = VectorRecall(app_bundle.store, app_bundle.embeddings, limit=getattr(settings, "recall_limit", 8))
-        runtime = PersonRuntime(app_bundle.store, recall, app_bundle.embeddings, app_bundle.model, persona, stickers)
+        runtime = PersonRuntime(app_bundle.store, recall, app_bundle.embeddings, app_bundle.model, persona, stickers, images)
         app_bundle.runtimes[character_id] = runtime
         if isinstance(getattr(app_bundle.chat, "runtime", None), dict):
             app_bundle.chat.runtime[character_id] = runtime
@@ -252,7 +320,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             proactive_stop.wait(_PROACTIVE_POLL_SECONDS)
         logger.info("api.proactive loop_stop")
 
-    app = FastAPI(title="character-memory", version="0.8.0")
+    app = FastAPI(title="character-memory", version="0.9.0")
     web_dir = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
@@ -289,8 +357,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "runtime_loaded": app_bundle is not None,
             "runtime_error": runtime_error,
             "model": settings.chat_model,
+            "vision_model": getattr(settings, "vision_model", ""),
             "embedding_provider": settings.embedding_provider,
             "db_path": settings.db_path,
+            "media_dir": str(resolve_media_dir(settings)),
             "characters": len(character_profiles()),
             "proactive_poll_seconds": _PROACTIVE_POLL_SECONDS,
         }
@@ -319,6 +389,33 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         if path is None:
             raise HTTPException(status_code=404, detail="sticker not found")
         return FileResponse(path)
+
+    @app.get("/v1/images")
+    def images(character_id: str = "rin"):
+        catalog = image_catalog_for(character_id)
+        return {
+            "character_id": character_id,
+            "source": catalog.source,
+            "images": catalog.public_items(character_id),
+        }
+
+    @app.get("/v1/images/{character_id}/{image_id}/asset")
+    def character_image_asset(character_id: str, image_id: str):
+        catalog = image_catalog_for(character_id)
+        path = catalog.asset_path(image_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="image not found")
+        return FileResponse(path)
+
+    @app.get("/v1/media/{media_id}")
+    def uploaded_media_asset(media_id: str):
+        asset = read_store.get_media_asset(media_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="media not found")
+        path = media_storage.asset_path(asset)
+        if path is None:
+            raise HTTPException(status_code=404, detail="media file not found")
+        return FileResponse(path, media_type=asset.mime_type, filename=asset.original_name)
 
     @app.post("/v1/characters/draft")
     def generate_character_draft(req: PersonaDraftRequest):
@@ -386,17 +483,37 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
         api_started = time.perf_counter()
         was_unloaded = app_bundle is None
+        current = require_bundle()
+        init_ms = current.init_timings.get("total_ms", 0.0) if was_unloaded else 0.0
+
+        selected_image = None
+        vision_data_url = None
+        if req.image is not None:
+            upload_time = req.at or datetime.now().astimezone()
+            try:
+                asset, vision_data_url = media_storage.save_data_url(
+                    character_id=req.character_id,
+                    original_name=req.image.filename,
+                    data_url=req.image.data_url,
+                    created_at=upload_time,
+                )
+                current.store.add_media_asset(asset)
+                selected_image = asset.model_dump(mode="json")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except Exception as exc:
+                logger.exception("api.media save_failed character=%s error=%s", req.character_id, exc)
+                raise HTTPException(status_code=500, detail=f"图片保存失败：{exc}") from exc
+
         logger.info(
-            "api.chat start character=%s conversation=%s chars=%d sticker=%s runtime_loaded=%s",
+            "api.chat start character=%s conversation=%s chars=%d sticker=%s image=%s runtime_loaded=%s",
             req.character_id,
             req.conversation_id,
             len(req.message),
             req.sticker_id or "-",
+            (selected_image or {}).get("id") or "-",
             not was_unloaded,
         )
-
-        current = require_bundle()
-        init_ms = current.init_timings.get("total_ms", 0.0) if was_unloaded else 0.0
 
         service_started = time.perf_counter()
         try:
@@ -406,6 +523,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 conversation_id=req.conversation_id,
                 at=req.at,
                 sticker=selected_sticker,
+                image=selected_image,
+                vision_image_data_url=vision_data_url,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -424,6 +543,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "event_id": out.event.id,
             "event_time": out.event.event_time.isoformat(),
             "character_id": req.character_id,
+            "input_image": uploaded_media_payload((selected_image or {}).get("id")),
             "action": action_payload(req.character_id, out.reaction.action) if out.reaction.action is not None else None,
             "actions": [action_payload(req.character_id, action) for action in out.reaction.actions],
             "perception": out.reaction.perception,
@@ -447,7 +567,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         profile = ensure_character(character_id)
         memories = read_store.list_memories(character_id, include_inactive=True, limit=80, include_embedding=False)
         intents = [dict(row) for row in read_store.list_intents(character_id, limit=80)]
-        catalog = sticker_catalog_for(character_id)
+        stickers = sticker_catalog_for(character_id)
+        images = image_catalog_for(character_id)
         if app_bundle is not None and hasattr(app_bundle, "runtimes") and character_id in app_bundle.runtimes:
             persona = app_bundle.runtimes[character_id].persona
         else:
@@ -457,7 +578,14 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "character_id": character_id,
             "profile": public_profile(profile),
             "now": datetime.now().astimezone().isoformat(),
-            "provider": {"chat_model": settings.chat_model, "base_url": settings.base_url, "embedding_provider": settings.embedding_provider, "embedding_model": settings.embedding_model, "db_path": settings.db_path},
+            "provider": {
+                "chat_model": settings.chat_model,
+                "vision_model": getattr(settings, "vision_model", ""),
+                "base_url": settings.base_url,
+                "embedding_provider": settings.embedding_provider,
+                "embedding_model": settings.embedding_model,
+                "db_path": settings.db_path,
+            },
             "runtime_loaded": app_bundle is not None,
             "runtime_error": runtime_error,
             "runtime_init_timings": app_bundle.init_timings if app_bundle is not None else {},
@@ -465,8 +593,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "mental_state": read_store.get_mental_state(character_id),
             "memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in reversed(memories)],
             "intents": intents,
-            "stickers": catalog.public_items(character_id),
-            "sticker_source": catalog.source,
+            "stickers": stickers.public_items(character_id),
+            "sticker_source": stickers.source,
+            "images": images.public_items(character_id),
+            "image_source": images.source,
         }
 
     @app.post("/v1/simulate")

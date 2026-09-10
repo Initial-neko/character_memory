@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from character_memory.domain.models import Event, EventType, Memory
+from character_memory.media import MediaAsset
 
 
 logger = logging.getLogger("character_memory.storage")
@@ -75,6 +76,18 @@ class SQLiteStore:
                     source_event_id INTEGER
                 );
                 CREATE INDEX IF NOT EXISTS idx_intents_due ON intents(character_id,status,earliest_at);
+
+                CREATE TABLE IF NOT EXISTS media_assets(
+                    id TEXT PRIMARY KEY,
+                    character_id TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    original_name TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    storage_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_media_assets_character_time ON media_assets(character_id,created_at);
 
                 CREATE TABLE IF NOT EXISTS world_states(
                     character_id TEXT PRIMARY KEY,
@@ -166,6 +179,19 @@ class SQLiteStore:
     def _event_from_row(r) -> Event:
         return Event(id=r["id"], character_id=r["character_id"], event_type=EventType(r["event_type"]), event_time=datetime.fromisoformat(r["event_time"]), content=r["content"], metadata=json.loads(r["metadata_json"]))
 
+    @staticmethod
+    def _media_from_row(r) -> MediaAsset:
+        return MediaAsset(
+            id=r["id"],
+            character_id=r["character_id"],
+            source=r["source"],
+            original_name=r["original_name"],
+            mime_type=r["mime_type"],
+            storage_name=r["storage_name"],
+            created_at=datetime.fromisoformat(r["created_at"]),
+            size_bytes=r["size_bytes"],
+        )
+
     def append_event(self, event: Event) -> Event:
         with self._lock:
             cur = self.conn.execute(
@@ -174,6 +200,25 @@ class SQLiteStore:
             )
             self._maybe_commit()
             return event.model_copy(update={"id": cur.lastrowid})
+
+    def add_media_asset(self, asset: MediaAsset) -> MediaAsset:
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO media_assets(id,character_id,source,original_name,mime_type,storage_name,created_at,size_bytes) VALUES(?,?,?,?,?,?,?,?)",
+                (asset.id, asset.character_id, asset.source, asset.original_name, asset.mime_type, asset.storage_name, asset.created_at.isoformat(), asset.size_bytes),
+            )
+            self._maybe_commit()
+            return asset
+
+    def get_media_asset(self, media_id: str) -> MediaAsset | None:
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM media_assets WHERE id=?", (media_id,)).fetchone()
+            return self._media_from_row(row) if row else None
+
+    def delete_media_asset(self, media_id: str) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM media_assets WHERE id=?", (media_id,))
+            self._maybe_commit()
 
     def add_memory(self, memory: Memory) -> Memory:
         with self._lock:

@@ -311,6 +311,10 @@ stickerImportInput.addEventListener("change", () => {
   stickerImportInput.value = "";
 });
 stickerPanel.addEventListener("click", async event => {
+  // Keep every click that starts inside the panel inside the panel. Pack switches
+  // re-render innerHTML, which detaches the original target before document-level
+  // outside-click handling runs; without this guard the same click closes the panel.
+  event.stopPropagation();
   if (event.target.closest("[data-sticker-import-open]")) {
     stickerImportFile = null;
     stickerImportInput.click();

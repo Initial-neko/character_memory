@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 from pathlib import Path, PurePosixPath
 import re
+from typing import Callable
 import zipfile
 
 import yaml
@@ -25,6 +26,15 @@ class Sticker(BaseModel):
     description: str = Field(default="", max_length=240)
     pack_id: str = Field(default="default", min_length=1, max_length=64)
     pack_name: str = Field(default="内置", min_length=1, max_length=80)
+
+
+class StickerTagSuggestion(BaseModel):
+    label: str = Field(min_length=1, max_length=80)
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    description: str = Field(default="", max_length=240)
+
+
+StickerTagger = Callable[[str, bytes], StickerTagSuggestion | dict]
 
 
 class StickerCatalog:
@@ -151,7 +161,7 @@ def _dedupe_tags(values: list[object]) -> list[str]:
     return result
 
 
-def _metadata_rows(archive: zipfile.ZipFile, names: list[str]) -> list[dict]:
+def _metadata_rows(archive: zipfile.ZipFile, names: list[str], *, required: bool = True) -> list[dict]:
     all_tags = [name for name in names if PurePosixPath(name).name == "all_tags.json"]
     candidates = all_tags[:1] if all_tags else [name for name in names if PurePosixPath(name).name == "tags.json"]
     rows: list[dict] = []
@@ -163,19 +173,40 @@ def _metadata_rows(archive: zipfile.ZipFile, names: list[str]) -> list[dict]:
         if not isinstance(value, list):
             raise ValueError(f"sticker metadata must be a JSON list: {name}")
         rows.extend(item for item in value if isinstance(item, dict))
-    if not rows:
+    if required and not rows:
         raise ValueError("zip must contain all_tags.json or one or more tags.json files")
     return rows
 
 
-def import_sticker_bundle(persona_path: str | Path, archive_bytes: bytes) -> dict:
-    """Import a tagged sticker ZIP into one character's local sticker library.
+def _supported_asset_names(names: list[str]) -> list[str]:
+    return [name for name in names if Path(PurePosixPath(name).name).suffix.lower() in _ALLOWED_EXTENSIONS]
 
-    Supported metadata mirrors the generated sticker bundles used by this project:
-    `all_tags.json` or per-pack `tags.json`, with filename/id/tag_zh/aliases/description
-    plus optional set_id/display_name fields. Imported files are flattened into the
-    character sticker directory; the manifest is written last so partial failures do
-    not expose incomplete packs.
+
+def _as_tag_suggestion(value: StickerTagSuggestion | dict) -> StickerTagSuggestion:
+    return value if isinstance(value, StickerTagSuggestion) else StickerTagSuggestion.model_validate(value)
+
+
+def _needs_ai_fill(row: dict) -> bool:
+    has_label = bool(str(row.get("tag_zh") or row.get("label") or row.get("tag_en") or "").strip())
+    aliases = row.get("aliases") if isinstance(row.get("aliases"), list) else []
+    has_semantics = bool(row.get("category") or row.get("tag_zh") or row.get("tag_en") or aliases or row.get("description"))
+    return not has_label or not has_semantics
+
+
+def import_sticker_bundle(
+    persona_path: str | Path,
+    archive_bytes: bytes,
+    *,
+    tagger: StickerTagger | None = None,
+    default_pack_name: str = "自定义",
+) -> dict:
+    """Import a sticker ZIP into one character's local sticker library.
+
+    Preferred format is the tagged bundle used by this project: `all_tags.json` or
+    per-pack `tags.json` with filename/id/tag_zh/aliases/description and optional
+    set_id/display_name. If metadata is absent and `tagger` is provided, every
+    supported image is tagged by that callback. Existing metadata wins; AI is only
+    asked to fill rows whose label/semantic fields are missing.
     """
     if not archive_bytes:
         raise ValueError("empty sticker archive")
@@ -200,7 +231,25 @@ def import_sticker_bundle(persona_path: str | Path, archive_bytes: bytes) -> dic
         for name in names:
             by_basename[PurePosixPath(name).name].append(name)
 
-        rows = _metadata_rows(archive, names)
+        rows = _metadata_rows(archive, names, required=False)
+        metadata_present = bool(rows)
+        if not rows:
+            if tagger is None:
+                raise ValueError("zip has no sticker metadata; enable AI auto-tag or add all_tags.json/tags.json")
+            asset_names = _supported_asset_names(names)
+            if not asset_names:
+                raise ValueError("no supported sticker images were found in the archive")
+            rows = [
+                {
+                    "id": _safe_id(PurePosixPath(name).stem, f"sticker_{index:03d}"),
+                    "filename": PurePosixPath(name).name,
+                    "_member_name": name,
+                    "set_id": "custom_ai",
+                    "display_name": default_pack_name or "AI 自动标签",
+                }
+                for index, name in enumerate(asset_names, start=1)
+            ]
+
         target_dir = Path(persona_path).parent / "stickers"
         target_dir.mkdir(parents=True, exist_ok=True)
         local_manifest = target_dir / "manifest.yaml"
@@ -208,7 +257,9 @@ def import_sticker_bundle(persona_path: str | Path, archive_bytes: bytes) -> dic
 
         imported: list[Sticker] = []
         pack_names: dict[str, str] = {}
-        for index, row in enumerate(rows, start=1):
+        ai_tagged = 0
+        for index, source_row in enumerate(rows, start=1):
+            row = dict(source_row)
             filename = str(row.get("filename") or row.get("file") or "").strip()
             if not filename:
                 continue
@@ -216,13 +267,32 @@ def import_sticker_bundle(persona_path: str | Path, archive_bytes: bytes) -> dic
             suffix = Path(basename).suffix.lower()
             if suffix not in _ALLOWED_EXTENSIONS:
                 continue
-            matches = by_basename.get(basename, [])
-            if len(matches) != 1:
-                raise ValueError(f"cannot uniquely locate sticker asset: {basename}")
-            member_name = matches[0]
+
+            member_name = str(row.get("_member_name") or "")
+            if member_name:
+                if member_name not in info_by_name:
+                    raise ValueError(f"cannot locate sticker asset: {basename}")
+            else:
+                matches = by_basename.get(basename, [])
+                if len(matches) != 1:
+                    raise ValueError(f"cannot uniquely locate sticker asset: {basename}")
+                member_name = matches[0]
+
+            payload = archive.read(info_by_name[member_name])
+            if tagger is not None and _needs_ai_fill(row):
+                suggestion = _as_tag_suggestion(tagger(basename, payload))
+                row.setdefault("label", suggestion.label)
+                if not row.get("tag_zh") and not row.get("tag_en"):
+                    row["label"] = suggestion.label
+                if not row.get("aliases"):
+                    row["aliases"] = suggestion.tags
+                if not row.get("description"):
+                    row["description"] = suggestion.description
+                ai_tagged += 1
+
             sticker_id = _safe_id(row.get("id"), f"sticker_{index:03d}")
             pack_id = _safe_id(row.get("set_id") or row.get("pack_id"), "custom")
-            pack_name = str(row.get("display_name") or row.get("pack_name") or row.get("set_name") or "自定义").strip()[:80] or "自定义"
+            pack_name = str(row.get("display_name") or row.get("pack_name") or row.get("set_name") or default_pack_name or "自定义").strip()[:80] or "自定义"
             label = str(row.get("tag_zh") or row.get("label") or row.get("tag_en") or sticker_id).strip()[:80] or sticker_id
             aliases = row.get("aliases") if isinstance(row.get("aliases"), list) else []
             tags = _dedupe_tags([
@@ -233,7 +303,6 @@ def import_sticker_bundle(persona_path: str | Path, archive_bytes: bytes) -> dic
             ])
             description = str(row.get("description") or "").strip()[:240]
             output_name = f"{sticker_id}{suffix}"
-            payload = archive.read(info_by_name[member_name])
             (target_dir / output_name).write_bytes(payload)
             sticker = Sticker(
                 id=sticker_id,
@@ -260,6 +329,8 @@ def import_sticker_bundle(persona_path: str | Path, archive_bytes: bytes) -> dic
         )
         return {
             "imported": len(imported),
+            "ai_tagged": ai_tagged,
+            "metadata_present": metadata_present,
             "packs": [{"id": key, "name": value} for key, value in pack_names.items()],
             "manifest": str(local_manifest),
         }

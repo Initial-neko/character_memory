@@ -5,7 +5,7 @@ from io import BytesIO
 import json
 from pathlib import Path, PurePosixPath
 import re
-from typing import Callable
+from typing import Callable, Iterable
 import zipfile
 
 import yaml
@@ -76,15 +76,22 @@ class StickerCatalog:
             rows.append(f"- {item.id}: {item.label}；适合：{meaning}")
         return "\n".join(rows)
 
-    def public_items(self, character_id: str) -> list[dict]:
-        return [
-            {
-                **item.model_dump(mode="json"),
-                "url": f"/v1/stickers/{character_id}/{item.id}/asset",
-            }
-            for item in self.stickers
-            if self.asset_path(item.id) is not None
-        ]
+    def public_items(self, character_id: str | None = None) -> list[dict]:
+        """Return API payloads.
+
+        `character_id` is retained only for the legacy character-scoped asset
+        route. New callers should omit it and use the global asset URL.
+        """
+        result = []
+        for item in self.stickers:
+            if self.asset_path(item.id) is None:
+                continue
+            if character_id:
+                url = f"/v1/stickers/{character_id}/{item.id}/asset"
+            else:
+                url = f"/v1/stickers/{item.id}/asset"
+            result.append({**item.model_dump(mode="json"), "url": url})
+        return result
 
 
 def _default_manifest() -> Path:
@@ -107,28 +114,61 @@ def _read_manifest(path: Path) -> list[Sticker]:
     return result
 
 
-def _merge_catalogs(default_manifest: Path, local_manifest: Path) -> StickerCatalog:
-    defaults = _read_manifest(default_manifest)
-    locals_ = _read_manifest(local_manifest)
-    merged: dict[str, Sticker] = {item.id: item for item in defaults}
-    merged.update({item.id: item for item in locals_})
-    roots = {item.id: default_manifest.parent for item in defaults}
-    roots.update({item.id: local_manifest.parent for item in locals_})
-    return StickerCatalog(
-        local_manifest.parent,
-        list(merged.values()),
-        source="default+character",
-        asset_roots=roots,
-    )
+def _catalog_from_manifests(manifests: Iterable[Path], *, root: Path, source: str) -> StickerCatalog:
+    """Merge manifests in order; later manifests override identical ids.
+
+    The default pack is first, legacy character-local imports are compatibility
+    sources in the middle, and the global user library is last so new imports
+    always win deterministically.
+    """
+    merged: dict[str, Sticker] = {}
+    roots: dict[str, Path] = {}
+    for manifest in manifests:
+        for item in _read_manifest(manifest):
+            merged[item.id] = item
+            roots[item.id] = manifest.parent
+    return StickerCatalog(root, list(merged.values()), source=source, asset_roots=roots)
+
+
+def load_global_sticker_catalog(
+    global_dir: str | Path,
+    *,
+    persona_paths: Iterable[str | Path] = (),
+) -> StickerCatalog:
+    """Load the application-wide sticker library.
+
+    User-imported packs live in `<global_dir>/manifest.yaml`. Existing P0.9/P0.10
+    character-local manifests are also read as legacy compatibility sources so a
+    user who already imported stickers does not lose them after this migration.
+    """
+    root = Path(global_dir)
+    manifests: list[Path] = [_default_manifest()]
+    seen: set[Path] = set()
+    for persona_path in persona_paths:
+        legacy = Path(persona_path).parent / "stickers" / "manifest.yaml"
+        key = legacy.resolve()
+        if legacy.is_file() and key not in seen:
+            manifests.append(legacy)
+            seen.add(key)
+    manifests.append(root / "manifest.yaml")
+    return _catalog_from_manifests(manifests, root=root, source="default+global+legacy")
 
 
 def load_sticker_catalog(persona_path: str | Path) -> StickerCatalog:
+    """Legacy character-scoped loader retained for compatibility/tests.
+
+    New application code should use `load_global_sticker_catalog`.
+    """
     persona_path = Path(persona_path)
     local_manifest = persona_path.parent / "stickers" / "manifest.yaml"
-    default_manifest = _default_manifest()
+    manifests = [_default_manifest()]
     if local_manifest.is_file():
-        return _merge_catalogs(default_manifest, local_manifest)
-    return StickerCatalog(default_manifest.parent, _read_manifest(default_manifest), source="default")
+        manifests.append(local_manifest)
+    return _catalog_from_manifests(
+        manifests,
+        root=local_manifest.parent if local_manifest.is_file() else _default_manifest().parent,
+        source="default+character" if local_manifest.is_file() else "default",
+    )
 
 
 def _safe_member_name(name: str) -> str:
@@ -199,14 +239,13 @@ def import_sticker_bundle(
     *,
     tagger: StickerTagger | None = None,
     default_pack_name: str = "自定义",
+    target_dir: str | Path | None = None,
 ) -> dict:
-    """Import a sticker ZIP into one character's local sticker library.
+    """Import a sticker ZIP.
 
-    Preferred format is the tagged bundle used by this project: `all_tags.json` or
-    per-pack `tags.json` with filename/id/tag_zh/aliases/description and optional
-    set_id/display_name. If metadata is absent and `tagger` is provided, every
-    supported image is tagged by that callback. Existing metadata wins; AI is only
-    asked to fill rows whose label/semantic fields are missing.
+    `persona_path` remains for backward compatibility with the old CLI/API.
+    New Web imports pass `target_dir` and therefore write to the application-wide
+    user sticker library instead of a character directory.
     """
     if not archive_bytes:
         raise ValueError("empty sticker archive")
@@ -250,9 +289,9 @@ def import_sticker_bundle(
                 for index, name in enumerate(asset_names, start=1)
             ]
 
-        target_dir = Path(persona_path).parent / "stickers"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        local_manifest = target_dir / "manifest.yaml"
+        output_dir = Path(target_dir) if target_dir is not None else Path(persona_path).parent / "stickers"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        local_manifest = output_dir / "manifest.yaml"
         existing = {item.id: item for item in _read_manifest(local_manifest)}
 
         imported: list[Sticker] = []
@@ -303,7 +342,7 @@ def import_sticker_bundle(
             ])
             description = str(row.get("description") or "").strip()[:240]
             output_name = f"{sticker_id}{suffix}"
-            (target_dir / output_name).write_bytes(payload)
+            (output_dir / output_name).write_bytes(payload)
             sticker = Sticker(
                 id=sticker_id,
                 file=output_name,
@@ -320,9 +359,7 @@ def import_sticker_bundle(
         if not imported:
             raise ValueError("no supported sticker images were found in the archive")
 
-        manifest_payload = {
-            "stickers": [item.model_dump(mode="json") for item in existing.values()]
-        }
+        manifest_payload = {"stickers": [item.model_dump(mode="json") for item in existing.values()]}
         local_manifest.write_text(
             yaml.safe_dump(manifest_payload, allow_unicode=True, sort_keys=False),
             encoding="utf-8",

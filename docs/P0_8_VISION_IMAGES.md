@@ -29,6 +29,8 @@ https://opencode.ai/zen/go/v1/chat/completions
     -> deepseek-v4-flash-vision-exp   # DeepSeek V4 Flash Vision Exp
 ```
 
+DeepSeek 官方 Vision 文档明确说明 `deepseek-v4-flash-vision-exp` 接受图文混合输入；OpenCode Go 也在同一个 Chat Completions 端点暴露该模型。当前实现因此没有自行假设 `deepseek-flash` 可以接图片，而是显式区分 text / vision model id。
+
 两条路径继续共用：
 
 - `x-opencode-session`
@@ -72,7 +74,7 @@ Event metadata 只引用 media id 和显示元数据。
 
 **base64 图片内容不会写入 Event、Memory 或 Runtime Trace。**
 
-调用 Vision 时，模型收到：
+调用 Vision 时，模型收到 OpenAI-compatible Chat Completions content blocks：
 
 ```json
 {

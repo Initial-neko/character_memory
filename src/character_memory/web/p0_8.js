@@ -31,23 +31,28 @@ addMessage = function addMessageWithMedia(message) {
     ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮开发详情">···</button>`
     : "";
 
+  const messageCharacter = message.character_id || characterId;
   const sticker = message.sticker || (message.sticker_id ? {
     id: message.sticker_id,
     label: message.sticker_label || "表情包",
-    url: stickerAsset(characterId, message.sticker_id),
+    url: stickerAsset(messageCharacter, message.sticker_id),
   } : null);
   const image = message.image || null;
   const hideStoredResourceText = (message.action === "STICKER" && sticker) || (message.action === "IMAGE" && image);
   const text = hideStoredResourceText ? "" : String(message.content || "").trim();
   const textHtml = text ? `<div class="bubble">${escapeHtml(text)}</div>` : "";
-  const stickerHtml = sticker?.url
-    ? `<div class="sticker-bubble"><img src="${escapeHtml(sticker.url)}" alt="${escapeHtml(sticker.label || "表情包")}" loading="lazy"></div>`
+  const stickerUrl = sticker?.url || (sticker?.id ? stickerAsset(messageCharacter, sticker.id) : "");
+  const stickerHtml = stickerUrl
+    ? `<div class="sticker-bubble"><img src="${escapeHtml(stickerUrl)}" alt="${escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>`
     : "";
   const imageHtml = image?.url
     ? `<div class="image-bubble"><img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.label || "图片")}" loading="lazy"><div class="image-caption">${escapeHtml(image.label || "图片")}</div></div>`
     : "";
   const proactive = message.proactive || message.action === "PROACTIVE_MESSAGE";
   row.innerHTML = `<div class="avatar">${escapeHtml(avatar)}</div><div class="bubble-wrap">${textHtml}${stickerHtml}${imageHtml}<div class="message-meta"><span>${fmtTime(message.event_time)}</span>${latency}${proactive ? "<span>主动消息</span>" : ""}${thought}${trace}</div></div>`;
+  row.querySelectorAll(".sticker-bubble img").forEach(img => {
+    img.addEventListener("error", () => img.closest(".sticker-bubble")?.classList.add("broken"), {once:true});
+  });
   chat.appendChild(row);
   return row;
 };
@@ -83,6 +88,7 @@ revealActionsWithRhythm = async function revealActionsWithImageRhythm(result, se
     const action = actions[index];
     addMessage({
       role: "assistant",
+      character_id: sentCharacter,
       content: action.message || "",
       sticker_id: action.sticker_id,
       sticker: action.sticker,
@@ -116,9 +122,8 @@ function closeImagePanel() {
   if (imageInput) imageInput.value = "";
 }
 
-function openImageDraft(file) {
-  if (!imagePanel) return;
-  if (!file) return;
+function openImageDraft(file, {source = "FILE_PICKER"} = {}) {
+  if (!imagePanel || !file) return;
   const allowed = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
   if (!allowed.has(file.type)) {
     imagePanel.classList.remove("hidden");
@@ -133,14 +138,16 @@ function openImageDraft(file) {
 
   const reader = new FileReader();
   reader.onload = () => {
-    imageDraft = {filename: file.name || "image", data_url: String(reader.result || ""), size: file.size};
+    const defaultName = source === "CLIPBOARD" ? `clipboard-${Date.now()}.png` : "image";
+    imageDraft = {filename: file.name || defaultName, data_url: String(reader.result || ""), size: file.size, source};
     closeStickerPanel?.();
     imagePanel.classList.remove("hidden");
     imagePanel.innerHTML = `
       <div class="image-draft-preview"><img src="${escapeHtml(imageDraft.data_url)}" alt="图片预览"></div>
-      <div class="image-draft-meta">${escapeHtml(imageDraft.filename)} · ${(file.size / 1024).toFixed(0)} KB</div>
+      <div class="image-draft-meta">${source === "CLIPBOARD" ? "来自剪贴板" : escapeHtml(imageDraft.filename)} · ${(file.size / 1024).toFixed(0)} KB</div>
       <textarea id="imageCaption" rows="2" maxlength="12000" placeholder="可以补一句话，也可以只发图片"></textarea>
       <div class="image-draft-actions"><button type="button" data-image-cancel>取消</button><button class="image-send" type="button" data-image-send>发送图片</button></div>`;
+    document.getElementById("imageCaption")?.focus();
   };
   reader.onerror = () => {
     imagePanel.classList.remove("hidden");
@@ -163,8 +170,9 @@ async function sendImageDraft() {
   if (chat.querySelector(".empty")) chat.innerHTML = "";
   addMessage({
     role: "user",
+    character_id: sentCharacter,
     content: caption,
-    image: {url: draft.data_url, label: draft.filename, source: "LOCAL_PREVIEW"},
+    image: {url: draft.data_url, label: draft.filename, source: draft.source || "LOCAL_PREVIEW"},
     event_time: new Date().toISOString(),
     has_trace: false,
   });
@@ -231,7 +239,18 @@ imageButton.addEventListener("click", event => {
   closeStickerPanel?.();
   imageInput.click();
 });
-imageInput.addEventListener("change", () => openImageDraft(imageInput.files?.[0]));
+imageInput.addEventListener("change", () => openImageDraft(imageInput.files?.[0], {source:"FILE_PICKER"}));
+
+input.addEventListener("paste", event => {
+  const items = [...(event.clipboardData?.items || [])];
+  const imageItem = items.find(item => item.kind === "file" && String(item.type || "").startsWith("image/"));
+  if (!imageItem) return;
+  const file = imageItem.getAsFile();
+  if (!file) return;
+  event.preventDefault();
+  openImageDraft(file, {source:"CLIPBOARD"});
+});
+
 imagePanel.addEventListener("click", event => {
   if (event.target.closest("[data-image-cancel]")) closeImagePanel();
   if (event.target.closest("[data-image-send]")) sendImageDraft().catch(console.error);

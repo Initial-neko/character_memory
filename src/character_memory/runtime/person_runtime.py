@@ -172,7 +172,9 @@ class PersonRuntime:
         logger.info("runtime.recall done count=%d ids=%s duration_ms=%.1f", len(memories), [memory.id for memory in memories], timings["recall_ms"])
 
         stage = time.perf_counter()
-        state_before = self.store.get_mental_state(event.character_id)
+        # Mental State is temporal state. Reading the latest snapshot here would
+        # leak a future simulation into a historical/real-time event.
+        state_before = self.store.get_mental_state(event.character_id, at=event.event_time)
         recent = [e for e in self.store.list_events(event.character_id, limit=10, before=event.event_time) if e.id != event.id][-8:]
         context = compile_context(
             self.persona,
@@ -191,13 +193,14 @@ class PersonRuntime:
         stage = time.perf_counter()
         logger.info("runtime.model react start event_id=%s conversation=%s images=%d", event.id, conversation_id, len(image_data_urls or []))
         if image_data_urls:
-            reaction = self.model.react_with_images_for_session(context, image_data_urls, conversation_id)
+            model_call = self.model.react_call_with_images_for_session(context, image_data_urls, conversation_id)
         else:
-            reaction = self.model.react_for_session(context, conversation_id)
+            model_call = self.model.react_call_for_session(context, conversation_id)
+        reaction = model_call.value
         reaction, sticker_decisions, image_decisions = self._sanitize_resource_actions(reaction)
         timings["model_ms"] = _ms(stage)
         action_types = [action.type.value for action in reaction.actions]
-        model_used = getattr(self.model, "last_model", getattr(self.model, "model", ""))
+        model_used = model_call.trace.model or str(getattr(self.model, "model", "") or "")
         logger.info(
             "runtime.model react done event_id=%s model=%s actions=%s duration_ms=%.1f memory_candidates=%d intent_candidates=%d",
             event.id,
@@ -279,17 +282,14 @@ class PersonRuntime:
 
                 timings["persist_ms"] = _ms(stage)
                 timings["runtime_total_ms"] = _ms(started)
-                model_messages = getattr(self.model, "last_request_messages", [])
-                raw_model_response = getattr(self.model, "last_response_text", "")
-                model_attempt = getattr(self.model, "last_attempt", 0)
                 trace = {
                     "source_event_id": event.id,
                     "conversation_id": conversation_id,
                     "event": event.model_dump(mode="json"),
                     "context": context,
-                    "model_messages": model_messages,
-                    "raw_model_response": raw_model_response,
-                    "model_attempt": model_attempt,
+                    "model_messages": model_call.trace.request_messages,
+                    "raw_model_response": model_call.trace.response_text,
+                    "model_attempt": model_call.trace.attempt,
                     "model_used": model_used,
                     "vision_images": len(image_data_urls or []),
                     "last_chat_event": last_chat_event.model_dump(mode="json") if last_chat_event is not None else None,

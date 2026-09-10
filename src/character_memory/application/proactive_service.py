@@ -15,6 +15,7 @@ _EXPRESSIVE = {
     ActionType.MESSAGE,
     ActionType.EMOJI,
     ActionType.STICKER,
+    ActionType.IMAGE,
 }
 
 

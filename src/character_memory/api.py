@@ -6,7 +6,7 @@ from pathlib import Path
 import threading
 import time
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from character_memory.app import AppBundle, build_app, build_model
 from character_memory.application.proactive_service import ProactiveService
@@ -14,6 +14,7 @@ from character_memory.config import discover_character_profiles, load_persona, l
 from character_memory.domain.models import EventType
 from character_memory.logging_utils import configure_logging
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
+from character_memory.stickers import load_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -26,10 +27,17 @@ def _ms(started: float) -> float:
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1)
+    message: str = Field(default="", max_length=12000)
+    sticker_id: str | None = Field(default=None, max_length=64)
     character_id: str = "rin"
     conversation_id: str = "default"
     at: datetime | None = None
+
+    @model_validator(mode="after")
+    def require_content(self):
+        if not self.message.strip() and not (self.sticker_id or "").strip():
+            raise ValueError("message or sticker_id is required")
+        return self
 
 
 class SimulateRequest(BaseModel):
@@ -112,22 +120,61 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         known = ", ".join(profile["id"] for profile in character_profiles())
         raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}. Known: {known}")
 
+    def sticker_catalog_for(character_id: str):
+        profile = ensure_character(character_id)
+        if app_bundle is not None and hasattr(app_bundle, "runtimes"):
+            runtime = app_bundle.runtimes.get(character_id)
+            if runtime is not None and getattr(runtime, "sticker_catalog", None) is not None:
+                return runtime.sticker_catalog
+        return load_sticker_catalog(profile["persona_path"])
+
+    def sticker_payload(character_id: str, sticker_id: str | None) -> dict | None:
+        if not sticker_id:
+            return None
+        catalog = sticker_catalog_for(character_id)
+        sticker = catalog.get(sticker_id)
+        if sticker is None or catalog.asset_path(sticker_id) is None:
+            return None
+        return {
+            **sticker.model_dump(mode="json"),
+            "url": f"/v1/stickers/{character_id}/{sticker.id}/asset",
+        }
+
+    def action_payload(character_id: str, action) -> dict:
+        item = action.model_dump(mode="json")
+        sticker = sticker_payload(character_id, item.get("sticker_id"))
+        if sticker is not None:
+            item["sticker"] = sticker
+        return item
+
     def message_payload(event) -> dict:
         if event.event_type == EventType.USER_MESSAGE:
             role = "user"
             source_event_id = event.id
             source_event_type = EventType.USER_MESSAGE.value
+            content = event.metadata.get("display_text", event.content)
         else:
             role = "assistant"
             source_event_id = event.metadata.get("source_event_id")
             source_event_type = event.metadata.get("source_event_type")
+            content = event.content
+        sticker_id = event.metadata.get("sticker_id")
+        sticker = sticker_payload(event.character_id, sticker_id)
+        preview = content
+        if sticker is not None and not str(content or "").strip():
+            preview = f"[表情包] {sticker['label']}"
+        elif sticker is not None and event.metadata.get("action") == "STICKER":
+            preview = f"[表情包] {sticker['label']}"
         return {
             "id": event.id,
             "role": role,
-            "content": event.content,
+            "content": content,
+            "preview": preview,
             "event_time": event.event_time.isoformat(),
             "action": event.metadata.get("action"),
             "action_index": event.metadata.get("action_index"),
+            "sticker_id": sticker_id,
+            "sticker": sticker,
             "source_event_type": source_event_type,
             "source_event_id": source_event_id,
             "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,
@@ -171,8 +218,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
         character_id = profile["id"]
         persona = load_persona(profile["persona_path"])
+        stickers = load_sticker_catalog(profile["persona_path"])
         recall = VectorRecall(app_bundle.store, app_bundle.embeddings, limit=getattr(settings, "recall_limit", 8))
-        runtime = PersonRuntime(app_bundle.store, recall, app_bundle.embeddings, app_bundle.model, persona)
+        runtime = PersonRuntime(app_bundle.store, recall, app_bundle.embeddings, app_bundle.model, persona, stickers)
         app_bundle.runtimes[character_id] = runtime
         if isinstance(getattr(app_bundle.chat, "runtime", None), dict):
             app_bundle.chat.runtime[character_id] = runtime
@@ -204,7 +252,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             proactive_stop.wait(_PROACTIVE_POLL_SECONDS)
         logger.info("api.proactive loop_stop")
 
-    app = FastAPI(title="character-memory", version="0.7.0")
+    app = FastAPI(title="character-memory", version="0.8.0")
     web_dir = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
@@ -254,6 +302,23 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     @app.get("/v1/characters/summaries")
     def character_summaries():
         return {"characters": [character_summary(profile) for profile in character_profiles()]}
+
+    @app.get("/v1/stickers")
+    def stickers(character_id: str = "rin"):
+        catalog = sticker_catalog_for(character_id)
+        return {
+            "character_id": character_id,
+            "source": catalog.source,
+            "stickers": catalog.public_items(character_id),
+        }
+
+    @app.get("/v1/stickers/{character_id}/{sticker_id}/asset")
+    def sticker_asset(character_id: str, sticker_id: str):
+        catalog = sticker_catalog_for(character_id)
+        path = catalog.asset_path(sticker_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="sticker not found")
+        return FileResponse(path)
 
     @app.post("/v1/characters/draft")
     def generate_character_draft(req: PersonaDraftRequest):
@@ -311,16 +376,37 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     @app.post("/v1/chat")
     def chat(req: ChatRequest):
         ensure_character(req.character_id)
+        selected_sticker = None
+        if req.sticker_id:
+            catalog = sticker_catalog_for(req.character_id)
+            sticker = catalog.get(req.sticker_id)
+            if sticker is None or catalog.asset_path(req.sticker_id) is None:
+                raise HTTPException(status_code=400, detail=f"Unknown sticker: {req.sticker_id}")
+            selected_sticker = sticker.model_dump(mode="json")
+
         api_started = time.perf_counter()
         was_unloaded = app_bundle is None
-        logger.info("api.chat start character=%s conversation=%s chars=%d runtime_loaded=%s", req.character_id, req.conversation_id, len(req.message), not was_unloaded)
+        logger.info(
+            "api.chat start character=%s conversation=%s chars=%d sticker=%s runtime_loaded=%s",
+            req.character_id,
+            req.conversation_id,
+            len(req.message),
+            req.sticker_id or "-",
+            not was_unloaded,
+        )
 
         current = require_bundle()
         init_ms = current.init_timings.get("total_ms", 0.0) if was_unloaded else 0.0
 
         service_started = time.perf_counter()
         try:
-            out = current.chat.send(req.message, character_id=req.character_id, conversation_id=req.conversation_id, at=req.at)
+            out = current.chat.send(
+                req.message,
+                character_id=req.character_id,
+                conversation_id=req.conversation_id,
+                at=req.at,
+                sticker=selected_sticker,
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception:
@@ -338,8 +424,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "event_id": out.event.id,
             "event_time": out.event.event_time.isoformat(),
             "character_id": req.character_id,
-            "action": out.reaction.action.model_dump(mode="json") if out.reaction.action is not None else None,
-            "actions": [action.model_dump(mode="json") for action in out.reaction.actions],
+            "action": action_payload(req.character_id, out.reaction.action) if out.reaction.action is not None else None,
+            "actions": [action_payload(req.character_id, action) for action in out.reaction.actions],
             "perception": out.reaction.perception,
             "reaction": out.reaction.reaction,
             "mental_state": out.reaction.mental_state_update,
@@ -361,6 +447,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         profile = ensure_character(character_id)
         memories = read_store.list_memories(character_id, include_inactive=True, limit=80, include_embedding=False)
         intents = [dict(row) for row in read_store.list_intents(character_id, limit=80)]
+        catalog = sticker_catalog_for(character_id)
         if app_bundle is not None and hasattr(app_bundle, "runtimes") and character_id in app_bundle.runtimes:
             persona = app_bundle.runtimes[character_id].persona
         else:
@@ -378,6 +465,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "mental_state": read_store.get_mental_state(character_id),
             "memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in reversed(memories)],
             "intents": intents,
+            "stickers": catalog.public_items(character_id),
+            "sticker_source": catalog.source,
         }
 
     @app.post("/v1/simulate")

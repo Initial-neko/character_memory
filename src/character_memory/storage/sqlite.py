@@ -71,7 +71,8 @@ class SQLiteStore:
                     earliest_at TEXT,
                     expires_at TEXT,
                     status TEXT NOT NULL DEFAULT 'PENDING',
-                    reason TEXT NOT NULL DEFAULT ''
+                    reason TEXT NOT NULL DEFAULT '',
+                    source_event_id INTEGER
                 );
                 CREATE INDEX IF NOT EXISTS idx_intents_due ON intents(character_id,status,earliest_at);
 
@@ -91,6 +92,10 @@ class SQLiteStore:
                     ON runtime_traces(character_id,source_event_id);
                 """
             )
+            intent_columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(intents)").fetchall()}
+            if "source_event_id" not in intent_columns:
+                self.conn.execute("ALTER TABLE intents ADD COLUMN source_event_id INTEGER")
+                logger.info("storage.intent_migration added=source_event_id")
             migrated = self._migrate_legacy_action_traces_locked()
             self.conn.commit()
             if migrated:
@@ -254,11 +259,11 @@ class SQLiteStore:
             )
             self._maybe_commit()
 
-    def add_intent(self, character_id, content, preferred_action, created_at, earliest_at, expires_at, reason=""):
+    def add_intent(self, character_id, content, preferred_action, created_at, earliest_at, expires_at, reason="", *, source_event_id=None):
         with self._lock:
             cur = self.conn.execute(
-                "INSERT INTO intents(character_id,content,preferred_action,created_at,earliest_at,expires_at,status,reason) VALUES(?,?,?,?,?,?,?,?)",
-                (character_id, content, preferred_action, created_at.isoformat(), earliest_at.isoformat(), expires_at.isoformat(), "PENDING", reason),
+                "INSERT INTO intents(character_id,content,preferred_action,created_at,earliest_at,expires_at,status,reason,source_event_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                (character_id, content, preferred_action, created_at.isoformat(), earliest_at.isoformat(), expires_at.isoformat(), "PENDING", reason, source_event_id),
             )
             self._maybe_commit()
             return cur.lastrowid

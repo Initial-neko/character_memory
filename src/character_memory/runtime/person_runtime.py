@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 
-from character_memory.domain.models import ActionType, Event, EventType, Memory, RuntimeResult
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.context import compile_context
 
 
@@ -20,6 +20,7 @@ _EXPRESSIVE_ACTIONS = {
     ActionType.PROACTIVE_MESSAGE,
     ActionType.MESSAGE,
     ActionType.EMOJI,
+    ActionType.STICKER,
 }
 
 
@@ -40,12 +41,13 @@ def _cosine(left: list[float], right: list[float]) -> float | None:
 
 
 class PersonRuntime:
-    def __init__(self, store, recall, embeddings, model, persona: str):
+    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None):
         self.store = store
         self.recall = recall
         self.embeddings = embeddings
         self.model = model
         self.persona = persona
+        self.sticker_catalog = sticker_catalog
 
     def _last_chat_before(self, character_id: str, event_time):
         candidates = []
@@ -113,6 +115,23 @@ class PersonRuntime:
 
         return accepted, decisions
 
+    def _sanitize_sticker_actions(self, reaction):
+        decisions = []
+        sanitized = []
+        for action in reaction.actions:
+            if action.type != ActionType.STICKER:
+                sanitized.append(action)
+                continue
+            sticker = self.sticker_catalog.get(action.sticker_id) if self.sticker_catalog is not None else None
+            if sticker is None or self.sticker_catalog.asset_path(sticker.id) is None:
+                decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_UNKNOWN_STICKER"})
+                logger.warning("runtime.sticker drop_unknown sticker_id=%s", action.sticker_id)
+                continue
+            sanitized.append(action)
+            decisions.append({"sticker_id": action.sticker_id, "decision": "ALLOW", "label": sticker.label})
+        normalized_action = sanitized[0] if sanitized else ActionDecision(type=ActionType.NO_REPLY)
+        return reaction.model_copy(update={"actions": sanitized, "action": normalized_action}), decisions
+
     def handle(self, event: Event):
         started = time.perf_counter()
         timings: dict[str, float] = {}
@@ -133,7 +152,15 @@ class PersonRuntime:
         stage = time.perf_counter()
         state_before = self.store.get_mental_state(event.character_id)
         recent = [e for e in self.store.list_events(event.character_id, limit=10, before=event.event_time) if e.id != event.id][-8:]
-        context = compile_context(self.persona, state_before, memories, event, recent, last_chat_event=last_chat_event)
+        context = compile_context(
+            self.persona,
+            state_before,
+            memories,
+            event,
+            recent,
+            last_chat_event=last_chat_event,
+            sticker_catalog=self.sticker_catalog,
+        )
         timings["context_ms"] = _ms(stage)
         logger.info("runtime.context ready chars=%d recent_events=%d has_state=%s duration_ms=%.1f", len(context), len(recent), bool(state_before), timings["context_ms"])
 
@@ -141,6 +168,7 @@ class PersonRuntime:
         stage = time.perf_counter()
         logger.info("runtime.model react start event_id=%s conversation=%s", event.id, conversation_id)
         reaction = self.model.react_for_session(context, conversation_id)
+        reaction, sticker_decisions = self._sanitize_sticker_actions(reaction)
         timings["model_ms"] = _ms(stage)
         action_types = [action.type.value for action in reaction.actions]
         logger.info("runtime.model react done event_id=%s actions=%s duration_ms=%.1f memory_candidates=%d intent_candidates=%d", event.id, action_types or ["NO_REPLY"], timings["model_ms"], len(reaction.memory_candidates), len(reaction.intent_candidates))
@@ -166,25 +194,45 @@ class PersonRuntime:
 
                 reason = reaction.action.reason if reaction.action is not None else ""
                 for intent in reaction.intent_candidates:
-                    intent_id = self.store.add_intent(event.character_id, intent.content, intent.preferred_action.value, event.event_time, event.event_time + timedelta(hours=intent.earliest_hours), event.event_time + timedelta(hours=intent.expires_hours), reason)
+                    intent_id = self.store.add_intent(
+                        event.character_id,
+                        intent.content,
+                        intent.preferred_action.value,
+                        event.event_time,
+                        event.event_time + timedelta(hours=intent.earliest_hours),
+                        event.event_time + timedelta(hours=intent.expires_hours),
+                        reason,
+                        source_event_id=event.id,
+                    )
                     created_intent_ids.append(intent_id)
 
                 for index, action in enumerate(reaction.actions):
-                    if action.type not in _EXPRESSIVE_ACTIONS or not (action.message or "").strip():
+                    if action.type not in _EXPRESSIVE_ACTIONS:
                         continue
+                    metadata = {
+                        "action": action.type.value,
+                        "action_index": index,
+                        "source_event_id": event.id,
+                        "source_event_type": event.event_type.value,
+                        "conversation_id": conversation_id,
+                    }
+                    if action.type == ActionType.STICKER:
+                        sticker = self.sticker_catalog.get(action.sticker_id) if self.sticker_catalog is not None else None
+                        if sticker is None:
+                            continue
+                        content = f"[表情包：{sticker.label}]"
+                        metadata.update({"sticker_id": sticker.id, "sticker_label": sticker.label})
+                    else:
+                        if not (action.message or "").strip():
+                            continue
+                        content = (action.message or "").strip()
                     self.store.append_event(
                         Event(
                             character_id=event.character_id,
                             event_type=EventType.CHARACTER_MESSAGE,
                             event_time=event.event_time,
-                            content=(action.message or "").strip(),
-                            metadata={
-                                "action": action.type.value,
-                                "action_index": index,
-                                "source_event_id": event.id,
-                                "source_event_type": event.event_type.value,
-                                "conversation_id": conversation_id,
-                            },
+                            content=content,
+                            metadata=metadata,
                         )
                     )
 
@@ -210,6 +258,7 @@ class PersonRuntime:
                     "reaction": reaction.reaction,
                     "action": reaction.action.model_dump(mode="json") if reaction.action is not None else None,
                     "actions": [action.model_dump(mode="json") for action in reaction.actions],
+                    "sticker_decisions": sticker_decisions,
                     "memory_candidates": [candidate.model_dump(mode="json") for candidate in reaction.memory_candidates],
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,

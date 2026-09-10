@@ -58,29 +58,49 @@ class ChatService:
         character_id: str = "rin",
         conversation_id: str = "default",
         at: datetime | None = None,
+        sticker: dict | None = None,
     ):
         content = message.strip()
-        if not content:
-            raise ValueError("message must not be empty")
+        if not content and sticker is None:
+            raise ValueError("message or sticker must not be empty")
+
+        metadata = {"conversation_id": conversation_id}
+        runtime_content = content
+        if sticker is not None:
+            sticker_id = str(sticker.get("id") or "").strip()
+            sticker_label = str(sticker.get("label") or sticker_id).strip()
+            tags = [str(value).strip() for value in (sticker.get("tags") or []) if str(value).strip()]
+            description = str(sticker.get("description") or "").strip()
+            meaning = "、".join(tags) or description or sticker_label
+            sticker_text = f"[用户发送表情包：{sticker_label}；含义：{meaning}]"
+            runtime_content = f"{content}\n{sticker_text}".strip()
+            metadata.update(
+                {
+                    "display_text": content,
+                    "sticker_id": sticker_id,
+                    "sticker_label": sticker_label,
+                }
+            )
 
         runtime = self._runtime_for(character_id)
         with self._lock_for(character_id):
             now = at or self.clock.now()
             self.store.set_world_time(character_id, now)
             logger.info(
-                "chat.send character=%s conversation=%s at=%s chars=%d",
+                "chat.send character=%s conversation=%s at=%s chars=%d sticker=%s",
                 character_id,
                 conversation_id,
                 now.isoformat(),
                 len(content),
+                metadata.get("sticker_id") or "-",
             )
             return runtime.handle(
                 Event(
                     character_id=character_id,
                     event_type=EventType.USER_MESSAGE,
                     event_time=now,
-                    content=content,
-                    metadata={"conversation_id": conversation_id},
+                    content=runtime_content,
+                    metadata=metadata,
                 )
             )
 
@@ -127,17 +147,21 @@ class ChatService:
             if event.event_type == EventType.USER_MESSAGE:
                 role = "user"
                 source_event_id = event.id
+                content = event.metadata.get("display_text", event.content)
             else:
                 role = "assistant"
                 source_event_id = event.metadata.get("source_event_id")
+                content = event.content
 
             messages.append(
                 {
                     "id": event.id,
                     "role": role,
-                    "content": event.content,
+                    "content": content,
                     "event_time": event.event_time.isoformat(),
                     "action": event.metadata.get("action"),
+                    "sticker_id": event.metadata.get("sticker_id"),
+                    "sticker_label": event.metadata.get("sticker_label"),
                     "source_event_type": event.metadata.get("source_event_type"),
                     "source_event_id": source_event_id,
                     "has_trace": source_event_id in trace_sources,

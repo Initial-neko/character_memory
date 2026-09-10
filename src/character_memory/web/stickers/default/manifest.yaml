@@ -1,0 +1,41 @@
+stickers:
+  - id: round_duck_happy
+    file: round_duck_happy.svg
+    label: 圆鸭·开心
+    tags: [开心, 大笑, 得意, 庆祝]
+    description: 一只原创圆滚滚小鸭开心挥翅。
+  - id: round_duck_shock
+    file: round_duck_shock.svg
+    label: 圆鸭·震惊
+    tags: [震惊, 意外, 懵, 什么]
+    description: 一只原创圆滚滚小鸭瞪大眼睛。
+  - id: round_duck_speechless
+    file: round_duck_speechless.svg
+    label: 圆鸭·无语
+    tags: [无语, 嫌弃, 沉默, 服了]
+    description: 一只原创圆滚滚小鸭侧眼无语。
+  - id: round_duck_flat
+    file: round_duck_flat.svg
+    label: 圆鸭·躺平
+    tags: [躺平, 累, 摆烂, 不想动]
+    description: 一只原创小鸭摊平休息。
+  - id: round_cat_happy
+    file: round_cat_happy.svg
+    label: 圆猫·开心
+    tags: [开心, 可爱, 欢迎, 好耶]
+    description: 一只原创软萌圆猫开心举爪。
+  - id: round_cat_pleading
+    file: round_cat_pleading.svg
+    label: 圆猫·期待
+    tags: [期待, 拜托, 可怜, 星星眼]
+    description: 一只原创软萌圆猫星星眼期待。
+  - id: round_cat_sleepy
+    file: round_cat_sleepy.svg
+    label: 圆猫·困困
+    tags: [困, 晚安, 睡觉, 没电]
+    description: 一只原创软萌圆猫抱着尾巴打瞌睡。
+  - id: round_cat_grumpy
+    file: round_cat_grumpy.svg
+    label: 圆猫·气鼓鼓
+    tags: [生气, 不爽, 嫌弃, 哼]
+    description: 一只原创软萌圆猫气鼓鼓抱臂。

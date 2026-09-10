@@ -23,6 +23,9 @@ class Settings(BaseModel):
     db_path: str = "data/character-memory.db"
     media_dir: str = ""
     media_max_bytes: int = Field(default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)
+    # User-imported stickers are account/application resources, not character-owned.
+    # Empty means <db parent>/stickers.
+    sticker_dir: str = ""
     persona_path: str = "personas/rin/persona.yaml"
     recall_limit: int = Field(default=8, ge=1, le=32)
 
@@ -42,6 +45,13 @@ def resolve_media_dir(settings: Settings) -> Path:
     if configured:
         return Path(configured)
     return Path(settings.db_path).parent / "media"
+
+
+def resolve_sticker_dir(settings: Settings) -> Path:
+    configured = str(getattr(settings, "sticker_dir", "") or "").strip()
+    if configured:
+        return Path(configured)
+    return Path(settings.db_path).parent / "stickers"
 
 
 def load_persona(path: str | Path) -> str:

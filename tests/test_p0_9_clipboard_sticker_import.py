@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-from character_memory.stickers import import_sticker_bundle, load_sticker_catalog
+from character_memory.stickers import import_sticker_bundle, load_global_sticker_catalog, load_sticker_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +68,22 @@ def test_tagged_sticker_zip_imports_and_keeps_default_pack(tmp_path):
     assert catalog.get("round_cat_happy") is not None
 
 
+def test_global_target_dir_makes_import_visible_independent_of_character(tmp_path):
+    persona_a = tmp_path / "personas" / "a" / "persona.yaml"
+    persona_b = tmp_path / "personas" / "b" / "persona.yaml"
+    persona_a.parent.mkdir(parents=True)
+    persona_b.parent.mkdir(parents=True)
+    persona_a.write_text("name: A\n", encoding="utf-8")
+    persona_b.write_text("name: B\n", encoding="utf-8")
+    global_dir = tmp_path / "data" / "stickers"
+
+    import_sticker_bundle(persona_a, _tagged_zip(), target_dir=global_dir)
+    catalog = load_global_sticker_catalog(global_dir, persona_paths=[persona_a, persona_b])
+    assert catalog.get("set_01_01") is not None
+    assert catalog.get("set_02_01") is not None
+    assert catalog.asset_path("set_01_01").read_bytes() == b"png-one"
+
+
 def test_sticker_import_rejects_unsafe_zip_paths(tmp_path):
     persona = tmp_path / "personas" / "neko" / "persona.yaml"
     persona.parent.mkdir(parents=True)
@@ -80,21 +96,24 @@ def test_sticker_import_rejects_unsafe_zip_paths(tmp_path):
         import_sticker_bundle(persona, output.getvalue())
 
 
-def test_web_supports_clipboard_images_and_final_sticker_rendering():
-    p08 = (WEB / "p0_8.js").read_text(encoding="utf-8")
-    assert 'input.addEventListener("paste"' in p08
-    assert 'item.kind === "file"' in p08
-    assert 'startsWith("image/")' in p08
-    assert 'source:"CLIPBOARD"' in p08
-    assert "stickerAsset(messageCharacter" in p08
-    assert ".sticker-bubble img" in p08
+def test_web_supports_clipboard_images_and_core_sticker_rendering():
+    images = (WEB / "images.js").read_text(encoding="utf-8")
+    core = (WEB / "app.js").read_text(encoding="utf-8")
+    assert 'addEventListener("paste"' in images
+    assert 'item.kind === "file"' in images
+    assert 'startsWith("image/")' in images
+    assert 'source:"CLIPBOARD"' in images
+    assert "/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset" in core
+    assert ".sticker-bubble img" in core
 
 
-def test_sticker_picker_has_pack_tabs_and_small_previews():
-    js = (WEB / "p0_7.js").read_text(encoding="utf-8")
+def test_sticker_picker_has_global_pack_tabs_and_small_previews():
+    js = (WEB / "stickers.js").read_text(encoding="utf-8")
     css = (WEB / "p0_7.css").read_text(encoding="utf-8")
-    assert "stickerPacks(stickers)" in js
     assert "data-sticker-pack" in js
     assert "pack_name" in js
+    assert 'CM.registerFeature("stickers"' in js
+    assert 'CM.api("/v1/stickers")' in js
+    assert "character_id" not in js[js.index('CM.api("/v1/stickers")') - 120:js.index('CM.api("/v1/stickers")') + 120]
     assert "grid-template-columns: repeat(6, 52px)" in css
     assert "max-width: 112px" in css

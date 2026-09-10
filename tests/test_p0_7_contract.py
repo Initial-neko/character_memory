@@ -41,12 +41,13 @@ def test_existing_intent_table_is_migrated(tmp_path):
     store.close()
 
 
-def test_p0_7_assets_are_packaged_and_loaded_from_index():
+def test_sticker_module_and_default_pack_are_packaged_and_loaded():
     from pathlib import Path
     import character_memory
 
     root = Path(character_memory.__file__).parent
     index = (root / "web" / "index.html").read_text(encoding="utf-8")
-    assert "/static/p0_7.js" in index
+    assert "/static/stickers.js" in index
+    assert "/static/p0_7.js" not in index
     assert "/static/p0_7.css" in index
     assert (root / "web" / "stickers" / "default" / "manifest.yaml").is_file()

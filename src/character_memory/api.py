@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 import logging
 from pathlib import Path
@@ -16,12 +17,19 @@ from character_memory.images import load_image_catalog
 from character_memory.logging_utils import configure_logging
 from character_memory.media import MediaStorage
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
-from character_memory.stickers import load_sticker_catalog
+from character_memory.stickers import StickerTagSuggestion, import_sticker_bundle, load_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 
 
 logger = logging.getLogger("character_memory.api")
 _PROACTIVE_POLL_SECONDS = 30.0
+_STICKER_VISION_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
 
 
 def _ms(started: float) -> float:
@@ -68,7 +76,7 @@ class CreateCharacterRequest(BaseModel):
 
 
 def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = None):
-    from fastapi import FastAPI, HTTPException
+    from fastapi import Body, FastAPI, HTTPException
     from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
 
@@ -142,6 +150,47 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             if runtime is not None and getattr(runtime, "sticker_catalog", None) is not None:
                 return runtime.sticker_catalog
         return load_sticker_catalog(profile["persona_path"])
+
+    def refresh_runtime_sticker_catalog(character_id: str, catalog) -> None:
+        if app_bundle is None or not hasattr(app_bundle, "runtimes"):
+            return
+        runtime = app_bundle.runtimes.get(character_id)
+        if runtime is not None:
+            runtime.sticker_catalog = catalog
+
+    def ai_sticker_tagger(character_id: str):
+        model_holder: dict[str, object] = {}
+
+        def tagger(filename: str, payload: bytes) -> StickerTagSuggestion:
+            suffix = Path(filename).suffix.lower()
+            mime_type = _STICKER_VISION_MIME.get(suffix)
+            if not mime_type:
+                raise ValueError(f"AI auto-tag does not support {suffix or 'this format'}; add metadata for this sticker")
+            if "model" not in model_holder:
+                current = require_bundle()
+                if not hasattr(current, "model"):
+                    raise RuntimeError("loaded runtime does not expose a vision model")
+                model_holder["model"] = current.model
+            model = model_holder["model"]
+            data_url = f"data:{mime_type};base64,{base64.b64encode(payload).decode('ascii')}"
+            prompt = (
+                "你正在给聊天软件里的表情包做长期可复用的语义标签。只观察图片本身，不猜人物真实身份、作品名或版权来源。"
+                "返回 JSON：label 是 2~12 个汉字左右的简短名称；tags 是 3~8 个适合聊天检索/选择的中文短标签，优先情绪、动作、语气和使用场景；"
+                "description 用一句中文说明这张表情在聊天里通常表达什么。不要输出文件名，不要输出 JSON 之外的文字。"
+            )
+            try:
+                result = model.structured_with_images_for_session(
+                    prompt,
+                    [data_url],
+                    StickerTagSuggestion,
+                    f"sticker-tag:{character_id}:{filename}",
+                )
+            except Exception as exc:
+                logger.exception("api.sticker auto_tag failed character=%s file=%s error=%s", character_id, filename, exc)
+                raise RuntimeError(f"AI 自动标注失败：{filename}: {exc}") from exc
+            return result
+
+        return tagger
 
     def image_catalog_for(character_id: str):
         profile = ensure_character(character_id)
@@ -320,7 +369,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             proactive_stop.wait(_PROACTIVE_POLL_SECONDS)
         logger.info("api.proactive loop_stop")
 
-    app = FastAPI(title="character-memory", version="0.9.0")
+    app = FastAPI(title="character-memory", version="0.10.0")
     web_dir = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
@@ -377,6 +426,47 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     def stickers(character_id: str = "rin"):
         catalog = sticker_catalog_for(character_id)
         return {
+            "character_id": character_id,
+            "source": catalog.source,
+            "stickers": catalog.public_items(character_id),
+        }
+
+    @app.post("/v1/stickers/import")
+    def import_stickers_web(
+        archive: bytes = Body(..., media_type="application/zip"),
+        character_id: str = "rin",
+        filename: str = "stickers.zip",
+        auto_tag: bool = True,
+    ):
+        profile = ensure_character(character_id)
+        pack_name = Path(filename).stem.strip()[:80] or "自定义表情包"
+        started = time.perf_counter()
+        try:
+            result = import_sticker_bundle(
+                profile["persona_path"],
+                archive,
+                tagger=ai_sticker_tagger(character_id) if auto_tag else None,
+                default_pack_name=pack_name,
+            )
+            catalog = load_sticker_catalog(profile["persona_path"])
+            refresh_runtime_sticker_catalog(character_id, catalog)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("api.sticker import_failed character=%s file=%s error=%s", character_id, filename, exc)
+            raise HTTPException(status_code=502, detail=f"表情包导入失败：{exc}") from exc
+        logger.info(
+            "api.sticker imported character=%s file=%s count=%d ai_tagged=%d duration_ms=%.1f",
+            character_id,
+            filename,
+            result["imported"],
+            result["ai_tagged"],
+            _ms(started),
+        )
+        return {
+            **result,
             "character_id": character_id,
             "source": catalog.source,
             "stickers": catalog.public_items(character_id),

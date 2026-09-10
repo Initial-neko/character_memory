@@ -11,6 +11,7 @@ class Settings(BaseModel):
     api_key: str = ""
     base_url: str = "https://opencode.ai/zen/go/v1"
     chat_model: str = "deepseek-flash"
+    vision_model: str = "deepseek-v4-flash-vision-exp"
     chat_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     llm_attempts: int = Field(default=2, ge=1, le=4)
 
@@ -20,6 +21,8 @@ class Settings(BaseModel):
     embedding_base_url: str = ""
 
     db_path: str = "data/character-memory.db"
+    media_dir: str = ""
+    media_max_bytes: int = Field(default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)
     persona_path: str = "personas/rin/persona.yaml"
     recall_limit: int = Field(default=8, ge=1, le=32)
 
@@ -32,6 +35,13 @@ def load_settings(path: str = "config.yaml") -> Settings:
     data["api_key"] = os.getenv("OPENCODE_GO_API_KEY", data.get("api_key", ""))
     data["db_path"] = os.getenv("CHARACTER_MEMORY_DB_PATH", data.get("db_path", "data/character-memory.db"))
     return Settings.model_validate(data)
+
+
+def resolve_media_dir(settings: Settings) -> Path:
+    configured = str(getattr(settings, "media_dir", "") or "").strip()
+    if configured:
+        return Path(configured)
+    return Path(settings.db_path).parent / "media"
 
 
 def load_persona(path: str | Path) -> str:

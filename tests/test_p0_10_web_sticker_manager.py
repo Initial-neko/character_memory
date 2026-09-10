@@ -30,8 +30,17 @@ class FakeStickerTagModel:
         return schema(label="震惊", tags=["震惊", "意外", "懵"], description="适合表达突然被惊到或一时没反应过来。")
 
 
-def _settings(tmp_path, persona):
-    return SimpleNamespace(
+def _persona(tmp_path, character_id):
+    persona = tmp_path / "personas" / character_id / "persona.yaml"
+    persona.parent.mkdir(parents=True)
+    persona.write_text(f"id: {character_id}\nname: {character_id.title()}\nidentity: test\n", encoding="utf-8")
+    return persona
+
+
+def _bundle(tmp_path, model):
+    store = SQLiteStore(tmp_path / "x.db")
+    personas = {character_id: _persona(tmp_path, character_id) for character_id in ("neko", "momo")}
+    settings = SimpleNamespace(
         chat_model="deepseek-flash",
         vision_model="deepseek-v4-flash-vision-exp",
         embedding_provider="deterministic",
@@ -39,24 +48,28 @@ def _settings(tmp_path, persona):
         db_path=str(tmp_path / "x.db"),
         media_dir=str(tmp_path / "media"),
         media_max_bytes=8 * 1024 * 1024,
+        sticker_dir=str(tmp_path / "global-stickers"),
         base_url="fake",
-        persona_path=str(persona),
+        persona_path=str(personas["neko"]),
         api_key="",
+        recall_limit=8,
     )
-
-
-def _bundle(tmp_path, persona, model):
-    store = SQLiteStore(tmp_path / "x.db")
-    runtime = SimpleNamespace(sticker_catalog=load_sticker_catalog(persona))
-    profile = {"id": "neko", "name": "Neko", "identity": "", "tagline": "", "persona_path": str(persona)}
+    runtimes = {
+        character_id: SimpleNamespace(sticker_catalog=load_sticker_catalog(persona))
+        for character_id, persona in personas.items()
+    }
+    profiles = [
+        {"id": character_id, "name": character_id.title(), "identity": "", "tagline": "", "persona_path": str(persona)}
+        for character_id, persona in personas.items()
+    ]
     bundle = SimpleNamespace(
-        settings=_settings(tmp_path, persona),
+        settings=settings,
         store=store,
-        characters=[profile],
-        runtimes={"neko": runtime},
+        characters=profiles,
+        runtimes=runtimes,
         model=model,
     )
-    return bundle, runtime, store
+    return bundle, runtimes, store
 
 
 def _tagged_zip() -> bytes:
@@ -84,17 +97,9 @@ def _untagged_zip() -> bytes:
     return output.getvalue()
 
 
-def _persona(tmp_path):
-    persona = tmp_path / "personas" / "neko" / "persona.yaml"
-    persona.parent.mkdir(parents=True)
-    persona.write_text("id: neko\nname: Neko\nidentity: test\n", encoding="utf-8")
-    return persona
-
-
-def test_web_import_uses_existing_tags_without_calling_vision_and_hot_refreshes_runtime(tmp_path):
-    persona = _persona(tmp_path)
+def test_web_import_uses_existing_tags_without_vision_and_hot_refreshes_every_runtime(tmp_path):
     model = FakeStickerTagModel()
-    bundle, runtime, store = _bundle(tmp_path, persona, model)
+    bundle, runtimes, store = _bundle(tmp_path, model)
     client = TestClient(create_api(bundle=bundle))
 
     response = client.post(
@@ -105,23 +110,34 @@ def test_web_import_uses_existing_tags_without_calling_vision_and_hot_refreshes_
 
     assert response.status_code == 200, response.text
     payload = response.json()
+    assert payload["scope"] == "global"
     assert payload["imported"] == 1
     assert payload["ai_tagged"] == 0
     assert model.calls == []
-    assert runtime.sticker_catalog.get("cute_happy").label == "开心"
-    assert runtime.sticker_catalog.asset_path("cute_happy").read_bytes() == b"tagged-png"
-    assert any(item["id"] == "cute_happy" for item in payload["stickers"])
+    assert (Path(bundle.settings.sticker_dir) / "manifest.yaml").is_file()
+    for runtime in runtimes.values():
+        imported = runtime.sticker_catalog.get("cute_happy")
+        assert imported is not None
+        assert imported.label == "开心"
+        assert runtime.sticker_catalog.asset_path("cute_happy").read_bytes() == b"tagged-png"
+
+    neko = client.get("/v1/stickers?character_id=neko").json()
+    momo = client.get("/v1/stickers?character_id=momo").json()
+    assert neko["scope"] == momo["scope"] == "global"
+    assert [item["id"] for item in neko["stickers"]] == [item["id"] for item in momo["stickers"]]
+    selected = next(item for item in momo["stickers"] if item["id"] == "cute_happy")
+    assert selected["url"] == "/v1/stickers/cute_happy/asset"
+    assert client.get(selected["url"]).content == b"tagged-png"
     store.close()
 
 
-def test_web_import_can_ai_tag_an_image_only_zip_and_make_it_available_to_character(tmp_path):
-    persona = _persona(tmp_path)
+def test_web_import_can_ai_tag_image_only_zip_and_make_it_global(tmp_path):
     model = FakeStickerTagModel()
-    bundle, runtime, store = _bundle(tmp_path, persona, model)
+    bundle, runtimes, store = _bundle(tmp_path, model)
     client = TestClient(create_api(bundle=bundle))
 
     response = client.post(
-        "/v1/stickers/import?character_id=neko&filename=raw-reactions.zip&auto_tag=true",
+        "/v1/stickers/import?filename=raw-reactions.zip&auto_tag=true",
         content=_untagged_zip(),
         headers={"Content-Type": "application/zip"},
     )
@@ -132,22 +148,21 @@ def test_web_import_can_ai_tag_an_image_only_zip_and_make_it_available_to_charac
     assert payload["ai_tagged"] == 1
     assert len(model.calls) == 1
     assert model.calls[0]["images"][0].startswith("data:image/png;base64,")
-    imported = runtime.sticker_catalog.get("wow")
-    assert imported is not None
-    assert imported.label == "震惊"
-    assert "意外" in imported.tags
-    assert "震惊" in runtime.sticker_catalog.prompt_text()
+    for runtime in runtimes.values():
+        imported = runtime.sticker_catalog.get("wow")
+        assert imported is not None
+        assert imported.label == "震惊"
+        assert "意外" in imported.tags
     store.close()
 
 
 def test_web_import_without_metadata_requires_auto_tag(tmp_path):
-    persona = _persona(tmp_path)
     model = FakeStickerTagModel()
-    bundle, _, store = _bundle(tmp_path, persona, model)
+    bundle, _, store = _bundle(tmp_path, model)
     client = TestClient(create_api(bundle=bundle))
 
     response = client.post(
-        "/v1/stickers/import?character_id=neko&filename=raw.zip&auto_tag=false",
+        "/v1/stickers/import?filename=raw.zip&auto_tag=false",
         content=_untagged_zip(),
         headers={"Content-Type": "application/zip"},
     )
@@ -156,15 +171,15 @@ def test_web_import_without_metadata_requires_auto_tag(tmp_path):
     store.close()
 
 
-def test_sticker_web_manager_exposes_zip_import_and_character_owned_sticker_semantics():
-    js = (WEB / "p0_7.js").read_text(encoding="utf-8")
-    css = (WEB / "p0_7.css").read_text(encoding="utf-8")
+def test_sticker_web_manager_uses_global_library_and_no_character_cache_key():
+    js = (WEB / "stickers.js").read_text(encoding="utf-8")
     context = (ROOT / "src" / "character_memory" / "runtime" / "context.py").read_text(encoding="utf-8")
 
     assert "/v1/stickers/import" in js
-    assert '"Content-Type": "application/zip"' in js
-    assert "AI 自动补标签" in js
-    assert "data-sticker-import-open" in js
-    assert ".sticker-import-open" in css
+    assert '"Content-Type":"application/zip"' in js
+    assert "导入全局表情包" in js
+    assert "所有人物和群聊都能使用" in js
+    assert 'CM.api("/v1/stickers")' in js
+    assert "new Map()" not in js[:1000]
     assert "不需要等用户先发表情包" in context
     assert "MESSAGE + STICKER" in context

@@ -180,6 +180,8 @@ def test_sticker_web_manager_uses_global_library_and_no_character_cache_key():
     assert "导入全局表情包" in js
     assert "所有人物和群聊都能使用" in js
     assert 'CM.api("/v1/stickers")' in js
-    assert "new Map()" not in js[:1000]
+    assert "stickerCache = new Map" not in js
+    assert "cache.get(CM.state.characterId)" not in js
+    assert "cache.set(CM.state.characterId" not in js
     assert "不需要等用户先发表情包" in context
     assert "MESSAGE + STICKER" in context

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import hashlib
 from io import BytesIO
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
+import threading
 from typing import Callable, Iterable
+from uuid import uuid4
 import zipfile
 
 import yaml
@@ -16,6 +20,8 @@ _ALLOWED_EXTENSIONS = {".png", ".webp", ".gif", ".svg", ".jpg", ".jpeg"}
 _MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 _MAX_UNCOMPRESSED_BYTES = 160 * 1024 * 1024
 _MAX_ARCHIVE_FILES = 500
+_IMPORT_LOCKS_GUARD = threading.Lock()
+_IMPORT_LOCKS: dict[str, threading.RLock] = {}
 
 
 class Sticker(BaseModel):
@@ -77,11 +83,6 @@ class StickerCatalog:
         return "\n".join(rows)
 
     def public_items(self, character_id: str | None = None) -> list[dict]:
-        """Return API payloads.
-
-        `character_id` is retained only for the legacy character-scoped asset
-        route. New callers should omit it and use the global asset URL.
-        """
         result = []
         for item in self.stickers:
             if self.asset_path(item.id) is None:
@@ -115,12 +116,6 @@ def _read_manifest(path: Path) -> list[Sticker]:
 
 
 def _catalog_from_manifests(manifests: Iterable[Path], *, root: Path, source: str) -> StickerCatalog:
-    """Merge manifests in order; later manifests override identical ids.
-
-    The default pack is first, legacy character-local imports are compatibility
-    sources in the middle, and the global user library is last so new imports
-    always win deterministically.
-    """
     merged: dict[str, Sticker] = {}
     roots: dict[str, Path] = {}
     for manifest in manifests:
@@ -135,12 +130,6 @@ def load_global_sticker_catalog(
     *,
     persona_paths: Iterable[str | Path] = (),
 ) -> StickerCatalog:
-    """Load the application-wide sticker library.
-
-    User-imported packs live in `<global_dir>/manifest.yaml`. Existing P0.9/P0.10
-    character-local manifests are also read as legacy compatibility sources so a
-    user who already imported stickers does not lose them after this migration.
-    """
     root = Path(global_dir)
     manifests: list[Path] = [_default_manifest()]
     seen: set[Path] = set()
@@ -155,10 +144,6 @@ def load_global_sticker_catalog(
 
 
 def load_sticker_catalog(persona_path: str | Path) -> StickerCatalog:
-    """Legacy character-scoped loader retained for compatibility/tests.
-
-    New application code should use `load_global_sticker_catalog`.
-    """
     persona_path = Path(persona_path)
     local_manifest = persona_path.parent / "stickers" / "manifest.yaml"
     manifests = [_default_manifest()]
@@ -233,6 +218,77 @@ def _needs_ai_fill(row: dict) -> bool:
     return not has_label or not has_semantics
 
 
+def _import_lock_for(output_dir: Path) -> threading.RLock:
+    key = str(output_dir.resolve())
+    with _IMPORT_LOCKS_GUARD:
+        lock = _IMPORT_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _IMPORT_LOCKS[key] = lock
+        return lock
+
+
+def _durable_write(path: Path, content: bytes) -> None:
+    with path.open("wb") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _commit_prepared_import(output_dir: Path, prepared: list[tuple[Sticker, bytes]]) -> None:
+    """Publish assets first under immutable content-addressed names, manifest last.
+
+    Existing referenced assets are never overwritten. Until the final atomic
+    manifest replace succeeds, readers keep seeing the previous complete pack.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = output_dir / "manifest.yaml"
+    transaction_id = uuid4().hex
+    created_assets: list[Path] = []
+    temp_paths: list[Path] = []
+    committed = False
+    try:
+        existing = {item.id: item for item in _read_manifest(manifest)}
+        for sticker, payload in prepared:
+            target = output_dir / sticker.file
+            if target.exists():
+                if target.read_bytes() != payload:
+                    raise RuntimeError(f"content-address collision for sticker asset: {target.name}")
+            else:
+                temp = output_dir / f".{target.name}.{transaction_id}.tmp"
+                temp_paths.append(temp)
+                _durable_write(temp, payload)
+                os.replace(temp, target)
+                temp_paths.remove(temp)
+                created_assets.append(target)
+            existing[sticker.id] = sticker
+
+        manifest_payload = {"stickers": [item.model_dump(mode="json") for item in existing.values()]}
+        manifest_text = yaml.safe_dump(manifest_payload, allow_unicode=True, sort_keys=False).encode("utf-8")
+        temp_manifest = output_dir / f".manifest.{transaction_id}.tmp"
+        temp_paths.append(temp_manifest)
+        _durable_write(temp_manifest, manifest_text)
+        _read_manifest(temp_manifest)
+        for sticker, _ in prepared:
+            if not (output_dir / sticker.file).is_file():
+                raise RuntimeError(f"prepared sticker asset missing before manifest commit: {sticker.file}")
+        os.replace(temp_manifest, manifest)
+        temp_paths.remove(temp_manifest)
+        committed = True
+    finally:
+        for path in temp_paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if not committed:
+            for path in created_assets:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+
 def import_sticker_bundle(
     persona_path: str | Path,
     archive_bytes: bytes,
@@ -241,12 +297,7 @@ def import_sticker_bundle(
     default_pack_name: str = "自定义",
     target_dir: str | Path | None = None,
 ) -> dict:
-    """Import a sticker ZIP.
-
-    `persona_path` remains for backward compatibility with the old CLI/API.
-    New Web imports pass `target_dir` and therefore write to the application-wide
-    user sticker library instead of a character directory.
-    """
+    """Import a sticker ZIP using validate-first, manifest-last publication."""
     if not archive_bytes:
         raise ValueError("empty sticker archive")
     if len(archive_bytes) > _MAX_ARCHIVE_BYTES:
@@ -256,6 +307,11 @@ def import_sticker_bundle(
         archive = zipfile.ZipFile(BytesIO(archive_bytes))
     except zipfile.BadZipFile as exc:
         raise ValueError("invalid sticker zip archive") from exc
+
+    prepared: list[tuple[Sticker, bytes]] = []
+    pack_names: dict[str, str] = {}
+    ai_tagged = 0
+    metadata_present = False
 
     with archive:
         infos = [info for info in archive.infolist() if not info.is_dir()]
@@ -289,14 +345,8 @@ def import_sticker_bundle(
                 for index, name in enumerate(asset_names, start=1)
             ]
 
-        output_dir = Path(target_dir) if target_dir is not None else Path(persona_path).parent / "stickers"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        local_manifest = output_dir / "manifest.yaml"
-        existing = {item.id: item for item in _read_manifest(local_manifest)}
-
-        imported: list[Sticker] = []
-        pack_names: dict[str, str] = {}
-        ai_tagged = 0
+        # Phase 1: resolve, read, tag and validate every row without mutating the
+        # current sticker library. Any later missing/ambiguous file aborts here.
         for index, source_row in enumerate(rows, start=1):
             row = dict(source_row)
             filename = str(row.get("filename") or row.get("file") or "").strip()
@@ -341,33 +391,37 @@ def import_sticker_bundle(
                 *aliases,
             ])
             description = str(row.get("description") or "").strip()[:240]
-            output_name = f"{sticker_id}{suffix}"
-            (output_dir / output_name).write_bytes(payload)
-            sticker = Sticker(
-                id=sticker_id,
-                file=output_name,
-                label=label,
-                tags=tags,
-                description=description,
-                pack_id=pack_id,
-                pack_name=pack_name,
+            digest = hashlib.sha256(payload).hexdigest()[:16]
+            output_name = f"{sticker_id}-{digest}{suffix}"
+            prepared.append(
+                (
+                    Sticker(
+                        id=sticker_id,
+                        file=output_name,
+                        label=label,
+                        tags=tags,
+                        description=description,
+                        pack_id=pack_id,
+                        pack_name=pack_name,
+                    ),
+                    payload,
+                )
             )
-            existing[sticker.id] = sticker
-            imported.append(sticker)
             pack_names[pack_id] = pack_name
 
-        if not imported:
-            raise ValueError("no supported sticker images were found in the archive")
+    if not prepared:
+        raise ValueError("no supported sticker images were found in the archive")
 
-        manifest_payload = {"stickers": [item.model_dump(mode="json") for item in existing.values()]}
-        local_manifest.write_text(
-            yaml.safe_dump(manifest_payload, allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
-        )
-        return {
-            "imported": len(imported),
-            "ai_tagged": ai_tagged,
-            "metadata_present": metadata_present,
-            "packs": [{"id": key, "name": value} for key, value in pack_names.items()],
-            "manifest": str(local_manifest),
-        }
+    # Phase 2: serialize publication for this library. New immutable assets are
+    # published first and the manifest pointer changes atomically only at the end.
+    output_dir = Path(target_dir) if target_dir is not None else Path(persona_path).parent / "stickers"
+    with _import_lock_for(output_dir):
+        _commit_prepared_import(output_dir, prepared)
+
+    return {
+        "imported": len(prepared),
+        "ai_tagged": ai_tagged,
+        "metadata_present": metadata_present,
+        "packs": [{"id": key, "name": value} for key, value in pack_names.items()],
+        "manifest": str(output_dir / "manifest.yaml"),
+    }

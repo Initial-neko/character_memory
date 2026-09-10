@@ -8,6 +8,7 @@ import time
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import Clock, RealClock
 from character_memory.config import Settings, discover_character_profiles, load_persona, load_settings
+from character_memory.images import load_image_catalog
 from character_memory.life.runner import DayRunner
 from character_memory.life.simulator import LifeSimulator
 from character_memory.life.ticker import TimeTicker
@@ -65,7 +66,14 @@ def build_embedding(settings: Settings):
 def build_model(settings: Settings):
     if not settings.api_key:
         raise ValueError("Missing OPENCODE_GO_API_KEY or api_key in config.yaml")
-    return OpenAICompatibleModel(settings.api_key, settings.chat_model, settings.base_url, temperature=settings.chat_temperature, attempts=settings.llm_attempts)
+    return OpenAICompatibleModel(
+        settings.api_key,
+        settings.chat_model,
+        settings.base_url,
+        temperature=settings.chat_temperature,
+        attempts=settings.llm_attempts,
+        vision_model=settings.vision_model,
+    )
 
 
 def _default_character_id(settings: Settings, profiles: list[dict[str, str]]) -> str:
@@ -84,7 +92,7 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
 
     total = time.perf_counter()
     timings: dict[str, float] = {}
-    logger.info("app.init start model=%s embedding=%s/%s", settings.chat_model, settings.embedding_provider, settings.embedding_model)
+    logger.info("app.init start model=%s vision_model=%s embedding=%s/%s", settings.chat_model, settings.vision_model, settings.embedding_provider, settings.embedding_model)
 
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     stage = time.perf_counter()
@@ -104,11 +112,20 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
         profiles = discover_character_profiles(settings)
         persona_by_id = {profile["id"]: load_persona(profile["persona_path"]) for profile in profiles}
         sticker_by_id = {profile["id"]: load_sticker_catalog(profile["persona_path"]) for profile in profiles}
+        image_by_id = {profile["id"]: load_image_catalog(profile["persona_path"]) for profile in profiles}
         timings["persona_ms"] = _ms(stage)
 
         recall = VectorRecall(store, embeddings, limit=settings.recall_limit)
         runtimes = {
-            character_id: PersonRuntime(store, recall, embeddings, model, persona, sticker_by_id[character_id])
+            character_id: PersonRuntime(
+                store,
+                recall,
+                embeddings,
+                model,
+                persona,
+                sticker_by_id[character_id],
+                image_by_id[character_id],
+            )
             for character_id, persona in persona_by_id.items()
         }
         default_character_id = _default_character_id(settings, profiles)

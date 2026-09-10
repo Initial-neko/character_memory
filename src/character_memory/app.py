@@ -15,6 +15,7 @@ from character_memory.llm.client import OpenAICompatibleModel
 from character_memory.memory.embedding import DeterministicEmbedding, OpenAICompatibleEmbedding, SentenceTransformerEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
+from character_memory.stickers import load_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -102,11 +103,12 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
         stage = time.perf_counter()
         profiles = discover_character_profiles(settings)
         persona_by_id = {profile["id"]: load_persona(profile["persona_path"]) for profile in profiles}
+        sticker_by_id = {profile["id"]: load_sticker_catalog(profile["persona_path"]) for profile in profiles}
         timings["persona_ms"] = _ms(stage)
 
         recall = VectorRecall(store, embeddings, limit=settings.recall_limit)
         runtimes = {
-            character_id: PersonRuntime(store, recall, embeddings, model, persona)
+            character_id: PersonRuntime(store, recall, embeddings, model, persona, sticker_by_id[character_id])
             for character_id, persona in persona_by_id.items()
         }
         default_character_id = _default_character_id(settings, profiles)

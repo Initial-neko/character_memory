@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 
 class EventType(str, Enum):
@@ -58,7 +58,10 @@ class Memory(BaseModel):
 class ActionDecision(BaseModel):
     type: ActionType
     reason: str = ""
-    message: str | None = None
+    # Providers occasionally drift to `text` for a textual action. Accept that
+    # narrow alias at the schema boundary, but keep `message` as our canonical
+    # persisted/API field and still reject genuinely empty MESSAGE/EMOJI actions.
+    message: str | None = Field(default=None, validation_alias=AliasChoices("message", "text"))
     sticker_id: str | None = None
     image_id: str | None = None
 
@@ -74,6 +77,7 @@ class ActionDecision(BaseModel):
         if self.type in message_actions:
             if not (self.message or "").strip():
                 raise ValueError(f"{self.type.value} requires a non-empty message")
+            self.message = self.message.strip()
             self.sticker_id = None
             self.image_id = None
             return self

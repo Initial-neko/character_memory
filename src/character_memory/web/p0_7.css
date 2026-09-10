@@ -18,8 +18,8 @@
   right: auto;
   bottom: calc(100% - 2px);
   z-index: 20;
-  width: min(410px, calc(100% - 48px));
-  max-height: 320px;
+  width: min(430px, calc(100% - 48px));
+  max-height: 360px;
   overflow: hidden;
   padding: 8px 10px 10px;
   border: 1px solid rgba(120, 113, 108, 0.18);
@@ -30,7 +30,44 @@
 }
 
 .sticker-panel.hidden { display: none; }
-.sticker-loading { padding: 24px; text-align: center; color: #78716c; }
+.sticker-loading { padding: 24px; text-align: center; color: #78716c; line-height: 1.55; }
+.sticker-loading span { font-size: 11px; }
+.sticker-import-input { display: none; }
+
+.sticker-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 2px 5px;
+  color: #5e544f;
+  font-size: 12px;
+}
+
+.sticker-import-open {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #786f69;
+  cursor: pointer;
+  font-size: 21px;
+  line-height: 1;
+}
+.sticker-import-open:hover { background: #f3efec; }
+
+.sticker-import-notice {
+  margin: 0 0 7px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: #eef8f0;
+  color: #3d6848;
+  font-size: 10px;
+  line-height: 1.4;
+}
 
 .sticker-pack-tabs {
   display: flex;
@@ -108,6 +145,20 @@
   text-align: right;
 }
 
+.sticker-import-card { padding: 8px 5px 4px; }
+.sticker-import-title { color: #302b28; font-size: 14px; font-weight: 700; }
+.sticker-import-file { margin-top: 6px; color: #6f635d; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sticker-import-help { margin-top: 9px; padding: 9px 10px; border-radius: 10px; background: #f7f4f2; color: #80746e; font-size: 11px; line-height: 1.55; }
+.sticker-import-help code { color: #5b514b; font-size: 10px; }
+.sticker-auto-tag { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; color: #554d48; font-size: 12px; cursor: pointer; }
+.sticker-auto-tag input { margin-top: 2px; }
+.sticker-auto-tag small { display: block; margin-top: 2px; color: #948983; font-size: 10px; font-weight: 400; }
+.sticker-import-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.sticker-import-actions button,
+.sticker-import-retry button { padding: 7px 11px; border: 1px solid #dfd7d2; border-radius: 9px; background: #fff; color: #5b514b; cursor: pointer; }
+.sticker-import-actions .sticker-import-confirm { border-color: #302b28; background: #302b28; color: #fff; }
+.sticker-import-retry { padding: 0 12px 12px; text-align: center; }
+
 .sticker-bubble {
   position: relative;
   width: auto;
@@ -156,7 +207,7 @@
 .intent-reason { margin-top: 8px; color: #8b817b; font-size: 12px; line-height: 1.45; }
 
 @media (max-width: 720px) {
-  .sticker-panel { width: min(348px, calc(100% - 20px)); }
+  .sticker-panel { width: min(360px, calc(100% - 20px)); }
   .sticker-grid { grid-template-columns: repeat(5, 52px); }
   .sticker-bubble,
   .sticker-bubble img { max-width: 96px; max-height: 96px; }

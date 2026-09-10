@@ -1,8 +1,10 @@
 # Copy to config.yaml. Prefer OPENCODE_GO_API_KEY instead of writing the key here.
 api_key: ""
 base_url: "https://opencode.ai/zen/go/v1"
-# OpenCode Go model id for DeepSeek V4.1 Flash.
+# OpenCode Go model id for DeepSeek V4.1 Flash text turns.
 chat_model: "deepseek-flash"
+# Real image turns are routed to DeepSeek V4 Flash Vision Exp.
+vision_model: "deepseek-v4-flash-vision-exp"
 chat_temperature: 0.7
 llm_attempts: 2
 
@@ -17,5 +19,8 @@ embedding_model: "BAAI/bge-small-zh-v1.5"
 # embedding_api_key: ""
 
 db_path: "data/character-memory.db"
+# Empty means <db parent>/media. User-uploaded image bytes live here, not in SQLite.
+media_dir: ""
+media_max_bytes: 8388608
 persona_path: "personas/rin/persona.yaml"
 recall_limit: 8

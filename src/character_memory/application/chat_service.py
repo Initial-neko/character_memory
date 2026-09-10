@@ -59,21 +59,23 @@ class ChatService:
         conversation_id: str = "default",
         at: datetime | None = None,
         sticker: dict | None = None,
+        image: dict | None = None,
+        vision_image_data_url: str | None = None,
     ):
         content = message.strip()
-        if not content and sticker is None:
-            raise ValueError("message or sticker must not be empty")
+        if not content and sticker is None and image is None:
+            raise ValueError("message, sticker or image must not be empty")
 
         metadata = {"conversation_id": conversation_id}
-        runtime_content = content
+        runtime_parts = [content] if content else []
+
         if sticker is not None:
             sticker_id = str(sticker.get("id") or "").strip()
             sticker_label = str(sticker.get("label") or sticker_id).strip()
             tags = [str(value).strip() for value in (sticker.get("tags") or []) if str(value).strip()]
             description = str(sticker.get("description") or "").strip()
             meaning = "、".join(tags) or description or sticker_label
-            sticker_text = f"[用户发送表情包：{sticker_label}；含义：{meaning}]"
-            runtime_content = f"{content}\n{sticker_text}".strip()
+            runtime_parts.append(f"[用户发送表情包：{sticker_label}；含义：{meaning}]")
             metadata.update(
                 {
                     "display_text": content,
@@ -82,27 +84,48 @@ class ChatService:
                 }
             )
 
+        if image is not None:
+            media_id = str(image.get("id") or "").strip()
+            original_name = str(image.get("original_name") or "图片").strip() or "图片"
+            mime_type = str(image.get("mime_type") or "").strip()
+            size_bytes = int(image.get("size_bytes") or 0)
+            runtime_parts.append(f"[用户发送真实图片：{original_name}。图片本体已随本轮多模态请求提供，请根据实际视觉内容理解。]")
+            metadata.update(
+                {
+                    "display_text": content,
+                    "media_id": media_id,
+                    "media_name": original_name,
+                    "media_mime_type": mime_type,
+                    "media_size_bytes": size_bytes,
+                }
+            )
+
+        runtime_content = "\n".join(runtime_parts).strip()
         runtime = self._runtime_for(character_id)
         with self._lock_for(character_id):
             now = at or self.clock.now()
             self.store.set_world_time(character_id, now)
             logger.info(
-                "chat.send character=%s conversation=%s at=%s chars=%d sticker=%s",
+                "chat.send character=%s conversation=%s at=%s chars=%d sticker=%s image=%s",
                 character_id,
                 conversation_id,
                 now.isoformat(),
                 len(content),
                 metadata.get("sticker_id") or "-",
+                metadata.get("media_id") or "-",
             )
-            return runtime.handle(
-                Event(
-                    character_id=character_id,
-                    event_type=EventType.USER_MESSAGE,
-                    event_time=now,
-                    content=runtime_content,
-                    metadata=metadata,
-                )
+            event = Event(
+                character_id=character_id,
+                event_type=EventType.USER_MESSAGE,
+                event_time=now,
+                content=runtime_content,
+                metadata=metadata,
             )
+            if vision_image_data_url:
+                return runtime.handle(event, image_data_urls=[vision_image_data_url])
+            # Keep the long-standing handle(event) contract untouched for every
+            # ordinary text/sticker turn and for lightweight test runtimes.
+            return runtime.handle(event)
 
     def dispatch_proactive_intent(
         self,
@@ -162,6 +185,10 @@ class ChatService:
                     "action": event.metadata.get("action"),
                     "sticker_id": event.metadata.get("sticker_id"),
                     "sticker_label": event.metadata.get("sticker_label"),
+                    "image_id": event.metadata.get("image_id"),
+                    "image_label": event.metadata.get("image_label"),
+                    "media_id": event.metadata.get("media_id"),
+                    "media_name": event.metadata.get("media_name"),
                     "source_event_type": event.metadata.get("source_event_type"),
                     "source_event_id": source_event_id,
                     "has_trace": source_event_id in trace_sources,

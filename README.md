@@ -2,7 +2,7 @@
 
 一个用于研究 **Persistent AI Person / 持久化 AI 人物** 的 V0 原型。
 
-当前阶段只做 **Phase 1 — Prove the Person / Relationship**：验证同一个 AI 人物能否在长期交互中保持人格、拥有可追溯经历、选择性记忆、持续心理状态，并自然地表达、追问、沉默、使用表情包和再次相遇。
+当前阶段只做 **Phase 1 — Prove the Person / Relationship**：验证同一个 AI 人物能否在长期交互中保持人格、拥有可追溯经历、选择性记忆、持续心理状态，并自然地表达、追问、沉默、使用表情包/图片和再次相遇。
 
 ## 当前实现
 
@@ -13,17 +13,21 @@
 - 语言形式 Mental State；空 update 表示本轮沿用旧状态。
 - Relationship Time：Runtime 知道最近一次聊天和距今时间，不写死机械问候。
 - `PersonRuntime.handle(event)` 统一处理用户消息、Time Tick、Intent。
-- P0 对外行为：`actions[0..3]`，当前支持 `MESSAGE / EMOJI / STICKER`；`actions=[]` 是真正沉默。
+- P0 对外行为：`actions[0..3]`，当前支持 `MESSAGE / EMOJI / STICKER / IMAGE`；`actions=[]` 是真正沉默。
 - 旧 `REPLY / MINIMAL_RESPONSE / NO_REPLY / DEFER / PROACTIVE_MESSAGE / NO_ACTION` 保留兼容，不再是新聊天主 contract。
-- OpenAI-compatible Person Model；默认 OpenCode Go `deepseek-flash`（DeepSeek V4.1 Flash），结构化请求使用 `response_format=json_object` + Pydantic validation。
-- OpenCode Go conversation session header 自动处理。
-- 多 Character：每个 Character 独立 Persona、聊天历史、Mental State、Memory、conversation session、可选 Sticker Catalog；Embedding / Provider / SQLite 共享。
+- OpenAI-compatible Person Model；默认 OpenCode Go `deepseek-flash`（DeepSeek V4.1 Flash）。
+- 用户本轮附带真实图片时，自动路由到 OpenCode Go `deepseek-v4-flash-vision-exp`。
+- 两种模型路径都继续使用 `response_format=json_object` + Pydantic validation 和稳定 `x-opencode-session`。
+- 多 Character：每个 Character 独立 Persona、聊天历史、Mental State、Memory、conversation session、可选 Sticker Catalog / Image Catalog；Embedding / Provider / SQLite 共享。
 - Persistent World Time、Life Event、Diary、Pending Intent、时间模拟（当前冻结，不作为 P0 扩展重点）。
 - P0.6 主动消息：后台只检查已经存在且到期的 Intent；没有 due Intent 时不调用模型。
 - P0.6 未读红点：一次 `/v1/characters/summaries` 请求返回全部人物摘要，前端本地维护 read state。
 - P0.7 Intent Preview：可查看 Intent 状态、计划时间、来源 Event，并跳到产生它的 Runtime Trace。
 - P0.7 Sticker：用户和人物都能发送本地表情包；人物只能选择 Manifest 中真实存在的 Sticker ID。
-- Runtime Trace 独立持久化，可按单轮回看 Context / Recall / Reaction / Actions / Sticker / Memory Admission / Intent / timings。
+- P0.8 Vision：用户可上传 JPEG / PNG / GIF / WebP，人物基于真实视觉内容回应。
+- P0.8 Image Action：人物可以发送自身 `images/manifest.yaml` 中的已有图片；主动 Intent 也可产生 IMAGE。
+- 用户上传图片文件保存在本地 media 目录，SQLite 只保存媒体元数据；base64 不进入 Event / Trace。
+- Runtime Trace 独立持久化，可按单轮回看 Context / Recall / Reaction / Actions / Sticker/Image Decision / Memory Admission / Intent / model used / timings。
 - FastAPI + 原生 HTML/CSS/JS 聊天 WebUI。
 - 用户可选「想法」视图：只展示安全 `perception / reaction` 摘要，不展示 raw chain-of-thought。
 - Streamlit Developer Inspector。
@@ -40,18 +44,22 @@ FastAPI
 ChatService
     ├── RealClock
     ├── conversation_id
-    └── per-character turn lock
+    ├── per-character turn lock
+    └── optional image attachment
     ↓
 PersonRuntime(character persona)
     ├── Relationship Time
     ├── Vector Recall
     ├── Person Model
+    │   ├── text -> deepseek-flash
+    │   └── image -> deepseek-v4-flash-vision-exp
     ├── Mental State
     ├── Sticker Catalog
+    ├── Image Catalog
     ├── actions[0..3]
     └── Memory Admission
     ↓
-SQLite Event / Memory / Intent / Trace
+SQLite Event / Memory / Intent / Media metadata / Trace
 ```
 
 CLI 的 `chat` 也调用同一个 `ChatService`。Streamlit 不再承担正式聊天交互，只保留为 Developer Inspector。
@@ -73,12 +81,15 @@ $env:OPENCODE_GO_API_KEY="YOUR_KEY"
 ```yaml
 base_url: "https://opencode.ai/zen/go/v1"
 chat_model: "deepseek-flash"
+vision_model: "deepseek-v4-flash-vision-exp"
 embedding_provider: "sentence-transformers"
 embedding_model: "BAAI/bge-small-zh-v1.5"
 db_path: "data/character-memory.db"
+media_dir: ""
+media_max_bytes: 8388608
 ```
 
-第一次加载本地 BGE embedding 时会下载模型。
+`media_dir` 留空时使用 `<db parent>/media`。第一次加载本地 BGE embedding 时会下载模型。
 
 ## 主要入口：HTML / JS WebUI
 
@@ -101,7 +112,9 @@ http://127.0.0.1:8000
 - Enter 发送、Shift+Enter 换行；
 - `☺` 打开当前人物可用的 Sticker 面板；
 - 用户可单独发送一个 Sticker；
-- 人物一轮按顺序显示 0~3 条 MESSAGE / EMOJI / STICKER；
+- 图片按钮选择 JPEG / PNG / GIF / WebP，可添加一句文字后发送；
+- 发送真实图片时仅这一轮自动使用 Vision 模型；纯文本仍使用 DeepSeek V4.1 Flash；
+- 人物一轮按顺序显示 0~3 条 MESSAGE / EMOJI / STICKER / IMAGE；
 - 真正沉默时不伪造角色消息，只显示轻量 `已读 · 没有回复`；
 - 非流式等待时显示“正在输入中”；
 - 聊天历史与时间分隔；
@@ -110,14 +123,14 @@ http://127.0.0.1:8000
 - 每条有 Trace 的消息通过 `···` 打开 Developer Detail；
 - 查看 Mental State Before / After；
 - 查看本轮 Recall；
-- 查看实际发送给模型的 messages；
-- 查看 Compiled Context / Relationship Time / Available Stickers；
+- 查看实际发送给模型的 messages；图片 data URL 在 Trace 中会替换为 `<base64 omitted>`；
+- 查看 Compiled Context / Relationship Time / Available Stickers / Available Images；
 - 查看 Memory Candidate 的 WRITE / SKIP_LOW_VALUE / SKIP_DUPLICATE；
 - 查看 Intent Candidate、创建的 Intent ID 和来源 Event；
-- 查看 Sticker 决策，包括无效 Sticker ID 被丢弃的原因；
+- 查看 Sticker/Image 决策，包括无效资源 ID 被丢弃的原因；
 - 查看 Raw Model Response；
-- 查看本轮 `runtime_init / recall / model / memory_embedding / persist / API / browser` 等耗时；
-- 顶部 `Runtime` 按钮按需查看当前 Character 的 Persona、Mental State、Memory、Intent、Sticker、Provider。
+- 查看本轮实际使用的 text / vision model 和各阶段耗时；
+- 顶部 `Runtime` 按钮按需查看当前 Character 的 Persona、Mental State、Memory、Intent、Sticker、Image、Provider。
 
 前端不直接操作 Runtime/SQLite，只调用 FastAPI。
 
@@ -148,7 +161,7 @@ Persona 不只控制语气，也描述：
 - 分歧；
 - 边界行为。
 
-## Multi-action / Silence / Sticker
+## Multi-action / Silence / Sticker / Image
 
 新聊天主 contract：
 
@@ -160,7 +173,7 @@ Persona 不只控制语气，也描述：
   "actions": [
     {"type": "MESSAGE", "message": "诶？？"},
     {"type": "STICKER", "sticker_id": "round_cat_pleading"},
-    {"type": "MESSAGE", "message": "怎么回事呀？"}
+    {"type": "IMAGE", "image_id": "afternoon_tea"}
   ],
   "memory_candidates": [],
   "intent_candidates": []
@@ -169,7 +182,7 @@ Persona 不只控制语气，也描述：
 
 一轮最多 3 个 action，但不要求拆分；普通一条消息仍然是默认情况。
 
-`STICKER` 不接受任意 URL。Runtime 每轮会把当前人物可用的 Sticker Manifest 编译进 `# Available Stickers`，模型只能选择真实存在的 `sticker_id`；模型编造不存在的 ID 时 Runtime 会丢弃该动作并记录 Trace。
+`STICKER` / `IMAGE` 都不接受任意 URL。Runtime 每轮把当前人物可用资源编译进 `# Available Stickers` / `# Available Images`，模型只能选择真实存在的 ID；编造不存在的 ID 时 Runtime 会丢弃该动作并记录 Trace。
 
 真正不想回复：
 
@@ -205,11 +218,55 @@ stickers:
 
 用户点击 Sticker 后，Event 内会保留 `sticker_id`，同时把 Sticker 的标签语义转成文本上下文交给当前文本模型，因此人物能够理解用户发来的表情包含义，而不要求默认聊天模型具备视觉能力。
 
+## Vision / User Image
+
+用户发送真实图片时，服务端先验证真实文件内容，再把这一轮路由到：
+
+```text
+deepseek-v4-flash-vision-exp
+```
+
+图片以 OpenAI-compatible Chat Completions 的 `image_url` content block 发送给模型。当前支持 JPEG / PNG / GIF / WebP，默认单张最大 8 MiB。
+
+图片字节保存在本地 media 目录。SQLite 的 `media_assets` 只保存文件引用与元数据；Event 也只保存 `media_id` 等引用。Runtime Trace 会保存多模态 messages 的结构，但会把实际 base64 内容替换为 `<base64 omitted>`。
+
+后续轮次不会自动把所有历史图片重新发给 Vision。真正值得长期记住的视觉信息，应由当轮模型形成语言形式的 Memory Candidate，再走正常 Memory Admission。
+
+## Character Image Catalog
+
+人物主动/被动发送的 `IMAGE` 来自自己的可控图片库：
+
+```text
+personas/<character_id>/images/
+├── manifest.yaml
+├── tea.png
+└── street-cat.webp
+```
+
+Manifest 示例：
+
+```yaml
+images:
+  - id: afternoon_tea
+    file: tea.png
+    label: 下午茶照片
+    tags: [日常, 分享, 下午茶]
+
+  - id: street_cat
+    file: street-cat.webp
+    label: 路边小猫
+    tags: [猫, 分享]
+```
+
+当前没有默认 Character Image Catalog，因此人物不会凭空拥有照片。添加真实图片和 manifest 后，模型才能选择对应 `image_id`。这与图片生成是两个不同能力。
+
 ## Intent / Proactive Message
 
 正常聊天的一次 Person Model 调用同时可以返回 `intent_candidates`。只有人物真的形成未来行动意图时才应产生 Intent；没有必要时保持空数组。
 
 到达 `earliest_at` 后，后台 Dispatcher 会把已持久化 Intent 作为 `PROACTIVE_INTENT` 再交给 PersonRuntime 判断是否执行、沉默或放弃。没有 due Intent 时只做轻量 SQLite 检查，不调用模型。
+
+到期 Intent 的 PersonReaction 现在也允许 `IMAGE`。如果当前人物图片库中存在匹配资源，人物可以主动发送图片；有效 IMAGE 与 MESSAGE/STICKER 一样会把 Intent 标记为 `EXECUTED`，并沿用聊天历史、未读红点和 Trace 链路。
 
 P0.7 起 Intent 记录 `source_event_id`。WebUI 顶部 `Intent` 可查看：
 
@@ -274,7 +331,7 @@ if gap > N:
 
 它们是简短、安全、可调试的人物反应摘要，**不是模型隐藏 chain-of-thought**。
 
-完整 Developer Trace 仍用于开发调试，包括 Context、Recall、Actions、Sticker Decision、Memory Admission、Mental State、Intent、Raw Structured Response 和 timings。
+完整 Developer Trace 仍用于开发调试，包括 Context、Recall、Actions、Sticker/Image Decision、Memory Admission、Mental State、Intent、Model Used、Raw Structured Response 和 timings。
 
 ## CLI
 
@@ -301,6 +358,7 @@ events
 memories
 mental_states
 intents
+media_assets
 world_states
 runtime_traces
 ```
@@ -317,12 +375,14 @@ LLM 成功后，以下派生状态在一个 SQLite transaction 中提交：
 Mental State
 Accepted Memory
 Intent
-0..3 Character Messages / Stickers
+0..3 Character Messages / Stickers / Images
 Runtime Trace
 ACTION Event
 ```
 
 如果派生写入失败，则整组 rollback，避免出现“状态改了一半、Trace 又没有”的半轮数据。
+
+用户上传图片的媒体文件/`media_assets` 在进入 Runtime 前持久化；即使随后模型调用失败，原始媒体仍可作为该次用户输入的持久化来源保存。
 
 ## Provider
 
@@ -330,6 +390,18 @@ ACTION Event
 
 ```text
 deepseek-flash
+```
+
+图片输入模型：
+
+```text
+deepseek-v4-flash-vision-exp
+```
+
+两者都走：
+
+```text
+https://opencode.ai/zen/go/v1/chat/completions
 ```
 
 OpenCode Go inference 会携带 `x-opencode-session` / `x-opencode-client` / `User-Agent`。
@@ -346,8 +418,6 @@ Web 前端为每个 Character 分别把 `conversation_id` 保存在浏览器 `lo
 
 `httpx.Client` 在 Model 生命周期内复用，不再每次请求重新建立连接。
 
-当前不把 `deepseek-flash` 假设为视觉模型。任意图片输入 / Vision 仍留到后续独立 Media 能力。
-
 ## 后端日志
 
 Web/API 默认输出 `INFO` 日志：
@@ -356,7 +426,7 @@ Web/API 默认输出 `INFO` 日志：
 API → ChatService → Runtime Event → Recall → Context → Provider → Actions → Memory Admission → Persist
 ```
 
-单轮日志会输出各阶段耗时。Provider HTTP error body 会直接输出，但不会输出 API Key。
+图片轮次日志会显示 `images=1` 和实际 `model=deepseek-v4-flash-vision-exp`；纯文本轮次保持 `model=deepseek-flash`。Provider HTTP error body 会直接输出，但不会输出 API Key 或图片 base64。
 
 更细日志：
 
@@ -392,12 +462,13 @@ Persona 主观自然度仍需要后续 blind judge；当前 harness 只验证可
 - `docs/EVALS.md`：评测计划与 P0 Relationship suite。
 - `docs/P0_6_PROACTIVE.md`：主动消息与未读闭环。
 - `docs/P0_7_STICKER_INTENT.md`：Sticker、Intent Preview 与 V4.1 Flash 切换。
+- `docs/P0_8_VISION_IMAGES.md`：Vision、用户图片、Image Action、媒体持久化与主动发图。
 - `docs/RESEARCH.md`：外部研究参考。
 
 ## 当前明确不做
 
 V0 不引入 LangChain/LangGraph、Redis、Celery、PostgreSQL、Knowledge Graph、复杂 Emotion 数值系统、Voice/TTS、Avatar、Video、完整 Feed、多用户生产架构。
 
-当前仍不做任意图片上传 / Vision、搜索引擎自动抓第三方图片、头像自动替换和 External Information / Web Tool Agent。当前人物不知道实时事实时应承认不知道或自然询问；后续如果加入外部能力，再采用 `人物决定查询 -> 外部结果 Event -> Person Runtime 再反应` 的路径。
+P0.8 已经支持图片理解和已有图片发送，但仍不做图片生成、搜索引擎自动抓第三方图片、头像自动替换和 External Information / Web Tool Agent。当前人物不知道实时事实时应承认不知道或自然询问；后续如果加入外部能力，再采用 `人物决定查询 -> 外部结果 Event -> Person Runtime 再反应` 的路径。
 
-先把 **同一个人持续聊天、会记、会沉默、会主动回来、会自然使用自己的表情包** 跑稳，再扩展外部能力。
+先把 **同一个人持续聊天、会记、会沉默、会主动回来、会自然使用自己的表情包和图片** 跑稳，再扩展外部能力。

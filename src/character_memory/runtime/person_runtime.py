@@ -21,6 +21,7 @@ _EXPRESSIVE_ACTIONS = {
     ActionType.MESSAGE,
     ActionType.EMOJI,
     ActionType.STICKER,
+    ActionType.IMAGE,
 }
 
 
@@ -41,13 +42,14 @@ def _cosine(left: list[float], right: list[float]) -> float | None:
 
 
 class PersonRuntime:
-    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None):
+    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None, image_catalog=None):
         self.store = store
         self.recall = recall
         self.embeddings = embeddings
         self.model = model
         self.persona = persona
         self.sticker_catalog = sticker_catalog
+        self.image_catalog = image_catalog
 
     def _last_chat_before(self, character_id: str, event_time):
         candidates = []
@@ -115,27 +117,47 @@ class PersonRuntime:
 
         return accepted, decisions
 
-    def _sanitize_sticker_actions(self, reaction):
-        decisions = []
+    def _sanitize_resource_actions(self, reaction):
+        sticker_decisions = []
+        image_decisions = []
         sanitized = []
         for action in reaction.actions:
-            if action.type != ActionType.STICKER:
+            if action.type == ActionType.STICKER:
+                sticker = self.sticker_catalog.get(action.sticker_id) if self.sticker_catalog is not None else None
+                if sticker is None or self.sticker_catalog.asset_path(sticker.id) is None:
+                    sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_UNKNOWN_STICKER"})
+                    logger.warning("runtime.sticker drop_unknown sticker_id=%s", action.sticker_id)
+                    continue
                 sanitized.append(action)
+                sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "ALLOW", "label": sticker.label})
                 continue
-            sticker = self.sticker_catalog.get(action.sticker_id) if self.sticker_catalog is not None else None
-            if sticker is None or self.sticker_catalog.asset_path(sticker.id) is None:
-                decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_UNKNOWN_STICKER"})
-                logger.warning("runtime.sticker drop_unknown sticker_id=%s", action.sticker_id)
-                continue
-            sanitized.append(action)
-            decisions.append({"sticker_id": action.sticker_id, "decision": "ALLOW", "label": sticker.label})
-        normalized_action = sanitized[0] if sanitized else ActionDecision(type=ActionType.NO_REPLY)
-        return reaction.model_copy(update={"actions": sanitized, "action": normalized_action}), decisions
 
-    def handle(self, event: Event):
+            if action.type == ActionType.IMAGE:
+                image = self.image_catalog.get(action.image_id) if self.image_catalog is not None else None
+                if image is None or self.image_catalog.asset_path(image.id) is None:
+                    image_decisions.append({"image_id": action.image_id, "decision": "DROP_UNKNOWN_IMAGE"})
+                    logger.warning("runtime.image drop_unknown image_id=%s", action.image_id)
+                    continue
+                sanitized.append(action)
+                image_decisions.append({"image_id": action.image_id, "decision": "ALLOW", "label": image.label})
+                continue
+
+            sanitized.append(action)
+
+        normalized_action = sanitized[0] if sanitized else ActionDecision(type=ActionType.NO_REPLY)
+        return reaction.model_copy(update={"actions": sanitized, "action": normalized_action}), sticker_decisions, image_decisions
+
+    def handle(self, event: Event, *, image_data_urls: list[str] | None = None):
         started = time.perf_counter()
         timings: dict[str, float] = {}
-        logger.info("runtime.handle start character=%s event_type=%s event_time=%s content_chars=%d", event.character_id, event.event_type.value, event.event_time.isoformat(), len(event.content or ""))
+        logger.info(
+            "runtime.handle start character=%s event_type=%s event_time=%s content_chars=%d images=%d",
+            event.character_id,
+            event.event_type.value,
+            event.event_time.isoformat(),
+            len(event.content or ""),
+            len(image_data_urls or []),
+        )
 
         last_chat_event = self._last_chat_before(event.character_id, event.event_time)
 
@@ -160,18 +182,31 @@ class PersonRuntime:
             recent,
             last_chat_event=last_chat_event,
             sticker_catalog=self.sticker_catalog,
+            image_catalog=self.image_catalog,
         )
         timings["context_ms"] = _ms(stage)
         logger.info("runtime.context ready chars=%d recent_events=%d has_state=%s duration_ms=%.1f", len(context), len(recent), bool(state_before), timings["context_ms"])
 
         conversation_id = str(event.metadata.get("conversation_id") or f"{event.character_id}:default")
         stage = time.perf_counter()
-        logger.info("runtime.model react start event_id=%s conversation=%s", event.id, conversation_id)
-        reaction = self.model.react_for_session(context, conversation_id)
-        reaction, sticker_decisions = self._sanitize_sticker_actions(reaction)
+        logger.info("runtime.model react start event_id=%s conversation=%s images=%d", event.id, conversation_id, len(image_data_urls or []))
+        if image_data_urls:
+            reaction = self.model.react_with_images_for_session(context, image_data_urls, conversation_id)
+        else:
+            reaction = self.model.react_for_session(context, conversation_id)
+        reaction, sticker_decisions, image_decisions = self._sanitize_resource_actions(reaction)
         timings["model_ms"] = _ms(stage)
         action_types = [action.type.value for action in reaction.actions]
-        logger.info("runtime.model react done event_id=%s actions=%s duration_ms=%.1f memory_candidates=%d intent_candidates=%d", event.id, action_types or ["NO_REPLY"], timings["model_ms"], len(reaction.memory_candidates), len(reaction.intent_candidates))
+        model_used = getattr(self.model, "last_model", getattr(self.model, "model", ""))
+        logger.info(
+            "runtime.model react done event_id=%s model=%s actions=%s duration_ms=%.1f memory_candidates=%d intent_candidates=%d",
+            event.id,
+            model_used or "-",
+            action_types or ["NO_REPLY"],
+            timings["model_ms"],
+            len(reaction.memory_candidates),
+            len(reaction.intent_candidates),
+        )
 
         state_after = (reaction.mental_state_update or "").strip() or state_before
 
@@ -222,6 +257,12 @@ class PersonRuntime:
                             continue
                         content = f"[表情包：{sticker.label}]"
                         metadata.update({"sticker_id": sticker.id, "sticker_label": sticker.label})
+                    elif action.type == ActionType.IMAGE:
+                        image = self.image_catalog.get(action.image_id) if self.image_catalog is not None else None
+                        if image is None:
+                            continue
+                        content = f"[图片：{image.label}]"
+                        metadata.update({"image_id": image.id, "image_label": image.label})
                     else:
                         if not (action.message or "").strip():
                             continue
@@ -249,6 +290,8 @@ class PersonRuntime:
                     "model_messages": model_messages,
                     "raw_model_response": raw_model_response,
                     "model_attempt": model_attempt,
+                    "model_used": model_used,
+                    "vision_images": len(image_data_urls or []),
                     "last_chat_event": last_chat_event.model_dump(mode="json") if last_chat_event is not None else None,
                     "mental_state_before": state_before,
                     "mental_state_after": state_after,
@@ -259,6 +302,7 @@ class PersonRuntime:
                     "action": reaction.action.model_dump(mode="json") if reaction.action is not None else None,
                     "actions": [action.model_dump(mode="json") for action in reaction.actions],
                     "sticker_decisions": sticker_decisions,
+                    "image_decisions": image_decisions,
                     "memory_candidates": [candidate.model_dump(mode="json") for candidate in reaction.memory_candidates],
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,

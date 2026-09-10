@@ -39,6 +39,15 @@ class PersonModel(ABC):
         # Backward-compatible fallback for local/fake PersonModel implementations.
         return self.react_for_session(context, session_id)
 
+    def structured_with_images_for_session(
+        self,
+        prompt: str,
+        image_data_urls: list[str],
+        schema: type[BaseModel],
+        session_id: str,
+    ):
+        raise RuntimeError("this PersonModel does not support generic structured vision analysis")
+
     @abstractmethod
     def plan_day(self, context: str) -> DailyLifePlan:
         ...
@@ -259,6 +268,15 @@ class OpenAICompatibleModel(PersonModel):
 
     def react_with_images_for_session(self, context: str, image_data_urls: list[str], session_id: str) -> PersonReaction:
         return self._call(context, PersonReaction, conversation_id=session_id, image_data_urls=image_data_urls)
+
+    def structured_with_images_for_session(
+        self,
+        prompt: str,
+        image_data_urls: list[str],
+        schema: type[BaseModel],
+        session_id: str,
+    ):
+        return self._call(prompt, schema, conversation_id=session_id, image_data_urls=image_data_urls)
 
     def plan_day(self, context: str) -> DailyLifePlan:
         return self._call(context, DailyLifePlan)

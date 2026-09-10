@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from pathlib import Path
+from collections import defaultdict
+from io import BytesIO
+import json
+from pathlib import Path, PurePosixPath
+import re
+import zipfile
 
 import yaml
 from pydantic import BaseModel, Field
 
 
 _ALLOWED_EXTENSIONS = {".png", ".webp", ".gif", ".svg", ".jpg", ".jpeg"}
+_MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+_MAX_UNCOMPRESSED_BYTES = 160 * 1024 * 1024
+_MAX_ARCHIVE_FILES = 500
 
 
 class Sticker(BaseModel):
@@ -15,14 +23,24 @@ class Sticker(BaseModel):
     label: str = Field(min_length=1, max_length=80)
     tags: list[str] = Field(default_factory=list, max_length=12)
     description: str = Field(default="", max_length=240)
+    pack_id: str = Field(default="default", min_length=1, max_length=64)
+    pack_name: str = Field(default="内置", min_length=1, max_length=80)
 
 
 class StickerCatalog:
-    def __init__(self, root: Path, stickers: list[Sticker], *, source: str):
+    def __init__(
+        self,
+        root: Path,
+        stickers: list[Sticker],
+        *,
+        source: str,
+        asset_roots: dict[str, Path] | None = None,
+    ):
         self.root = root
         self.stickers = stickers
         self.source = source
         self._by_id = {item.id: item for item in stickers}
+        self._asset_roots = {key: value.resolve() for key, value in (asset_roots or {}).items()}
 
     def get(self, sticker_id: str) -> Sticker | None:
         return self._by_id.get(sticker_id)
@@ -31,8 +49,8 @@ class StickerCatalog:
         item = self.get(sticker_id)
         if item is None:
             return None
-        candidate = (self.root / item.file).resolve()
-        root = self.root.resolve()
+        root = self._asset_roots.get(sticker_id, self.root.resolve())
+        candidate = (root / item.file).resolve()
         if candidate.parent != root or candidate.suffix.lower() not in _ALLOWED_EXTENSIONS:
             return None
         if not candidate.is_file():
@@ -79,10 +97,169 @@ def _read_manifest(path: Path) -> list[Sticker]:
     return result
 
 
+def _merge_catalogs(default_manifest: Path, local_manifest: Path) -> StickerCatalog:
+    defaults = _read_manifest(default_manifest)
+    locals_ = _read_manifest(local_manifest)
+    merged: dict[str, Sticker] = {item.id: item for item in defaults}
+    merged.update({item.id: item for item in locals_})
+    roots = {item.id: default_manifest.parent for item in defaults}
+    roots.update({item.id: local_manifest.parent for item in locals_})
+    return StickerCatalog(
+        local_manifest.parent,
+        list(merged.values()),
+        source="default+character",
+        asset_roots=roots,
+    )
+
+
 def load_sticker_catalog(persona_path: str | Path) -> StickerCatalog:
     persona_path = Path(persona_path)
     local_manifest = persona_path.parent / "stickers" / "manifest.yaml"
-    if local_manifest.is_file():
-        return StickerCatalog(local_manifest.parent, _read_manifest(local_manifest), source="character")
     default_manifest = _default_manifest()
+    if local_manifest.is_file():
+        return _merge_catalogs(default_manifest, local_manifest)
     return StickerCatalog(default_manifest.parent, _read_manifest(default_manifest), source="default")
+
+
+def _safe_member_name(name: str) -> str:
+    normalized = name.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"unsafe zip path: {name}")
+    return str(path)
+
+
+def _safe_id(value: object, fallback: str) -> str:
+    raw = str(value or fallback).strip()
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._-")
+    if not normalized:
+        normalized = fallback
+    return normalized[:64]
+
+
+def _dedupe_tags(values: list[object]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text[:40])
+        if len(result) >= 12:
+            break
+    return result
+
+
+def _metadata_rows(archive: zipfile.ZipFile, names: list[str]) -> list[dict]:
+    all_tags = [name for name in names if PurePosixPath(name).name == "all_tags.json"]
+    candidates = all_tags[:1] if all_tags else [name for name in names if PurePosixPath(name).name == "tags.json"]
+    rows: list[dict] = []
+    for name in candidates:
+        try:
+            value = json.loads(archive.read(name).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid sticker metadata JSON: {name}") from exc
+        if not isinstance(value, list):
+            raise ValueError(f"sticker metadata must be a JSON list: {name}")
+        rows.extend(item for item in value if isinstance(item, dict))
+    if not rows:
+        raise ValueError("zip must contain all_tags.json or one or more tags.json files")
+    return rows
+
+
+def import_sticker_bundle(persona_path: str | Path, archive_bytes: bytes) -> dict:
+    """Import a tagged sticker ZIP into one character's local sticker library.
+
+    Supported metadata mirrors the generated sticker bundles used by this project:
+    `all_tags.json` or per-pack `tags.json`, with filename/id/tag_zh/aliases/description
+    plus optional set_id/display_name fields. Imported files are flattened into the
+    character sticker directory; the manifest is written last so partial failures do
+    not expose incomplete packs.
+    """
+    if not archive_bytes:
+        raise ValueError("empty sticker archive")
+    if len(archive_bytes) > _MAX_ARCHIVE_BYTES:
+        raise ValueError("sticker archive is too large (max 64 MiB)")
+
+    try:
+        archive = zipfile.ZipFile(BytesIO(archive_bytes))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("invalid sticker zip archive") from exc
+
+    with archive:
+        infos = [info for info in archive.infolist() if not info.is_dir()]
+        if len(infos) > _MAX_ARCHIVE_FILES:
+            raise ValueError("sticker archive contains too many files")
+        total_uncompressed = sum(info.file_size for info in infos)
+        if total_uncompressed > _MAX_UNCOMPRESSED_BYTES:
+            raise ValueError("sticker archive expands beyond 160 MiB")
+        names = [_safe_member_name(info.filename) for info in infos]
+        info_by_name = {name: info for name, info in zip(names, infos)}
+        by_basename: dict[str, list[str]] = defaultdict(list)
+        for name in names:
+            by_basename[PurePosixPath(name).name].append(name)
+
+        rows = _metadata_rows(archive, names)
+        target_dir = Path(persona_path).parent / "stickers"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        local_manifest = target_dir / "manifest.yaml"
+        existing = {item.id: item for item in _read_manifest(local_manifest)}
+
+        imported: list[Sticker] = []
+        pack_names: dict[str, str] = {}
+        for index, row in enumerate(rows, start=1):
+            filename = str(row.get("filename") or row.get("file") or "").strip()
+            if not filename:
+                continue
+            basename = PurePosixPath(filename.replace("\\", "/")).name
+            suffix = Path(basename).suffix.lower()
+            if suffix not in _ALLOWED_EXTENSIONS:
+                continue
+            matches = by_basename.get(basename, [])
+            if len(matches) != 1:
+                raise ValueError(f"cannot uniquely locate sticker asset: {basename}")
+            member_name = matches[0]
+            sticker_id = _safe_id(row.get("id"), f"sticker_{index:03d}")
+            pack_id = _safe_id(row.get("set_id") or row.get("pack_id"), "custom")
+            pack_name = str(row.get("display_name") or row.get("pack_name") or row.get("set_name") or "自定义").strip()[:80] or "自定义"
+            label = str(row.get("tag_zh") or row.get("label") or row.get("tag_en") or sticker_id).strip()[:80] or sticker_id
+            aliases = row.get("aliases") if isinstance(row.get("aliases"), list) else []
+            tags = _dedupe_tags([
+                row.get("category"),
+                row.get("tag_zh"),
+                row.get("tag_en"),
+                *aliases,
+            ])
+            description = str(row.get("description") or "").strip()[:240]
+            output_name = f"{sticker_id}{suffix}"
+            payload = archive.read(info_by_name[member_name])
+            (target_dir / output_name).write_bytes(payload)
+            sticker = Sticker(
+                id=sticker_id,
+                file=output_name,
+                label=label,
+                tags=tags,
+                description=description,
+                pack_id=pack_id,
+                pack_name=pack_name,
+            )
+            existing[sticker.id] = sticker
+            imported.append(sticker)
+            pack_names[pack_id] = pack_name
+
+        if not imported:
+            raise ValueError("no supported sticker images were found in the archive")
+
+        manifest_payload = {
+            "stickers": [item.model_dump(mode="json") for item in existing.values()]
+        }
+        local_manifest.write_text(
+            yaml.safe_dump(manifest_payload, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        return {
+            "imported": len(imported),
+            "packs": [{"id": key, "name": value} for key, value in pack_names.items()],
+            "manifest": str(local_manifest),
+        }

@@ -28,7 +28,7 @@ def _ms(started: float) -> float:
 
 
 class GroupConversationService:
-    """P0.11 shared-conversation orchestrator.
+    """Shared group-conversation orchestrator.
 
     One user fact is persisted once in `conversation_events`. Each character then
     observes that same shared history, independently reacts or stays silent, and
@@ -80,7 +80,9 @@ class GroupConversationService:
             event_type = EventType.USER_MESSAGE if item.actor_type == "USER" else EventType.CHARACTER_MESSAGE
             content = item.metadata.get("display_text", item.content)
             if item.metadata.get("action") == ActionType.STICKER.value:
-                content = f"[表情包：{item.metadata.get('sticker_label') or item.metadata.get('sticker_id') or '表情包'}]"
+                label = item.metadata.get("sticker_label") or item.metadata.get("sticker_id") or "表情包"
+                meaning = item.metadata.get("sticker_meaning") or ""
+                content = f"[表情包：{label}{f'；含义：{meaning}' if meaning else ''}]"
             elif item.metadata.get("action") == ActionType.IMAGE.value:
                 content = f"[图片：{item.metadata.get('image_label') or item.metadata.get('image_id') or '图片'}]"
             elif item.metadata.get("media_id"):
@@ -107,8 +109,9 @@ class GroupConversationService:
 群里出现消息不代表你必须发言；如果别人已经表达了与你相同的意思、当前话题与你关系不大、你没有自然补充，actions=[] 是正常且优先允许的选择。
 不要机械重复别人刚说的话，不要为了保持群活跃度而插话，也不要因为你“能回答”就一定回答。
 你可以自然回应 User，也可以回应其他 Character 刚刚说的话；后说话时要把本轮已经出现的群消息当成真实发生的共同经历。
-如果你拥有 Available Stickers / Available Images，可以像普通聊天一样自然使用，但不要刷媒体。
-当前 P0.11 群聊不创建未来主动 Intent：intent_candidates 必须保持 []。
+Available Stickers 是大家共享可见的聊天表情资源；你可以像普通聊天一样自然使用 STICKER，也可以保持沉默，不要为了活跃而刷表情。
+如果你拥有 Available Images，也可以自然使用，但不要刷媒体。
+当前群聊不创建未来主动 Intent：intent_candidates 必须保持 []。
 来自你私人单聊的 Memory 只用于理解背景；除非 User 已在这个群里主动公开，否则不要把私人信息透露给其他群成员。
 """
 
@@ -135,13 +138,15 @@ class GroupConversationService:
             recall_query = str(source_event.metadata.get("display_text") or source_event.content or "").strip()
             if source_event.metadata.get("media_id"):
                 recall_query = f"{recall_query} 群聊图片".strip()
+            if source_event.metadata.get("action") == ActionType.STICKER.value:
+                recall_query = f"{source_event.metadata.get('sticker_label') or '表情包'} {source_event.metadata.get('sticker_meaning') or ''}".strip()
             memories = runtime.recall.recall(character_id, recall_query, now=now)
             recent = self._recent_as_events(group.id)
             synthetic = Event(
                 character_id=character_id,
                 event_type=EventType.USER_MESSAGE,
                 event_time=now,
-                content=f"群聊里 User 刚刚发起了这一轮：{source_event.metadata.get('display_text', source_event.content)}",
+                content=f"群聊里 User 刚刚发起了这一轮：{source_event.content}",
                 metadata={
                     "conversation_id": group.id,
                     "group_turn_id": source_event.turn_id,
@@ -165,7 +170,7 @@ class GroupConversationService:
             else:
                 reaction = runtime.model.react_for_session(context, session_id)
             reaction, sticker_decisions, image_decisions = runtime._sanitize_resource_actions(reaction)
-            # Group proactive intent is deliberately out of P0.11 V0 scope.
+            # Group proactive intent is deliberately out of current V0 scope.
             reaction = reaction.model_copy(update={"intent_candidates": []})
             model_ms = _ms(model_started)
 
@@ -215,7 +220,11 @@ class GroupConversationService:
                         if sticker is None:
                             continue
                         content = f"[表情包：{sticker.label}]"
-                        metadata.update({"sticker_id": sticker.id, "sticker_label": sticker.label})
+                        metadata.update({
+                            "sticker_id": sticker.id,
+                            "sticker_label": sticker.label,
+                            "sticker_meaning": "、".join(sticker.tags) or sticker.description,
+                        })
                     elif action.type == ActionType.IMAGE:
                         image = runtime.image_catalog.get(action.image_id) if runtime.image_catalog is not None else None
                         if image is None:
@@ -293,13 +302,16 @@ class GroupConversationService:
         at: datetime | None = None,
         image: dict | None = None,
         image_data_url: str | None = None,
+        sticker: dict | None = None,
     ) -> dict:
         group = self.repo.get_group(conversation_id)
         if group is None:
             raise KeyError(f"unknown group: {conversation_id}")
         content = message.strip()
-        if not content and image is None:
-            raise ValueError("group message or image must not be empty")
+        if image is not None and sticker is not None:
+            raise ValueError("send a sticker or image in one group user turn, not both")
+        if not content and image is None and sticker is None:
+            raise ValueError("group message, sticker or image must not be empty")
         now = at or self.clock.now()
         turn_id = f"turn-{uuid4().hex[:12]}"
         metadata = {"display_text": content}
@@ -314,6 +326,19 @@ class GroupConversationService:
                 }
             )
             runtime_content = f"{content}\n[用户发送了一张真实图片]".strip()
+        elif sticker is not None:
+            label = str(sticker.get("label") or sticker.get("id") or "表情包")
+            tags = sticker.get("tags") if isinstance(sticker.get("tags"), list) else []
+            meaning = "、".join(str(value) for value in tags if str(value).strip()) or str(sticker.get("description") or "")
+            metadata.update(
+                {
+                    "action": ActionType.STICKER.value,
+                    "sticker_id": sticker.get("id"),
+                    "sticker_label": label,
+                    "sticker_meaning": meaning,
+                }
+            )
+            runtime_content = f"[用户发送表情包：{label}{f'；含义：{meaning}' if meaning else ''}]"
         source_event = self.repo.append_event(
             GroupEvent(
                 conversation_id=conversation_id,
@@ -333,7 +358,14 @@ class GroupConversationService:
         user_turn_count = self.repo.count_user_turns(conversation_id)
         offset = (user_turn_count - 1) % len(members)
         ordered = members[offset:] + members[:offset]
-        logger.info("group.turn start conversation=%s turn=%s order=%s image=%s", conversation_id, turn_id, ordered, bool(image_data_url))
+        logger.info(
+            "group.turn start conversation=%s turn=%s order=%s image=%s sticker=%s",
+            conversation_id,
+            turn_id,
+            ordered,
+            bool(image_data_url),
+            (sticker or {}).get("id") or "-",
+        )
         decisions = []
         for character_id in ordered:
             decisions.append(

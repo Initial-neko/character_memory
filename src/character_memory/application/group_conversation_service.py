@@ -33,6 +33,64 @@ def _ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
+def resolve_group_mentions(
+    member_ids: list[str],
+    message: str,
+    profiles: dict[str, dict] | None = None,
+    explicit_mentions: list[str] | None = None,
+) -> list[str]:
+    """Resolve visible @tokens to stable Character IDs.
+
+    Explicit IDs from API clients are authoritative and validated. Text parsing
+    is a fallback so manually typing ``@Name`` still produces structured Event
+    metadata. ``*`` represents @所有人.
+    """
+    members = list(dict.fromkeys(str(value).strip() for value in member_ids if str(value).strip()))
+    member_set = set(members)
+    result: list[str] = []
+
+    for raw in explicit_mentions or []:
+        value = str(raw).strip()
+        if not value:
+            continue
+        if value != "*" and value not in member_set:
+            raise ValueError(f"Unknown mentioned character: {value}")
+        if value not in result:
+            result.append(value)
+    if "*" in result:
+        return ["*"]
+
+    text = str(message or "")
+    occurrences: list[tuple[int, int, str]] = []
+    all_index = text.find("@所有人")
+    if all_index >= 0:
+        occurrences.append((all_index, -len("@所有人"), "*"))
+
+    profile_map = profiles or {}
+    terminal = set(" \t\r\n，。！？,.!?;；:：()（）[]【】{}<>《》\"'、")
+    for character_id in members:
+        profile = profile_map.get(character_id) or {}
+        name = str(profile.get("name") or character_id).strip()
+        tokens = list(dict.fromkeys([f"@{name}", f"@{character_id}"]))
+        for token in tokens:
+            start = 0
+            while True:
+                index = text.find(token, start)
+                if index < 0:
+                    break
+                end = index + len(token)
+                if end >= len(text) or text[end] in terminal:
+                    occurrences.append((index, -len(token), character_id))
+                start = index + len(token)
+
+    for _, _, character_id in sorted(occurrences):
+        if character_id == "*":
+            return ["*"]
+        if character_id not in result:
+            result.append(character_id)
+    return result
+
+
 def build_group_user_event(
     conversation_id: str,
     message: str,
@@ -40,6 +98,7 @@ def build_group_user_event(
     at: datetime,
     image: dict | None = None,
     sticker: dict | None = None,
+    mentions: list[str] | None = None,
 ) -> GroupEvent:
     content = message.strip()
     if image is not None and sticker is not None:
@@ -48,7 +107,7 @@ def build_group_user_event(
         raise ValueError("group message, sticker or image must not be empty")
 
     turn_id = f"turn-{uuid4().hex[:12]}"
-    metadata = {"display_text": content}
+    metadata = {"display_text": content, "mentions": list(mentions or [])}
     runtime_content = content
     if image is not None:
         metadata.update(
@@ -166,18 +225,22 @@ class GroupConversationService:
         at: datetime | None = None,
         image: dict | None = None,
         sticker: dict | None = None,
+        mentions: list[str] | None = None,
     ) -> GroupEvent:
-        if self.repo.get_group(conversation_id) is None:
+        group = self.repo.get_group(conversation_id)
+        if group is None:
             raise KeyError(f"unknown group: {conversation_id}")
+        resolved_mentions = resolve_group_mentions(group.member_ids, message, self.profile_by_id, mentions)
         event = build_group_user_event(
             conversation_id,
             message,
             at=at or self.clock.now(),
             image=image,
             sticker=sticker,
+            mentions=resolved_mentions,
         )
         stored = self.repo.append_event(event)
-        logger.info("group.persist conversation=%s turn=%s event_id=%s", conversation_id, stored.turn_id, stored.id)
+        logger.info("group.persist conversation=%s turn=%s event_id=%s mentions=%s", conversation_id, stored.turn_id, stored.id, resolved_mentions)
         return stored
 
     def _recent_as_events(self, group_id: str, *, limit: int = 14) -> list[Event]:
@@ -201,13 +264,22 @@ class GroupConversationService:
                     event_type=event_type,
                     event_time=item.event_time,
                     content=f"{actor}: {content}",
-                    metadata={"group_event_id": item.id, "conversation_id": group_id},
+                    metadata={"group_event_id": item.id, "conversation_id": group_id, "mentions": item.metadata.get("mentions", [])},
                 )
             )
         return result
 
-    def _group_contract(self, group, character_id: str) -> str:
+    def _group_contract(self, group, character_id: str, mentioned_ids: list[str] | None = None) -> str:
         names = "、".join(self._name(member_id) for member_id in group.member_ids)
+        mentions = list(mentioned_ids or [])
+        explicitly_mentioned = "*" in mentions or character_id in mentions
+        if explicitly_mentioned:
+            mention_guidance = "\nUser 在当前连续表达中明确 @ 了你。这是很强的注意力和回复倾向信号；优先认真理解并自然回应，但如果人物状态或语境确实适合沉默，actions=[] 仍然合法。"
+        elif mentions:
+            target_names = "、".join(self._name(value) for value in mentions if value in group.member_ids)
+            mention_guidance = f"\nUser 当前主要 @ 了 {target_names or '其他群成员'}。你没有被直接点名，不要为了抢话而机械插入；但如果你有自然的情绪反应、不同意见、必要补充，或想回应他们刚说的话，仍然可以正常参与。"
+        else:
+            mention_guidance = ""
         return f"""
 
 # Group Conversation Contract
@@ -216,7 +288,7 @@ class GroupConversationService:
 群里出现消息不代表你必须回复；如果别人已经表达了与你相同的意思、当前话题与你关系不大、你没有自然补充，actions=[] 是正常且优先允许的选择。
 不要机械重复别人刚说的话，不要为了保持群活跃度而插话，也不要因为你“能回答”就一定回答。
 你可以自然回应 User，也可以回应其他 Character 刚刚说的话；后说话时要把本轮已经出现的群消息当成真实发生的共同经历。
-用户可能连续发送多条消息。Recent Events 才是当前共享事实；不要假设每条用户消息都必须得到一条单独回复。
+用户可能连续发送多条消息。Recent Events 才是当前共享事实；不要假设每条用户消息都必须得到一条单独回复。{mention_guidance}
 Available Stickers 是系统针对当前群语境召回的候选表情；只能从当前候选中选择 STICKER，也可以完全不用表情或保持沉默。
 如果你拥有 Available Images，也可以自然使用，但不要刷媒体。
 当前群聊不创建未来主动 Intent：intent_candidates 必须保持 []。
@@ -236,6 +308,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         character_id: str,
         image_data_urls: list[str] | None = None,
         commit_guard: Callable[[], bool] | None = None,
+        mentioned_ids: list[str] | None = None,
     ) -> dict:
         runtime = self.runtimes[character_id]
         started = time.perf_counter()
@@ -263,6 +336,8 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "conversation_id": group.id,
                     "group_turn_id": source_event.turn_id,
                     "source_conversation_event_id": source_event.id,
+                    "mentions": list(mentioned_ids or []),
+                    "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
                 },
             )
             context = compile_context(
@@ -274,7 +349,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 last_chat_event=None,
                 sticker_catalog=prompt_stickers,
                 image_catalog=runtime.image_catalog,
-            ) + self._group_contract(group, character_id)
+            ) + self._group_contract(group, character_id, mentioned_ids)
             session_id = f"group:{group.id}:{character_id}"
             model_started = time.perf_counter()
             if image_data_urls:
@@ -373,6 +448,8 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "recalled_memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in memories],
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,
+                    "mentions": list(mentioned_ids or []),
+                    "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
                     "sticker_retrieval": {
                         "query": sticker_retrieval.query,
                         "matches": [match.__dict__ for match in sticker_retrieval.matches],
@@ -408,6 +485,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 "perception": reaction.perception,
                 "reaction": reaction.reaction,
                 "model_ms": model_ms,
+                "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
             }
 
     def react_from_event(
@@ -417,6 +495,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         image_data_urls: list[str] | None = None,
         commit_guard: Callable[[], bool] | None = None,
         on_member: Callable[[dict], None] | None = None,
+        mention_order: list[str] | None = None,
     ) -> dict:
         group = self.repo.get_group(source_event.conversation_id)
         if group is None:
@@ -424,8 +503,22 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         members = list(group.member_ids)
         user_turn_index = self._user_turn_index(group.id, int(source_event.id))
         offset = max(user_turn_index - 1, 0) % len(members)
-        ordered = members[offset:] + members[:offset]
-        logger.info("group.reaction start conversation=%s source_event=%s order=%s", group.id, source_event.id, ordered)
+        base_order = members[offset:] + members[:offset]
+        mentions = list(mention_order if mention_order is not None else (source_event.metadata.get("mentions") or []))
+        if "*" in mentions:
+            explicit_mentions = list(members)
+            ordered = base_order
+        else:
+            explicit_mentions = [value for value in mentions if value in members]
+            explicit_mentions = list(dict.fromkeys(explicit_mentions))
+            ordered = explicit_mentions + [value for value in base_order if value not in explicit_mentions]
+        logger.info(
+            "group.reaction start conversation=%s source_event=%s order=%s mentions=%s",
+            group.id,
+            source_event.id,
+            ordered,
+            mentions,
+        )
         decisions = []
         for character_id in ordered:
             if commit_guard is not None and not commit_guard():
@@ -438,6 +531,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 character_id=character_id,
                 image_data_urls=image_data_urls,
                 commit_guard=commit_guard,
+                mentioned_ids=explicit_mentions,
             )
             decisions.append(decision)
             if on_member is not None:
@@ -448,6 +542,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             "turn_id": source_event.turn_id,
             "source_event_id": source_event.id,
             "speaker_order": ordered,
+            "mentions": mentions,
             "decisions": decisions,
             "events": self.repo.list_turn_events(group.id, source_event.turn_id),
         }
@@ -461,6 +556,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         image: dict | None = None,
         image_data_url: str | None = None,
         sticker: dict | None = None,
+        mentions: list[str] | None = None,
     ) -> dict:
         source_event = self.persist_user_event(
             conversation_id,
@@ -468,6 +564,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             at=at,
             image=image,
             sticker=sticker,
+            mentions=mentions,
         )
         return self.react_from_event(
             source_event,
@@ -483,6 +580,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         image: dict | None = None,
         image_data_url: str | None = None,
         sticker: dict | None = None,
+        mentions: list[str] | None = None,
     ) -> dict:
         with self.turn_lock:
             return self._send_locked(
@@ -492,4 +590,5 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 image=image,
                 image_data_url=image_data_url,
                 sticker=sticker,
+                mentions=mentions,
             )

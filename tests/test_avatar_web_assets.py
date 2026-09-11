@@ -15,7 +15,7 @@ def test_avatar_assets_are_loaded_and_server_attaches_routes():
     assert server.index("attach_avatar_routes(app)") < server.index("attach_group_routes(app")
 
 
-def test_avatar_ui_uses_search_session_ids_instead_of_posting_arbitrary_image_url():
+def test_avatar_ui_uses_llm_hint_and_search_session_ids_without_arbitrary_image_url():
     avatars = (WEB / "avatars.js").read_text(encoding="utf-8")
 
     assert "/avatar/search" in avatars
@@ -25,6 +25,12 @@ def test_avatar_ui_uses_search_session_ids_instead_of_posting_arbitrary_image_ur
     assert "image_url:" not in avatars
     assert "MutationObserver" in avatars
     assert "group-speaker-name" in avatars
+    assert "data-avatar-hint" in avatars
+    assert "让角色决定并搜索" in avatars
+    assert "portrait avatar profile picture" not in avatars
+    assert "JSON.stringify({hint, limit:12})" in avatars
+    assert "visual_intent" in avatars
+    assert "AI 搜索词" in avatars
 
 
 def test_example_config_declares_searchapi_and_avatar_storage_without_enabling_future_web_tools():

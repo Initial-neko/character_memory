@@ -249,9 +249,13 @@ def attach_async_routes(app):
             },
         )
 
-    @app.on_event("shutdown")
     def _shutdown_async_runtime():
         scheduler.close()
         hub.close()
+
+    # create_api registered the store/model shutdown before this feature exists.
+    # Put the worker shutdown first so a running generation never wakes up after
+    # SQLite/model resources have already been closed.
+    app.router.on_shutdown.insert(0, _shutdown_async_runtime)
 
     return app

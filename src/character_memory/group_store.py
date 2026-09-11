@@ -42,6 +42,39 @@ class GroupRepository:
         self.store = store
         self._init_schema()
 
+    def _migrate_epoch_keys(self) -> tuple[int, int]:
+        specs = [
+            ("conversations", "created_at", "created_at_epoch"),
+            ("conversations", "updated_at", "updated_at_epoch"),
+            ("conversation_members", "joined_at", "joined_at_epoch"),
+            ("conversation_events", "event_time", "event_time_epoch"),
+            ("conversation_runtime_traces", "created_at", "created_at_epoch"),
+        ]
+        migrated = 0
+        invalid = 0
+        for table, time_column, epoch_column in specs:
+            self.store._ensure_column_locked(table, epoch_column, "INTEGER")
+            migrated_rows, invalid_rows = self.store._backfill_epoch_locked(table, time_column, epoch_column)
+            migrated += migrated_rows
+            invalid += invalid_rows
+        return migrated, invalid
+
+    def _create_indexes(self) -> None:
+        self.store.conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_conversation_members_position
+                ON conversation_members(conversation_id, position);
+            CREATE INDEX IF NOT EXISTS idx_conversation_events_turn
+                ON conversation_events(conversation_id, turn_id, id);
+            CREATE INDEX IF NOT EXISTS idx_conversation_runtime_traces_turn
+                ON conversation_runtime_traces(conversation_id, turn_id, character_id);
+            CREATE INDEX IF NOT EXISTS idx_conversations_updated_epoch
+                ON conversations(updated_at_epoch DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_conversation_events_time_epoch
+                ON conversation_events(conversation_id, event_time_epoch, id);
+            """
+        )
+
     def _init_schema(self) -> None:
         with self.store._lock:
             self.store.conn.executescript(
@@ -62,8 +95,6 @@ class GroupRepository:
                     joined_at TEXT NOT NULL,
                     PRIMARY KEY(conversation_id, actor_type, actor_id)
                 );
-                CREATE INDEX IF NOT EXISTS idx_conversation_members_position
-                    ON conversation_members(conversation_id, position);
 
                 CREATE TABLE IF NOT EXISTS conversation_events(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,8 +107,6 @@ class GroupRepository:
                     content TEXT NOT NULL,
                     metadata_json TEXT NOT NULL DEFAULT '{}'
                 );
-                CREATE INDEX IF NOT EXISTS idx_conversation_events_turn
-                    ON conversation_events(conversation_id, turn_id, id);
 
                 CREATE TABLE IF NOT EXISTS conversation_runtime_traces(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,29 +118,12 @@ class GroupRepository:
                     trace_json TEXT NOT NULL,
                     UNIQUE(source_conversation_event_id, character_id)
                 );
-                CREATE INDEX IF NOT EXISTS idx_conversation_runtime_traces_turn
-                    ON conversation_runtime_traces(conversation_id, turn_id, character_id);
-                """
-            )
-            specs = [
-                ("conversations", "created_at", "created_at_epoch"),
-                ("conversations", "updated_at", "updated_at_epoch"),
-                ("conversation_members", "joined_at", "joined_at_epoch"),
-                ("conversation_events", "event_time", "event_time_epoch"),
-                ("conversation_runtime_traces", "created_at", "created_at_epoch"),
-            ]
-            for table, time_column, epoch_column in specs:
-                self.store._ensure_column_locked(table, epoch_column, "INTEGER")
-                self.store._backfill_epoch_locked(table, time_column, epoch_column)
-            self.store.conn.executescript(
-                """
-                CREATE INDEX IF NOT EXISTS idx_conversations_updated_epoch
-                    ON conversations(updated_at_epoch DESC, id DESC);
-                CREATE INDEX IF NOT EXISTS idx_conversation_events_time_epoch
-                    ON conversation_events(conversation_id, event_time_epoch, id);
                 """
             )
             self.store.conn.commit()
+
+        self.store.apply_schema_migration("group/001-epoch-time-keys", self._migrate_epoch_keys)
+        self.store.apply_schema_migration("group/002-indexes", self._create_indexes)
 
     @staticmethod
     def _event_from_row(row) -> GroupEvent:

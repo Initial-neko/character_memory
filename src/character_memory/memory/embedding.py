@@ -14,6 +14,9 @@ class EmbeddingProvider(ABC):
     def embed_many(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(text) for text in texts]
 
+    def close(self) -> None:
+        pass
+
 
 class DeterministicEmbedding(EmbeddingProvider):
     """Offline smoke-test embedding only; not semantic retrieval."""
@@ -55,13 +58,16 @@ class OpenAICompatibleEmbedding(EmbeddingProvider):
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.client = httpx.Client(timeout=self.timeout)
 
     def embed(self, text: str) -> list[float]:
-        with httpx.Client(timeout=self.timeout) as client:
-            r = client.post(
-                f"{self.base_url}/embeddings",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"model": self.model, "input": text},
-            )
-            r.raise_for_status()
+        r = self.client.post(
+            f"{self.base_url}/embeddings",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"model": self.model, "input": text},
+        )
+        r.raise_for_status()
         return r.json()["data"][0]["embedding"]
+
+    def close(self) -> None:
+        self.client.close()

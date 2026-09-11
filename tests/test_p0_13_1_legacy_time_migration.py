@@ -74,6 +74,12 @@ def test_invalid_legacy_time_only_values_are_preserved_but_quarantined(tmp_path,
             ) == ""
             assert store.get_world_time("rin") is None
 
+            world = store.conn.execute(
+                "SELECT current_time,current_time_epoch FROM world_states WHERE character_id='rin'"
+            ).fetchone()
+            assert world["current_time"] == "10:49:43"
+            assert world["current_time_epoch"] is None
+
             history_count = store.conn.execute(
                 "SELECT COUNT(*) AS n FROM mental_state_history WHERE character_id='rin'"
             ).fetchone()["n"]

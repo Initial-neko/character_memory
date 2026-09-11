@@ -21,7 +21,7 @@ logger = logging.getLogger("character_memory.async_web")
 
 def attach_async_routes(app):
     """Attach non-blocking message acceptance and SSE delivery routes."""
-    from fastapi import HTTPException, Request
+    from fastapi import Header, HTTPException
     from fastapi.responses import StreamingResponse
 
     access = getattr(app.state, "character_memory", None)
@@ -216,10 +216,10 @@ def attach_async_routes(app):
 
     @app.get("/v1/events/stream")
     def event_stream(
-        request: Request,
         scope: str,
         conversation_id: str,
         character_id: str | None = None,
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     ):
         normalized = scope.strip().lower()
         if normalized == "direct":
@@ -234,7 +234,7 @@ def attach_async_routes(app):
         else:
             raise HTTPException(status_code=400, detail="scope must be direct or group")
 
-        raw_last_id = request.headers.get("last-event-id")
+        raw_last_id = last_event_id
         if raw_last_id is None:
             # A brand-new UI stream has already reconciled durable state through
             # the history endpoint. Start at the current ephemeral tail so old

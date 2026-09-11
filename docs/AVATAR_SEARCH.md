@@ -5,12 +5,30 @@ Avatar discovery is the first consumer of the search abstraction. This phase int
 ## Current flow
 
 1. The Web UI opens the avatar manager from the character header avatar.
-2. `POST /v1/characters/{character_id}/avatar/search` calls `SearchProvider.search_images()`.
-3. `SearchApiProvider` uses SearchAPI.io Google Images by default. `BraveSearchProvider` remains an optional fallback.
-4. The server returns thumbnail candidates plus opaque `search_id` / `candidate_id` values.
-5. The browser selects only those opaque IDs; it never sends an arbitrary download URL to the backend.
-6. The backend downloads the cached search result, validates image content type/size, and stores it under `avatar_dir/<character_id>/`.
-7. Character profiles expose a versioned local `/avatar/asset` URL; sidebar/header/direct chat/group chat render that local asset.
+2. The optional text box is a **preference hint**, not a raw search-engine query.
+3. `AvatarIntentPlanner` asks the existing character model to judge what avatar fits the character **right now**, using bounded context:
+   - Persona
+   - current Mental State
+   - at most 8 recent short chat lines
+   - optional user preference
+4. The planner returns a compact `AvatarSearchIntent` containing:
+   - `visual_intent`
+   - 1~3 short image-search queries
+   - optional mood/style labels
+5. `AvatarSearchService` searches the primary query first. It only spends a second/third provider request when the previous query did not produce enough viable candidates.
+6. `SearchApiProvider` uses SearchAPI.io Google Images by default. `BraveSearchProvider` remains an optional fallback.
+7. The server returns thumbnail candidates plus opaque `search_id` / `candidate_id` values.
+8. The browser selects only those opaque IDs; it never sends an arbitrary download URL to the backend.
+9. The backend downloads the cached search result, validates image content type/size, and stores it under `avatar_dir/<character_id>/`.
+10. Character profiles expose a versioned local `/avatar/asset` URL; sidebar/header/direct chat/group chat render that local asset.
+
+If LLM planning fails, the server falls back to the previous deterministic `name + identity + avatar` style query so avatar search remains usable. That fixed query is now a fallback only, not the normal path.
+
+## Privacy boundary
+
+Persona, Mental State and recent dialogue are used only inside the LLM planning step. The image-search provider receives only the short generated search query. The planner prompt explicitly forbids copying user names, private facts, relationship secrets or chat quotations into search queries.
+
+The avatar plan is ephemeral tool context. It is **not** written to Character Memory and does not become a normal PersonRuntime action.
 
 ## Configuration
 

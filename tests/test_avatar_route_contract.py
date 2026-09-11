@@ -12,7 +12,10 @@ def test_avatar_routes_do_not_expose_general_web_tools_to_chat_runtime():
 
     assert 'avatar_search.search_queries(' in routes
     assert 'AvatarIntentPlanner' in routes
-    assert 'PersonRuntime' not in planner
+    # Comments/docs may explain that planning stays outside PersonRuntime; the
+    # actual architectural contract is that the planner imports no runtime code.
+    assert 'from character_memory.runtime' not in planner
+    assert 'import character_memory.runtime' not in planner
     assert 'search_web' not in routes
     assert 'WebFetcher' in search
     assert 'web_search is reserved for a later phase' in search

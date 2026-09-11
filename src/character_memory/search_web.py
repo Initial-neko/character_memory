@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from character_memory.group_store import GroupRepository
 from character_memory.storage.message_search import MessageSearchRepository
 
 
@@ -78,7 +79,8 @@ def attach_search_routes(app):
             raise HTTPException(status_code=400, detail="search query is too long")
         page_size = max(1, min(int(limit), 50))
         normalized = scope.strip().lower()
-        repository = MessageSearchRepository(access.store())
+        store = access.store()
+        repository = MessageSearchRepository(store)
 
         if normalized == "direct":
             if not character_id:
@@ -87,8 +89,10 @@ def attach_search_routes(app):
         elif normalized == "group":
             if not conversation_id:
                 raise HTTPException(status_code=400, detail="conversation_id is required for group search")
+            GroupRepository(store)
             raw = repository.search_group(query, conversation_id=conversation_id, limit=page_size)
         elif normalized == "global":
+            GroupRepository(store)
             raw = repository.search_direct(query, limit=page_size) + repository.search_group(query, limit=page_size)
             raw.sort(key=lambda item: (int(item.get("event_time_epoch") or 0), int(item.get("event_id") or 0)), reverse=True)
             raw = raw[:page_size]

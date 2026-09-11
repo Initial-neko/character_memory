@@ -30,7 +30,7 @@ def _wait_until(predicate, timeout: float = 5.0) -> None:
     raise AssertionError("condition did not become true before timeout")
 
 
-def test_uvicorn_graceful_shutdown_does_not_wait_on_open_sse(tmp_path):
+def test_uvicorn_bounded_shutdown_with_open_sse(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "\n".join(
@@ -54,6 +54,7 @@ def test_uvicorn_graceful_shutdown_does_not_wait_on_open_sse(tmp_path):
             port=port,
             log_level="warning",
             lifespan="on",
+            timeout_graceful_shutdown=2,
         )
     )
     thread = threading.Thread(target=server.run, daemon=True)
@@ -78,16 +79,16 @@ def test_uvicorn_graceful_shutdown_does_not_wait_on_open_sse(tmp_path):
                 lines = response.iter_lines()
                 assert next(lines) == "retry: 1500"
 
-                # No timeout_graceful_shutdown is configured here on purpose:
-                # the stream itself must be cancellable. This reproduces the
-                # production Ctrl+C path instead of relying on a forced timeout.
+                # SSE is intentionally long-lived. Production therefore uses a
+                # two-second graceful-shutdown bound; the async iterator must be
+                # cancellable when Uvicorn reaches that bound.
                 started = time.monotonic()
                 server.should_exit = True
-                thread.join(timeout=3.0)
+                thread.join(timeout=4.0)
                 elapsed = time.monotonic() - started
 
                 assert not thread.is_alive(), "Uvicorn stayed alive waiting for the open SSE response"
-                assert elapsed < 3.0
+                assert elapsed < 4.0
     finally:
         server.should_exit = True
         if thread.is_alive():

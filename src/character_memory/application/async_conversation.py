@@ -95,6 +95,7 @@ class _PendingState:
     condition: threading.Condition = field(default_factory=threading.Condition)
     latest_event: object | None = None
     image_urls: dict[int, str] = field(default_factory=dict)
+    mention_by_event: dict[int, list[str]] = field(default_factory=dict)
     processed_id: int = 0
     pending_since: float | None = None
     last_submit_at: float = 0.0
@@ -154,6 +155,10 @@ class ReactionScheduler:
             state.latest_event = event
             if image_data_url:
                 state.image_urls[int(event.id)] = image_data_url
+            metadata = getattr(event, "metadata", {}) or {}
+            raw_mentions = metadata.get("mentions") if isinstance(metadata, dict) else None
+            if isinstance(raw_mentions, list) and raw_mentions:
+                state.mention_by_event[int(event.id)] = [str(value) for value in raw_mentions if str(value).strip()]
             if state.pending_since is None:
                 state.pending_since = now
             state.last_submit_at = now
@@ -184,6 +189,19 @@ class ReactionScheduler:
             lambda channel, state: self._run_group(channel, state, conversation_id),
         )
 
+    @staticmethod
+    def _ordered_mentions(state: _PendingState, watermark: int) -> list[str]:
+        result: list[str] = []
+        for event_id in sorted(state.mention_by_event):
+            if not (state.processed_id < event_id <= watermark):
+                continue
+            for value in state.mention_by_event[event_id]:
+                if value == "*":
+                    return ["*"]
+                if value not in result:
+                    result.append(value)
+        return result
+
     def _snapshot_after_quiet(self, state: _PendingState):
         while not self._closed.is_set():
             with state.condition:
@@ -202,8 +220,9 @@ class ReactionScheduler:
                     continue
                 watermark = int(event.id)
                 image_urls = [url for event_id, url in sorted(state.image_urls.items()) if state.processed_id < event_id <= watermark]
+                mentions = self._ordered_mentions(state, watermark)
                 state.pending_since = None
-                return event, watermark, image_urls
+                return event, watermark, image_urls, mentions
         return None
 
     @staticmethod
@@ -234,6 +253,8 @@ class ReactionScheduler:
             state.processed_id = max(state.processed_id, watermark)
             for event_id in [value for value in state.image_urls if value <= watermark]:
                 state.image_urls.pop(event_id, None)
+            for event_id in [value for value in state.mention_by_event if value <= watermark]:
+                state.mention_by_event.pop(event_id, None)
             latest_id = int(state.latest_event.id) if state.latest_event is not None else state.processed_id
             if latest_id <= state.processed_id:
                 state.active = False
@@ -245,9 +266,9 @@ class ReactionScheduler:
     def _retry_superseded(self, state: _PendingState) -> None:
         """Retry from the newest fact without consuming the stale watermark.
 
-        In particular, image bytes from a superseded generation stay available
-        to the next context snapshot; otherwise a follow-up text could retain an
-        image placeholder while losing the actual visual input.
+        Image bytes and mention signals from a superseded generation stay
+        available to the next context snapshot so a follow-up text does not lose
+        the visual or directed-attention part of the same user burst.
         """
         with state.condition:
             if state.pending_since is None:
@@ -259,7 +280,7 @@ class ReactionScheduler:
             snapshot = self._snapshot_after_quiet(state)
             if snapshot is None:
                 return
-            event, watermark, image_urls = snapshot
+            event, watermark, image_urls, _mentions = snapshot
             self.hub.publish(channel, "reaction_status", {"state": "typing", "watermark": watermark})
             superseded = False
             try:
@@ -326,7 +347,7 @@ class ReactionScheduler:
             snapshot = self._snapshot_after_quiet(state)
             if snapshot is None:
                 return
-            event, watermark, image_urls = snapshot
+            event, watermark, image_urls, mentions = snapshot
             self.hub.publish(channel, "reaction_status", {"state": "typing", "watermark": watermark})
             superseded = False
             try:
@@ -354,6 +375,7 @@ class ReactionScheduler:
                             "turn_id": event.turn_id,
                             "character_id": decision.get("character_id"),
                             "silent": not bool(decision.get("actions")),
+                            "explicitly_mentioned": bool(decision.get("explicitly_mentioned")),
                         },
                     )
 
@@ -363,6 +385,7 @@ class ReactionScheduler:
                         image_data_urls=image_urls or None,
                         commit_guard=current,
                         on_member=member_done,
+                        mention_order=mentions,
                     )
                 self.hub.publish(
                     channel,
@@ -370,11 +393,13 @@ class ReactionScheduler:
                     {
                         "watermark": watermark,
                         "turn_id": event.turn_id,
+                        "mentions": mentions,
                         "speaker_order": result.get("speaker_order") or [],
                         "decisions": [
                             {
                                 "character_id": item.get("character_id"),
                                 "silent": not bool(item.get("actions")),
+                                "explicitly_mentioned": bool(item.get("explicitly_mentioned")),
                             }
                             for item in result.get("decisions") or []
                         ],

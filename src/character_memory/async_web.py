@@ -11,7 +11,7 @@ from character_memory.application.async_conversation import (
     group_channel,
 )
 from character_memory.application.chat_service import build_user_event
-from character_memory.application.group_conversation_service import build_group_user_event
+from character_memory.application.group_conversation_service import build_group_user_event, resolve_group_mentions
 from character_memory.group_store import GroupRepository
 from character_memory.group_web import GroupChatRequest
 
@@ -119,6 +119,7 @@ def attach_async_routes(app):
             "content": event.metadata.get("display_text", event.content),
             "event_time": event.event_time.isoformat(),
             "action": event.metadata.get("action"),
+            "mentions": event.metadata.get("mentions", []),
             "sticker_id": sticker_id,
             "sticker": sticker,
             "media_id": event.metadata.get("media_id"),
@@ -178,8 +179,13 @@ def attach_async_routes(app):
     def accept_group_message(conversation_id: str, req: GroupChatRequest):
         store = active_store()
         repository = GroupRepository(store)
-        if repository.get_group(conversation_id) is None:
+        group = repository.get_group(conversation_id)
+        if group is None:
             raise HTTPException(status_code=404, detail="group not found")
+        try:
+            mentions = resolve_group_mentions(group.member_ids, req.message, profiles_by_id(), req.mentions)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         selected_sticker = sticker_for(req.sticker_id)
         selected_image = None
         image_data_url = None
@@ -203,10 +209,11 @@ def attach_async_routes(app):
             at=now,
             image=selected_image,
             sticker=selected_sticker,
+            mentions=mentions,
         )
         event = repository.append_event(event)
         scheduler.enqueue_group(conversation_id, event, image_data_url=image_data_url)
-        logger.info("async.accept group conversation=%s event_id=%s", conversation_id, event.id)
+        logger.info("async.accept group conversation=%s event_id=%s mentions=%s", conversation_id, event.id, mentions)
         return {
             "accepted": True,
             "event_id": event.id,

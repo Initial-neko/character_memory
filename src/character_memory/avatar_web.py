@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import logging
+
 from pydantic import BaseModel, Field
 
+from character_memory.avatar_intent import AvatarIntentPlanner, AvatarSearchIntent
 from character_memory.avatars import AvatarSearchService, AvatarStore
-from character_memory.config import resolve_avatar_dir
+from character_memory.config import load_persona, resolve_avatar_dir
+from character_memory.domain.models import EventType
 from character_memory.search import BraveSearchProvider, SearchApiProvider
 
 
+logger = logging.getLogger("character_memory.avatar_web")
+
+
 class AvatarSearchRequest(BaseModel):
+    # `hint` is an optional human preference, not the final search-engine query.
+    # `query` stays as a compatibility alias for clients from the previous UI.
+    hint: str = Field(default="", max_length=400)
     query: str = Field(default="", max_length=400)
     limit: int = Field(default=12, ge=1, le=20)
 
@@ -68,16 +78,70 @@ def attach_avatar_routes(app) -> None:
         result["avatar_url"] = avatar_url(item["id"])
         return result
 
-    def default_query(item: dict[str, str]) -> str:
+    def fallback_intent(item: dict[str, str], hint: str) -> AvatarSearchIntent:
         name = str(item.get("name") or item["id"]).strip()
         identity = str(item.get("identity") or "").strip()
-        # Identity helps distinguish a known fictional character without dumping
-        # the full Persona/personality into a public search query.
         parts = [name]
         if identity and identity.casefold() not in name.casefold():
             parts.append(identity[:80])
+        if hint:
+            parts.append(hint[:160])
         parts.extend(["portrait", "avatar", "profile picture"])
-        return " ".join(part for part in parts if part).strip()[:400]
+        query = " ".join(part for part in parts if part).strip()[:180]
+        return AvatarSearchIntent(
+            visual_intent=f"保持{name}核心辨识度的清晰聊天头像",
+            queries=[query],
+            preferred_mood="",
+            preferred_style="清晰人物主体、适合作为聊天头像",
+        )
+
+    def recent_dialogue(character_id: str) -> list[str]:
+        try:
+            events = access.read_store.list_chat_events(character_id, limit=8)
+        except Exception:
+            logger.exception("avatar.intent recent_dialogue failed character=%s", character_id)
+            return []
+        lines: list[str] = []
+        for event in events[-8:]:
+            if event.event_type == EventType.USER_MESSAGE:
+                role = "用户"
+                content = event.metadata.get("display_text", event.content)
+            else:
+                role = "角色"
+                content = event.content
+            text = " ".join(str(content or "").split()).strip()
+            if text:
+                lines.append(f"{role}: {text[:320]}")
+        return lines
+
+    def plan_search(character_id: str, item: dict[str, str], hint: str) -> tuple[AvatarSearchIntent, str]:
+        try:
+            current = access.require_bundle()
+            runtime = getattr(current, "runtimes", {}).get(character_id)
+            persona = getattr(runtime, "persona", "") if runtime is not None else ""
+            if not persona:
+                persona = load_persona(item["persona_path"])
+            mental_state = access.read_store.get_mental_state(character_id)
+            planner = AvatarIntentPlanner(current.model)
+            intent = planner.plan(
+                character_id,
+                persona=persona,
+                mental_state=mental_state,
+                recent_dialogue=recent_dialogue(character_id),
+                user_hint=hint,
+            )
+            logger.info(
+                "avatar.intent planned character=%s queries=%d visual_intent_chars=%d",
+                character_id,
+                len(intent.queries),
+                len(intent.visual_intent),
+            )
+            return intent, "llm"
+        except Exception as exc:
+            # Avatar search remains usable if the chat model is temporarily
+            # unavailable. The old deterministic query is strictly a fallback.
+            logger.warning("avatar.intent fallback character=%s error=%s", character_id, exc)
+            return fallback_intent(item, hint), "fallback"
 
     @app.get("/v1/character-profiles")
     def character_profiles_with_avatars():
@@ -107,11 +171,17 @@ def attach_avatar_routes(app) -> None:
         item = profile(character_id)
         if provider is None:
             raise HTTPException(status_code=501, detail=f"Unsupported search_provider: {provider_name}")
-        query = req.query.strip() or default_query(item)
+        hint = req.hint.strip() or req.query.strip()
+        intent, planning_source = plan_search(character_id, item, hint)
         try:
+            result = avatar_search.search_queries(character_id, intent.queries, limit=req.limit)
             return {
                 "character_id": character_id,
-                **avatar_search.search(character_id, query, limit=req.limit),
+                **result,
+                "visual_intent": intent.visual_intent,
+                "preferred_mood": intent.preferred_mood,
+                "preferred_style": intent.preferred_style,
+                "planning_source": planning_source,
             }
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

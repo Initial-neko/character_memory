@@ -11,7 +11,21 @@
   <link rel="stylesheet" href="/static/p0_8.css">
   <link rel="stylesheet" href="/static/p0_11.css">
 </head>
-<body>
+<body class="startup-pending">
+  <div id="startupGate" class="startup-gate" role="status" aria-live="polite" aria-busy="true">
+    <div class="startup-card">
+      <div class="startup-mark">CM</div>
+      <h1>Character Memory</h1>
+      <p id="startupStatus" class="startup-status">正在唤醒人物…</p>
+      <p id="startupDetail" class="startup-detail">正在加载记忆、人物设定与表情资源</p>
+      <div class="startup-progress" aria-hidden="true"><span></span></div>
+      <div class="startup-actions">
+        <button id="startupRetry" class="ghost-button hidden" type="button">重试</button>
+        <button id="startupContinue" class="ghost-button hidden" type="button">进入只读界面</button>
+      </div>
+    </div>
+  </div>
+
   <div class="workspace">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark">CM</div><div><strong>Character Memory</strong><span>Persistent AI Person</span></div></div>
@@ -38,6 +52,8 @@
 
   <template id="typingTemplate"><article class="message-row assistant typing-row"><div class="avatar">AI</div><div class="bubble-wrap"><div class="bubble typing"><span></span><span></span><span></span></div><div class="message-meta">正在输入中…</div></div></article></template>
 
+  <!-- Startup only owns readiness presentation; app.js remains the chat controller. -->
+  <script src="/static/startup.js" defer></script>
   <!-- One core controller; feature modules register behavior instead of overriding globals. -->
   <script src="/static/app.js" defer></script>
   <script src="/static/persona.js" defer></script>

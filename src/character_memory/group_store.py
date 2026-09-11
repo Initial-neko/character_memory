@@ -173,6 +173,21 @@ class GroupRepository:
             updated_at=now,
         )
 
+    def rename_group(self, conversation_id: str, name: str, now: datetime) -> GroupConversation | None:
+        cleaned_name = name.strip()
+        if not cleaned_name:
+            raise ValueError("group name must not be empty")
+        stamp = epoch_us(now)
+        with self.store._lock:
+            cur = self.store.conn.execute(
+                "UPDATE conversations SET name=?,updated_at=?,updated_at_epoch=? WHERE id=? AND type='GROUP'",
+                (cleaned_name, now.isoformat(), stamp, conversation_id),
+            )
+            self.store._maybe_commit()
+        if cur.rowcount <= 0:
+            return None
+        return self.get_group(conversation_id)
+
     def _member_ids(self, conversation_id: str) -> list[str]:
         with self.store._lock:
             rows = self.store.conn.execute(

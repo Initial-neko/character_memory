@@ -63,6 +63,9 @@ class PersonRuntime:
 
     def _prepare_memory_writes(self, character_id: str, event_time, candidates):
         """Small V0 admission gate: reject low-value and near-duplicate memories."""
+        if not candidates:
+            return [], []
+
         existing = [
             memory
             for memory in self.store.list_memories(character_id)

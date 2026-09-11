@@ -49,7 +49,7 @@ def compile_context(
         or "- 无"
     )
     has_stickers = bool(sticker_catalog and sticker_catalog.stickers)
-    stickers = sticker_catalog.prompt_text() if has_stickers else "- 无"
+    stickers = sticker_catalog.prompt_text() if sticker_catalog is not None else "- 无合适候选"
     has_images = bool(image_catalog and image_catalog.images)
     images = image_catalog.prompt_text() if has_images else "- 无"
     resource_actions = ""
@@ -94,7 +94,7 @@ def compile_context(
 # Behavioral Contract
 你是一个持续存在的人物，不是客服。用户发来消息不代表你必须回复；真实的人会回复、追问、只发一个表情，也会在对话自然结束、需要空间、没有想说的话或不想回应时保持沉默。
 本事件允许的对外表达：{allowed}。
-actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。Available Stickers 非空时，这些表情包是你自己可用的聊天表达资源：你可以在语义合适时单独发 STICKER，也可以 MESSAGE + STICKER，不需要等用户先发表情包；sticker_id 必须从上面的列表中选择。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。
+actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时可以在语义合适时单独发 STICKER，也可以 MESSAGE + STICKER；sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用 STICKER。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。
 如果当前事件包含用户上传的真实图片，模型会同时收到图片本体；应根据实际视觉内容回应，不要从文件名臆测。
 如果确实没有想回复的内容，直接 actions=[]。不要为了礼貌、活跃度或“完成任务”硬补一句话。
 不要无条件迎合，也不要为了提高互动率而主动联系。

@@ -11,6 +11,7 @@
       conversation: {type: "DIRECT", groupId: null},
       directHistory: {messages: [], hasMore: false, nextBeforeId: null, loadingOlder: false},
       directStream: null,
+      directStreamKey: null,
     },
     features: {},
     listeners: new Map(),
@@ -172,7 +173,6 @@
 
   CM.updateComposerState = () => {
     if (CM.isGroupConversation() && CM.features.groups?.applyComposerState?.()) return;
-    // A character generating a reaction must never lock the user's composer.
     CM.dom.sendButton.disabled = false;
     CM.dom.input.disabled = false;
     CM.features.stickers?.setDisabled?.(false);
@@ -239,16 +239,20 @@
   CM.closeDirectStream = () => {
     CM.state.directStream?.close?.();
     CM.state.directStream = null;
+    CM.state.directStreamKey = null;
   };
 
   CM.connectDirectStream = () => {
-    CM.closeDirectStream();
     if (CM.isGroupConversation()) return;
     const characterId = CM.state.characterId;
     const conversationId = CM.conversationIdFor(characterId);
+    const streamKey = `${characterId}:${conversationId}`;
+    if (CM.state.directStream && CM.state.directStreamKey === streamKey) return;
+    CM.closeDirectStream();
     const params = new URLSearchParams({scope:"direct", character_id:characterId, conversation_id:conversationId});
     const source = new EventSource(`/v1/events/stream?${params.toString()}`);
     CM.state.directStream = source;
+    CM.state.directStreamKey = streamKey;
     source.addEventListener("reaction_status", event => {
       if (CM.isGroupConversation() || characterId !== CM.state.characterId) return;
       const data = JSON.parse(event.data || "{}");

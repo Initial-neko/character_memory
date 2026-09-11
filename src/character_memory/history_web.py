@@ -26,20 +26,17 @@ def attach_history_routes(app):
             raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}")
         return profile
 
-    def sticker_payload(sticker_id: str | None):
+    def sticker_payload(catalog, sticker_id: str | None):
         if not sticker_id:
             return None
-        catalog = access.global_sticker_catalog()
         sticker = catalog.get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
         return {**sticker.model_dump(mode="json"), "url": f"/v1/stickers/{sticker.id}/asset"}
 
-    def image_payload(character_id: str, image_id: str | None):
+    def image_payload(character_id: str, catalog, image_id: str | None):
         if not image_id:
             return None
-        profile = ensure_character(character_id)
-        catalog = load_image_catalog(profile["persona_path"])
         image = catalog.get(image_id)
         if image is None or catalog.asset_path(image_id) is None:
             return None
@@ -64,7 +61,7 @@ def attach_history_routes(app):
             "url": f"/v1/media/{asset.id}",
         }
 
-    def message_payload(event, has_trace: bool):
+    def message_payload(event, has_trace: bool, sticker_catalog, image_catalog):
         if event.event_type == EventType.USER_MESSAGE:
             role = "user"
             source_event_id = event.id
@@ -77,8 +74,8 @@ def attach_history_routes(app):
             content = event.content
 
         sticker_id = event.metadata.get("sticker_id")
-        sticker = sticker_payload(sticker_id)
-        image = image_payload(event.character_id, event.metadata.get("image_id"))
+        sticker = sticker_payload(sticker_catalog, sticker_id)
+        image = image_payload(event.character_id, image_catalog, event.metadata.get("image_id"))
         media_id = event.metadata.get("media_id")
         if media_id:
             image = media_payload(media_id)
@@ -112,7 +109,7 @@ def attach_history_routes(app):
 
     @app.get("/v1/chat/history-page")
     def direct_history_page(character_id: str = "rin", limit: int = 50, before_id: int | None = None):
-        ensure_character(character_id)
+        profile = ensure_character(character_id)
         repository = ChatHistoryRepository(access.store())
         page = repository.list_page(character_id, limit=limit, before_id=before_id)
         source_ids = []
@@ -122,12 +119,18 @@ def attach_history_routes(app):
             else:
                 source_ids.append(event.metadata.get("source_event_id"))
         trace_sources = repository.trace_sources(character_id, source_ids)
+
+        # One resource snapshot per page. Do not reparse manifests for every row.
+        sticker_catalog = access.global_sticker_catalog()
+        image_catalog = load_image_catalog(profile["persona_path"])
         return {
             "character_id": character_id,
             "messages": [
                 message_payload(
                     event,
                     (event.id if event.event_type == EventType.USER_MESSAGE else event.metadata.get("source_event_id")) in trace_sources,
+                    sticker_catalog,
+                    image_catalog,
                 )
                 for event in page.events
             ],

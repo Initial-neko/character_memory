@@ -47,7 +47,12 @@ class AppBundle:
         try:
             self.model.close()
         finally:
-            self.store.close()
+            try:
+                close_embeddings = getattr(self.embeddings, "close", None)
+                if callable(close_embeddings):
+                    close_embeddings()
+            finally:
+                self.store.close()
 
 
 def build_embedding(settings: Settings):

@@ -46,7 +46,7 @@ def test_default_sticker_catalog_has_real_assets(tmp_path):
     assert "round_cat_happy" in catalog.prompt_text()
 
 
-def test_runtime_persists_valid_sticker_and_drops_unknown(tmp_path):
+def test_runtime_persists_valid_sticker_and_rejects_outside_working_set(tmp_path):
     now = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
     store = SQLiteStore(tmp_path / "x.db")
     emb = DeterministicEmbedding()
@@ -66,7 +66,7 @@ def test_runtime_persists_valid_sticker_and_drops_unknown(tmp_path):
     out = service.send("再来一个", character_id="momo", conversation_id="x", at=now)
     assert out.reaction.actions == []
     trace = store.get_runtime_trace(out.event.id)
-    assert trace["sticker_decisions"][0]["decision"] == "DROP_UNKNOWN_STICKER"
+    assert trace["sticker_decisions"][0]["decision"] == "DROP_NOT_RETRIEVED_STICKER"
     store.close()
 
 

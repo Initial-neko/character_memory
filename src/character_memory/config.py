@@ -22,6 +22,16 @@ class Settings(BaseModel):
     embedding_api_key: str = ""
     embedding_base_url: str = ""
 
+    # Local speech recognition is intentionally a draft-input capability.
+    # The provider can be replaced without changing Web/chat submission.
+    asr_provider: str = "funasr"
+    asr_model: str = "FunAudioLLM/Fun-ASR-Nano-2512"
+    asr_device: str = "cuda:0"
+    asr_hub: str = "ms"
+    asr_language: str = "中文"
+    asr_hotwords: list[str] = Field(default_factory=list, max_length=64)
+    asr_max_bytes: int = Field(default=24 * 1024 * 1024, ge=1024, le=128 * 1024 * 1024)
+
     db_path: str = "data/character-memory.db"
     media_dir: str = ""
     media_max_bytes: int = Field(default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)
@@ -39,6 +49,8 @@ def load_settings(path: str = "config.yaml") -> Settings:
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     data["api_key"] = os.getenv("OPENCODE_GO_API_KEY", data.get("api_key", ""))
     data["db_path"] = os.getenv("CHARACTER_MEMORY_DB_PATH", data.get("db_path", "data/character-memory.db"))
+    data["asr_provider"] = os.getenv("CHARACTER_MEMORY_ASR_PROVIDER", data.get("asr_provider", "funasr"))
+    data["asr_device"] = os.getenv("CHARACTER_MEMORY_ASR_DEVICE", data.get("asr_device", "cuda:0"))
     return Settings.model_validate(data)
 
 

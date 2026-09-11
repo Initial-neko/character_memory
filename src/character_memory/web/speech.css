@@ -1,0 +1,23 @@
+.speech-button {
+  min-width:38px !important;
+  width:38px;
+  flex:0 0 38px;
+  padding:0 !important;
+  border:1px solid var(--line) !important;
+  background:#fff !important;
+  color:#555a64 !important;
+  font-size:17px;
+}
+.speech-button:hover { background:#f6f6f7 !important; }
+.speech-button.recording {
+  color:#b42318 !important;
+  background:#fff2f0 !important;
+  border-color:#ffc9c2 !important;
+  animation:speech-pulse 1.1s ease-in-out infinite;
+}
+.speech-status { margin-left:8px; }
+.speech-status[data-kind="recording"] { color:#b42318; }
+.speech-status[data-kind="working"] { color:#6f7782; }
+.speech-status[data-kind="success"] { color:#397548; }
+.speech-status[data-kind="error"] { color:#a61b1b; }
+@keyframes speech-pulse { 50% { opacity:.58; } }

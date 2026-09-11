@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Character Memory</title>
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/speech.css">
   <link rel="stylesheet" href="/static/p0_5.css">
   <link rel="stylesheet" href="/static/p0_6.css">
   <link rel="stylesheet" href="/static/p0_7.css">
@@ -27,8 +28,8 @@
       </header>
       <section id="chat" class="chat" aria-live="polite"></section>
       <div class="composer-wrap">
-        <form id="composer" class="composer"><textarea id="messageInput" rows="1" placeholder="发送消息" autocomplete="off"></textarea><button id="sendButton" type="submit">发送</button></form>
-        <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
+        <form id="composer" class="composer"><button id="speechButton" class="speech-button" type="button" aria-label="语音转文字" aria-pressed="false" title="点击开始录音">🎙</button><textarea id="messageInput" rows="1" placeholder="发送消息" autocomplete="off"></textarea><button id="sendButton" type="submit">发送</button></form>
+        <div class="composer-hint"><span>Enter 发送 · Shift+Enter 换行</span><span id="speechStatus" class="speech-status" aria-live="polite"></span></div>
       </div>
     </main>
   </div>
@@ -40,6 +41,7 @@
 
   <!-- One core controller; feature modules register behavior instead of overriding globals. -->
   <script src="/static/app.js" defer></script>
+  <script src="/static/speech.js" defer></script>
   <script src="/static/persona.js" defer></script>
   <script src="/static/unread.js" defer></script>
   <script src="/static/stickers.js" defer></script>

@@ -161,10 +161,11 @@ def test_group_history_pages_and_reaction_summary(tmp_path):
     store.close()
 
 
-def test_web_uses_50_message_working_set_and_group_post_merges_new_turn_only():
+def test_web_uses_50_message_working_set_and_async_group_incremental_delivery():
     app_js = (WEB / "app.js").read_text(encoding="utf-8")
     groups_js = (WEB / "groups.js").read_text(encoding="utf-8")
     group_web = (ROOT / "src" / "character_memory" / "group_web.py").read_text(encoding="utf-8")
+    async_web = (ROOT / "src" / "character_memory" / "async_web.py").read_text(encoding="utf-8")
     group_service = (ROOT / "src" / "character_memory" / "application" / "group_conversation_service.py").read_text(encoding="utf-8")
 
     assert "/v1/chat/history-page" in app_js
@@ -174,9 +175,14 @@ def test_web_uses_50_message_working_set_and_group_post_merges_new_turn_only():
 
     assert 'limit:"50"' in groups_js
     assert "limit=180" not in groups_js
-    assert "result.new_messages" in groups_js
+    assert '/v1/groups/${encodeURIComponent(groupId)}/messages' in groups_js
+    assert "mergeMessage(result.message)" in groups_js
+    assert 'source.addEventListener("group_character_event"' in groups_js
     assert "本轮反应 · ${summary.replied || 0} 回复 / ${summary.silent || 0} 沉默" in groups_js
+    assert "result.new_messages" not in groups_js
     assert "new_messages" in group_web
     assert 'list_event_page(conversation_id, limit=limit, before_id=before_id)' in group_web
-    assert 'self.repo.list_turn_events(conversation_id, turn_id)' in group_service
+    assert '@app.post("/v1/groups/{conversation_id}/messages", status_code=202)' in async_web
+    assert 'scheduler.enqueue_group(conversation_id, event' in async_web
+    assert 'self.repo.list_turn_events(conversation_id, source_event.turn_id)' in group_service
     assert 'self.repo.list_events(conversation_id, limit=180)' not in group_service

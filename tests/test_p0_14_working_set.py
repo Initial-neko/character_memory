@@ -184,5 +184,5 @@ def test_web_uses_50_message_working_set_and_async_group_incremental_delivery():
     assert 'list_event_page(conversation_id, limit=limit, before_id=before_id)' in group_web
     assert '@app.post("/v1/groups/{conversation_id}/messages", status_code=202)' in async_web
     assert 'scheduler.enqueue_group(conversation_id, event' in async_web
-    assert 'self.repo.list_turn_events(conversation_id, source_event.turn_id)' in group_service
+    assert 'self.repo.list_turn_events(group.id, source_event.turn_id)' in group_service
     assert 'self.repo.list_events(conversation_id, limit=180)' not in group_service

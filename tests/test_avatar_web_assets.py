@@ -27,12 +27,15 @@ def test_avatar_ui_uses_search_session_ids_instead_of_posting_arbitrary_image_ur
     assert "group-speaker-name" in avatars
 
 
-def test_example_config_declares_search_and_avatar_storage_without_enabling_future_web_tools():
+def test_example_config_declares_searchapi_and_avatar_storage_without_enabling_future_web_tools():
     config = (ROOT / "config.example.yaml").read_text(encoding="utf-8")
 
-    assert 'search_provider: "brave"' in config
+    assert 'search_provider: "searchapi"' in config
     assert 'search_api_key: ""' in config
+    assert 'search_country: "jp"' in config
+    assert 'search_language: "zh-cn"' in config
     assert 'search_safe_search: "strict"' in config
     assert 'avatar_dir: ""' in config
+    assert '# search_provider: "brave"' in config
     assert "# web_search_enabled: false" in config
     assert "# web_fetch_enabled: false" in config

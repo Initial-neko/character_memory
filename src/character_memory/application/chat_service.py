@@ -73,9 +73,9 @@ class ChatService:
     """Application entry point for direct conversation state.
 
     `persist_user_message` is deliberately independent from model generation so
-    Web/API callers can durably accept user input immediately. The legacy `send`
-    method remains synchronous for CLI/tests and processes the already-persisted
-    event under the character lock.
+    asynchronous Web/API callers can durably accept user input immediately. The
+    legacy `send` method intentionally keeps the long-standing synchronous
+    `runtime.handle(event)` contract for CLI callers and lightweight test runtimes.
     """
 
     def __init__(self, store, runtime, clock: Clock):
@@ -151,22 +151,28 @@ class ChatService:
     ):
         runtime = self._runtime_for(character_id)
         with self._lock_for(character_id):
-            event = self.persist_user_message(
+            now = at or self.clock.now()
+            self.store.set_world_time(character_id, now)
+            event = build_user_event(
                 message,
                 character_id=character_id,
                 conversation_id=conversation_id,
-                at=at,
+                at=now,
                 sticker=sticker,
                 image=image,
             )
-            self.store.set_world_time(character_id, event.event_time)
+            logger.info(
+                "chat.send character=%s conversation=%s at=%s chars=%d sticker=%s image=%s",
+                character_id,
+                conversation_id,
+                now.isoformat(),
+                len(message.strip()),
+                event.metadata.get("sticker_id") or "-",
+                event.metadata.get("media_id") or "-",
+            )
             if vision_image_data_url:
-                return runtime.handle(
-                    event,
-                    image_data_urls=[vision_image_data_url],
-                    persist_event=False,
-                )
-            return runtime.handle(event, persist_event=False)
+                return runtime.handle(event, image_data_urls=[vision_image_data_url])
+            return runtime.handle(event)
 
     def dispatch_proactive_intent(
         self,

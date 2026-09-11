@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from character_memory.avatars import AvatarSearchService, AvatarStore
 from character_memory.config import resolve_avatar_dir
-from character_memory.search import BraveSearchProvider
+from character_memory.search import BraveSearchProvider, SearchApiProvider
 
 
 class AvatarSearchRequest(BaseModel):
@@ -32,14 +32,22 @@ def attach_avatar_routes(app) -> None:
         resolve_avatar_dir(settings),
         max_bytes=int(getattr(settings, "avatar_max_bytes", 8 * 1024 * 1024)),
     )
-    provider_name = str(getattr(settings, "search_provider", "brave") or "brave").strip().lower()
+    provider_name = str(getattr(settings, "search_provider", "searchapi") or "searchapi").strip().lower()
     provider = None
-    if provider_name == "brave":
+    provider_kwargs = {
+        "country": getattr(settings, "search_country", "jp"),
+        "language": getattr(settings, "search_language", "zh-cn"),
+        "safe_search": getattr(settings, "search_safe_search", "strict"),
+    }
+    if provider_name in {"searchapi", "searchapi.io", "search_api"}:
+        provider = SearchApiProvider(
+            getattr(settings, "search_api_key", ""),
+            **provider_kwargs,
+        )
+    elif provider_name == "brave":
         provider = BraveSearchProvider(
             getattr(settings, "search_api_key", ""),
-            country=getattr(settings, "search_country", "ALL"),
-            language=getattr(settings, "search_language", "zh"),
-            safe_search=getattr(settings, "search_safe_search", "strict"),
+            **provider_kwargs,
         )
     avatar_search = AvatarSearchService(provider, avatar_store)
     app.state.character_memory.avatar_store = avatar_store
@@ -97,7 +105,7 @@ def attach_avatar_routes(app) -> None:
     @app.post("/v1/characters/{character_id}/avatar/search")
     def search_avatar(character_id: str, req: AvatarSearchRequest):
         item = profile(character_id)
-        if provider_name != "brave":
+        if provider is None:
             raise HTTPException(status_code=501, detail=f"Unsupported search_provider: {provider_name}")
         query = req.query.strip() or default_query(item)
         try:

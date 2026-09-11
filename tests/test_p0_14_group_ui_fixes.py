@@ -47,14 +47,16 @@ def test_group_rename_api_persists_without_loading_model_runtime(tmp_path: Path)
 def test_group_rename_ui_is_wired_without_adding_a_second_composer_submit_owner():
     root = Path(__file__).resolve().parents[1]
     web = root / "src" / "character_memory" / "web"
-    groups = (web / "groups.js").read_text(encoding="utf-8")
+    settings = (web / "group_settings.js").read_text(encoding="utf-8")
     core = (web / "app.js").read_text(encoding="utf-8")
     css = (web / "p0_11.css").read_text(encoding="utf-8")
+    index = (web / "index.html").read_text(encoding="utf-8")
 
-    assert 'method:"PATCH"' in groups
-    assert "data-group-rename-name" in groups
-    assert "data-group-rename-confirm" in groups
-    assert "group-name-editable" in groups
+    assert '/static/group_settings.js' in index
+    assert 'method:"PATCH"' in settings
+    assert "data-group-rename-name" in settings
+    assert "data-group-rename-confirm" in settings
+    assert "group-name-editable" in settings
     assert "group-name-editable" in css
     assert core.count('addEventListener("submit"') == 1
-    assert 'addEventListener("submit"' not in groups
+    assert 'addEventListener("submit"' not in settings

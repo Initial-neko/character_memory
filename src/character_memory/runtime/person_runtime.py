@@ -127,12 +127,16 @@ class PersonRuntime:
 
         return accepted, decisions
 
-    def _sanitize_resource_actions(self, reaction):
+    def _sanitize_resource_actions(self, reaction, *, allowed_sticker_ids: set[str] | None = None):
         sticker_decisions = []
         image_decisions = []
         sanitized = []
         for action in reaction.actions:
             if action.type == ActionType.STICKER:
+                if allowed_sticker_ids is not None and action.sticker_id not in allowed_sticker_ids:
+                    sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_NOT_RETRIEVED_STICKER"})
+                    logger.warning("runtime.sticker drop_not_retrieved sticker_id=%s", action.sticker_id)
+                    continue
                 sticker = self.sticker_catalog.get(action.sticker_id) if self.sticker_catalog is not None else None
                 if sticker is None or self.sticker_catalog.asset_path(sticker.id) is None:
                     sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_UNKNOWN_STICKER"})
@@ -191,6 +195,7 @@ class PersonRuntime:
             self._sticker_query(event, recent),
         )
         prompt_stickers = sticker_retrieval.catalog if sticker_retrieval is not None else None
+        allowed_sticker_ids = {match.sticker_id for match in sticker_retrieval.matches} if sticker_retrieval is not None else set()
         timings["sticker_retrieval_ms"] = _ms(stage)
         context = compile_context(
             self.persona,
@@ -207,7 +212,7 @@ class PersonRuntime:
             "runtime.context ready chars=%d recent_events=%d sticker_candidates=%d has_state=%s duration_ms=%.1f",
             len(context),
             len(recent),
-            len(sticker_retrieval.matches) if sticker_retrieval is not None else 0,
+            len(allowed_sticker_ids),
             bool(state_before),
             timings["context_ms"],
         )
@@ -220,7 +225,10 @@ class PersonRuntime:
         else:
             model_call = self.model.react_call_for_session(context, conversation_id)
         reaction = model_call.value
-        reaction, sticker_decisions, image_decisions = self._sanitize_resource_actions(reaction)
+        reaction, sticker_decisions, image_decisions = self._sanitize_resource_actions(
+            reaction,
+            allowed_sticker_ids=allowed_sticker_ids,
+        )
         timings["model_ms"] = _ms(stage)
         action_types = [action.type.value for action in reaction.actions]
         model_used = model_call.trace.model or str(getattr(self.model, "model", "") or "")

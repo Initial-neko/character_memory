@@ -46,14 +46,3 @@ def attach_startup_routes(app) -> None:
             "warmup_ms": total_ms,
             "init_timings": dict(getattr(bundle, "init_timings", {}) or {}),
         }
-
-    @app.get("/v1/runtime/warmup")
-    def warmup_status():
-        bundle = getattr(access, "get_bundle", None)
-        runtime_loaded = False
-        try:
-            store = access.store()
-            runtime_loaded = store is not access.read_store
-        except Exception:
-            runtime_loaded = False
-        return {"ready": runtime_loaded, "runtime_loaded": runtime_loaded, "warmup_available": callable(bundle)}

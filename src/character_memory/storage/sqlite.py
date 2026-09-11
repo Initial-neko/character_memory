@@ -35,13 +35,16 @@ class SQLiteStore:
         return True
 
     def _backfill_epoch_locked(self, table: str, time_column: str, epoch_column: str) -> tuple[int, int]:
+        # All identifiers come from the hard-coded migration spec below. Quote
+        # them because names such as `current_time` collide with SQLite keywords.
         rows = self.conn.execute(
-            f"SELECT rowid AS _rowid,{time_column} FROM {table} WHERE {epoch_column} IS NULL"
+            f'SELECT rowid AS _rowid,"{time_column}" AS _time_value '
+            f'FROM "{table}" WHERE "{epoch_column}" IS NULL'
         ).fetchall()
         migrated = 0
         invalid = 0
         for row in rows:
-            raw = row[time_column]
+            raw = row["_time_value"]
             if raw is None or not str(raw).strip():
                 continue
             try:
@@ -60,7 +63,7 @@ class SQLiteStore:
             if stamp is None:
                 continue
             self.conn.execute(
-                f"UPDATE {table} SET {epoch_column}=? WHERE rowid=?",
+                f'UPDATE "{table}" SET "{epoch_column}"=? WHERE rowid=?',
                 (stamp, row["_rowid"]),
             )
             migrated += 1

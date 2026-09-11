@@ -74,12 +74,17 @@ class StickerRetriever:
         self.embeddings = embeddings
         self.limit = max(1, int(limit))
         self.semantic_threshold = float(semantic_threshold)
-        with _SHARED_CACHE_GUARD:
-            shared = _SHARED_CACHES.get(embeddings)
-            if shared is None:
-                shared = (threading.RLock(), {})
-                _SHARED_CACHES[embeddings] = shared
-        self._lock, self._cache = shared
+        try:
+            with _SHARED_CACHE_GUARD:
+                shared = _SHARED_CACHES.get(embeddings)
+                if shared is None:
+                    shared = (threading.RLock(), {})
+                    _SHARED_CACHES[embeddings] = shared
+            self._lock, self._cache = shared
+        except TypeError:
+            # Minimal test/fake providers may not support weak references.
+            self._lock = threading.RLock()
+            self._cache: dict[str, tuple[str, list[float]]] = {}
 
     @staticmethod
     def semantic_text(sticker: Sticker) -> str:
@@ -122,6 +127,12 @@ class StickerRetriever:
             return 0.0
         return float(np.dot(a, b) / denom)
 
+    def _embed_many(self, texts: list[str]) -> list[list[float]]:
+        method = getattr(self.embeddings, "embed_many", None)
+        if callable(method):
+            return method(texts)
+        return [self.embeddings.embed(text) for text in texts]
+
     def _catalog_vectors(self, catalog: StickerCatalog) -> dict[str, list[float]]:
         missing_ids: list[str] = []
         missing_texts: list[str] = []
@@ -134,7 +145,7 @@ class StickerRetriever:
                     missing_texts.append(text)
 
         if missing_texts:
-            vectors = self.embeddings.embed_many(missing_texts)
+            vectors = self._embed_many(missing_texts)
             with self._lock:
                 for sticker_id, text, vector in zip(missing_ids, missing_texts, vectors):
                     self._cache[sticker_id] = (text, vector)

@@ -79,6 +79,8 @@ class PersonRuntime:
 
     def _prepare_memory_writes(self, character_id: str, event_time, candidates):
         """Small V0 admission gate: reject low-value and near-duplicate memories."""
+        if not candidates:
+            return [], []
         existing = [
             memory
             for memory in self.store.list_memories(character_id)
@@ -139,14 +141,14 @@ class PersonRuntime:
         sanitized = []
         for action in reaction.actions:
             if action.type == ActionType.STICKER:
+                if allowed_sticker_ids is not None and action.sticker_id not in allowed_sticker_ids:
+                    sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_NOT_RETRIEVED_STICKER"})
+                    logger.warning("runtime.sticker drop_not_retrieved sticker_id=%s", action.sticker_id)
+                    continue
                 sticker = self.sticker_catalog.get(action.sticker_id) if self.sticker_catalog is not None else None
                 if sticker is None or self.sticker_catalog.asset_path(sticker.id) is None:
                     sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_UNKNOWN_STICKER"})
                     logger.warning("runtime.sticker drop_unknown sticker_id=%s", action.sticker_id)
-                    continue
-                if allowed_sticker_ids is not None and action.sticker_id not in allowed_sticker_ids:
-                    sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_NOT_RETRIEVED_STICKER"})
-                    logger.warning("runtime.sticker drop_not_retrieved sticker_id=%s", action.sticker_id)
                     continue
                 sanitized.append(action)
                 sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "ALLOW", "label": sticker.label})

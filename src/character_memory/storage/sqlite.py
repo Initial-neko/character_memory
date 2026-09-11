@@ -34,23 +34,42 @@ class SQLiteStore:
         self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
         return True
 
-    def _backfill_epoch_locked(self, table: str, time_column: str, epoch_column: str) -> int:
+    def _backfill_epoch_locked(self, table: str, time_column: str, epoch_column: str) -> tuple[int, int]:
+        # All identifiers come from the hard-coded migration spec below. Quote
+        # them because names such as `current_time` collide with SQLite keywords.
         rows = self.conn.execute(
-            f"SELECT rowid AS _rowid,{time_column} FROM {table} WHERE {epoch_column} IS NULL"
+            f'SELECT rowid AS _rowid,"{time_column}" AS _time_value '
+            f'FROM "{table}" WHERE "{epoch_column}" IS NULL'
         ).fetchall()
         migrated = 0
+        invalid = 0
         for row in rows:
-            raw = row[time_column]
+            raw = row["_time_value"]
             if raw is None or not str(raw).strip():
                 continue
+            try:
+                stamp = epoch_us_from_iso(raw)
+            except (TypeError, ValueError, OverflowError) as exc:
+                invalid += 1
+                logger.warning(
+                    "storage.time_migration skipped_invalid table=%s column=%s rowid=%s value=%r error=%s",
+                    table,
+                    time_column,
+                    row["_rowid"],
+                    raw,
+                    exc,
+                )
+                continue
+            if stamp is None:
+                continue
             self.conn.execute(
-                f"UPDATE {table} SET {epoch_column}=? WHERE rowid=?",
-                (epoch_us_from_iso(raw), row["_rowid"]),
+                f'UPDATE "{table}" SET "{epoch_column}"=? WHERE rowid=?',
+                (stamp, row["_rowid"]),
             )
             migrated += 1
-        return migrated
+        return migrated, invalid
 
-    def _migrate_time_keys_locked(self) -> int:
+    def _migrate_time_keys_locked(self) -> tuple[int, int]:
         specs = [
             ("events", "event_time", "event_time_epoch"),
             ("memories", "event_time", "event_time_epoch"),
@@ -63,10 +82,13 @@ class SQLiteStore:
             ("runtime_traces", "created_at", "created_at_epoch"),
         ]
         migrated = 0
+        invalid = 0
         for table, time_column, epoch_column in specs:
             self._ensure_column_locked(table, epoch_column, "INTEGER")
-            migrated += self._backfill_epoch_locked(table, time_column, epoch_column)
-        return migrated
+            migrated_rows, invalid_rows = self._backfill_epoch_locked(table, time_column, epoch_column)
+            migrated += migrated_rows
+            invalid += invalid_rows
+        return migrated, invalid
 
     def _seed_mental_state_history_locked(self) -> int:
         rows = self.conn.execute(
@@ -74,6 +96,13 @@ class SQLiteStore:
         ).fetchall()
         seeded = 0
         for row in rows:
+            if row["updated_at_epoch"] is None:
+                logger.warning(
+                    "storage.mental_state_migration skipped_invalid_time character=%s value=%r",
+                    row["character_id"],
+                    row["updated_at"],
+                )
+                continue
             exists = self.conn.execute(
                 "SELECT 1 FROM mental_state_history WHERE character_id=? LIMIT 1",
                 (row["character_id"],),
@@ -172,7 +201,7 @@ class SQLiteStore:
                 self.conn.execute("ALTER TABLE intents ADD COLUMN source_event_id INTEGER")
                 logger.info("storage.intent_migration added=source_event_id")
 
-            time_rows = self._migrate_time_keys_locked()
+            time_rows, invalid_time_rows = self._migrate_time_keys_locked()
             mental_rows = self._seed_mental_state_history_locked()
             self.conn.executescript(
                 """
@@ -190,6 +219,8 @@ class SQLiteStore:
             self.conn.commit()
             if time_rows:
                 logger.info("storage.time_migration epoch_rows=%d", time_rows)
+            if invalid_time_rows:
+                logger.warning("storage.time_migration invalid_rows=%d preserved_raw=true", invalid_time_rows)
             if mental_rows:
                 logger.info("storage.mental_state_migration seeded_history=%d", mental_rows)
             if migrated:
@@ -294,7 +325,16 @@ class SQLiteStore:
     def get_media_asset(self, media_id: str) -> MediaAsset | None:
         with self._lock:
             row = self.conn.execute("SELECT * FROM media_assets WHERE id=?", (media_id,)).fetchone()
-            return self._media_from_row(row) if row else None
+            if row is None:
+                return None
+            if row["created_at_epoch"] is None:
+                logger.warning(
+                    "storage.media skipped_invalid_time media_id=%s value=%r",
+                    media_id,
+                    row["created_at"],
+                )
+                return None
+            return self._media_from_row(row)
 
     def delete_media_asset(self, media_id: str) -> None:
         with self._lock:
@@ -317,7 +357,7 @@ class SQLiteStore:
 
     def list_memories(self, character_id: str, *, include_inactive: bool = False, limit: int | None = None, include_embedding: bool = True) -> list[Memory]:
         with self._lock:
-            sql = "SELECT * FROM memories WHERE character_id=?"
+            sql = "SELECT * FROM memories WHERE character_id=? AND event_time_epoch IS NOT NULL"
             args: list = [character_id]
             if not include_inactive:
                 sql += " AND active=1"
@@ -331,7 +371,7 @@ class SQLiteStore:
 
     def list_events(self, character_id: str, limit: int = 50, event_type: str | None = None, before: datetime | None = None) -> list[Event]:
         with self._lock:
-            sql = "SELECT * FROM events WHERE character_id=?"
+            sql = "SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL"
             args: list = [character_id]
             if event_type:
                 sql += " AND event_type=?"
@@ -347,7 +387,7 @@ class SQLiteStore:
     def list_chat_events(self, character_id: str, limit: int = 160) -> list[Event]:
         with self._lock:
             rows = self.conn.execute(
-                "SELECT * FROM events WHERE character_id=? AND event_type IN (?,?) ORDER BY event_time_epoch DESC,id DESC LIMIT ?",
+                "SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL AND event_type IN (?,?) ORDER BY event_time_epoch DESC,id DESC LIMIT ?",
                 (character_id, EventType.USER_MESSAGE.value, EventType.CHARACTER_MESSAGE.value, limit),
             ).fetchall()
             return [self._event_from_row(r) for r in reversed(rows)]
@@ -432,8 +472,20 @@ class SQLiteStore:
 
     def get_world_time(self, character_id: str) -> datetime | None:
         with self._lock:
-            row = self.conn.execute('SELECT "current_time" FROM world_states WHERE character_id=?', (character_id,)).fetchone()
-            return parse_datetime(row["current_time"]) if row else None
+            row = self.conn.execute(
+                'SELECT "current_time",current_time_epoch FROM world_states WHERE character_id=?',
+                (character_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["current_time_epoch"] is None:
+                logger.warning(
+                    "storage.world_time ignored_invalid character=%s value=%r",
+                    character_id,
+                    row["current_time"],
+                )
+                return None
+            return parse_datetime(row["current_time"])
 
     def set_world_time(self, character_id: str, current_time: datetime, *, allow_rollback: bool = False):
         with self._lock:

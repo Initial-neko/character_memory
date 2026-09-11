@@ -32,7 +32,7 @@ def test_group_text_sticker_and_image_are_all_routed_by_conversation_mode():
     groups = (WEB / "groups.js").read_text(encoding="utf-8")
 
     assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message);' in core
-    assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendSticker?.(sticker);' in stickers
+    assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendSticker?.(sticker, caption);' in stickers
     assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendImage?.(currentDraft, caption);' in images
     assert '/v1/groups/${encodeURIComponent(groupId)}/chat' in groups
 

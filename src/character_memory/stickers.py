@@ -22,6 +22,8 @@ _MAX_UNCOMPRESSED_BYTES = 160 * 1024 * 1024
 _MAX_ARCHIVE_FILES = 500
 _IMPORT_LOCKS_GUARD = threading.Lock()
 _IMPORT_LOCKS: dict[str, threading.RLock] = {}
+_GLOBAL_CATALOG_CACHE_LOCK = threading.RLock()
+_GLOBAL_CATALOG_CACHE: dict[tuple[str, ...], tuple[tuple[tuple[str, int, int], ...], "StickerCatalog"]] = {}
 
 
 class Sticker(BaseModel):
@@ -125,11 +127,7 @@ def _catalog_from_manifests(manifests: Iterable[Path], *, root: Path, source: st
     return StickerCatalog(root, list(merged.values()), source=source, asset_roots=roots)
 
 
-def load_global_sticker_catalog(
-    global_dir: str | Path,
-    *,
-    persona_paths: Iterable[str | Path] = (),
-) -> StickerCatalog:
+def _global_manifest_paths(global_dir: str | Path, persona_paths: Iterable[str | Path]) -> list[Path]:
     root = Path(global_dir)
     manifests: list[Path] = [_default_manifest()]
     seen: set[Path] = set()
@@ -140,7 +138,44 @@ def load_global_sticker_catalog(
             manifests.append(legacy)
             seen.add(key)
     manifests.append(root / "manifest.yaml")
-    return _catalog_from_manifests(manifests, root=root, source="default+global+legacy")
+    return manifests
+
+
+def _manifest_signature(manifests: Iterable[Path]) -> tuple[tuple[str, int, int], ...]:
+    rows: list[tuple[str, int, int]] = []
+    for manifest in manifests:
+        resolved = manifest.resolve()
+        try:
+            stat = manifest.stat()
+        except FileNotFoundError:
+            rows.append((str(resolved), -1, -1))
+        else:
+            rows.append((str(resolved), int(stat.st_mtime_ns), int(stat.st_size)))
+    return tuple(rows)
+
+
+def clear_global_sticker_catalog_cache() -> None:
+    with _GLOBAL_CATALOG_CACHE_LOCK:
+        _GLOBAL_CATALOG_CACHE.clear()
+
+
+def load_global_sticker_catalog(
+    global_dir: str | Path,
+    *,
+    persona_paths: Iterable[str | Path] = (),
+) -> StickerCatalog:
+    root = Path(global_dir)
+    persona_paths = tuple(persona_paths)
+    manifests = _global_manifest_paths(root, persona_paths)
+    cache_key = tuple(str(path.resolve()) for path in manifests)
+    with _GLOBAL_CATALOG_CACHE_LOCK:
+        signature = _manifest_signature(manifests)
+        cached = _GLOBAL_CATALOG_CACHE.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        catalog = _catalog_from_manifests(manifests, root=root, source="default+global+legacy")
+        _GLOBAL_CATALOG_CACHE[cache_key] = (signature, catalog)
+        return catalog
 
 
 def load_sticker_catalog(persona_path: str | Path) -> StickerCatalog:
@@ -417,6 +452,7 @@ def import_sticker_bundle(
     output_dir = Path(target_dir) if target_dir is not None else Path(persona_path).parent / "stickers"
     with _import_lock_for(output_dir):
         _commit_prepared_import(output_dir, prepared)
+    clear_global_sticker_catalog_cache()
 
     return {
         "imported": len(prepared),

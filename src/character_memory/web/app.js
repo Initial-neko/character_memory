@@ -9,6 +9,7 @@
       pendingCharacters: new Set(),
       lastRenderedSignature: "",
       conversation: {type: "DIRECT", groupId: null},
+      directHistory: {messages: [], hasMore: false, nextBeforeId: null, loadingOlder: false},
     },
     features: {},
     listeners: new Map(),
@@ -139,9 +140,11 @@
     return row;
   };
 
-  CM.renderHistory = messages => {
+  CM.renderHistory = (messages, {preserveScroll = false} = {}) => {
     const d = CM.dom;
-    const signature = `${CM.state.characterId}|` + messages.map(m => `${m.id}:${m.event_time}:${m.content}:${m.sticker_id || ""}:${m.image_id || m.media_id || ""}`).join("|");
+    const beforeHeight = document.body.scrollHeight;
+    const beforeY = window.scrollY;
+    const signature = `${CM.state.characterId}|${CM.state.directHistory.hasMore}|` + messages.map(m => `${m.id}:${m.event_time}:${m.content}:${m.sticker_id || ""}:${m.image_id || m.media_id || ""}`).join("|");
     if (signature === CM.state.lastRenderedSignature && d.chat.children.length) return;
     d.chat.innerHTML = "";
     if (!messages.length) {
@@ -149,6 +152,12 @@
       CM.state.lastRenderedSignature = signature;
       if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
       return;
+    }
+    if (CM.state.directHistory.hasMore) {
+      const older = document.createElement("div");
+      older.className = "date-separator history-load-more";
+      older.innerHTML = `<button class="detail-button" type="button" data-load-older-direct ${CM.state.directHistory.loadingOlder ? "disabled" : ""}>${CM.state.directHistory.loadingOlder ? "正在加载…" : "加载更早的消息"}</button>`;
+      d.chat.appendChild(older);
     }
     let lastDate = null;
     for (const message of messages) {
@@ -164,7 +173,14 @@
     }
     if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
     CM.state.lastRenderedSignature = signature;
-    CM.scrollToBottom(false);
+    if (preserveScroll) {
+      requestAnimationFrame(() => {
+        const delta = document.body.scrollHeight - beforeHeight;
+        window.scrollTo({top: beforeY + delta, behavior:"auto"});
+      });
+    } else {
+      CM.scrollToBottom(false);
+    }
   };
 
   CM.appendTypingForCurrent = () => {
@@ -231,14 +247,40 @@
     await CM.emit("charactersLoaded", CM.state.characters);
   };
 
-  CM.loadDirectHistory = async () => {
+  CM.loadDirectHistory = async ({beforeId = null, appendOlder = false} = {}) => {
     const requested = CM.state.characterId;
-    const data = await CM.api(`/v1/chat/history?character_id=${encodeURIComponent(requested)}&limit=180`);
+    const params = new URLSearchParams({character_id:requested, limit:"50"});
+    if (beforeId != null) params.set("before_id", String(beforeId));
+    const data = await CM.api(`/v1/chat/history-page?${params.toString()}`);
     if (CM.isGroupConversation() || requested !== CM.state.characterId) return;
-    CM.renderHistory(data.messages || []);
+    const incoming = data.messages || [];
+    if (appendOlder) {
+      const existing = new Set(CM.state.directHistory.messages.map(item => item.id));
+      CM.state.directHistory.messages = [...incoming.filter(item => !existing.has(item.id)), ...CM.state.directHistory.messages];
+    } else {
+      CM.state.directHistory.messages = incoming;
+    }
+    CM.state.directHistory.hasMore = Boolean(data.has_more);
+    CM.state.directHistory.nextBeforeId = data.next_before_id ?? null;
+    CM.renderHistory(CM.state.directHistory.messages, {preserveScroll:appendOlder});
     CM.features.unread?.markRead?.(requested);
     CM.renderCharacterList();
-    await CM.emit("historyLoaded", {type:"DIRECT", characterId:requested, messages:data.messages || []});
+    await CM.emit("historyLoaded", {type:"DIRECT", characterId:requested, messages:CM.state.directHistory.messages});
+  };
+
+  CM.loadOlderDirectHistory = async () => {
+    const history = CM.state.directHistory;
+    if (CM.isGroupConversation() || history.loadingOlder || !history.hasMore || history.nextBeforeId == null) return;
+    history.loadingOlder = true;
+    CM.state.lastRenderedSignature = "";
+    CM.renderHistory(history.messages, {preserveScroll:true});
+    try {
+      await CM.loadDirectHistory({beforeId:history.nextBeforeId, appendOlder:true});
+    } finally {
+      history.loadingOlder = false;
+      CM.state.lastRenderedSignature = "";
+      CM.renderHistory(history.messages, {preserveScroll:true});
+    }
   };
 
   CM.loadHistory = async () => {
@@ -254,6 +296,7 @@
     CM.features.images?.close?.();
     CM.features.unread?.markRead?.(nextId);
     CM.state.characterId = nextId;
+    CM.state.directHistory = {messages: [], hasMore: false, nextBeforeId: null, loadingOlder: false};
     localStorage.setItem(activeCharacterKey, nextId);
     CM.state.lastRenderedSignature = "";
     CM.closeDrawer();
@@ -375,7 +418,7 @@
       const actions = Array.isArray(trace.actions) ? trace.actions : (trace.action ? [trace.action] : []);
       const actionText = actions.length ? actions.map((action, index) => `${index + 1}. ${action.type}: ${action.message || action.sticker_id || action.image_id || action.reason || ""}`).join("\n") : "没有发送消息";
       const firstAction = trace.action || actions[0] || {};
-      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>耗时</h3>${CM.timingHtml(trace.timings)}</section><section class="section"><h3>决策</h3><div class="kv"><div>Actions</div><div>${CM.escapeHtml(actions.map(a => a.type).join(" / ") || "NO_REPLY")}</div><div>Action Reason</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(firstAction.reason))}</div><div>Perception</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.perception))}</div><div>Reaction</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.reaction))}</div><div>Model Attempt</div><div>${CM.escapeHtml(trace.model_attempt || "—")}</div></div></section><section class="section"><h3>最终对外表达</h3><pre>${CM.escapeHtml(actionText)}</pre></section><section class="section"><h3>Mental State · Before</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_before))}</pre></section><section class="section"><h3>Mental State · After</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_after))}</pre></section><section class="section"><h3>Recall</h3><div class="card-list">${(trace.recalled_memories || []).map(m => `<div class="card"><strong>${CM.escapeHtml(m.memory_type)}</strong><span> · importance ${CM.escapeHtml(m.importance)}</span><div>${CM.escapeHtml(m.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div></section><section class="section"><h3>实际发送给模型的 messages</h3>${(trace.model_messages || []).map((m, i) => `<p><strong>${i + 1}. ${CM.escapeHtml(m.role)}</strong></p><pre>${CM.escapeHtml(m.content)}</pre>`).join("") || `<p>${CM.escapeHtml(hiddenText)}</p>`}</section><section class="section"><h3>Compiled Context</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.context))}</pre></section><section class="section"><h3>Memory Admission</h3><pre>${CM.escapeHtml(JSON.stringify(trace.memory_decisions || [], null, 2))}</pre></section><section class="section"><h3>Memory Write</h3><pre>${CM.escapeHtml(JSON.stringify({candidates:trace.memory_candidates || [], created_memory_ids:trace.created_memory_ids || []}, null, 2))}</pre></section><section class="section"><h3>Intent</h3><pre>${CM.escapeHtml(JSON.stringify({candidates:trace.intent_candidates || [], created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre></section><section class="section"><h3>Raw Model Response</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.raw_model_response))}</pre></section>`;
+      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>耗时</h3>${CM.timingHtml(trace.timings)}</section><section class="section"><h3>决策</h3><div class="kv"><div>Actions</div><div>${CM.escapeHtml(actions.map(a => a.type).join(" / ") || "NO_REPLY")}</div><div>Action Reason</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(firstAction.reason))}</div><div>Perception</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.perception))}</div><div>Reaction</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.reaction))}</div><div>Model Attempt</div><div>${CM.escapeHtml(trace.model_attempt || "—")}</div></div></section><section class="section"><h3>最终对外表达</h3><pre>${CM.escapeHtml(actionText)}</pre></section><section class="section"><h3>Sticker Retrieval</h3><pre>${CM.escapeHtml(JSON.stringify(trace.sticker_retrieval || {}, null, 2))}</pre></section><section class="section"><h3>Mental State · Before</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_before))}</pre></section><section class="section"><h3>Mental State · After</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_after))}</pre></section><section class="section"><h3>Recall</h3><div class="card-list">${(trace.recalled_memories || []).map(m => `<div class="card"><strong>${CM.escapeHtml(m.memory_type)}</strong><span> · importance ${CM.escapeHtml(m.importance)}</span><div>${CM.escapeHtml(m.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div></section><section class="section"><h3>实际发送给模型的 messages</h3>${(trace.model_messages || []).map((m, i) => `<p><strong>${i + 1}. ${CM.escapeHtml(m.role)}</strong></p><pre>${CM.escapeHtml(m.content)}</pre>`).join("") || `<p>${CM.escapeHtml(hiddenText)}</p>`}</section><section class="section"><h3>Compiled Context</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.context))}</pre></section><section class="section"><h3>Memory Admission</h3><pre>${CM.escapeHtml(JSON.stringify(trace.memory_decisions || [], null, 2))}</pre></section><section class="section"><h3>Memory Write</h3><pre>${CM.escapeHtml(JSON.stringify({candidates:trace.memory_candidates || [], created_memory_ids:trace.created_memory_ids || []}, null, 2))}</pre></section><section class="section"><h3>Intent</h3><pre>${CM.escapeHtml(JSON.stringify({candidates:trace.intent_candidates || [], created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre></section><section class="section"><h3>Raw Model Response</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.raw_model_response))}</pre></section>`;
     } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
   };
 
@@ -402,6 +445,8 @@
       if (button) CM.switchCharacter(button.dataset.character).catch(console.error);
     });
     d.chat.addEventListener("click", event => {
+      const older = event.target.closest("[data-load-older-direct]");
+      if (older) { CM.loadOlderDirectHistory().catch(console.error); return; }
       const thought = event.target.closest("[data-thought]");
       if (thought) { CM.showThought(thought.dataset.thought); return; }
       const trace = event.target.closest("[data-trace]");
@@ -411,7 +456,6 @@
     d.input.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); d.composer.requestSubmit(); }
     });
-    // Single submit owner. DIRECT/GROUP routing happens here and nowhere else.
     d.composer.addEventListener("submit", event => {
       event.preventDefault();
       CM.submitCurrentText().catch(error => console.error("submit failed", error));

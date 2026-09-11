@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import logging
+from urllib.parse import urlparse
 
 import httpx
 
@@ -62,7 +63,140 @@ class WebFetcher(ABC):
         raise NotImplementedError("web_fetch is reserved for a later phase")
 
 
+def _dimension(value) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _avatar_shape_ok(width: int | None, height: int | None) -> bool:
+    if not width or not height:
+        return True
+    ratio = width / max(height, 1)
+    return 0.45 <= ratio <= 2.2
+
+
+class SearchApiProvider(SearchProvider):
+    """SearchAPI.io Google Images adapter.
+
+    The provider intentionally implements image search only. General web search
+    remains a separate later capability even though SearchAPI.io supports it.
+    """
+
+    IMAGE_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        country: str = "jp",
+        language: str = "zh-cn",
+        safe_search: str = "strict",
+        timeout: float = 20.0,
+        client: httpx.Client | None = None,
+    ):
+        self.api_key = str(api_key or "").strip()
+        country_value = str(country or "").strip().lower()
+        self.country = "" if country_value in {"", "all"} else country_value
+        language_value = str(language or "zh-cn").strip().lower() or "zh-cn"
+        self.language = "zh-cn" if language_value == "zh" else language_value
+        safe_value = str(safe_search or "strict").strip().lower() or "strict"
+        self.safe_search = {
+            "strict": "active",
+            "active": "active",
+            "moderate": "blur",
+            "blur": "blur",
+            "off": "off",
+        }.get(safe_value, "active")
+        self._owns_client = client is None
+        self.client = client or httpx.Client(timeout=timeout, follow_redirects=True)
+
+    def search_images(self, query: str, *, limit: int = 12) -> list[ImageSearchResult]:
+        query = str(query or "").strip()
+        if not query:
+            raise ValueError("image search query must not be empty")
+        if not self.api_key:
+            raise RuntimeError("search_api_key is empty; configure a SearchAPI.io API key first")
+
+        count = max(1, min(int(limit), 50))
+        params = {
+            "engine": "google_images",
+            "q": query,
+            "hl": self.language,
+            "safe": self.safe_search,
+        }
+        if self.country:
+            params["gl"] = self.country
+
+        response = self.client.get(
+            self.IMAGE_SEARCH_URL,
+            params=params,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "User-Agent": "character-memory/0.4 avatar-search",
+            },
+        )
+        if response.is_error:
+            body = (response.text or "").strip()
+            if len(body) > 1200:
+                body = body[:1200] + "…"
+            raise RuntimeError(
+                f"SearchAPI image search failed with HTTP {response.status_code}: {body or '<empty>'}"
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError("SearchAPI image search returned invalid JSON") from exc
+
+        results: list[ImageSearchResult] = []
+        for item in payload.get("images") or []:
+            original = item.get("original") or {}
+            source = item.get("source") or {}
+            image_url = str(original.get("link") or "").strip()
+            thumbnail_value = item.get("thumbnail") or ""
+            if isinstance(thumbnail_value, dict):
+                thumbnail_url = str(thumbnail_value.get("link") or thumbnail_value.get("src") or "").strip()
+            else:
+                thumbnail_url = str(thumbnail_value).strip()
+            source_page_url = str(source.get("link") or "").strip()
+            if not image_url or not thumbnail_url or not source_page_url:
+                continue
+
+            width = _dimension(original.get("width"))
+            height = _dimension(original.get("height"))
+            if not _avatar_shape_ok(width, height):
+                continue
+
+            parsed_source = urlparse(source_page_url)
+            source_domain = parsed_source.hostname or str(source.get("name") or "").strip()
+            results.append(
+                ImageSearchResult(
+                    title=str(item.get("title") or source.get("name") or source_domain or "头像候选").strip(),
+                    image_url=image_url,
+                    thumbnail_url=thumbnail_url,
+                    source_page_url=source_page_url,
+                    source_domain=source_domain,
+                    width=width,
+                    height=height,
+                )
+            )
+            if len(results) >= count:
+                break
+
+        logger.info("search.images provider=searchapi query_chars=%d returned=%d", len(query), len(results))
+        return results
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
+
+
 class BraveSearchProvider(SearchProvider):
+    """Legacy/optional Brave Image Search adapter."""
+
     IMAGE_SEARCH_URL = "https://api.search.brave.com/res/v1/images/search"
 
     def __init__(
@@ -124,19 +258,10 @@ class BraveSearchProvider(SearchProvider):
                 continue
             meta_url = item.get("meta_url") or {}
             source_domain = str(item.get("source") or meta_url.get("hostname") or meta_url.get("netloc") or "").strip()
-            width = properties.get("width")
-            height = properties.get("height")
-            try:
-                width = int(width) if width is not None else None
-                height = int(height) if height is not None else None
-            except (TypeError, ValueError):
-                width = height = None
-            # Extremely panoramic assets make poor chat avatars. Keep unknown
-            # dimensions, but reject obvious banners before they reach the UI.
-            if width and height:
-                ratio = width / max(height, 1)
-                if ratio < 0.45 or ratio > 2.2:
-                    continue
+            width = _dimension(properties.get("width"))
+            height = _dimension(properties.get("height"))
+            if not _avatar_shape_ok(width, height):
+                continue
             results.append(
                 ImageSearchResult(
                     title=str(item.get("title") or source_domain or "头像候选").strip(),

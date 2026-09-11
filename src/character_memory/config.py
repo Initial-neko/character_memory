@@ -23,12 +23,12 @@ class Settings(BaseModel):
     embedding_api_key: str = ""
     embedding_base_url: str = ""
 
-    # Search is deliberately separate from the LLM runtime. P0.15 only uses
-    # image search for avatar discovery; web_search/web_fetch remain reserved.
-    search_provider: str = "brave"
+    # Search is deliberately separate from the LLM runtime. Avatar discovery
+    # uses image search only; web_search/web_fetch remain reserved.
+    search_provider: str = "searchapi"
     search_api_key: str = ""
-    search_country: str = "ALL"
-    search_language: str = "zh"
+    search_country: str = "jp"
+    search_language: str = "zh-cn"
     search_safe_search: str = "strict"
 
     db_path: str = "data/character-memory.db"
@@ -51,9 +51,19 @@ def load_settings(path: str = "config.yaml") -> Settings:
     if p.exists():
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     data["api_key"] = os.getenv("OPENCODE_GO_API_KEY", data.get("api_key", ""))
-    # config.yaml is the primary declaration for search credentials. The env
-    # override is optional for deployments that prefer secret injection.
-    data["search_api_key"] = os.getenv("BRAVE_SEARCH_API_KEY", data.get("search_api_key", ""))
+
+    # config.yaml remains the primary search credential declaration. Provider-
+    # specific env vars are optional deployment overrides and never need to be
+    # present for local use.
+    provider = str(data.get("search_provider", "searchapi") or "searchapi").strip().lower()
+    configured_search_key = data.get("search_api_key", "")
+    if provider in {"searchapi", "searchapi.io", "search_api"}:
+        data["search_api_key"] = os.getenv("SEARCHAPI_API_KEY", configured_search_key)
+    elif provider == "brave":
+        data["search_api_key"] = os.getenv("BRAVE_SEARCH_API_KEY", configured_search_key)
+    else:
+        data["search_api_key"] = configured_search_key
+
     data["db_path"] = os.getenv("CHARACTER_MEMORY_DB_PATH", data.get("db_path", "data/character-memory.db"))
     return Settings.model_validate(data)
 

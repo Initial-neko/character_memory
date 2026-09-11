@@ -55,6 +55,7 @@ class AvatarMetadata(BaseModel):
 class _CachedCandidate:
     public: AvatarCandidate
     image_url: str
+    query: str
 
 
 @dataclass
@@ -113,8 +114,8 @@ class AvatarStore:
         self._owns_client = client is None
         # Avatar downloads intentionally do not follow redirects automatically.
         # A redirect could turn a public search result into a private-network URL
-        # after our SSRF validation. Candidates with redirect-only originals can
-        # still fall back to Brave's proxied thumbnail URL.
+        # after our SSRF validation. Search-provider thumbnails remain a useful
+        # fallback when a source rejects direct server downloads.
         self.client = client or httpx.Client(timeout=30.0, follow_redirects=False)
 
     def _character_dir(self, character_id: str) -> Path:
@@ -182,8 +183,8 @@ class AvatarStore:
         payload: bytes | None = None
         content_type = ""
         errors: list[str] = []
-        # Prefer the original image, but Brave's proxied thumbnail is a useful
-        # fallback when a source rejects hotlink-style server downloads.
+        # Prefer the original image, but a provider thumbnail is a useful
+        # fallback when a source rejects direct server downloads.
         urls = list(dict.fromkeys([candidate.image_url, candidate.thumbnail_url]))
         for url in urls:
             if not url:
@@ -257,39 +258,85 @@ class AvatarSearchService:
         for key in expired:
             self._sessions.pop(key, None)
 
+    @staticmethod
+    def _normalize_queries(queries: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for raw in queries:
+            query = " ".join(str(raw or "").split()).strip()[:180]
+            if not query:
+                continue
+            key = query.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(query)
+            if len(result) >= 3:
+                break
+        return result
+
     def search(self, character_id: str, query: str, *, limit: int = 12) -> dict:
+        return self.search_queries(character_id, [query], limit=limit)
+
+    def search_queries(self, character_id: str, queries: list[str], *, limit: int = 12) -> dict:
         if self.provider is None:
             raise RuntimeError("image search is not configured")
-        query = str(query or "").strip()
-        if not query:
+        normalized = self._normalize_queries(queries)
+        if not normalized:
             raise ValueError("avatar search query must not be empty")
-        raw = self.provider.search_images(query, limit=max(1, min(int(limit), 20)))
-        search_id = uuid.uuid4().hex
+
+        target = max(1, min(int(limit), 20))
         candidates: dict[str, _CachedCandidate] = {}
-        for item in raw:
-            candidate_id = uuid.uuid4().hex[:12]
-            public = AvatarCandidate(
-                id=candidate_id,
-                title=item.title,
-                thumbnail_url=item.thumbnail_url,
-                source_page_url=item.source_page_url,
-                source_domain=item.source_domain,
-                width=item.width,
-                height=item.height,
-            )
-            candidates[candidate_id] = _CachedCandidate(public=public, image_url=item.image_url)
+        seen_images: set[str] = set()
+        used_queries: list[str] = []
+
+        # Search the primary LLM query first. Extra planned queries are only used
+        # when the provider returns too few viable candidates, preserving free
+        # API quota in the common case.
+        for query in normalized:
+            remaining = target - len(candidates)
+            if remaining <= 0:
+                break
+            raw = self.provider.search_images(query, limit=remaining)
+            used_queries.append(query)
+            for item in raw:
+                dedup_key = str(item.image_url or item.thumbnail_url or item.source_page_url).strip().casefold()
+                if not dedup_key or dedup_key in seen_images:
+                    continue
+                seen_images.add(dedup_key)
+                candidate_id = uuid.uuid4().hex[:12]
+                public = AvatarCandidate(
+                    id=candidate_id,
+                    title=item.title,
+                    thumbnail_url=item.thumbnail_url,
+                    source_page_url=item.source_page_url,
+                    source_domain=item.source_domain,
+                    width=item.width,
+                    height=item.height,
+                )
+                candidates[candidate_id] = _CachedCandidate(
+                    public=public,
+                    image_url=item.image_url,
+                    query=query,
+                )
+                if len(candidates) >= target:
+                    break
+
+        search_id = uuid.uuid4().hex
         now = time.monotonic()
         with self._lock:
             self._prune(now)
             self._sessions[search_id] = _SearchSession(
                 character_id=character_id,
-                query=query,
+                query=normalized[0],
                 created_at=now,
                 candidates=candidates,
             )
         return {
             "search_id": search_id,
-            "query": query,
+            "query": normalized[0],
+            "queries": normalized,
+            "used_queries": used_queries,
             "candidates": [item.public.model_dump(mode="json") for item in candidates.values()],
         }
 
@@ -305,7 +352,7 @@ class AvatarSearchService:
             cached = session.candidates.get(str(candidate_id or ""))
             if cached is None:
                 raise ValueError("avatar candidate is not part of this search")
-            query = session.query
+            query = cached.query or session.query
 
         result = ImageSearchResult(
             title=cached.public.title,

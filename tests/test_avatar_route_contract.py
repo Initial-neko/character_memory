@@ -6,10 +6,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_avatar_routes_do_not_expose_general_web_tools_to_chat_runtime():
     routes = (ROOT / "src" / "character_memory" / "avatar_web.py").read_text(encoding="utf-8")
+    planner = (ROOT / "src" / "character_memory" / "avatar_intent.py").read_text(encoding="utf-8")
     search = (ROOT / "src" / "character_memory" / "search.py").read_text(encoding="utf-8")
     runtime = (ROOT / "src" / "character_memory" / "runtime" / "person_runtime.py").read_text(encoding="utf-8")
 
-    assert 'avatar_search.search(' in routes
+    assert 'avatar_search.search_queries(' in routes
+    assert 'AvatarIntentPlanner' in routes
+    # Comments/docs may explain that planning stays outside PersonRuntime; the
+    # actual architectural contract is that the planner imports no runtime code.
+    assert 'from character_memory.runtime' not in planner
+    assert 'import character_memory.runtime' not in planner
     assert 'search_web' not in routes
     assert 'WebFetcher' in search
     assert 'web_search is reserved for a later phase' in search

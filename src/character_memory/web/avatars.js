@@ -80,10 +80,6 @@
     applyAvatars();
   }
 
-  function defaultQuery(profile) {
-    return [profile?.name || profile?.id || "", profile?.identity || "", "portrait avatar profile picture"].filter(Boolean).join(" ").trim();
-  }
-
   function managerHtml(profile) {
     const avatar = imageHtml(profile, "avatar-manager-current-image");
     return `<div class="avatar-manager">
@@ -91,9 +87,10 @@
         <div class="avatar-manager-current-preview">${avatar || `<span>${CM.escapeHtml(CM.initialFor(profile))}</span>`}</div>
         <div><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><p>${profile.avatar_url ? "当前头像已保存到本地。" : "当前还没有头像，将继续使用首字母。"}</p></div>
       </section>
-      <label class="avatar-search-field"><span>搜索关键词</span><input type="text" data-avatar-query maxlength="400" value="${CM.escapeHtml(defaultQuery(profile))}"></label>
-      <div class="avatar-manager-actions"><button class="primary" type="button" data-avatar-search>搜索头像</button></div>
-      <div data-avatar-results class="avatar-results"><p class="muted">搜索结果会先作为候选展示，只有你选择后才会下载并设为头像。</p></div>
+      <div class="avatar-planning-note"><strong>让角色自己判断</strong><span>系统会结合人物设定、当前状态和最近互动，先判断此刻适合什么头像，再生成图片搜索词。</span></div>
+      <label class="avatar-search-field"><span>补充偏好（可选）</span><input type="text" data-avatar-hint maxlength="400" value="" placeholder="例如：更温暖一点、害羞一点，或保持经典形象"></label>
+      <div class="avatar-manager-actions"><button class="primary" type="button" data-avatar-search>让角色决定并搜索</button></div>
+      <div data-avatar-results class="avatar-results"><p class="muted">SearchAPI 只会收到 AI 生成的短搜索词，不会收到 Persona、Mental State 或聊天原文。</p></div>
     </div>`;
   }
 
@@ -102,20 +99,34 @@
     if (!profile) return;
     managerCharacterId = characterId;
     currentSearch = null;
-    CM.openDrawer(`${profile.name || profile.id} · 头像`, "Image Search 只用于寻找候选；确认后才保存到本地");
+    CM.openDrawer(`${profile.name || profile.id} · 头像`, "先由角色判断此刻需要什么头像，再搜索候选");
     CM.dom.drawerBody.innerHTML = managerHtml(profile);
-    CM.dom.drawerBody.querySelector("[data-avatar-query]")?.focus();
+    CM.dom.drawerBody.querySelector("[data-avatar-hint]")?.focus();
   }
 
   function renderCandidates(result) {
     const box = CM.dom.drawerBody.querySelector("[data-avatar-results]");
     if (!box) return;
     const candidates = result?.candidates || [];
+    const plannedQueries = result?.queries || (result?.query ? [result.query] : []);
+    const usedQueries = result?.used_queries || [];
+    const sourceNote = result?.planning_source === "fallback"
+      ? '<span class="avatar-plan-fallback">本次 LLM 规划不可用，已使用基础关键词兜底。</span>'
+      : "";
+    const plan = `<div class="avatar-search-plan">
+      <strong>此刻的头像判断</strong>
+      <p>${CM.escapeHtml(result?.visual_intent || "保持人物辨识度的清晰聊天头像")}</p>
+      ${result?.preferred_mood ? `<span>气质：${CM.escapeHtml(result.preferred_mood)}</span>` : ""}
+      ${result?.preferred_style ? `<span>风格：${CM.escapeHtml(result.preferred_style)}</span>` : ""}
+      ${plannedQueries.length ? `<details><summary>AI 搜索词</summary><div>${plannedQueries.map(item => `<code>${CM.escapeHtml(item)}</code>`).join("")}</div></details>` : ""}
+      ${usedQueries.length > 1 ? `<span>首条候选不足，实际使用了 ${usedQueries.length} 条搜索词。</span>` : ""}
+      ${sourceNote}
+    </div>`;
     if (!candidates.length) {
-      box.innerHTML = '<div class="error">没有找到适合作为头像的图片，可以换一组关键词再试。</div>';
+      box.innerHTML = `${plan}<div class="error">没有找到适合作为头像的图片，可以补充偏好再试。</div>`;
       return;
     }
-    box.innerHTML = `<div class="avatar-search-summary">找到 ${candidates.length} 个候选 · ${CM.escapeHtml(result.query || "")}</div><div class="avatar-candidate-grid">${candidates.map(item => {
+    box.innerHTML = `${plan}<div class="avatar-search-summary">找到 ${candidates.length} 个候选</div><div class="avatar-candidate-grid">${candidates.map(item => {
       const size = item.width && item.height ? `${item.width}×${item.height}` : "尺寸未知";
       return `<article class="avatar-candidate"><div class="avatar-candidate-image"><img src="${CM.escapeHtml(item.thumbnail_url)}" alt="${CM.escapeHtml(item.title || "头像候选")}" loading="lazy"></div><div class="avatar-candidate-copy"><strong>${CM.escapeHtml(item.title || "头像候选")}</strong><span>${CM.escapeHtml(item.source_domain || "未知来源")} · ${CM.escapeHtml(size)}</span></div><div class="avatar-candidate-actions"><a href="${CM.escapeHtml(item.source_page_url)}" target="_blank" rel="noopener noreferrer">来源</a><button type="button" data-avatar-select="${CM.escapeHtml(item.id)}">选这个</button></div></article>`;
     }).join("")}</div>`;
@@ -123,18 +134,18 @@
 
   async function search() {
     if (!managerCharacterId) return;
-    const query = CM.dom.drawerBody.querySelector("[data-avatar-query]")?.value.trim() || "";
+    const hint = CM.dom.drawerBody.querySelector("[data-avatar-hint]")?.value.trim() || "";
     const button = CM.dom.drawerBody.querySelector("[data-avatar-search]");
     const box = CM.dom.drawerBody.querySelector("[data-avatar-results]");
-    if (button) { button.disabled = true; button.textContent = "正在搜索…"; }
-    if (box) box.innerHTML = '<p class="muted">正在从图片搜索中寻找头像候选…</p>';
+    if (button) { button.disabled = true; button.textContent = "正在判断并搜索…"; }
+    if (box) box.innerHTML = '<p class="muted">角色正在结合当前状态判断适合的头像，并生成搜索词…</p>';
     try {
-      currentSearch = await CM.api(`/v1/characters/${encodeURIComponent(managerCharacterId)}/avatar/search`, {method:"POST", body:JSON.stringify({query, limit:12})});
+      currentSearch = await CM.api(`/v1/characters/${encodeURIComponent(managerCharacterId)}/avatar/search`, {method:"POST", body:JSON.stringify({hint, limit:12})});
       renderCandidates(currentSearch);
     } catch (error) {
       if (box) box.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
     } finally {
-      if (button) { button.disabled = false; button.textContent = "搜索头像"; }
+      if (button) { button.disabled = false; button.textContent = "让角色决定并搜索"; }
     }
   }
 
@@ -174,7 +185,7 @@
     if (button) select(button.dataset.avatarSelect).catch(console.error);
   });
   CM.dom.drawerBody.addEventListener("keydown", event => {
-    if (!event.target.closest("[data-avatar-query]") || event.key !== "Enter" || event.isComposing) return;
+    if (!event.target.closest("[data-avatar-hint]") || event.key !== "Enter" || event.isComposing) return;
     event.preventDefault();
     search().catch(console.error);
   });

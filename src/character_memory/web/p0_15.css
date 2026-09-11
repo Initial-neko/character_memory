@@ -1,0 +1,136 @@
+.character-avatar,
+.header-avatar,
+.avatar,
+.avatar-manager-current-preview {
+  overflow: hidden;
+}
+
+.character-avatar-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.header-avatar.avatar-editable {
+  cursor: pointer;
+  position: relative;
+}
+
+body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
+  content: "✎";
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #202123;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  border: 2px solid #fff;
+}
+
+.avatar-manager { display: grid; gap: 16px; }
+.avatar-manager-current {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.avatar-manager-current-preview {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #ececef;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 18px;
+}
+.avatar-manager-current-preview.large { width: 96px; height: 96px; margin: 0 auto; }
+.avatar-manager-current p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+
+.avatar-search-field { display: grid; gap: 7px; font-size: 12px; font-weight: 650; }
+.avatar-search-field input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+  outline: none;
+}
+.avatar-search-field input:focus { border-color: #969aa3; box-shadow: 0 0 0 3px rgba(0,0,0,.04); }
+.avatar-manager-actions { display: flex; justify-content: flex-end; }
+.avatar-manager-actions button,
+.avatar-candidate-actions button,
+.avatar-selected-success button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 9px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.avatar-manager-actions .primary,
+.avatar-candidate-actions button {
+  background: #202123;
+  color: #fff;
+  border-color: #202123;
+}
+.avatar-manager-actions button:disabled,
+.avatar-candidate-actions button:disabled { opacity: .5; cursor: default; }
+
+.avatar-results { min-height: 64px; }
+.avatar-search-summary { color: var(--muted); font-size: 11px; margin: 2px 0 10px; }
+.avatar-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.avatar-candidate {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+.avatar-candidate-image {
+  aspect-ratio: 1 / 1;
+  background: #f0f1f3;
+  overflow: hidden;
+}
+.avatar-candidate-image img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.avatar-candidate-copy { padding: 9px 9px 5px; min-width: 0; }
+.avatar-candidate-copy strong,
+.avatar-candidate-copy span {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.avatar-candidate-copy strong { font-size: 11px; }
+.avatar-candidate-copy span { margin-top: 3px; font-size: 10px; color: var(--muted); }
+.avatar-candidate-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px 9px;
+}
+.avatar-candidate-actions a { color: var(--muted); font-size: 10px; text-decoration: none; }
+.avatar-candidate-actions a:hover { text-decoration: underline; }
+.avatar-candidate-actions button { padding: 6px 9px; font-size: 10px; }
+
+.avatar-selected-success { text-align: center; padding: 24px 8px; }
+.avatar-selected-success h3 { margin: 13px 0 5px; }
+.avatar-selected-success p { color: var(--muted); font-size: 12px; }
+.avatar-selected-success button { margin-top: 10px; }
+
+@media (max-width: 720px) {
+  .avatar-candidate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

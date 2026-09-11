@@ -22,12 +22,24 @@ class Settings(BaseModel):
     embedding_api_key: str = ""
     embedding_base_url: str = ""
 
+    # Search is deliberately separate from the LLM runtime. P0.15 only uses
+    # image search for avatar discovery; web_search/web_fetch remain reserved.
+    search_provider: str = "brave"
+    search_api_key: str = ""
+    search_country: str = "ALL"
+    search_language: str = "zh"
+    search_safe_search: str = "strict"
+
     db_path: str = "data/character-memory.db"
     media_dir: str = ""
     media_max_bytes: int = Field(default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)
     # User-imported stickers are account/application resources, not character-owned.
     # Empty means <db parent>/stickers.
     sticker_dir: str = ""
+    # Empty means <db parent>/avatars. Selected web avatars are downloaded here
+    # so chat UI never depends on a third-party hotlink remaining alive.
+    avatar_dir: str = ""
+    avatar_max_bytes: int = Field(default=8 * 1024 * 1024, ge=64 * 1024, le=32 * 1024 * 1024)
     persona_path: str = "personas/rin/persona.yaml"
     recall_limit: int = Field(default=8, ge=1, le=32)
 
@@ -38,6 +50,9 @@ def load_settings(path: str = "config.yaml") -> Settings:
     if p.exists():
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     data["api_key"] = os.getenv("OPENCODE_GO_API_KEY", data.get("api_key", ""))
+    # config.yaml is the primary declaration for search credentials. The env
+    # override is optional for deployments that prefer secret injection.
+    data["search_api_key"] = os.getenv("BRAVE_SEARCH_API_KEY", data.get("search_api_key", ""))
     data["db_path"] = os.getenv("CHARACTER_MEMORY_DB_PATH", data.get("db_path", "data/character-memory.db"))
     return Settings.model_validate(data)
 
@@ -54,6 +69,13 @@ def resolve_sticker_dir(settings: Settings) -> Path:
     if configured:
         return Path(configured)
     return Path(settings.db_path).parent / "stickers"
+
+
+def resolve_avatar_dir(settings: Settings) -> Path:
+    configured = str(getattr(settings, "avatar_dir", "") or "").strip()
+    if configured:
+        return Path(configured)
+    return Path(settings.db_path).parent / "avatars"
 
 
 def load_persona(path: str | Path) -> str:

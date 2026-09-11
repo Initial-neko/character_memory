@@ -239,6 +239,18 @@ class ReactionScheduler:
                 state.pending_since = time.monotonic()
             return False
 
+    def _retry_superseded(self, state: _PendingState) -> None:
+        """Retry from the newest fact without consuming the stale watermark.
+
+        In particular, image bytes from a superseded generation stay available
+        to the next context snapshot; otherwise a follow-up text could retain an
+        image placeholder while losing the actual visual input.
+        """
+        with state.condition:
+            if state.pending_since is None:
+                state.pending_since = time.monotonic()
+            state.condition.notify_all()
+
     def _run_direct(self, channel: str, state: _PendingState, character_id: str, conversation_id: str) -> None:
         while not self._closed.is_set():
             snapshot = self._snapshot_after_quiet(state)
@@ -246,6 +258,7 @@ class ReactionScheduler:
                 return
             event, watermark, image_urls = snapshot
             self.hub.publish(channel, "reaction_status", {"state": "typing", "watermark": watermark})
+            superseded = False
             try:
                 bundle = self.get_bundle()
                 runtime = bundle.runtimes[character_id]
@@ -281,11 +294,16 @@ class ReactionScheduler:
                     },
                 )
             except SupersededReaction:
+                superseded = True
                 logger.info("scheduler.direct superseded character=%s conversation=%s watermark=%s", character_id, conversation_id, watermark)
                 self.hub.publish(channel, "reaction_status", {"state": "superseded", "watermark": watermark})
             except Exception as exc:
                 logger.exception("scheduler.direct failed character=%s conversation=%s", character_id, conversation_id)
                 self.hub.publish(channel, "reaction_error", {"watermark": watermark, "message": str(exc)})
+
+            if superseded:
+                self._retry_superseded(state)
+                continue
             idle = self._finish_cycle(state, watermark)
             if idle:
                 self.hub.publish(channel, "reaction_status", {"state": "idle", "watermark": watermark})
@@ -301,6 +319,7 @@ class ReactionScheduler:
                 return
             event, watermark, image_urls = snapshot
             self.hub.publish(channel, "reaction_status", {"state": "typing", "watermark": watermark})
+            superseded = False
             try:
                 bundle = self.get_bundle()
                 service = GroupConversationService(
@@ -353,11 +372,16 @@ class ReactionScheduler:
                     },
                 )
             except SupersededGroupReaction:
+                superseded = True
                 logger.info("scheduler.group superseded conversation=%s watermark=%s", conversation_id, watermark)
                 self.hub.publish(channel, "reaction_status", {"state": "superseded", "watermark": watermark, "turn_id": event.turn_id})
             except Exception as exc:
                 logger.exception("scheduler.group failed conversation=%s", conversation_id)
                 self.hub.publish(channel, "reaction_error", {"watermark": watermark, "turn_id": event.turn_id, "message": str(exc)})
+
+            if superseded:
+                self._retry_superseded(state)
+                continue
             idle = self._finish_cycle(state, watermark)
             if idle:
                 self.hub.publish(channel, "reaction_status", {"state": "idle", "watermark": watermark})

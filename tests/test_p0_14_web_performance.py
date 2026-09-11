@@ -14,14 +14,15 @@ def test_direct_chat_history_is_bounded_to_cursor_pages():
     assert "data-load-older-direct" in app
 
 
-def test_group_chat_merges_current_turn_and_only_reconciles_history_on_failure():
+def test_group_async_send_merges_only_accepted_message_and_uses_sse_for_reactions():
     groups = (WEB / "groups.js").read_text(encoding="utf-8")
     assert 'limit:"50"' in groups
     assert "limit=180" not in groups
-    assert "result.new_messages" in groups
-    assert "group history reconcile failed" in groups
-    assert "catch (error)" in groups
-    assert "await loadHistory().catch" in groups
+    assert '/v1/groups/${encodeURIComponent(groupId)}/messages' in groups
+    assert "mergeMessage(result.message)" in groups
+    assert 'new EventSource(`/v1/events/stream?' in groups
+    assert 'source.addEventListener("group_character_event"' in groups
+    assert "result.new_messages" not in groups
 
 
 def test_background_summary_polling_is_throttled():

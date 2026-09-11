@@ -208,10 +208,13 @@ class ReactionScheduler:
 
     @staticmethod
     def _latest_direct_user_id(store, character_id: str, conversation_id: str) -> int | None:
+        # Supersession follows durable arrival order, not caller-controlled event
+        # timestamps. A later persisted message with an older `at` value must
+        # still supersede an in-flight generation for an earlier Event.
         with store._lock:
             row = store.conn.execute(
-                "SELECT id FROM events WHERE character_id=? AND event_type='USER_MESSAGE' AND event_time_epoch IS NOT NULL "
-                "AND json_extract(metadata_json,'$.conversation_id')=? ORDER BY event_time_epoch DESC,id DESC LIMIT 1",
+                "SELECT id FROM events WHERE character_id=? AND event_type='USER_MESSAGE' "
+                "AND json_extract(metadata_json,'$.conversation_id')=? ORDER BY id DESC LIMIT 1",
                 (character_id, conversation_id),
             ).fetchone()
         return int(row["id"]) if row else None
@@ -309,8 +312,14 @@ class ReactionScheduler:
                 self.hub.publish(channel, "reaction_status", {"state": "idle", "watermark": watermark})
                 return
 
-    def _latest_group_user_id(self, service: GroupConversationService, conversation_id: str) -> int | None:
-        return service._latest_user_event_id(conversation_id)
+    @staticmethod
+    def _latest_group_user_id(service: GroupConversationService, conversation_id: str) -> int | None:
+        with service.store._lock:
+            row = service.store.conn.execute(
+                "SELECT id FROM conversation_events WHERE conversation_id=? AND actor_type='USER' ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        return int(row["id"]) if row else None
 
     def _run_group(self, channel: str, state: _PendingState, conversation_id: str) -> None:
         while not self._closed.is_set():

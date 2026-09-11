@@ -260,11 +260,12 @@
     return commitSend(groupId, {message}, {role:"user",actor_type:"USER",actor_id:"user",actor_name:"我",content:message,event_time:new Date().toISOString()}, "大家正在看这条消息…");
   }
 
-  async function sendSticker(sticker) {
+  async function sendSticker(sticker, caption = "") {
     const groupId = activeId();
+    const text = String(caption || "").trim();
     if (!groupId || !sticker) return;
     CM.features.stickers?.close?.();
-    return commitSend(groupId, {message:"",sticker_id:sticker.id}, {role:"user",actor_type:"USER",actor_id:"user",actor_name:"我",content:"",action:"STICKER",sticker_id:sticker.id,sticker,event_time:new Date().toISOString()}, "大家正在看这个表情…");
+    return commitSend(groupId, {message:text,sticker_id:sticker.id}, {role:"user",actor_type:"USER",actor_id:"user",actor_name:"我",content:text,action:text ? null : "STICKER",sticker_id:sticker.id,sticker,event_time:new Date().toISOString()}, "大家正在看这个表情…");
   }
 
   async function sendImage(draft, caption) {

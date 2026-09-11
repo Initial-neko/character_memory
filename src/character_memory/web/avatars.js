@@ -16,11 +16,19 @@
 
   function setAvatar(container, profile) {
     if (!container || !profile) return;
-    const image = imageHtml(profile);
-    const marker = `${profile.id}|${profile.avatar_url || ""}`;
-    if (container.dataset.avatarMarker === marker) return;
+    const url = profile.avatar_url || "";
+    const marker = `${profile.id}|${url}`;
+    if (url && container.dataset.avatarBroken === url) {
+      container.dataset.avatarMarker = marker;
+      if (container.querySelector("img")) container.textContent = CM.initialFor(profile);
+      return;
+    }
+    const existingImage = container.querySelector("img.character-avatar-image");
+    const imageMatches = url ? existingImage?.getAttribute("src") === url : !existingImage;
+    if (container.dataset.avatarMarker === marker && imageMatches) return;
     container.dataset.avatarMarker = marker;
-    container.innerHTML = image || CM.escapeHtml(CM.initialFor(profile));
+    if (container.dataset.avatarBroken && container.dataset.avatarBroken !== url) delete container.dataset.avatarBroken;
+    container.innerHTML = imageHtml(profile) || CM.escapeHtml(CM.initialFor(profile));
   }
 
   function applyAvatars() {
@@ -51,7 +59,8 @@
           const id = host?.closest("[data-character]")?.dataset.character || (CM.isGroupConversation() ? "" : CM.state.characterId);
           const profile = profileById(id);
           if (host && profile) {
-            host.dataset.avatarMarker = "";
+            host.dataset.avatarMarker = `${profile.id}|${profile.avatar_url || ""}`;
+            host.dataset.avatarBroken = profile.avatar_url || "broken";
             host.textContent = CM.initialFor(profile);
           }
         }, {once:true});
@@ -173,6 +182,7 @@
   const observer = new MutationObserver(() => applyAvatars());
   observer.observe(CM.dom.chat, {childList:true, subtree:true});
   observer.observe(CM.dom.characterList, {childList:true, subtree:true});
+  observer.observe(CM.dom.headerAvatar, {childList:true, subtree:true});
 
   CM.on("charactersLoaded", () => refreshProfiles().catch(error => console.warn("avatar profile refresh failed", error)));
   CM.on("historyLoaded", applyAvatars);

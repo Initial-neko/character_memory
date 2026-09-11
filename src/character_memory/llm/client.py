@@ -109,12 +109,15 @@ class OpenAICompatibleModel(PersonModel):
         self.session_id = self.default_session_id
         # Compatibility/debug fields only. Runtime persistence must use the
         # ModelCallTrace returned from the same invocation, never these globals.
+        # They are guarded only while being updated; provider calls themselves
+        # are intentionally concurrent so different characters do not queue
+        # behind one shared model-wide lock.
         self.last_request_messages: list[dict] = []
         self.last_response_text: str = ""
         self.last_attempt: int = 0
         self.last_model: str = model
         self.client = httpx.Client(timeout=self.timeout)
-        self._call_lock = threading.RLock()
+        self._debug_lock = threading.Lock()
         logger.info(
             "provider.ready model=%s vision_model=%s base_url=%s default_session=%s attempts=%s timeout=%ss",
             self.model,
@@ -298,73 +301,75 @@ class OpenAICompatibleModel(PersonModel):
         conversation_id: str | None = None,
         image_data_urls: list[str] | None = None,
     ) -> ModelCallResult:
-        with self._call_lock:
-            selected_model = self.vision_model if image_data_urls else self.model
-            if image_data_urls and not selected_model:
-                raise RuntimeError("vision_model is required for image input")
-            messages = self.preview_messages(prompt, schema, image_data_urls=image_data_urls)
-            last_error: Exception | None = None
-            for attempt in range(self.attempts):
-                safe_messages = self._trace_safe_messages(messages)
-                attempt_number = attempt + 1
-                # Keep these only for backward-compatible ad-hoc inspection.
+        selected_model = self.vision_model if image_data_urls else self.model
+        if image_data_urls and not selected_model:
+            raise RuntimeError("vision_model is required for image input")
+        messages = self.preview_messages(prompt, schema, image_data_urls=image_data_urls)
+        last_error: Exception | None = None
+        for attempt in range(self.attempts):
+            safe_messages = self._trace_safe_messages(messages)
+            attempt_number = attempt + 1
+            # Compatibility fields are best-effort only. Per-call ModelCallTrace
+            # is authoritative and remains isolated even when calls overlap.
+            with self._debug_lock:
                 self.last_request_messages = safe_messages
                 self.last_response_text = ""
                 self.last_attempt = attempt_number
                 self.last_model = selected_model
-                try:
-                    logger.info(
-                        "provider.structured_call attempt=%d/%d schema=%s model=%s images=%d",
-                        attempt_number,
-                        self.attempts,
-                        schema.__name__,
-                        selected_model,
-                        len(image_data_urls or []),
-                    )
-                    text = self._request(
-                        messages,
-                        conversation_id=conversation_id,
-                        json_object=True,
-                        model=selected_model,
-                    )
+            try:
+                logger.info(
+                    "provider.structured_call attempt=%d/%d schema=%s model=%s images=%d",
+                    attempt_number,
+                    self.attempts,
+                    schema.__name__,
+                    selected_model,
+                    len(image_data_urls or []),
+                )
+                text = self._request(
+                    messages,
+                    conversation_id=conversation_id,
+                    json_object=True,
+                    model=selected_model,
+                )
+                with self._debug_lock:
                     self.last_response_text = text
-                    result = schema.model_validate(self._json(text))
-                    logger.info(
-                        "provider.structured_call valid attempt=%d schema=%s model=%s",
-                        attempt_number,
-                        schema.__name__,
-                        selected_model,
-                    )
-                    return ModelCallResult(
-                        value=result,
-                        trace=ModelCallTrace(
-                            request_messages=safe_messages,
-                            response_text=text,
-                            attempt=attempt_number,
-                            model=selected_model,
-                        ),
-                    )
-                except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
-                    last_error = exc
-                    logger.warning(
-                        "provider.structured_call invalid attempt=%d/%d schema=%s error=%s",
-                        attempt_number,
-                        self.attempts,
-                        schema.__name__,
-                        exc,
-                    )
-                    if attempt_number >= self.attempts:
-                        break
-                    messages.append({"role": "assistant", "content": text if "text" in locals() else "{}"})
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": "上一份 JSON 不符合目标对象约束。只修正结构：actions 为 0~3 个 MESSAGE/EMOJI/STICKER/IMAGE；STICKER/IMAGE 必须使用已列出的资源 id；没有想回复时 actions=[]；非关键内部字段可以留空。",
-                        }
-                    )
-            raise RuntimeError(
-                f"Model returned invalid structured output after {self.attempts} attempts: {last_error}"
-            ) from last_error
+                result = schema.model_validate(self._json(text))
+                logger.info(
+                    "provider.structured_call valid attempt=%d schema=%s model=%s",
+                    attempt_number,
+                    schema.__name__,
+                    selected_model,
+                )
+                return ModelCallResult(
+                    value=result,
+                    trace=ModelCallTrace(
+                        request_messages=safe_messages,
+                        response_text=text,
+                        attempt=attempt_number,
+                        model=selected_model,
+                    ),
+                )
+            except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
+                last_error = exc
+                logger.warning(
+                    "provider.structured_call invalid attempt=%d/%d schema=%s error=%s",
+                    attempt_number,
+                    self.attempts,
+                    schema.__name__,
+                    exc,
+                )
+                if attempt_number >= self.attempts:
+                    break
+                messages.append({"role": "assistant", "content": text if "text" in locals() else "{}"})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "上一份 JSON 不符合目标对象约束。只修正结构：actions 为 0~3 个 MESSAGE/EMOJI/STICKER/IMAGE；STICKER/IMAGE 必须使用已列出的资源 id；没有想回复时 actions=[]；非关键内部字段可以留空。",
+                    }
+                )
+        raise RuntimeError(
+            f"Model returned invalid structured output after {self.attempts} attempts: {last_error}"
+        ) from last_error
 
     def _call(
         self,

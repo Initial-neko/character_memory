@@ -11,7 +11,9 @@ class Settings(BaseModel):
     api_key: str = ""
     base_url: str = "https://opencode.ai/zen/go/v1"
     chat_model: str = "deepseek-flash"
-    vision_model: str = "deepseek-v4-flash-vision-exp"
+    # Optional compatibility override for providers that still require a
+    # dedicated vision model. Empty/None means image turns reuse chat_model.
+    vision_model: str | None = None
     chat_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     llm_attempts: int = Field(default=2, ge=1, le=4)
 

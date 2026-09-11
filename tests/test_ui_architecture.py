@@ -7,7 +7,7 @@ WEB = ROOT / "src" / "character_memory" / "web"
 
 def test_index_loads_responsibility_modules_not_version_override_chain():
     index = (WEB / "index.html").read_text(encoding="utf-8")
-    for name in ["app.js", "persona.js", "unread.js", "stickers.js", "images.js", "groups.js", "intent.js"]:
+    for name in ["app.js", "persona.js", "unread.js", "stickers.js", "images.js", "groups.js", "group_settings.js", "intent.js"]:
         assert f'/static/{name}' in index
     for name in ["p0_5.js", "p0_6.js", "p0_7.js", "p0_8.js", "p0_11.js"]:
         assert f'/static/{name}' not in index
@@ -18,7 +18,7 @@ def test_core_is_only_submit_owner_and_features_do_not_monkey_patch_core_functio
     core = (WEB / "app.js").read_text(encoding="utf-8")
     assert core.count('addEventListener("submit"') == 1
     assert "CM.submitCurrentText" in core
-    for name in ["persona.js", "unread.js", "stickers.js", "images.js", "groups.js", "intent.js"]:
+    for name in ["persona.js", "unread.js", "stickers.js", "images.js", "groups.js", "group_settings.js", "intent.js"]:
         text = (WEB / name).read_text(encoding="utf-8")
         assert 'addEventListener("submit"' not in text
         assert "stopImmediatePropagation" not in text

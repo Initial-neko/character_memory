@@ -19,19 +19,37 @@ class VectorRecall:
         q = np.asarray(self.embeddings.embed(query), dtype=np.float32)
         now = now or datetime.now(timezone.utc)
         n = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
-        scored = []
+
+        memories = []
+        vectors = []
+        recencies = []
+        importances = []
         for memory in self.store.list_memories(character_id):
             if not memory.embedding:
                 continue
             t = memory.event_time if memory.event_time.tzinfo else memory.event_time.replace(tzinfo=timezone.utc)
             if t > n:  # simulated future memories must never leak backward in time
                 continue
-            v = np.asarray(memory.embedding, dtype=np.float32)
-            if v.size != q.size:
+            if len(memory.embedding) != q.size:
                 continue  # use `character-memory reembed` after changing embedding models
-            semantic = float(np.dot(q, v) / (np.linalg.norm(q) * np.linalg.norm(v) + 1e-8))
+            memories.append(memory)
+            vectors.append(memory.embedding)
             days = max(0.0, (n - t).total_seconds() / 86400)
-            recency = 1 / (1 + days / 30)
-            score = 0.70 * semantic + 0.20 * recency + 0.10 * memory.importance
-            scored.append((score, memory))
-        return [m for _, m in sorted(scored, key=lambda item: item[0], reverse=True)[: (limit or self.limit)]]
+            recencies.append(1 / (1 + days / 30))
+            importances.append(memory.importance)
+
+        if not memories:
+            return []
+
+        matrix = np.asarray(vectors, dtype=np.float32)
+        q_norm = float(np.linalg.norm(q))
+        row_norms = np.linalg.norm(matrix, axis=1)
+        semantic = (matrix @ q) / (row_norms * q_norm + 1e-8)
+        scores = (
+            0.70 * semantic
+            + 0.20 * np.asarray(recencies, dtype=np.float32)
+            + 0.10 * np.asarray(importances, dtype=np.float32)
+        )
+        count = min(limit or self.limit, len(memories))
+        order = np.argsort(-scores, kind="stable")[:count]
+        return [memories[int(index)] for index in order]

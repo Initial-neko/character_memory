@@ -6,6 +6,7 @@ import logging
 import sqlite3
 import struct
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +27,52 @@ class SQLiteStore:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
+
+    def _ensure_migration_table_locked(self) -> None:
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations("
+            "name TEXT PRIMARY KEY,"
+            "applied_at TEXT NOT NULL"
+            ")"
+        )
+
+    def _migration_applied_locked(self, name: str) -> bool:
+        row = self.conn.execute("SELECT 1 FROM schema_migrations WHERE name=?", (name,)).fetchone()
+        return row is not None
+
+    def _run_migration_locked(self, name: str, migrate):
+        self._ensure_migration_table_locked()
+        if self._migration_applied_locked(name):
+            return None
+        started = time.perf_counter()
+        result = migrate()
+        self.conn.execute(
+            "INSERT INTO schema_migrations(name,applied_at) VALUES(?,?)",
+            (name, datetime.now().astimezone().isoformat()),
+        )
+        logger.info(
+            "storage.migration applied name=%s duration_ms=%.1f",
+            name,
+            (time.perf_counter() - started) * 1000,
+        )
+        return result
+
+    def apply_schema_migration(self, name: str, migrate):
+        """Run one idempotent migration once for this SQLite database.
+
+        Feature modules such as group chat can share the same migration ledger
+        without re-running PRAGMA/ALTER/backfill work on every repository object.
+        The callback is executed under the store lock and committed atomically
+        with the migration marker.
+        """
+        with self.transaction():
+            return self._run_migration_locked(name, migrate)
+
+    def list_schema_migrations(self) -> list[str]:
+        with self._lock:
+            self._ensure_migration_table_locked()
+            rows = self.conn.execute("SELECT name FROM schema_migrations ORDER BY name").fetchall()
+            return [str(row["name"]) for row in rows]
 
     def _ensure_column_locked(self, table: str, column: str, declaration: str) -> bool:
         columns = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -68,6 +115,9 @@ class SQLiteStore:
             )
             migrated += 1
         return migrated, invalid
+
+    def _migrate_intent_source_event_locked(self) -> bool:
+        return self._ensure_column_locked("intents", "source_event_id", "INTEGER")
 
     def _migrate_time_keys_locked(self) -> tuple[int, int]:
         specs = [
@@ -115,6 +165,20 @@ class SQLiteStore:
             )
             seeded += 1
         return seeded
+
+    def _create_core_indexes_locked(self) -> None:
+        self.conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_character_time_epoch ON events(character_id,event_time_epoch,id);
+            CREATE INDEX IF NOT EXISTS idx_events_character_type_time_epoch ON events(character_id,event_type,event_time_epoch,id);
+            CREATE INDEX IF NOT EXISTS idx_memories_character_active ON memories(character_id,active);
+            CREATE INDEX IF NOT EXISTS idx_memories_character_time_epoch ON memories(character_id,event_time_epoch,id);
+            CREATE INDEX IF NOT EXISTS idx_mental_state_history_time ON mental_state_history(character_id,updated_at_epoch,id);
+            CREATE INDEX IF NOT EXISTS idx_intents_due_epoch ON intents(character_id,status,earliest_at_epoch,expires_at_epoch,id);
+            CREATE INDEX IF NOT EXISTS idx_runtime_traces_character_source ON runtime_traces(character_id,source_event_id);
+            CREATE INDEX IF NOT EXISTS idx_media_assets_character_time_epoch ON media_assets(character_id,created_at_epoch);
+            """
+        )
 
     def _init_schema(self):
         with self._lock:
@@ -196,31 +260,38 @@ class SQLiteStore:
                 );
                 """
             )
-            intent_columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(intents)").fetchall()}
-            if "source_event_id" not in intent_columns:
-                self.conn.execute("ALTER TABLE intents ADD COLUMN source_event_id INTEGER")
-                logger.info("storage.intent_migration added=source_event_id")
+            self._ensure_migration_table_locked()
 
-            time_rows, invalid_time_rows = self._migrate_time_keys_locked()
-            mental_rows = self._seed_mental_state_history_locked()
-            self.conn.executescript(
-                """
-                CREATE INDEX IF NOT EXISTS idx_events_character_time_epoch ON events(character_id,event_time_epoch,id);
-                CREATE INDEX IF NOT EXISTS idx_events_character_type_time_epoch ON events(character_id,event_type,event_time_epoch,id);
-                CREATE INDEX IF NOT EXISTS idx_memories_character_active ON memories(character_id,active);
-                CREATE INDEX IF NOT EXISTS idx_memories_character_time_epoch ON memories(character_id,event_time_epoch,id);
-                CREATE INDEX IF NOT EXISTS idx_mental_state_history_time ON mental_state_history(character_id,updated_at_epoch,id);
-                CREATE INDEX IF NOT EXISTS idx_intents_due_epoch ON intents(character_id,status,earliest_at_epoch,expires_at_epoch,id);
-                CREATE INDEX IF NOT EXISTS idx_runtime_traces_character_source ON runtime_traces(character_id,source_event_id);
-                CREATE INDEX IF NOT EXISTS idx_media_assets_character_time_epoch ON media_assets(character_id,created_at_epoch);
-                """
+            intent_added = self._run_migration_locked(
+                "core/001-intent-source-event",
+                self._migrate_intent_source_event_locked,
             )
-            migrated = self._migrate_legacy_action_traces_locked()
+            time_result = self._run_migration_locked(
+                "core/002-epoch-time-keys",
+                self._migrate_time_keys_locked,
+            )
+            mental_rows = self._run_migration_locked(
+                "core/003-mental-state-history",
+                self._seed_mental_state_history_locked,
+            )
+            migrated = self._run_migration_locked(
+                "core/004-runtime-trace-extraction",
+                self._migrate_legacy_action_traces_locked,
+            )
+            self._run_migration_locked(
+                "core/005-indexes",
+                self._create_core_indexes_locked,
+            )
             self.conn.commit()
-            if time_rows:
-                logger.info("storage.time_migration epoch_rows=%d", time_rows)
-            if invalid_time_rows:
-                logger.warning("storage.time_migration invalid_rows=%d preserved_raw=true", invalid_time_rows)
+
+            if intent_added:
+                logger.info("storage.intent_migration added=source_event_id")
+            if time_result is not None:
+                time_rows, invalid_time_rows = time_result
+                if time_rows:
+                    logger.info("storage.time_migration epoch_rows=%d", time_rows)
+                if invalid_time_rows:
+                    logger.warning("storage.time_migration invalid_rows=%d preserved_raw=true", invalid_time_rows)
             if mental_rows:
                 logger.info("storage.mental_state_migration seeded_history=%d", mental_rows)
             if migrated:

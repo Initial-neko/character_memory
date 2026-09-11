@@ -45,7 +45,7 @@ def _create_legacy_db(path):
         ("rin", "unknown-date-state", "10:49:43", None),
     )
     conn.execute(
-        "INSERT INTO world_states(character_id,current_time) VALUES(?,?)",
+        'INSERT INTO world_states(character_id,"current_time") VALUES(?,?)',
         ("rin", "10:49:43"),
     )
     conn.commit()
@@ -74,8 +74,11 @@ def test_invalid_legacy_time_only_values_are_preserved_but_quarantined(tmp_path,
             ) == ""
             assert store.get_world_time("rin") is None
 
+            # `current_time` is a SQLite keyword. Always quote the actual column;
+            # otherwise SELECT current_time can silently return the database clock.
             world = store.conn.execute(
-                "SELECT current_time,current_time_epoch FROM world_states WHERE character_id='rin'"
+                'SELECT "current_time",current_time_epoch FROM world_states WHERE character_id=?',
+                ("rin",),
             ).fetchone()
             assert world["current_time"] == "10:49:43"
             assert world["current_time_epoch"] is None
@@ -89,6 +92,7 @@ def test_invalid_legacy_time_only_values_are_preserved_but_quarantined(tmp_path,
 
     text = "\n".join(record.getMessage() for record in caplog.records)
     assert "storage.time_migration skipped_invalid table=events column=event_time" in text
+    assert "storage.time_migration skipped_invalid table=world_states column=current_time" in text
     assert "value='10:49:43'" in text
     assert "preserved_raw=true" in text
 

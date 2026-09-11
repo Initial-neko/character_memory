@@ -3,10 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 import threading
+import weakref
 
 import numpy as np
 
 from character_memory.stickers import Sticker, StickerCatalog
+
+
+_SHARED_CACHE_GUARD = threading.Lock()
+_SHARED_CACHES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 @dataclass(frozen=True)
@@ -61,15 +66,20 @@ class StickerRetriever:
     UI still sees the whole global Sticker library. Runtime gets at most `limit`
     candidates selected by metadata lexical match plus embedding similarity.
     Catalog embeddings are cached by sticker semantic text and recomputed only
-    when a sticker's metadata changes.
+    when metadata changes. Runtimes sharing one EmbeddingProvider also share this
+    cache, so a group does not encode the same Sticker library once per member.
     """
 
     def __init__(self, embeddings, *, limit: int = 12, semantic_threshold: float = 0.46):
         self.embeddings = embeddings
         self.limit = max(1, int(limit))
         self.semantic_threshold = float(semantic_threshold)
-        self._lock = threading.RLock()
-        self._cache: dict[str, tuple[str, list[float]]] = {}
+        with _SHARED_CACHE_GUARD:
+            shared = _SHARED_CACHES.get(embeddings)
+            if shared is None:
+                shared = (threading.RLock(), {})
+                _SHARED_CACHES[embeddings] = shared
+        self._lock, self._cache = shared
 
     @staticmethod
     def semantic_text(sticker: Sticker) -> str:

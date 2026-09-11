@@ -5,6 +5,7 @@
   let groups = [];
   const pending = new Set();
   let groupStream = null;
+  let groupStreamId = null;
   let historyState = {groupId:null, messages:[], hasMore:false, nextBeforeId:null, loadingOlder:false};
   const sidebar = document.querySelector(".sidebar");
   const sidebarFoot = document.querySelector(".sidebar-foot");
@@ -26,6 +27,7 @@
   function closeStream() {
     groupStream?.close?.();
     groupStream = null;
+    groupStreamId = null;
   }
 
   function renderList() {
@@ -171,10 +173,12 @@
   }
 
   function connectStream(groupId) {
+    if (groupStream && groupStreamId === groupId) return;
     closeStream();
     const params = new URLSearchParams({scope:"group", conversation_id:groupId});
     const source = new EventSource(`/v1/events/stream?${params.toString()}`);
     groupStream = source;
+    groupStreamId = groupId;
     source.addEventListener("reaction_status", event => {
       if (!CM.isGroupConversation() || groupId !== activeId()) return;
       const data = JSON.parse(event.data || "{}");

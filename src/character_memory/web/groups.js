@@ -155,6 +155,8 @@
 
   async function commitSend(groupId, payload, optimisticMessage, pendingText) {
     if (!groupId || pending.has(groupId)) return;
+    const browserStarted = performance.now();
+    let succeeded = false;
     pending.add(groupId);
     CM.updateHeader();
     if (CM.dom.chat.querySelector(".empty")) CM.dom.chat.innerHTML = "";
@@ -163,6 +165,11 @@
     CM.scrollToBottom();
     try {
       const result = await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/chat`, {method:"POST", body:JSON.stringify(payload)});
+      succeeded = true;
+      console.info("[group timings]", groupId, {
+        browser_total_ms:Number((performance.now() - browserStarted).toFixed(1)),
+        members:(result.decisions || []).map(item => ({character_id:item.character_id, model_ms:item.model_ms}))
+      });
       if (CM.isGroupConversation() && groupId === activeId()) {
         const index = groups.findIndex(item => item.id === groupId);
         if (index >= 0 && result.group) groups[index] = result.group;
@@ -183,7 +190,13 @@
     } finally {
       pending.delete(groupId);
       CM.updateHeader();
-      if (CM.isGroupConversation() && groupId === activeId()) await loadHistory().catch(console.warn);
+      // A successful POST already returns the authoritative history. Avoid an
+      // immediate duplicate GET + full DOM rebuild. On failure we still
+      // reconcile because the server may have committed before the connection
+      // failed on the client side.
+      if (!succeeded && CM.isGroupConversation() && groupId === activeId()) {
+        await loadHistory().catch(console.warn);
+      }
     }
   }
 

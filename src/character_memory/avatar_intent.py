@@ -10,7 +10,9 @@ class AvatarSearchIntent(BaseModel):
     """Small, safe planning result used to turn character context into image-search queries."""
 
     visual_intent: str = Field(min_length=1, max_length=300)
-    queries: list[str] = Field(min_length=1, max_length=3)
+    # Providers may occasionally return more than requested. Normalize down to
+    # three in the validator instead of rejecting an otherwise useful plan.
+    queries: list[str] = Field(min_length=1)
     preferred_mood: str = Field(default="", max_length=100)
     preferred_style: str = Field(default="", max_length=160)
 

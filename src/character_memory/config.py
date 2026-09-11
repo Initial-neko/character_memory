@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 from pydantic import BaseModel, Field
@@ -78,6 +79,15 @@ def resolve_avatar_dir(settings: Settings) -> Path:
     return Path(settings.db_path).parent / "avatars"
 
 
+def _avatar_url(settings: Settings, character_id: str) -> str:
+    directory = resolve_avatar_dir(settings) / character_id
+    for extension in (".jpg", ".png", ".gif", ".webp"):
+        path = directory / f"avatar{extension}"
+        if path.is_file():
+            return f"/v1/characters/{quote(character_id, safe='')}/avatar/asset?v={path.stat().st_mtime_ns}"
+    return ""
+
+
 def load_persona(path: str | Path) -> str:
     return Path(path).read_text(encoding="utf-8")
 
@@ -93,7 +103,8 @@ def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
     """Discover characters directly from personas/*/persona.yaml.
 
     Persona files stay the single character definition source. The UI/API does
-    not need a second character registry or duplicated config list.
+    not need a second character registry or duplicated config list. Avatar state
+    is an asset concern and is projected into the public profile dynamically.
     """
 
     root = _persona_root(settings)
@@ -119,6 +130,7 @@ def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
                 "name": str(data.get("name") or character_id),
                 "identity": str(data.get("identity") or ""),
                 "tagline": str(data.get("tagline") or ""),
+                "avatar_url": _avatar_url(settings, character_id),
                 "persona_path": str(path),
             }
         )
@@ -130,6 +142,7 @@ def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
                 "name": "Rin",
                 "identity": "",
                 "tagline": "",
+                "avatar_url": _avatar_url(settings, "rin"),
                 "persona_path": settings.persona_path,
             }
         )

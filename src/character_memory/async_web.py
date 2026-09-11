@@ -234,11 +234,20 @@ def attach_async_routes(app):
         else:
             raise HTTPException(status_code=400, detail="scope must be direct or group")
 
-        raw_last_id = request.headers.get("last-event-id", "0")
-        try:
-            last_id = int(raw_last_id or 0)
-        except ValueError:
-            last_id = 0
+        raw_last_id = request.headers.get("last-event-id")
+        if raw_last_id is None:
+            # A brand-new UI stream has already reconciled durable state through
+            # the history endpoint. Start at the current ephemeral tail so old
+            # typing/member-complete notifications are not replayed on tab/group
+            # switches. Native EventSource reconnects do send Last-Event-ID.
+            hub_channel = hub._channel(channel)
+            with hub_channel.condition:
+                last_id = hub_channel.next_id - 1
+        else:
+            try:
+                last_id = int(raw_last_id or 0)
+            except ValueError:
+                last_id = 0
         return StreamingResponse(
             hub.stream(channel, after_id=last_id),
             media_type="text/event-stream",
@@ -253,9 +262,6 @@ def attach_async_routes(app):
         scheduler.close()
         hub.close()
 
-    # create_api registered the store/model shutdown before this feature exists.
-    # Put the worker shutdown first so a running generation never wakes up after
-    # SQLite/model resources have already been closed.
     app.router.on_shutdown.insert(0, _shutdown_async_runtime)
 
     return app

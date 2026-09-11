@@ -19,6 +19,17 @@ embedding_model: "BAAI/bge-small-zh-v1.5"
 # embedding_model: "your-embedding-model"
 # embedding_api_key: ""
 
+# Search provider configuration.
+# P0.15 uses image search for avatar candidates. web_search/web_fetch are reserved for later.
+search_provider: "brave"
+search_api_key: ""
+search_country: "ALL"
+search_language: "zh"
+search_safe_search: "strict"
+# Reserved future capabilities; not implemented yet.
+# web_search_enabled: false
+# web_fetch_enabled: false
+
 db_path: "data/character-memory.db"
 # Empty means <db parent>/media. User-uploaded image bytes live here, not in SQLite.
 media_dir: ""

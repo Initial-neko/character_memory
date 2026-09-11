@@ -70,6 +70,13 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
     turn_locks: dict[str, threading.RLock] = {}
 
     def turn_lock_for(conversation_id: str) -> threading.RLock:
+        # Once P0.15 async routes are mounted, both the legacy synchronous group
+        # endpoint and the scheduler must serialize member reactions through the
+        # same per-group lock. The lookup is intentionally dynamic because
+        # attach_group_routes runs before attach_async_routes in server.py.
+        scheduler = getattr(access, "reaction_scheduler", None)
+        if scheduler is not None:
+            return scheduler.group_lock_for(conversation_id)
         with turn_locks_guard:
             lock = turn_locks.get(conversation_id)
             if lock is None:

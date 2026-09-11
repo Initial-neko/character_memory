@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta, timezone
 import logging
 import time
+from typing import Callable
 
 import numpy as np
 
@@ -24,6 +25,10 @@ _EXPRESSIVE_ACTIONS = {
     ActionType.STICKER,
     ActionType.IMAGE,
 }
+
+
+class SupersededReaction(RuntimeError):
+    """Raised when newer user facts arrived before derived state could commit."""
 
 
 def _ms(started: float) -> float:
@@ -53,10 +58,11 @@ class PersonRuntime:
         self.image_catalog = image_catalog
         self.sticker_retriever = StickerRetriever(embeddings)
 
-    def _last_chat_before(self, character_id: str, event_time):
+    def _last_chat_before(self, character_id: str, event_time, *, exclude_event_id: int | None = None):
         candidates = []
         for event_type in (EventType.USER_MESSAGE, EventType.CHARACTER_MESSAGE):
-            rows = self.store.list_events(character_id, limit=1, event_type=event_type.value, before=event_time)
+            rows = self.store.list_events(character_id, limit=4, event_type=event_type.value, before=event_time)
+            rows = [item for item in rows if exclude_event_id is None or item.id != exclude_event_id]
             if rows:
                 candidates.append(rows[-1])
         if not candidates:
@@ -163,24 +169,39 @@ class PersonRuntime:
         normalized_action = sanitized[0] if sanitized else ActionDecision(type=ActionType.NO_REPLY)
         return reaction.model_copy(update={"actions": sanitized, "action": normalized_action}), sticker_decisions, image_decisions
 
-    def handle(self, event: Event, *, image_data_urls: list[str] | None = None):
+    def handle(
+        self,
+        event: Event,
+        *,
+        image_data_urls: list[str] | None = None,
+        persist_event: bool = True,
+        commit_guard: Callable[[], bool] | None = None,
+    ):
         started = time.perf_counter()
         timings: dict[str, float] = {}
         logger.info(
-            "runtime.handle start character=%s event_type=%s event_time=%s content_chars=%d images=%d",
+            "runtime.handle start character=%s event_type=%s event_time=%s content_chars=%d images=%d persist_event=%s",
             event.character_id,
             event.event_type.value,
             event.event_time.isoformat(),
             len(event.content or ""),
             len(image_data_urls or []),
+            persist_event,
         )
 
-        last_chat_event = self._last_chat_before(event.character_id, event.event_time)
-
         stage = time.perf_counter()
-        event = self.store.append_event(event)
+        if persist_event:
+            event = self.store.append_event(event)
+        elif event.id is None:
+            raise ValueError("persist_event=False requires an already persisted event id")
         timings["event_store_ms"] = _ms(stage)
-        logger.info("runtime.event stored id=%s duration_ms=%.1f", event.id, timings["event_store_ms"])
+        logger.info("runtime.event ready id=%s duration_ms=%.1f", event.id, timings["event_store_ms"])
+
+        last_chat_event = self._last_chat_before(
+            event.character_id,
+            event.event_time,
+            exclude_event_id=event.id,
+        )
 
         stage = time.perf_counter()
         memories = self.recall.recall(event.character_id, event.content, now=event.event_time)
@@ -253,6 +274,13 @@ class PersonRuntime:
         stage = time.perf_counter()
         try:
             with self.store.transaction():
+                # The guard is deliberately evaluated *inside* the SQLiteStore
+                # transaction lock. New user events cannot slip between this check
+                # and the derived-state commit. A stale model result therefore
+                # cannot mutate Mental State, Memory, Intent, visible Actions or Trace.
+                if commit_guard is not None and not commit_guard():
+                    raise SupersededReaction(f"reaction for source event {event.id} was superseded")
+
                 if state_after:
                     self.store.set_mental_state(event.character_id, state_after, event.event_time, event.id)
 
@@ -362,6 +390,11 @@ class PersonRuntime:
                         },
                     )
                 )
+        except SupersededReaction:
+            timings["persist_ms"] = _ms(stage)
+            timings["runtime_total_ms"] = _ms(started)
+            logger.info("runtime.handle superseded event_id=%s total_ms=%.1f", event.id, timings["runtime_total_ms"])
+            raise
         except Exception:
             logger.exception("runtime.derived_transaction failed event_id=%s character=%s", event.id, event.character_id)
             raise

@@ -34,7 +34,9 @@ def test_group_text_sticker_and_image_are_all_routed_by_conversation_mode():
     assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message);' in core
     assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendSticker?.(sticker);' in stickers
     assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendImage?.(currentDraft, caption);' in images
-    assert '/v1/groups/${encodeURIComponent(groupId)}/chat' in groups
+    assert '/v1/groups/${encodeURIComponent(groupId)}/messages' in groups
+    assert '/v1/groups/${encodeURIComponent(groupId)}/chat' not in groups
+    assert 'new EventSource(`/v1/events/stream?' in groups
 
 
 def test_group_routes_reuse_create_api_application_runtime_instead_of_building_another_bundle():

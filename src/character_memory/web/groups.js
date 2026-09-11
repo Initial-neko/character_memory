@@ -4,6 +4,8 @@
 
   let groups = [];
   const pending = new Set();
+  let groupStream = null;
+  let groupStreamId = null;
   let historyState = {groupId:null, messages:[], hasMore:false, nextBeforeId:null, loadingOlder:false};
   const sidebar = document.querySelector(".sidebar");
   const sidebarFoot = document.querySelector(".sidebar-foot");
@@ -20,6 +22,12 @@
 
   function resetHistory(groupId) {
     historyState = {groupId, messages:[], hasMore:false, nextBeforeId:null, loadingOlder:false};
+  }
+
+  function closeStream() {
+    groupStream?.close?.();
+    groupStream = null;
+    groupStreamId = null;
   }
 
   function renderList() {
@@ -51,7 +59,7 @@
     const summary = message.turn_summary || null;
     const label = summary
       ? `本轮反应 · ${summary.replied || 0} 回复 / ${summary.silent || 0} 沉默`
-      : "本轮反应 · 查看心理摘要";
+      : "本轮反应 · 等待判断";
     return `<button class="group-turn-debug" type="button" data-group-turn="${CM.escapeHtml(message.turn_id)}">${CM.escapeHtml(label)}</button>`;
   }
 
@@ -79,6 +87,7 @@
     const group = current();
     if (!messages.length) {
       CM.dom.chat.innerHTML = `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」还没有消息。<br>说第一句话，看看谁会接话。</div>`;
+      if (pending.has(activeId())) appendPending("群成员正在输入…");
       return;
     }
     if (historyState.hasMore) {
@@ -99,15 +108,13 @@
       }
       addMessage(message);
     }
-    if (pending.has(activeId())) appendPending("大家正在看这条消息…");
+    if (pending.has(activeId())) appendPending("群成员正在输入…");
     if (preserveScroll) {
       requestAnimationFrame(() => {
         const delta = document.body.scrollHeight - beforeHeight;
         window.scrollTo({top: beforeY + delta, behavior:"auto"});
       });
-    } else {
-      CM.scrollToBottom(false);
-    }
+    } else CM.scrollToBottom(false);
   }
 
   function appendPending(text) {
@@ -116,6 +123,89 @@
     note.className = "group-pending-note";
     note.textContent = text;
     CM.dom.chat.appendChild(note);
+  }
+
+  function memberName(characterId) {
+    const group = current();
+    return group?.members?.find(item => item.id === characterId)?.name || characterId;
+  }
+
+  function rawCharacterEventToMessage(raw) {
+    const metadata = raw.metadata || {};
+    const stickerId = metadata.sticker_id || null;
+    const imageId = metadata.image_id || null;
+    return {
+      id:raw.id,
+      conversation_id:raw.conversation_id,
+      turn_id:raw.turn_id,
+      role:"assistant",
+      actor_type:"CHARACTER",
+      actor_id:raw.actor_id,
+      actor_name:memberName(raw.actor_id),
+      content:raw.content || "",
+      event_time:raw.event_time,
+      action:metadata.action,
+      sticker_id:stickerId,
+      sticker:stickerId ? {id:stickerId,label:metadata.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(stickerId)}/asset`} : null,
+      image_id:imageId,
+      image:imageId ? {id:imageId,label:metadata.image_label || "图片",url:`/v1/images/${encodeURIComponent(raw.actor_id)}/${encodeURIComponent(imageId)}/asset`} : null,
+      source_conversation_event_id:metadata.source_conversation_event_id,
+    };
+  }
+
+  function mergeMessage(message) {
+    if (!message) return;
+    const index = message.id == null ? -1 : historyState.messages.findIndex(item => item.id === message.id);
+    if (index >= 0) historyState.messages[index] = {...historyState.messages[index], ...message};
+    else historyState.messages.push(message);
+    historyState.messages.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+  }
+
+  function updateTurnSummary(turnId, silent) {
+    const source = historyState.messages.find(item => item.role === "user" && item.turn_id === turnId);
+    if (!source) return;
+    const currentSummary = source.turn_summary || {total:0,replied:0,silent:0};
+    source.turn_summary = {
+      total:(currentSummary.total || 0) + 1,
+      replied:(currentSummary.replied || 0) + (silent ? 0 : 1),
+      silent:(currentSummary.silent || 0) + (silent ? 1 : 0),
+    };
+  }
+
+  function connectStream(groupId) {
+    if (groupStream && groupStreamId === groupId) return;
+    closeStream();
+    const params = new URLSearchParams({scope:"group", conversation_id:groupId});
+    const source = new EventSource(`/v1/events/stream?${params.toString()}`);
+    groupStream = source;
+    groupStreamId = groupId;
+    source.addEventListener("reaction_status", event => {
+      if (!CM.isGroupConversation() || groupId !== activeId()) return;
+      const data = JSON.parse(event.data || "{}");
+      if (["queued","typing","superseded"].includes(data.state)) pending.add(groupId);
+      if (data.state === "idle") pending.delete(groupId);
+      CM.updateHeader();
+      renderHistory(historyState.messages);
+    });
+    source.addEventListener("group_character_event", event => {
+      if (!CM.isGroupConversation() || groupId !== activeId()) return;
+      mergeMessage(rawCharacterEventToMessage(JSON.parse(event.data)));
+      renderHistory(historyState.messages);
+    });
+    source.addEventListener("group_member_complete", event => {
+      if (!CM.isGroupConversation() || groupId !== activeId()) return;
+      const data = JSON.parse(event.data || "{}");
+      updateTurnSummary(data.turn_id, Boolean(data.silent));
+      renderHistory(historyState.messages);
+    });
+    source.addEventListener("reaction_error", event => {
+      if (!CM.isGroupConversation() || groupId !== activeId()) return;
+      const data = JSON.parse(event.data || "{}");
+      const box = document.createElement("div");
+      box.className = "error";
+      box.textContent = `群聊生成失败：${data.message || "未知错误"}`;
+      CM.dom.chat.appendChild(box);
+    });
   }
 
   async function loadHistory({beforeId = null, appendOlder = false} = {}) {
@@ -132,9 +222,7 @@
     if (appendOlder) {
       const existing = new Set(historyState.messages.map(item => item.id));
       historyState.messages = [...incoming.filter(item => !existing.has(item.id)), ...historyState.messages];
-    } else {
-      historyState.messages = incoming;
-    }
+    } else historyState.messages = incoming;
     historyState.hasMore = Boolean(data.has_more);
     historyState.nextBeforeId = data.next_before_id ?? null;
     renderList();
@@ -145,12 +233,8 @@
     if (!CM.isGroupConversation() || historyState.loadingOlder || !historyState.hasMore || historyState.nextBeforeId == null) return;
     historyState.loadingOlder = true;
     renderHistory(historyState.messages, {preserveScroll:true});
-    try {
-      await loadHistory({beforeId:historyState.nextBeforeId, appendOlder:true});
-    } finally {
-      historyState.loadingOlder = false;
-      renderHistory(historyState.messages, {preserveScroll:true});
-    }
+    try { await loadHistory({beforeId:historyState.nextBeforeId, appendOlder:true}); }
+    finally { historyState.loadingOlder = false; renderHistory(historyState.messages, {preserveScroll:true}); }
   }
 
   function applyHeader() {
@@ -160,9 +244,9 @@
     const names = (group.members || []).map(item => item.name || item.id).join("、");
     const isPending = pending.has(group.id);
     CM.dom.characterName.textContent = group.name;
-    CM.dom.characterIdentity.textContent = `${names}${isPending ? " · 大家正在回复" : ""}`;
+    CM.dom.characterIdentity.textContent = `${names}${isPending ? " · 有人正在输入" : ""}`;
     CM.dom.headerAvatar.textContent = initial(group);
-    CM.dom.input.placeholder = isPending ? "群成员正在回复…" : `发到「${group.name}」`;
+    CM.dom.input.placeholder = `发到「${group.name}」`;
     CM.dom.runtimeButton.disabled = true;
     CM.dom.runtimeButton.title = "群聊心理活动请查看每条用户消息下方的「本轮反应」";
     CM.features.intent?.setDisabled?.(true);
@@ -171,18 +255,19 @@
 
   function applyComposerState() {
     if (!CM.isGroupConversation()) return false;
-    const isPending = pending.has(activeId());
-    CM.dom.sendButton.disabled = isPending;
-    CM.dom.input.disabled = isPending;
-    CM.features.stickers?.setDisabled?.(isPending);
-    CM.features.images?.setDisabled?.(isPending);
-    if (!isPending) CM.dom.input.focus();
+    CM.dom.sendButton.disabled = false;
+    CM.dom.input.disabled = false;
+    CM.features.stickers?.setDisabled?.(false);
+    CM.features.images?.setDisabled?.(false);
+    CM.dom.input.focus();
     return true;
   }
 
   async function enter(groupId) {
     const group = groups.find(item => item.id === groupId);
     if (!group) return;
+    CM.closeDirectStream?.();
+    closeStream();
     CM.state.conversation = {type:"GROUP", groupId};
     CM.state.lastRenderedSignature = "";
     resetHistory(groupId);
@@ -195,60 +280,39 @@
     CM.updateHeader();
     CM.dom.chat.innerHTML = '<div class="empty">正在加载群聊记录…</div>';
     await loadHistory();
+    connectStream(groupId);
     CM.updateComposerState();
     await CM.emit("conversationChanged", {type:"GROUP", groupId});
   }
 
   function leave() {
     if (!CM.isGroupConversation()) return;
+    closeStream();
+    pending.delete(activeId());
     CM.state.conversation = {type:"DIRECT", groupId:null};
     document.body.classList.remove("group-mode");
     renderList();
   }
 
-  function mergeNewMessages(messages) {
-    const existing = new Set(historyState.messages.map(item => item.id));
-    for (const message of messages || []) {
-      if (message.id == null || !existing.has(message.id)) {
-        historyState.messages.push(message);
-        if (message.id != null) existing.add(message.id);
-      }
-    }
-  }
-
-  async function commitSend(groupId, payload, optimisticMessage, pendingText) {
-    if (!groupId || pending.has(groupId)) return;
-    pending.add(groupId);
-    CM.updateHeader();
-    if (CM.dom.chat.querySelector(".empty")) CM.dom.chat.innerHTML = "";
-    if (optimisticMessage) addMessage(optimisticMessage);
-    appendPending(pendingText);
-    CM.scrollToBottom();
+  async function commitSend(groupId, payload) {
+    if (!groupId) return;
+    connectStream(groupId);
     try {
-      const result = await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/chat`, {method:"POST", body:JSON.stringify(payload)});
+      const result = await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/messages`, {method:"POST", body:JSON.stringify(payload)});
       if (CM.isGroupConversation() && groupId === activeId()) {
-        const index = groups.findIndex(item => item.id === groupId);
-        if (index >= 0 && result.group) groups[index] = result.group;
-        mergeNewMessages(result.new_messages || result.messages || []);
+        mergeMessage(result.message);
         renderHistory(historyState.messages);
-        renderList();
       }
       return result;
     } catch (error) {
-      console.error("[group chat failed]", groupId, error);
+      console.error("[group message failed]", groupId, error);
       if (CM.isGroupConversation() && groupId === activeId()) {
-        CM.dom.chat.querySelector(".group-pending-note")?.remove();
         const box = document.createElement("div");
         box.className = "error";
-        box.textContent = `群聊生成失败：${error.message}`;
+        box.textContent = `发送失败：${error.message}`;
         CM.dom.chat.appendChild(box);
-        await loadHistory().catch(refreshError => console.warn("group history reconcile failed", refreshError));
       }
       throw error;
-    } finally {
-      pending.delete(groupId);
-      CM.updateHeader();
-      if (CM.isGroupConversation() && groupId === activeId()) CM.updateComposerState();
     }
   }
 
@@ -257,20 +321,20 @@
     if (!groupId || !message.trim()) return;
     CM.dom.input.value = "";
     CM.dom.input.style.height = "auto";
-    return commitSend(groupId, {message}, {role:"user",actor_type:"USER",actor_id:"user",actor_name:"我",content:message,event_time:new Date().toISOString()}, "大家正在看这条消息…");
+    return commitSend(groupId, {message});
   }
 
   async function sendSticker(sticker) {
     const groupId = activeId();
     if (!groupId || !sticker) return;
     CM.features.stickers?.close?.();
-    return commitSend(groupId, {message:"",sticker_id:sticker.id}, {role:"user",actor_type:"USER",actor_id:"user",actor_name:"我",content:"",action:"STICKER",sticker_id:sticker.id,sticker,event_time:new Date().toISOString()}, "大家正在看这个表情…");
+    return commitSend(groupId, {message:"",sticker_id:sticker.id});
   }
 
   async function sendImage(draft, caption) {
     const groupId = activeId();
     if (!groupId || !draft) return;
-    return commitSend(groupId, {message:caption,image:{filename:draft.filename,data_url:draft.data_url}}, {role:"user",actor_type:"USER",actor_id:"user",actor_name:"我",content:caption,image:{url:draft.data_url,label:draft.filename},event_time:new Date().toISOString()}, "大家正在看这张图片…");
+    return commitSend(groupId, {message:caption,image:{filename:draft.filename,data_url:draft.data_url}});
   }
 
   function showCreateGroup() {
@@ -310,17 +374,14 @@
         const actionText = actions.length ? actions.map(action => action.type).join(" / ") : "SILENCE";
         const stickerCount = item.sticker_retrieval?.matches?.length || 0;
         return `<div class="card"><strong>${CM.escapeHtml(item.character_name)}</strong><span> · ${CM.escapeHtml(actionText)} · ${CM.escapeHtml(CM.fmtMs(item.total_ms))}</span><div><b>注意：</b>${CM.escapeHtml(CM.hiddenIfEmpty(item.perception))}</div><div><b>反应：</b>${CM.escapeHtml(CM.hiddenIfEmpty(item.reaction))}</div><div class="muted">Sticker 候选：${CM.escapeHtml(stickerCount)}</div>${item.created_memory_ids?.length ? `<div>Memory: ${CM.escapeHtml(item.created_memory_ids.join(", "))}</div>` : ""}</div>`;
-      }).join("")}</div>` : '<p class="muted">本轮还没有角色判断记录。</p>';
+      }).join("")}</div>` : '<p class="muted">这一条消息可能被合并进后续连续表达，或者成员还没有完成判断。</p>';
     } catch (error) {
       CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
     }
   }
 
   createButton?.addEventListener("click", showCreateGroup);
-  list?.addEventListener("click", event => {
-    const button = event.target.closest("[data-group]");
-    if (button) enter(button.dataset.group).catch(console.error);
-  });
+  list?.addEventListener("click", event => { const button = event.target.closest("[data-group]"); if (button) enter(button.dataset.group).catch(console.error); });
   CM.dom.drawerBody.addEventListener("click", event => {
     if (event.target.closest("[data-group-create-cancel]")) CM.closeDrawer();
     if (event.target.closest("[data-group-create-confirm]")) createGroupFromDrawer().catch(console.error);
@@ -333,6 +394,7 @@
     if (button) showTurn(button.dataset.groupTurn).catch(console.error);
   });
 
-  const feature = CM.registerFeature("groups", {loadGroups,loadHistory,loadOlderHistory,enter,leave,applyHeader,applyComposerState,sendText,sendSticker,sendImage,renderList});
+  const feature = CM.registerFeature("groups", {loadGroups,loadHistory,loadOlderHistory,enter,leave,applyHeader,applyComposerState,sendText,sendSticker,sendImage,renderList,closeStream});
   CM.on("ready", loadGroups);
+  window.addEventListener("beforeunload", closeStream);
 })();

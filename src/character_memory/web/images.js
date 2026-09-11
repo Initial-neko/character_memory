@@ -71,37 +71,17 @@
   }
 
   async function sendDirect(currentDraft, caption) {
-    const sentCharacter = CM.state.characterId;
-    if (!currentDraft || CM.state.pendingCharacters.has(sentCharacter)) return;
-    const conversationId = CM.conversationIdFor(sentCharacter);
-    const browserStarted = performance.now();
-    CM.state.pendingCharacters.add(sentCharacter);
-    CM.renderCharacterList();
-    CM.updateHeader();
-    if (CM.dom.chat.querySelector(".empty")) CM.dom.chat.innerHTML = "";
-    CM.addMessage({role:"user", content:caption, image:{url:currentDraft.data_url,label:currentDraft.filename,source:currentDraft.source || "LOCAL_PREVIEW"}, event_time:new Date().toISOString(), has_trace:false});
-    CM.appendTypingForCurrent();
-    CM.scrollToBottom();
+    if (!currentDraft) return;
     try {
-      const result = await CM.api("/v1/chat", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, message:caption, image:{filename:currentDraft.filename,data_url:currentDraft.data_url}})});
-      const browserTotal = performance.now() - browserStarted;
-      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
-        CM.dom.chat.querySelector(".typing-row")?.remove();
-        await CM.revealActionsWithRhythm(result, sentCharacter, browserTotal);
-      }
+      await CM.sendDirectPayload({
+        message:caption,
+        image:{filename:currentDraft.filename, data_url:currentDraft.data_url},
+      });
     } catch (error) {
-      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
-        CM.dom.chat.querySelector(".typing-row")?.remove();
-        const box = document.createElement("div");
-        box.className = "error";
-        box.textContent = `发送图片失败：${error.message}`;
-        CM.dom.chat.appendChild(box);
-      }
-    } finally {
-      CM.state.pendingCharacters.delete(sentCharacter);
-      CM.renderCharacterList();
-      CM.updateHeader();
-      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) await CM.loadDirectHistory().catch(console.warn);
+      const box = document.createElement("div");
+      box.className = "error";
+      box.textContent = `发送图片失败：${error.message}`;
+      CM.dom.chat.appendChild(box);
     }
   }
 

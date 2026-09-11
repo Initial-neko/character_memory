@@ -59,12 +59,7 @@ class GroupChatRequest(BaseModel):
 
 
 def attach_group_routes(app, config_path: str = "config.yaml"):
-    """Attach group routes using the exact same application runtime as 1:1 chat.
-
-    Direct and group chat share the same AppBundle. Per-group turn locks also
-    live for the application lifetime here; creating a new service per HTTP
-    request must never create a new concurrency boundary.
-    """
+    """Attach group routes using the exact same application runtime as 1:1 chat."""
     from fastapi import HTTPException
 
     access = getattr(app.state, "character_memory", None)
@@ -88,8 +83,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
     def repo() -> GroupRepository:
         return GroupRepository(access.store())
 
-    def group_payload(group) -> dict:
-        profiles = profiles_by_id()
+    def group_payload(group, *, profiles: dict[str, dict[str, str]] | None = None) -> dict:
+        profiles = profiles or profiles_by_id()
         return {
             "id": group.id,
             "name": group.name,
@@ -106,10 +101,19 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "updated_at": group.updated_at.isoformat(),
         }
 
-    def sticker_payload(sticker_id: str | None) -> dict | None:
+    def resource_snapshot(group=None) -> dict:
+        profiles = profiles_by_id()
+        return {
+            "profiles": profiles,
+            "stickers": access.global_sticker_catalog(),
+            "images": {},
+            "member_ids": list(group.member_ids) if group is not None else [],
+        }
+
+    def sticker_payload(resources: dict, sticker_id: str | None) -> dict | None:
         if not sticker_id:
             return None
-        catalog = access.global_sticker_catalog()
+        catalog = resources["stickers"]
         sticker = catalog.get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
@@ -118,13 +122,17 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "url": f"/v1/stickers/{sticker.id}/asset",
         }
 
-    def image_payload(character_id: str, image_id: str | None) -> dict | None:
+    def image_payload(resources: dict, character_id: str, image_id: str | None) -> dict | None:
         if not image_id:
             return None
-        profile = profiles_by_id().get(character_id)
+        profile = resources["profiles"].get(character_id)
         if profile is None:
             return None
-        catalog = load_image_catalog(profile["persona_path"])
+        catalogs = resources["images"]
+        catalog = catalogs.get(character_id)
+        if catalog is None:
+            catalog = load_image_catalog(profile["persona_path"])
+            catalogs[character_id] = catalog
         image = catalog.get(image_id)
         if image is None or catalog.asset_path(image_id) is None:
             return None
@@ -149,12 +157,12 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "url": f"/v1/media/{asset.id}",
         }
 
-    def event_payload(event) -> dict:
-        profile = profiles_by_id().get(event.actor_id, {})
+    def event_payload(event, resources: dict, turn_summary: dict | None = None) -> dict:
+        profile = resources["profiles"].get(event.actor_id, {})
         role = "user" if event.actor_type == "USER" else "assistant"
         content = event.metadata.get("display_text", event.content) if role == "user" else event.content
-        sticker = sticker_payload(event.metadata.get("sticker_id"))
-        image = image_payload(event.actor_id, event.metadata.get("image_id")) if role == "assistant" else None
+        sticker = sticker_payload(resources, event.metadata.get("sticker_id"))
+        image = image_payload(resources, event.actor_id, event.metadata.get("image_id")) if role == "assistant" else None
         if event.metadata.get("media_id"):
             image = uploaded_media_payload(event.metadata.get("media_id"))
         return {
@@ -174,6 +182,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "media_id": event.metadata.get("media_id"),
             "image": image,
             "source_conversation_event_id": event.metadata.get("source_conversation_event_id"),
+            "turn_summary": turn_summary if role == "user" else None,
         }
 
     def refresh_member_resources(bundle, member_ids: list[str]) -> None:
@@ -188,7 +197,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
 
     @app.get("/v1/groups")
     def list_groups():
-        return {"groups": [group_payload(group) for group in repo().list_groups()]}
+        profiles = profiles_by_id()
+        return {"groups": [group_payload(group, profiles=profiles) for group in repo().list_groups()]}
 
     @app.post("/v1/groups")
     def create_group(req: CreateGroupRequest):
@@ -202,7 +212,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         logger.info("group.created id=%s members=%s", group.id, group.member_ids)
-        return {"group": group_payload(group)}
+        return {"group": group_payload(group, profiles=known)}
 
     @app.patch("/v1/groups/{conversation_id}")
     def update_group(conversation_id: str, req: UpdateGroupRequest):
@@ -218,13 +228,21 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         return {"group": group_payload(group)}
 
     @app.get("/v1/groups/{conversation_id}/history")
-    def group_history(conversation_id: str, limit: int = 180):
+    def group_history(conversation_id: str, limit: int = 50, before_id: int | None = None):
         repository = repo()
         group = repository.get_group(conversation_id)
         if group is None:
             raise HTTPException(status_code=404, detail="group not found")
-        events = repository.list_events(conversation_id, limit=max(1, min(limit, 500)))
-        return {"group": group_payload(group), "messages": [event_payload(event) for event in events]}
+        page = repository.list_event_page(conversation_id, limit=limit, before_id=before_id)
+        turn_ids = [event.turn_id for event in page.events if event.actor_type == "USER"]
+        summaries = repository.turn_summaries(conversation_id, turn_ids)
+        resources = resource_snapshot(group)
+        return {
+            "group": group_payload(group, profiles=resources["profiles"]),
+            "messages": [event_payload(event, resources, summaries.get(event.turn_id)) for event in page.events],
+            "has_more": page.has_more,
+            "next_before_id": page.next_before_id,
+        }
 
     @app.get("/v1/groups/{conversation_id}/turns/{turn_id}/traces")
     def group_turn_traces(conversation_id: str, turn_id: str):
@@ -232,17 +250,19 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         if repository.get_group(conversation_id) is None:
             raise HTTPException(status_code=404, detail="group not found")
         traces = repository.list_turn_traces(conversation_id, turn_id)
+        profiles = profiles_by_id()
         return {
             "conversation_id": conversation_id,
             "turn_id": turn_id,
             "traces": [
                 {
                     "character_id": item.get("character_id"),
-                    "character_name": profiles_by_id().get(item.get("character_id"), {}).get("name") or item.get("character_id"),
+                    "character_name": profiles.get(item.get("character_id"), {}).get("name") or item.get("character_id"),
                     "perception": item.get("perception", ""),
                     "reaction": item.get("reaction", ""),
                     "actions": item.get("actions", []),
                     "created_memory_ids": item.get("created_memory_ids", []),
+                    "sticker_retrieval": item.get("sticker_retrieval", {}),
                     "model_used": item.get("model_used", ""),
                     "model_ms": item.get("model_ms", 0),
                     "total_ms": item.get("total_ms", 0),
@@ -298,14 +318,17 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 sticker=selected_sticker,
             )
             group = service.repo.get_group(conversation_id)
-            events = service.repo.list_events(conversation_id, limit=180)
+            turn_summary = service.repo.turn_summaries(conversation_id, [result["turn_id"]]).get(result["turn_id"])
+            resources = resource_snapshot(group)
+            messages = [event_payload(event, resources, turn_summary) for event in result["events"]]
             return {
                 "conversation_id": conversation_id,
                 "turn_id": result["turn_id"],
                 "speaker_order": result["speaker_order"],
                 "decisions": result["decisions"],
-                "group": group_payload(group),
-                "messages": [event_payload(event) for event in events],
+                "group": group_payload(group, profiles=resources["profiles"]),
+                "new_messages": messages,
+                "messages": messages,
             }
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

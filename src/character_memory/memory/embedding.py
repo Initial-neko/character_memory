@@ -60,14 +60,26 @@ class OpenAICompatibleEmbedding(EmbeddingProvider):
         self.timeout = timeout
         self.client = httpx.Client(timeout=self.timeout)
 
-    def embed(self, text: str) -> list[float]:
-        r = self.client.post(
+    def _request(self, value):
+        response = self.client.post(
             f"{self.base_url}/embeddings",
             headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"model": self.model, "input": text},
+            json={"model": self.model, "input": value},
         )
-        r.raise_for_status()
-        return r.json()["data"][0]["embedding"]
+        response.raise_for_status()
+        return response.json()["data"]
+
+    def embed(self, text: str) -> list[float]:
+        return self._request(text)[0]["embedding"]
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        rows = self._request(texts)
+        rows = sorted(rows, key=lambda item: int(item.get("index", 0)))
+        if len(rows) != len(texts):
+            raise RuntimeError(f"embedding provider returned {len(rows)} vectors for {len(texts)} inputs")
+        return [row["embedding"] for row in rows]
 
     def close(self) -> None:
         self.client.close()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from datetime import datetime
 from typing import Any
@@ -28,6 +29,13 @@ class GroupEvent(BaseModel):
     event_time: datetime
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class GroupHistoryPage:
+    events: list[GroupEvent]
+    has_more: bool
+    next_before_id: int | None
 
 
 class GroupRepository:
@@ -256,10 +264,42 @@ class GroupRepository:
         limit = max(1, min(int(limit), 500))
         with self.store._lock:
             rows = self.store.conn.execute(
-                "SELECT * FROM conversation_events WHERE conversation_id=? ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM conversation_events WHERE conversation_id=? AND event_time_epoch IS NOT NULL ORDER BY event_time_epoch DESC,id DESC LIMIT ?",
                 (conversation_id, limit),
             ).fetchall()
         return [self._event_from_row(row) for row in reversed(rows)]
+
+    def list_event_page(self, conversation_id: str, *, limit: int = 50, before_id: int | None = None) -> GroupHistoryPage:
+        page_size = max(1, min(int(limit), 100))
+        with self.store._lock:
+            sql = "SELECT * FROM conversation_events WHERE conversation_id=? AND event_time_epoch IS NOT NULL"
+            args: list = [conversation_id]
+            if before_id is not None:
+                cursor = self.store.conn.execute(
+                    "SELECT event_time_epoch,id FROM conversation_events WHERE id=? AND conversation_id=?",
+                    (int(before_id), conversation_id),
+                ).fetchone()
+                if cursor is None or cursor["event_time_epoch"] is None:
+                    return GroupHistoryPage([], False, None)
+                sql += " AND (event_time_epoch<? OR (event_time_epoch=? AND id<?))"
+                args.extend([cursor["event_time_epoch"], cursor["event_time_epoch"], cursor["id"]])
+            sql += " ORDER BY event_time_epoch DESC,id DESC LIMIT ?"
+            args.append(page_size + 1)
+            rows = self.store.conn.execute(sql, args).fetchall()
+
+        has_more = len(rows) > page_size
+        rows = rows[:page_size]
+        events = [self._event_from_row(row) for row in reversed(rows)]
+        next_before_id = int(events[0].id) if has_more and events else None
+        return GroupHistoryPage(events, has_more, next_before_id)
+
+    def list_turn_events(self, conversation_id: str, turn_id: str) -> list[GroupEvent]:
+        with self.store._lock:
+            rows = self.store.conn.execute(
+                "SELECT * FROM conversation_events WHERE conversation_id=? AND turn_id=? AND event_time_epoch IS NOT NULL ORDER BY id",
+                (conversation_id, turn_id),
+            ).fetchall()
+        return [self._event_from_row(row) for row in rows]
 
     def count_user_turns(self, conversation_id: str) -> int:
         with self.store._lock:
@@ -314,4 +354,28 @@ class GroupRepository:
                     **trace,
                 }
             )
+        return result
+
+    def turn_summaries(self, conversation_id: str, turn_ids: list[str]) -> dict[str, dict[str, int]]:
+        ids = list(dict.fromkeys(str(value) for value in turn_ids if str(value or "").strip()))
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        with self.store._lock:
+            rows = self.store.conn.execute(
+                f"SELECT turn_id,trace_json FROM conversation_runtime_traces WHERE conversation_id=? AND turn_id IN ({placeholders}) ORDER BY id",
+                [conversation_id, *ids],
+            ).fetchall()
+        result: dict[str, dict[str, int]] = {}
+        for row in rows:
+            summary = result.setdefault(str(row["turn_id"]), {"total": 0, "replied": 0, "silent": 0})
+            summary["total"] += 1
+            try:
+                trace = json.loads(row["trace_json"])
+            except (TypeError, ValueError):
+                trace = {}
+            if trace.get("actions"):
+                summary["replied"] += 1
+            else:
+                summary["silent"] += 1
         return result

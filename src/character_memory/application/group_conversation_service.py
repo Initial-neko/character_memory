@@ -82,7 +82,7 @@ class GroupConversationService:
     def list_groups(self):
         return self.repo.list_groups()
 
-    def history(self, conversation_id: str, limit: int = 180):
+    def history(self, conversation_id: str, limit: int = 50):
         group = self.repo.get_group(conversation_id)
         if group is None:
             raise KeyError(f"unknown group: {conversation_id}")
@@ -124,7 +124,7 @@ class GroupConversationService:
 群里出现消息不代表你必须发言；如果别人已经表达了与你相同的意思、当前话题与你关系不大、你没有自然补充，actions=[] 是正常且优先允许的选择。
 不要机械重复别人刚说的话，不要为了保持群活跃度而插话，也不要因为你“能回答”就一定回答。
 你可以自然回应 User，也可以回应其他 Character 刚刚说的话；后说话时要把本轮已经出现的群消息当成真实发生的共同经历。
-Available Stickers 是大家共享可见的聊天表情资源；你可以像普通聊天一样自然使用 STICKER，也可以保持沉默，不要为了活跃而刷表情。
+Available Stickers 是系统针对当前群语境召回的候选表情；只能从当前候选中选择 STICKER，也可以完全不用表情或保持沉默。
 如果你拥有 Available Images，也可以自然使用，但不要刷媒体。
 当前群聊不创建未来主动 Intent：intent_candidates 必须保持 []。
 来自你私人单聊的 Memory 只用于理解背景；除非 User 已在这个群里主动公开，否则不要把私人信息透露给其他群成员。
@@ -156,6 +156,14 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
                 recall_query = f"{source_event.metadata.get('sticker_label') or '表情包'} {source_event.metadata.get('sticker_meaning') or ''}".strip()
             memories = runtime.recall.recall(character_id, recall_query, now=now)
             recent = self._recent_as_events(group.id)
+            sticker_query = "\n".join(
+                item.content.strip()
+                for item in recent[-4:]
+                if (item.content or "").strip()
+            ) or recall_query
+            sticker_retrieval = runtime.sticker_retriever.retrieve(runtime.sticker_catalog, sticker_query)
+            prompt_stickers = sticker_retrieval.catalog if sticker_retrieval is not None else None
+            allowed_sticker_ids = {match.sticker_id for match in sticker_retrieval.matches} if sticker_retrieval is not None else set()
             synthetic = Event(
                 character_id=character_id,
                 event_type=EventType.USER_MESSAGE,
@@ -174,7 +182,7 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
                 synthetic,
                 recent,
                 last_chat_event=None,
-                sticker_catalog=runtime.sticker_catalog,
+                sticker_catalog=prompt_stickers,
                 image_catalog=runtime.image_catalog,
             ) + self._group_contract(group, character_id)
             session_id = f"group:{group.id}:{character_id}"
@@ -184,7 +192,10 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
             else:
                 model_call = runtime.model.react_call_for_session(context, session_id)
             reaction = model_call.value
-            reaction, sticker_decisions, image_decisions = runtime._sanitize_resource_actions(reaction)
+            reaction, sticker_decisions, image_decisions = runtime._sanitize_resource_actions(
+                reaction,
+                allowed_sticker_ids=allowed_sticker_ids,
+            )
             reaction = reaction.model_copy(update={"intent_candidates": []})
             model_ms = _ms(model_started)
 
@@ -273,6 +284,10 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
                     "recalled_memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in memories],
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,
+                    "sticker_retrieval": {
+                        "query": sticker_retrieval.query,
+                        "matches": [match.__dict__ for match in sticker_retrieval.matches],
+                    } if sticker_retrieval is not None else {"query": "", "matches": []},
                     "sticker_decisions": sticker_decisions,
                     "image_decisions": image_decisions,
                     "model_messages": model_call.trace.request_messages,
@@ -292,11 +307,12 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
                 )
 
             logger.info(
-                "group.member conversation=%s turn=%s character=%s actions=%s memories=%d model_ms=%.1f total_ms=%.1f",
+                "group.member conversation=%s turn=%s character=%s actions=%s sticker_candidates=%d memories=%d model_ms=%.1f total_ms=%.1f",
                 group.id,
                 source_event.turn_id,
                 character_id,
                 [action.type.value for action in reaction.actions] or ["SILENCE"],
+                len(allowed_sticker_ids),
                 len(created_memory_ids),
                 model_ms,
                 _ms(started),
@@ -403,7 +419,7 @@ Available Stickers 是大家共享可见的聊天表情资源；你可以像普�
             "source_event_id": source_event.id,
             "speaker_order": ordered,
             "decisions": decisions,
-            "events": self.repo.list_events(conversation_id, limit=180),
+            "events": self.repo.list_turn_events(conversation_id, turn_id),
         }
 
     def send(

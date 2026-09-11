@@ -7,10 +7,95 @@ import pytest
 
 from character_memory.avatars import AvatarSearchService, AvatarStore
 from character_memory.config import Settings, discover_character_profiles
-from character_memory.search import BraveSearchProvider, ImageSearchResult, SearchProvider
+from character_memory.search import BraveSearchProvider, ImageSearchResult, SearchApiProvider, SearchProvider
 
 
-def test_brave_image_search_parses_ranked_candidates_without_web_search():
+def test_searchapi_image_search_parses_candidates_and_maps_safe_search():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["authorization"] = request.headers.get("authorization")
+        return httpx.Response(
+            200,
+            json={
+                "images": [
+                    {
+                        "position": 1,
+                        "title": "Mika portrait",
+                        "source": {"name": "Example", "link": "https://example.org/source"},
+                        "original": {
+                            "link": "https://imgs.example.org/full.jpg",
+                            "width": 900,
+                            "height": 900,
+                        },
+                        "thumbnail": "https://imgs.example.org/thumb.jpg",
+                    },
+                    {
+                        "position": 2,
+                        "title": "banner should be filtered",
+                        "source": {"name": "Example", "link": "https://example.org/banner"},
+                        "original": {
+                            "link": "https://imgs.example.org/banner.jpg",
+                            "width": 2000,
+                            "height": 200,
+                        },
+                        "thumbnail": "https://imgs.example.org/banner-thumb.jpg",
+                    },
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = SearchApiProvider(
+        "secret",
+        country="jp",
+        language="zh-cn",
+        safe_search="strict",
+        client=client,
+    )
+    results = provider.search_images("Mika avatar", limit=12)
+
+    assert len(results) == 1
+    assert results[0].image_url == "https://imgs.example.org/full.jpg"
+    assert results[0].thumbnail_url == "https://imgs.example.org/thumb.jpg"
+    assert results[0].source_page_url == "https://example.org/source"
+    assert results[0].source_domain == "example.org"
+    assert results[0].width == 900
+    assert results[0].height == 900
+    assert seen["authorization"] == "Bearer secret"
+    assert "engine=google_images" in seen["url"]
+    assert "gl=jp" in seen["url"]
+    assert "hl=zh-cn" in seen["url"]
+    assert "safe=active" in seen["url"]
+    assert "secret" not in seen["url"]
+    with pytest.raises(NotImplementedError):
+        provider.search_web("anything")
+    client.close()
+
+
+def test_searchapi_accepts_legacy_all_country_and_zh_language():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={"images": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = SearchApiProvider(
+        "secret",
+        country="ALL",
+        language="zh",
+        safe_search="strict",
+        client=client,
+    )
+    assert provider.search_images("avatar") == []
+    assert "gl=" not in seen["url"]
+    assert "hl=zh-cn" in seen["url"]
+    client.close()
+
+
+def test_brave_image_search_remains_available_as_fallback():
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -27,14 +112,7 @@ def test_brave_image_search_parses_ranked_candidates_without_web_search():
                         "confidence": "high",
                         "thumbnail": {"src": "https://imgs.example.org/thumb.jpg", "width": 500, "height": 500},
                         "properties": {"url": "https://imgs.example.org/full.jpg", "width": 900, "height": 900},
-                    },
-                    {
-                        "title": "banner should be filtered",
-                        "url": "https://example.org/banner",
-                        "source": "example.org",
-                        "thumbnail": {"src": "https://imgs.example.org/banner-thumb.jpg"},
-                        "properties": {"url": "https://imgs.example.org/banner.jpg", "width": 2000, "height": 200},
-                    },
+                    }
                 ]
             },
         )
@@ -51,14 +129,9 @@ def test_brave_image_search_parses_ranked_candidates_without_web_search():
 
     assert len(results) == 1
     assert results[0].image_url == "https://imgs.example.org/full.jpg"
-    assert results[0].source_page_url == "https://example.org/source"
-    assert results[0].width == 900
-    assert results[0].height == 900
     assert seen["token"] == "secret"
     assert "safesearch=strict" in seen["url"]
     assert "search_lang=zh" in seen["url"]
-    with pytest.raises(NotImplementedError):
-        provider.search_web("anything")
     client.close()
 
 

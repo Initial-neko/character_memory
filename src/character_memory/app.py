@@ -77,7 +77,10 @@ def build_model(settings: Settings):
         settings.base_url,
         temperature=settings.chat_temperature,
         attempts=settings.llm_attempts,
-        vision_model=settings.vision_model,
+        # Modern multimodal models can handle text and images through the same
+        # model id. Keep a dedicated vision model only as an explicit provider
+        # compatibility override.
+        vision_model=(str(settings.vision_model or "").strip() or settings.chat_model),
     )
 
 
@@ -97,7 +100,7 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
 
     total = time.perf_counter()
     timings: dict[str, float] = {}
-    logger.info("app.init start model=%s vision_model=%s embedding=%s/%s", settings.chat_model, settings.vision_model, settings.embedding_provider, settings.embedding_model)
+    logger.info("app.init start model=%s vision_model=%s embedding=%s/%s", settings.chat_model, settings.vision_model or settings.chat_model, settings.embedding_provider, settings.embedding_model)
 
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     stage = time.perf_counter()

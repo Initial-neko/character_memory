@@ -47,6 +47,7 @@ class GroupChatRequest(BaseModel):
     message: str = Field(default="", max_length=12000)
     sticker_id: str | None = Field(default=None, max_length=64)
     image: GroupImageRequest | None = None
+    mentions: list[str] = Field(default_factory=list, max_length=4)
     at: datetime | None = None
 
     @model_validator(mode="after")
@@ -55,6 +56,12 @@ class GroupChatRequest(BaseModel):
             raise ValueError("message, sticker_id or image is required")
         if self.sticker_id and self.image is not None:
             raise ValueError("send a sticker or image in one group user turn, not both")
+        cleaned = []
+        for raw in self.mentions:
+            value = str(raw).strip()
+            if value and value not in cleaned:
+                cleaned.append(value)
+        self.mentions = cleaned
         return self
 
 
@@ -183,6 +190,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "content": content,
             "event_time": event.event_time.isoformat(),
             "action": event.metadata.get("action"),
+            "mentions": event.metadata.get("mentions", []) if role == "user" else [],
             "sticker_id": event.metadata.get("sticker_id"),
             "sticker": sticker,
             "image_id": event.metadata.get("image_id"),
@@ -268,6 +276,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                     "perception": item.get("perception", ""),
                     "reaction": item.get("reaction", ""),
                     "actions": item.get("actions", []),
+                    "mentions": item.get("mentions", []),
+                    "explicitly_mentioned": bool(item.get("explicitly_mentioned")),
                     "created_memory_ids": item.get("created_memory_ids", []),
                     "sticker_retrieval": item.get("sticker_retrieval", {}),
                     "model_used": item.get("model_used", ""),
@@ -323,6 +333,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 image=selected_image,
                 image_data_url=image_data_url,
                 sticker=selected_sticker,
+                mentions=req.mentions,
             )
             group = service.repo.get_group(conversation_id)
             turn_summary = service.repo.turn_summaries(conversation_id, [result["turn_id"]]).get(result["turn_id"])
@@ -332,6 +343,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 "conversation_id": conversation_id,
                 "turn_id": result["turn_id"],
                 "speaker_order": result["speaker_order"],
+                "mentions": result.get("mentions", []),
                 "decisions": result["decisions"],
                 "group": group_payload(group, profiles=resources["profiles"]),
                 "new_messages": messages,

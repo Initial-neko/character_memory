@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/p0_8.css">
   <link rel="stylesheet" href="/static/p0_11.css">
   <link rel="stylesheet" href="/static/p0_15.css">
+  <link rel="stylesheet" href="/static/p0_16.css">
 </head>
 <body>
   <div class="workspace">
@@ -24,12 +25,12 @@
     <main class="chat-shell">
       <header class="topbar">
         <div class="character-heading"><div id="headerAvatar" class="header-avatar">R</div><div><h1 id="characterName">Rin</h1><p id="characterIdentity">Persistent AI Person</p></div></div>
-        <div class="topbar-actions"><span id="nowText" class="now"></span><button id="runtimeButton" class="ghost-button" type="button">Runtime</button></div>
+        <div class="topbar-actions"><span id="nowText" class="now"></span><button id="conversationSearchButton" class="ghost-button search-button" type="button" title="搜索当前聊天">🔎 <span class="search-label">搜索</span></button><button id="globalSearchButton" class="ghost-button search-button" type="button" title="搜索所有聊天">全局搜索</button><button id="runtimeButton" class="ghost-button" type="button">Runtime</button></div>
       </header>
       <section id="chat" class="chat" aria-live="polite"></section>
       <div class="composer-wrap">
         <form id="composer" class="composer"><textarea id="messageInput" rows="1" placeholder="发送消息" autocomplete="off"></textarea><button id="sendButton" type="submit">发送</button></form>
-        <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
+        <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 群聊输入 @ 可点名</div>
       </div>
     </main>
   </div>
@@ -46,8 +47,10 @@
   <script src="/static/stickers.js" defer></script>
   <script src="/static/images.js" defer></script>
   <script src="/static/groups.js" defer></script>
+  <script src="/static/mentions.js" defer></script>
   <script src="/static/group_settings.js" defer></script>
   <script src="/static/avatars.js" defer></script>
+  <script src="/static/search.js" defer></script>
   <script src="/static/intent.js" defer></script>
 </body>
 </html>

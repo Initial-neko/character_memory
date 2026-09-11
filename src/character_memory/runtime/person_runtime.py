@@ -8,6 +8,7 @@ import numpy as np
 
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.context import compile_context
+from character_memory.runtime.sticker_retrieval import StickerRetriever
 
 
 logger = logging.getLogger("character_memory.runtime")
@@ -50,6 +51,7 @@ class PersonRuntime:
         self.persona = persona
         self.sticker_catalog = sticker_catalog
         self.image_catalog = image_catalog
+        self.sticker_retriever = StickerRetriever(embeddings)
 
     def _last_chat_before(self, character_id: str, event_time):
         candidates = []
@@ -60,6 +62,14 @@ class PersonRuntime:
         if not candidates:
             return None
         return max(candidates, key=lambda item: (_aware(item.event_time), item.id or 0))
+
+    @staticmethod
+    def _sticker_query(event: Event, recent: list[Event]) -> str:
+        parts = [item.content.strip() for item in recent[-3:] if (item.content or "").strip()]
+        current = (event.content or "").strip()
+        if current:
+            parts.append(current)
+        return "\n".join(parts)
 
     def _prepare_memory_writes(self, character_id: str, event_time, candidates):
         """Small V0 admission gate: reject low-value and near-duplicate memories."""
@@ -176,6 +186,12 @@ class PersonRuntime:
         # leak a future simulation into a historical/real-time event.
         state_before = self.store.get_mental_state(event.character_id, at=event.event_time)
         recent = [e for e in self.store.list_events(event.character_id, limit=10, before=event.event_time) if e.id != event.id][-8:]
+        sticker_retrieval = self.sticker_retriever.retrieve(
+            self.sticker_catalog,
+            self._sticker_query(event, recent),
+        )
+        prompt_stickers = sticker_retrieval.catalog if sticker_retrieval is not None else None
+        timings["sticker_retrieval_ms"] = _ms(stage)
         context = compile_context(
             self.persona,
             state_before,
@@ -183,11 +199,18 @@ class PersonRuntime:
             event,
             recent,
             last_chat_event=last_chat_event,
-            sticker_catalog=self.sticker_catalog,
+            sticker_catalog=prompt_stickers,
             image_catalog=self.image_catalog,
         )
         timings["context_ms"] = _ms(stage)
-        logger.info("runtime.context ready chars=%d recent_events=%d has_state=%s duration_ms=%.1f", len(context), len(recent), bool(state_before), timings["context_ms"])
+        logger.info(
+            "runtime.context ready chars=%d recent_events=%d sticker_candidates=%d has_state=%s duration_ms=%.1f",
+            len(context),
+            len(recent),
+            len(sticker_retrieval.matches) if sticker_retrieval is not None else 0,
+            bool(state_before),
+            timings["context_ms"],
+        )
 
         conversation_id = str(event.metadata.get("conversation_id") or f"{event.character_id}:default")
         stage = time.perf_counter()
@@ -297,6 +320,10 @@ class PersonRuntime:
                     "mental_state_after": state_after,
                     "mental_state_updated": bool((reaction.mental_state_update or "").strip()),
                     "recalled_memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in memories],
+                    "sticker_retrieval": {
+                        "query": sticker_retrieval.query,
+                        "matches": [match.__dict__ for match in sticker_retrieval.matches],
+                    } if sticker_retrieval is not None else {"query": "", "matches": []},
                     "perception": reaction.perception,
                     "reaction": reaction.reaction,
                     "action": reaction.action.model_dump(mode="json") if reaction.action is not None else None,

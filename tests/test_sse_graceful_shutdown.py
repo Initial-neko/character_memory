@@ -54,7 +54,6 @@ def test_uvicorn_graceful_shutdown_does_not_wait_on_open_sse(tmp_path):
             port=port,
             log_level="warning",
             lifespan="on",
-            timeout_graceful_shutdown=2,
         )
     )
     thread = threading.Thread(target=server.run, daemon=True)
@@ -79,6 +78,9 @@ def test_uvicorn_graceful_shutdown_does_not_wait_on_open_sse(tmp_path):
                 lines = response.iter_lines()
                 assert next(lines) == "retry: 1500"
 
+                # No timeout_graceful_shutdown is configured here on purpose:
+                # the stream itself must be cancellable. This reproduces the
+                # production Ctrl+C path instead of relying on a forced timeout.
                 started = time.monotonic()
                 server.should_exit = True
                 thread.join(timeout=3.0)

@@ -1,1 +1,53 @@
-.search-mode-switch{display:flex;gap:8px;margin-bottom:12px}.search-mode-switch button{border:1px solid var(--line,#d8dde6);background:transparent;border-radius:999px;padding:6px 12px;cursor:pointer}.search-mode-switch button.active{background:var(--panel-soft,#eef2f8);font-weight:700}.search-input-wrap{display:flex;align-items:center;gap:8px;border:1px solid var(--line,#d8dde6);border-radius:12px;padding:9px 11px;background:var(--panel,#fff)}.search-input-wrap input{border:0;outline:0;background:transparent;width:100%;font:inherit;color:inherit}.search-result-status{font-size:12px;color:var(--muted,#6c7480);margin:10px 2px}.search-result-list{display:grid;gap:8px}.search-result-item{display:grid;gap:5px;text-align:left;width:100%;border:1px solid var(--line,#d8dde6);background:var(--panel,#fff);border-radius:12px;padding:10px 12px;cursor:pointer;color:inherit}.search-result-item:hover{background:var(--panel-soft,#f6f8fb)}.search-result-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.search-result-head span{font-size:11px;color:var(--muted,#6c7480);white-space:nowrap}.search-result-actor{font-size:12px;font-weight:700;color:var(--muted,#6c7480)}.search-result-preview{line-height:1.5;overflow-wrap:anywhere}.search-result-preview mark{border-radius:4px;padding:0 2px;background:#ffe995;color:inherit}.search-hit .bubble,.search-hit .sticker-bubble,.search-hit .image-bubble{outline:3px solid rgba(245,183,0,.55);outline-offset:3px;transition:outline-color .25s ease}.search-return-latest{position:fixed;right:32px;bottom:116px;z-index:40;border:1px solid var(--line,#d8dde6);border-radius:999px;padding:8px 14px;background:var(--panel,#fff);box-shadow:0 8px 24px rgba(0,0,0,.12);cursor:pointer}.composer-wrap{position:relative}.mention-menu{position:absolute;left:12px;bottom:calc(100% - 2px);z-index:70;min-width:240px;max-width:min(360px,calc(100vw - 40px));max-height:260px;overflow:auto;background:var(--panel,#fff);border:1px solid var(--line,#d8dde6);border-radius:14px;padding:6px;box-shadow:0 14px 40px rgba(0,0,0,.16)}.mention-option{display:flex;width:100%;gap:9px;align-items:center;text-align:left;border:0;background:transparent;border-radius:10px;padding:8px 10px;cursor:pointer;color:inherit}.mention-option:hover,.mention-option.active{background:var(--panel-soft,#eef2f8)}.mention-avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--panel-soft,#eef2f8);font-weight:700}.mention-option span:last-child{display:grid;gap:2px}.mention-option small{font-size:11px;color:var(--muted,#6c7480)}.group-speaker-name{cursor:pointer}.group-speaker-name:hover{text-decoration:underline}.topbar-actions .search-button{white-space:nowrap}@media(max-width:720px){.search-return-latest{right:16px;bottom:110px}.topbar-actions .search-label{display:none}.search-result-head{align-items:flex-start;flex-direction:column;gap:2px}}
+.search-mode-switch { display:flex; gap:8px; margin-bottom:12px; }
+.search-mode-switch button { border:1px solid var(--line,#d8dde6); background:transparent; border-radius:999px; padding:6px 12px; cursor:pointer; }
+.search-mode-switch button.active { background:var(--panel-soft,#eef2f8); font-weight:700; }
+.search-input-wrap { display:flex; align-items:center; gap:8px; border:1px solid var(--line,#d8dde6); border-radius:12px; padding:9px 11px; background:var(--panel,#fff); }
+.search-input-wrap input { border:0; outline:0; background:transparent; width:100%; font:inherit; color:inherit; }
+.search-result-status { font-size:12px; color:var(--muted,#6c7480); margin:10px 2px; }
+.search-result-list { display:grid; gap:8px; }
+.search-result-item { display:grid; gap:5px; text-align:left; width:100%; border:1px solid var(--line,#d8dde6); background:var(--panel,#fff); border-radius:12px; padding:10px 12px; cursor:pointer; color:inherit; }
+.search-result-item:hover { background:var(--panel-soft,#f6f8fb); }
+.search-result-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+.search-result-head span { font-size:11px; color:var(--muted,#6c7480); white-space:nowrap; }
+.search-result-actor { font-size:12px; font-weight:700; color:var(--muted,#6c7480); }
+.search-result-preview { line-height:1.5; overflow-wrap:anywhere; }
+.search-result-preview mark { border-radius:4px; padding:0 2px; background:#ffe995; color:inherit; }
+.search-hit .bubble,
+.search-hit .sticker-bubble,
+.search-hit .image-bubble { outline:3px solid rgba(245,183,0,.55); outline-offset:3px; transition:outline-color .25s ease; }
+.search-return-latest { position:fixed; right:32px; bottom:116px; z-index:40; border:1px solid var(--line,#d8dde6); border-radius:999px; padding:8px 14px; background:var(--panel,#fff); box-shadow:0 8px 24px rgba(0,0,0,.12); cursor:pointer; }
+
+/* `.composer-wrap` is intentionally NOT re-positioned here. The base layout
+   owns it as `position: fixed`; fixed positioning already establishes the
+   containing block needed by the absolute mention menu. */
+.mention-menu {
+  position:absolute;
+  left:max(24px, calc(50% - 390px));
+  bottom:calc(100% - 2px);
+  z-index:70;
+  min-width:240px;
+  max-width:min(360px,calc(100vw - 40px));
+  max-height:260px;
+  overflow:auto;
+  background:var(--panel,#fff);
+  border:1px solid var(--line,#d8dde6);
+  border-radius:14px;
+  padding:6px;
+  box-shadow:0 14px 40px rgba(0,0,0,.16);
+}
+.mention-option { display:flex; width:100%; gap:9px; align-items:center; text-align:left; border:0; background:transparent; border-radius:10px; padding:8px 10px; cursor:pointer; color:inherit; }
+.mention-option:hover,
+.mention-option.active { background:var(--panel-soft,#eef2f8); }
+.mention-avatar { display:grid; place-items:center; width:30px; height:30px; border-radius:50%; background:var(--panel-soft,#eef2f8); font-weight:700; }
+.mention-option span:last-child { display:grid; gap:2px; }
+.mention-option small { font-size:11px; color:var(--muted,#6c7480); }
+.group-speaker-name { cursor:pointer; }
+.group-speaker-name:hover { text-decoration:underline; }
+.topbar-actions .search-button { white-space:nowrap; }
+
+@media(max-width:720px) {
+  .search-return-latest { right:16px; bottom:110px; }
+  .topbar-actions .search-label { display:none; }
+  .search-result-head { align-items:flex-start; flex-direction:column; gap:2px; }
+  .mention-menu { left:14px; max-width:calc(100vw - 28px); }
+}

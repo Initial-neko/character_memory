@@ -107,7 +107,16 @@ def _run_server(config_path: str, host: str, port: int):
         raise SystemExit("WebUI dependencies are missing. Run: uv sync --extra api") from exc
     os.environ["CHARACTER_MEMORY_CONFIG"] = config_path
     print(f"web: http://{host}:{port}")
-    uvicorn.run("character_memory.server:app", host=host, port=port, reload=False)
+    # SSE requests are intentionally long-lived, so Uvicorn cannot wait for
+    # every connection to end naturally during Ctrl+C. Keep graceful shutdown
+    # bounded; the SSE iterator is async/cancellable, so cancellation is clean.
+    uvicorn.run(
+        "character_memory.server:app",
+        host=host,
+        port=port,
+        reload=False,
+        timeout_graceful_shutdown=2,
+    )
 
 
 def main():

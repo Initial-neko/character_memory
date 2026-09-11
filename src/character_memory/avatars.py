@@ -73,7 +73,14 @@ def _safe_public_http_url(url: str) -> None:
     if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
         raise ValueError("avatar URL points to a local host")
     try:
-        addresses = {item[4][0] for item in socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)}
+        addresses = {
+            item[4][0]
+            for item in socket.getaddrinfo(
+                hostname,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        }
     except OSError as exc:
         raise ValueError(f"avatar host could not be resolved: {hostname}") from exc
     for raw in addresses:
@@ -81,7 +88,14 @@ def _safe_public_http_url(url: str) -> None:
             address = ipaddress.ip_address(raw)
         except ValueError:
             continue
-        if address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_reserved or address.is_unspecified:
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_multicast
+            or address.is_reserved
+            or address.is_unspecified
+        ):
             raise ValueError("avatar URL resolved to a non-public address")
 
 
@@ -97,7 +111,11 @@ class AvatarStore:
         self.max_bytes = max(64 * 1024, int(max_bytes))
         self.root.mkdir(parents=True, exist_ok=True)
         self._owns_client = client is None
-        self.client = client or httpx.Client(timeout=30.0, follow_redirects=True)
+        # Avatar downloads intentionally do not follow redirects automatically.
+        # A redirect could turn a public search result into a private-network URL
+        # after our SSRF validation. Candidates with redirect-only originals can
+        # still fall back to Brave's proxied thumbnail URL.
+        self.client = client or httpx.Client(timeout=30.0, follow_redirects=False)
 
     def _character_dir(self, character_id: str) -> Path:
         value = str(character_id or "").strip()
@@ -133,18 +151,15 @@ class AvatarStore:
             return ""
         return str(path.stat().st_mtime_ns)
 
-    def save_from_candidate(
-        self,
-        character_id: str,
-        candidate: ImageSearchResult,
-        *,
-        query: str,
-    ) -> AvatarMetadata:
-        _safe_public_http_url(candidate.image_url)
+    def _download_image(self, url: str) -> tuple[bytes, str]:
+        _safe_public_http_url(url)
         response = self.client.get(
-            candidate.image_url,
+            url,
             headers={"Accept": "image/*", "User-Agent": "character-memory/0.4 avatar-fetch"},
+            follow_redirects=False,
         )
+        if 300 <= response.status_code < 400:
+            raise RuntimeError("avatar download redirect was rejected for safety")
         if response.is_error:
             raise RuntimeError(f"avatar download failed with HTTP {response.status_code}")
         payload = response.content
@@ -153,10 +168,35 @@ class AvatarStore:
         if len(payload) > self.max_bytes:
             raise ValueError(f"avatar exceeds the {self.max_bytes} byte limit")
         content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-        extension = _CONTENT_EXTENSIONS.get(content_type)
-        if extension is None:
+        if content_type not in _CONTENT_EXTENSIONS:
             raise ValueError(f"unsupported avatar content type: {content_type or '<missing>'}")
+        return payload, content_type
 
+    def save_from_candidate(
+        self,
+        character_id: str,
+        candidate: ImageSearchResult,
+        *,
+        query: str,
+    ) -> AvatarMetadata:
+        payload: bytes | None = None
+        content_type = ""
+        errors: list[str] = []
+        # Prefer the original image, but Brave's proxied thumbnail is a useful
+        # fallback when a source rejects hotlink-style server downloads.
+        urls = list(dict.fromkeys([candidate.image_url, candidate.thumbnail_url]))
+        for url in urls:
+            if not url:
+                continue
+            try:
+                payload, content_type = self._download_image(url)
+                break
+            except (RuntimeError, ValueError) as exc:
+                errors.append(str(exc))
+        if payload is None:
+            raise RuntimeError("avatar download failed: " + " | ".join(errors or ["no downloadable URL"]))
+
+        extension = _CONTENT_EXTENSIONS[content_type]
         directory = self._character_dir(character_id)
         filename = f"avatar{extension}"
         target = directory / filename
@@ -185,7 +225,12 @@ class AvatarStore:
             json.dumps(metadata.model_dump(mode="json"), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        logger.info("avatar.saved character=%s bytes=%d source=%s", character_id, len(payload), candidate.source_domain or "-")
+        logger.info(
+            "avatar.saved character=%s bytes=%d source=%s",
+            character_id,
+            len(payload),
+            candidate.source_domain or "-",
+        )
         return metadata
 
     def close(self) -> None:

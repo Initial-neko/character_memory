@@ -108,6 +108,8 @@
     const names = (group.members || []).map(item => item.name || item.id).join("、");
     const isPending = pending.has(group.id);
     CM.dom.characterName.textContent = group.name;
+    CM.dom.characterName.classList.toggle("group-name-editable", !isPending);
+    CM.dom.characterName.title = isPending ? "群成员回复结束后可修改群名称" : "点击修改群名称";
     CM.dom.characterIdentity.textContent = `${names}${isPending ? " · 大家正在回复" : ""}`;
     CM.dom.headerAvatar.textContent = initial(group);
     CM.dom.input.placeholder = isPending ? "群成员正在回复…" : `发到「${group.name}」`;
@@ -150,6 +152,8 @@
     if (!CM.isGroupConversation()) return;
     CM.state.conversation = {type:"DIRECT", groupId:null};
     document.body.classList.remove("group-mode");
+    CM.dom.characterName.classList.remove("group-name-editable");
+    CM.dom.characterName.removeAttribute("title");
     renderList();
   }
 
@@ -245,6 +249,38 @@
     }
   }
 
+  function showRenameGroup() {
+    const group = current();
+    if (!group || pending.has(group.id)) return;
+    CM.openDrawer("修改群名称", "只修改群聊显示名称，不影响成员和历史消息");
+    CM.dom.drawerBody.innerHTML = `<div class="group-create-form"><label>群名称<input type="text" data-group-rename-name maxlength="80" value="${CM.escapeHtml(group.name)}"></label><div class="group-create-error error hidden" data-group-rename-error></div><div class="group-create-actions"><button type="button" data-group-rename-cancel>取消</button><button type="button" class="primary" data-group-rename-confirm>保存</button></div></div>`;
+    const input = CM.dom.drawerBody.querySelector("[data-group-rename-name]");
+    input?.focus();
+    input?.select();
+  }
+
+  async function renameGroupFromDrawer() {
+    const group = current();
+    if (!group) return;
+    const input = CM.dom.drawerBody.querySelector("[data-group-rename-name]");
+    const name = input?.value.trim() || "";
+    const errorBox = CM.dom.drawerBody.querySelector("[data-group-rename-error]");
+    if (!name) {
+      if (errorBox) { errorBox.textContent = "群名称不能为空。"; errorBox.classList.remove("hidden"); }
+      return;
+    }
+    try {
+      const data = await CM.api(`/v1/groups/${encodeURIComponent(group.id)}`, {method:"PATCH", body:JSON.stringify({name})});
+      const index = groups.findIndex(item => item.id === group.id);
+      if (index >= 0 && data.group) groups[index] = data.group;
+      CM.closeDrawer();
+      renderList();
+      CM.updateHeader();
+    } catch (error) {
+      if (errorBox) { errorBox.textContent = error.message; errorBox.classList.remove("hidden"); }
+    }
+  }
+
   async function showTurn(turnId) {
     const group = current();
     if (!group) return;
@@ -268,9 +304,20 @@
     const button = event.target.closest("[data-group]");
     if (button) enter(button.dataset.group).catch(console.error);
   });
+  CM.dom.characterName.addEventListener("click", () => {
+    if (CM.isGroupConversation()) showRenameGroup();
+  });
   CM.dom.drawerBody.addEventListener("click", event => {
     if (event.target.closest("[data-group-create-cancel]")) CM.closeDrawer();
     if (event.target.closest("[data-group-create-confirm]")) createGroupFromDrawer().catch(console.error);
+    if (event.target.closest("[data-group-rename-cancel]")) CM.closeDrawer();
+    if (event.target.closest("[data-group-rename-confirm]")) renameGroupFromDrawer().catch(console.error);
+  });
+  CM.dom.drawerBody.addEventListener("keydown", event => {
+    if (!event.target.closest("[data-group-rename-name]")) return;
+    if (event.key !== "Enter" || event.isComposing) return;
+    event.preventDefault();
+    renameGroupFromDrawer().catch(console.error);
   });
   CM.dom.chat.addEventListener("click", event => {
     if (!CM.isGroupConversation()) return;
@@ -278,6 +325,6 @@
     if (button) showTurn(button.dataset.groupTurn).catch(console.error);
   });
 
-  const feature = CM.registerFeature("groups", {loadGroups,loadHistory,enter,leave,applyHeader,applyComposerState,sendText,sendSticker,sendImage,renderList});
+  const feature = CM.registerFeature("groups", {loadGroups,loadHistory,enter,leave,applyHeader,applyComposerState,sendText,sendSticker,sendImage,showRenameGroup,renderList});
   CM.on("ready", loadGroups);
 })();

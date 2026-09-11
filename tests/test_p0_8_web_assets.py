@@ -17,5 +17,13 @@ def test_image_module_is_loaded_and_packaged():
     assert 'web/*.js' in pyproject
     assert 'web/*.css' in pyproject
     text = js.read_text(encoding="utf-8")
+    css_text = css.read_text(encoding="utf-8")
     assert 'image/jpeg", "image/png", "image/gif", "image/webp' in text
     assert 'CM.registerFeature("images"' in text
+    assert 'event.key !== "Enter"' in text
+    assert "event.shiftKey" in text
+    assert "event.isComposing" in text
+    assert 'event.target.closest(".image-bubble img")' in text
+    assert "image-lightbox" in text
+    assert ".image-lightbox" in css_text
+    assert "cursor: zoom-in" in css_text

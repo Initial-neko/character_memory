@@ -76,6 +76,20 @@ body.group-mode .character-item.active { background: transparent; }
 body.group-mode .character-item.active:hover { background: rgba(0,0,0,.04); }
 body.group-mode .sticker-trigger { opacity: .45; }
 
+body.group-mode #characterName.group-name-editable {
+  cursor: pointer;
+  text-decoration: underline dotted rgba(0,0,0,.32) 1px;
+  text-underline-offset: 5px;
+}
+body.group-mode #characterName.group-name-editable::after {
+  content: " ✎";
+  color: var(--muted, #777);
+  font-size: .58em;
+  font-weight: 500;
+  vertical-align: middle;
+}
+body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
+
 .group-create-form { display: grid; gap: 16px; }
 .group-create-form label { display: grid; gap: 7px; font-weight: 650; }
 .group-create-form input[type="text"] {

@@ -6,6 +6,7 @@
   let panel = null;
   let inputEl = null;
   let trigger = null;
+  let lightbox = null;
 
   function close() {
     panel?.classList.add("hidden");
@@ -15,6 +16,25 @@
 
   function setDisabled(disabled) {
     if (trigger) trigger.disabled = Boolean(disabled);
+  }
+
+  function closeLightbox() {
+    if (!lightbox) return;
+    lightbox.classList.add("hidden");
+    const image = lightbox.querySelector("img");
+    if (image) {
+      image.removeAttribute("src");
+      image.alt = "";
+    }
+  }
+
+  function openLightbox(image) {
+    if (!lightbox || !image?.src) return;
+    const preview = lightbox.querySelector("img");
+    if (!preview) return;
+    preview.src = image.currentSrc || image.src;
+    preview.alt = image.alt || "图片预览";
+    lightbox.classList.remove("hidden");
   }
 
   function openDraft(file, {source = "FILE_PICKER"} = {}) {
@@ -111,6 +131,14 @@
   panel.className = "image-panel hidden";
   document.querySelector(".composer-wrap")?.appendChild(panel);
 
+  lightbox = document.createElement("div");
+  lightbox.className = "image-lightbox hidden";
+  lightbox.setAttribute("role", "dialog");
+  lightbox.setAttribute("aria-modal", "true");
+  lightbox.setAttribute("aria-label", "图片预览");
+  lightbox.innerHTML = '<button type="button" class="image-lightbox-close" data-image-lightbox-close aria-label="关闭图片预览">×</button><div class="image-lightbox-stage"><img alt=""></div>';
+  document.body.appendChild(lightbox);
+
   trigger.addEventListener("click", event => {
     event.stopPropagation();
     CM.features.stickers?.close?.();
@@ -131,10 +159,31 @@
     if (event.target.closest("[data-image-cancel]")) close();
     if (event.target.closest("[data-image-send]")) sendCurrentDraft().catch(console.error);
   });
+  panel.addEventListener("keydown", event => {
+    if (!event.target.closest("#imageCaption")) return;
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    sendCurrentDraft().catch(console.error);
+  });
+  CM.dom.chat.addEventListener("click", event => {
+    const image = event.target.closest(".image-bubble img");
+    if (!image) return;
+    event.preventDefault();
+    openLightbox(image);
+  });
+  lightbox.addEventListener("click", event => {
+    if (event.target === lightbox || event.target.closest("[data-image-lightbox-close]")) closeLightbox();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !lightbox.classList.contains("hidden")) closeLightbox();
+  });
   document.addEventListener("click", event => {
     if (!event.target.closest(".image-panel") && !event.target.closest(".image-trigger") && !panel?.contains(document.activeElement)) close();
   });
-  CM.on("conversationChanged", () => close());
+  CM.on("conversationChanged", () => {
+    close();
+    closeLightbox();
+  });
 
-  CM.registerFeature("images", {openDraft, close, setDisabled, trigger});
+  CM.registerFeature("images", {openDraft, close, setDisabled, openLightbox, closeLightbox, trigger});
 })();

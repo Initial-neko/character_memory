@@ -73,6 +73,8 @@ class PersonRuntime:
 
     def _prepare_memory_writes(self, character_id: str, event_time, candidates):
         """Small V0 admission gate: reject low-value and near-duplicate memories."""
+        if not candidates:
+            return [], []
         existing = [
             memory
             for memory in self.store.list_memories(character_id)
@@ -186,8 +188,6 @@ class PersonRuntime:
         logger.info("runtime.recall done count=%d ids=%s duration_ms=%.1f", len(memories), [memory.id for memory in memories], timings["recall_ms"])
 
         stage = time.perf_counter()
-        # Mental State is temporal state. Reading the latest snapshot here would
-        # leak a future simulation into a historical/real-time event.
         state_before = self.store.get_mental_state(event.character_id, at=event.event_time)
         recent = [e for e in self.store.list_events(event.character_id, limit=10, before=event.event_time) if e.id != event.id][-8:]
         sticker_retrieval = self.sticker_retriever.retrieve(

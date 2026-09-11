@@ -1,10 +1,11 @@
 # Copy to config.yaml. Prefer OPENCODE_GO_API_KEY instead of writing the key here.
 api_key: ""
 base_url: "https://opencode.ai/zen/go/v1"
-# OpenCode Go model id for DeepSeek V4.1 Flash text turns.
+# OpenCode Go model id. deepseek-flash is used for both text and image turns by default.
 chat_model: "deepseek-flash"
-# Real image turns are routed to DeepSeek V4 Flash Vision Exp.
-vision_model: "deepseek-v4-flash-vision-exp"
+# Optional compatibility override for providers that still require a dedicated vision model.
+# Leave empty to reuse chat_model for image input.
+vision_model: ""
 chat_temperature: 0.7
 llm_attempts: 2
 

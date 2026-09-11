@@ -3,7 +3,7 @@
   if (!CM) throw new Error("CM core must load before unread.js");
 
   const unreadBootstrapKey = "character-memory:unread-v1-initialized";
-  const summaryPollMs = 5000;
+  const summaryPollMs = 10000;
   const summaries = new Map();
   let busy = false;
 
@@ -71,7 +71,7 @@
   const feature = CM.registerFeature("unread", {markRead, isUnread, preview, refresh});
   CM.on("ready", async () => {
     await refresh();
-    setInterval(refresh, summaryPollMs);
+    setInterval(() => { if (!document.hidden) refresh(); }, summaryPollMs);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   });
 })();

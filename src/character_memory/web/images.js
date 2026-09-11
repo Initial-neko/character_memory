@@ -13,9 +13,7 @@
     if (inputEl) inputEl.value = "";
   }
 
-  function setDisabled(disabled) {
-    if (trigger) trigger.disabled = Boolean(disabled);
-  }
+  function setDisabled(disabled) { if (trigger) trigger.disabled = Boolean(disabled); }
 
   function openDraft(file, {source = "FILE_PICKER"} = {}) {
     if (!panel || !file) return;
@@ -37,10 +35,7 @@
       draft = {filename:file.name || defaultName, data_url:String(reader.result || ""), size:file.size, source};
       CM.features.stickers?.close?.();
       panel.classList.remove("hidden");
-      panel.innerHTML = `<div class="image-draft-preview"><img src="${CM.escapeHtml(draft.data_url)}" alt="图片预览"></div>
-        <div class="image-draft-meta">${source === "CLIPBOARD" ? "来自剪贴板" : CM.escapeHtml(draft.filename)} · ${(file.size / 1024).toFixed(0)} KB</div>
-        <textarea id="imageCaption" rows="2" maxlength="12000" placeholder="可以补一句话，也可以只发图片"></textarea>
-        <div class="image-draft-actions"><button type="button" data-image-cancel>取消</button><button class="image-send" type="button" data-image-send>发送图片</button></div>`;
+      panel.innerHTML = `<div class="image-draft-preview"><img src="${CM.escapeHtml(draft.data_url)}" alt="图片预览"></div><div class="image-draft-meta">${source === "CLIPBOARD" ? "来自剪贴板" : CM.escapeHtml(draft.filename)} · ${(file.size / 1024).toFixed(0)} KB</div><textarea id="imageCaption" rows="2" maxlength="12000" placeholder="可以补一句话，也可以只发图片"></textarea><div class="image-draft-actions"><button type="button" data-image-cancel>取消</button><button class="image-send" type="button" data-image-send>发送图片</button></div>`;
       document.getElementById("imageCaption")?.focus();
     };
     reader.onerror = () => {
@@ -51,37 +46,17 @@
   }
 
   async function sendDirect(currentDraft, caption) {
-    const sentCharacter = CM.state.characterId;
-    if (!currentDraft || CM.state.pendingCharacters.has(sentCharacter)) return;
-    const conversationId = CM.conversationIdFor(sentCharacter);
-    const browserStarted = performance.now();
-    CM.state.pendingCharacters.add(sentCharacter);
-    CM.renderCharacterList();
-    CM.updateHeader();
-    if (CM.dom.chat.querySelector(".empty")) CM.dom.chat.innerHTML = "";
-    CM.addMessage({role:"user", content:caption, image:{url:currentDraft.data_url,label:currentDraft.filename,source:currentDraft.source || "LOCAL_PREVIEW"}, event_time:new Date().toISOString(), has_trace:false});
-    CM.appendTypingForCurrent();
-    CM.scrollToBottom();
+    if (!currentDraft) return;
     try {
-      const result = await CM.api("/v1/chat", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, message:caption, image:{filename:currentDraft.filename,data_url:currentDraft.data_url}})});
-      const browserTotal = performance.now() - browserStarted;
-      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
-        CM.dom.chat.querySelector(".typing-row")?.remove();
-        await CM.revealActionsWithRhythm(result, sentCharacter, browserTotal);
-      }
+      await CM.sendDirectPayload({
+        message:caption,
+        image:{filename:currentDraft.filename, data_url:currentDraft.data_url},
+      });
     } catch (error) {
-      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
-        CM.dom.chat.querySelector(".typing-row")?.remove();
-        const box = document.createElement("div");
-        box.className = "error";
-        box.textContent = `发送图片失败：${error.message}`;
-        CM.dom.chat.appendChild(box);
-      }
-    } finally {
-      CM.state.pendingCharacters.delete(sentCharacter);
-      CM.renderCharacterList();
-      CM.updateHeader();
-      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) await CM.loadDirectHistory().catch(console.warn);
+      const box = document.createElement("div");
+      box.className = "error";
+      box.textContent = `发送图片失败：${error.message}`;
+      CM.dom.chat.appendChild(box);
     }
   }
 
@@ -111,11 +86,7 @@
   panel.className = "image-panel hidden";
   document.querySelector(".composer-wrap")?.appendChild(panel);
 
-  trigger.addEventListener("click", event => {
-    event.stopPropagation();
-    CM.features.stickers?.close?.();
-    inputEl.click();
-  });
+  trigger.addEventListener("click", event => { event.stopPropagation(); CM.features.stickers?.close?.(); inputEl.click(); });
   inputEl.addEventListener("change", () => openDraft(inputEl.files?.[0], {source:"FILE_PICKER"}));
   CM.dom.input.addEventListener("paste", event => {
     const items = [...(event.clipboardData?.items || [])];

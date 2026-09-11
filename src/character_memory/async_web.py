@@ -27,7 +27,6 @@ async def _stream_hub_events(
     channel_key: str,
     *,
     after_id: int = 0,
-    is_disconnected=None,
     poll_seconds: float = 0.1,
     heartbeat_seconds: float = 15.0,
 ):
@@ -40,9 +39,10 @@ async def _stream_hub_events(
     Ctrl+C waited indefinitely for the active SSE request to finish.
 
     This loop only performs short, lock-protected snapshots and then awaits an
-    asyncio sleep. Cancellation therefore propagates immediately when Uvicorn
-    closes active HTTP connections. Durable chat state is still stored in
-    SQLite; this stream remains only a low-latency notification channel.
+    asyncio sleep. Starlette remains the single owner of ASGI disconnect
+    handling, while cancellation can now propagate immediately into this async
+    iterator. Durable chat state is still stored in SQLite; this stream remains
+    only a low-latency notification channel.
     """
     channel = hub._channel(channel_key)
     cursor = max(0, int(after_id or 0))
@@ -50,9 +50,6 @@ async def _stream_hub_events(
     yield "retry: 1500\n\n"
 
     while not hub._closed.is_set():
-        if is_disconnected is not None and await is_disconnected():
-            return
-
         with channel.condition:
             batch = [item for item in channel.events if item[0] > cursor]
 
@@ -76,7 +73,7 @@ async def _stream_hub_events(
 
 def attach_async_routes(app):
     """Attach non-blocking message acceptance and SSE delivery routes."""
-    from fastapi import Header, HTTPException, Request
+    from fastapi import Header, HTTPException
     from fastapi.responses import StreamingResponse
 
     access = getattr(app.state, "character_memory", None)
@@ -278,7 +275,6 @@ def attach_async_routes(app):
 
     @app.get("/v1/events/stream")
     async def event_stream(
-        request: Request,
         scope: str,
         conversation_id: str,
         character_id: str | None = None,
@@ -313,12 +309,7 @@ def attach_async_routes(app):
                 last_id = 0
 
         return StreamingResponse(
-            _stream_hub_events(
-                hub,
-                channel,
-                after_id=last_id,
-                is_disconnected=request.is_disconnected,
-            ),
+            _stream_hub_events(hub, channel, after_id=last_id),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

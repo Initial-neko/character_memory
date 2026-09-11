@@ -82,8 +82,6 @@ class SQLiteStore:
         return True
 
     def _backfill_epoch_locked(self, table: str, time_column: str, epoch_column: str) -> tuple[int, int]:
-        # All identifiers come from the hard-coded migration spec below. Quote
-        # them because names such as `current_time` collide with SQLite keywords.
         rows = self.conn.execute(
             f'SELECT rowid AS _rowid,"{time_column}" AS _time_value '
             f'FROM "{table}" WHERE "{epoch_column}" IS NULL'
@@ -192,7 +190,6 @@ class SQLiteStore:
                     content TEXT NOT NULL,
                     metadata_json TEXT NOT NULL DEFAULT '{}'
                 );
-
                 CREATE TABLE IF NOT EXISTS memories(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     character_id TEXT NOT NULL,
@@ -205,14 +202,12 @@ class SQLiteStore:
                     metadata_json TEXT NOT NULL DEFAULT '{}',
                     embedding BLOB
                 );
-
                 CREATE TABLE IF NOT EXISTS mental_states(
                     character_id TEXT PRIMARY KEY,
                     content TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     source_event_id INTEGER
                 );
-
                 CREATE TABLE IF NOT EXISTS mental_state_history(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     character_id TEXT NOT NULL,
@@ -221,7 +216,6 @@ class SQLiteStore:
                     updated_at_epoch INTEGER NOT NULL,
                     source_event_id INTEGER
                 );
-
                 CREATE TABLE IF NOT EXISTS intents(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     character_id TEXT NOT NULL,
@@ -234,7 +228,6 @@ class SQLiteStore:
                     reason TEXT NOT NULL DEFAULT '',
                     source_event_id INTEGER
                 );
-
                 CREATE TABLE IF NOT EXISTS media_assets(
                     id TEXT PRIMARY KEY,
                     character_id TEXT NOT NULL,
@@ -245,12 +238,10 @@ class SQLiteStore:
                     created_at TEXT NOT NULL,
                     size_bytes INTEGER NOT NULL
                 );
-
                 CREATE TABLE IF NOT EXISTS world_states(
                     character_id TEXT PRIMARY KEY,
                     current_time TEXT NOT NULL
                 );
-
                 CREATE TABLE IF NOT EXISTS runtime_traces(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     character_id TEXT NOT NULL,
@@ -261,29 +252,13 @@ class SQLiteStore:
                 """
             )
             self._ensure_migration_table_locked()
-
-            intent_added = self._run_migration_locked(
-                "core/001-intent-source-event",
-                self._migrate_intent_source_event_locked,
-            )
-            time_result = self._run_migration_locked(
-                "core/002-epoch-time-keys",
-                self._migrate_time_keys_locked,
-            )
-            mental_rows = self._run_migration_locked(
-                "core/003-mental-state-history",
-                self._seed_mental_state_history_locked,
-            )
-            migrated = self._run_migration_locked(
-                "core/004-runtime-trace-extraction",
-                self._migrate_legacy_action_traces_locked,
-            )
-            self._run_migration_locked(
-                "core/005-indexes",
-                self._create_core_indexes_locked,
-            )
+            intent_added = self._run_migration_locked("core/001-intent-source-event", self._migrate_intent_source_event_locked)
+            time_result = self._run_migration_locked("core/002-epoch-time-keys", self._migrate_time_keys_locked)
+            mental_rows = self._run_migration_locked("core/003-mental-state-history", self._seed_mental_state_history_locked)
+            migrated = self._run_migration_locked("core/004-runtime-trace-extraction", self._migrate_legacy_action_traces_locked)
+            self._run_migration_locked("core/005-indexes", self._create_core_indexes_locked)
+            compat_migrated = self._migrate_legacy_action_traces_locked()
             self.conn.commit()
-
             if intent_added:
                 logger.info("storage.intent_migration added=source_event_id")
             if time_result is not None:
@@ -296,6 +271,8 @@ class SQLiteStore:
                 logger.info("storage.mental_state_migration seeded_history=%d", mental_rows)
             if migrated:
                 logger.info("storage.trace_migration migrated=%d", migrated)
+            if compat_migrated:
+                logger.info("storage.trace_compat_migration migrated=%d", compat_migrated)
 
     def _migrate_legacy_action_traces_locked(self) -> int:
         rows = self.conn.execute(
@@ -316,8 +293,7 @@ class SQLiteStore:
             if source_event_id is None:
                 continue
             self.conn.execute(
-                "INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) "
-                "VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO NOTHING",
+                "INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO NOTHING",
                 (row["character_id"], int(source_event_id), row["event_time"], row["event_time_epoch"], json.dumps(trace, ensure_ascii=False)),
             )
             self.conn.execute(
@@ -364,16 +340,7 @@ class SQLiteStore:
 
     @staticmethod
     def _media_from_row(r) -> MediaAsset:
-        return MediaAsset(
-            id=r["id"],
-            character_id=r["character_id"],
-            source=r["source"],
-            original_name=r["original_name"],
-            mime_type=r["mime_type"],
-            storage_name=r["storage_name"],
-            created_at=parse_datetime(r["created_at"]),
-            size_bytes=r["size_bytes"],
-        )
+        return MediaAsset(id=r["id"], character_id=r["character_id"], source=r["source"], original_name=r["original_name"], mime_type=r["mime_type"], storage_name=r["storage_name"], created_at=parse_datetime(r["created_at"]), size_bytes=r["size_bytes"])
 
     def append_event(self, event: Event) -> Event:
         with self._lock:
@@ -386,10 +353,7 @@ class SQLiteStore:
 
     def add_media_asset(self, asset: MediaAsset) -> MediaAsset:
         with self._lock:
-            self.conn.execute(
-                "INSERT INTO media_assets(id,character_id,source,original_name,mime_type,storage_name,created_at,created_at_epoch,size_bytes) VALUES(?,?,?,?,?,?,?,?,?)",
-                (asset.id, asset.character_id, asset.source, asset.original_name, asset.mime_type, asset.storage_name, asset.created_at.isoformat(), epoch_us(asset.created_at), asset.size_bytes),
-            )
+            self.conn.execute("INSERT INTO media_assets(id,character_id,source,original_name,mime_type,storage_name,created_at,created_at_epoch,size_bytes) VALUES(?,?,?,?,?,?,?,?,?)", (asset.id, asset.character_id, asset.source, asset.original_name, asset.mime_type, asset.storage_name, asset.created_at.isoformat(), epoch_us(asset.created_at), asset.size_bytes))
             self._maybe_commit()
             return asset
 
@@ -399,11 +363,7 @@ class SQLiteStore:
             if row is None:
                 return None
             if row["created_at_epoch"] is None:
-                logger.warning(
-                    "storage.media skipped_invalid_time media_id=%s value=%r",
-                    media_id,
-                    row["created_at"],
-                )
+                logger.warning("storage.media skipped_invalid_time media_id=%s value=%r", media_id, row["created_at"])
                 return None
             return self._media_from_row(row)
 
@@ -457,19 +417,12 @@ class SQLiteStore:
 
     def list_chat_events(self, character_id: str, limit: int = 160) -> list[Event]:
         with self._lock:
-            rows = self.conn.execute(
-                "SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL AND event_type IN (?,?) ORDER BY event_time_epoch DESC,id DESC LIMIT ?",
-                (character_id, EventType.USER_MESSAGE.value, EventType.CHARACTER_MESSAGE.value, limit),
-            ).fetchall()
+            rows = self.conn.execute("SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL AND event_type IN (?,?) ORDER BY event_time_epoch DESC,id DESC LIMIT ?", (character_id, EventType.USER_MESSAGE.value, EventType.CHARACTER_MESSAGE.value, limit)).fetchall()
             return [self._event_from_row(r) for r in reversed(rows)]
 
     def add_runtime_trace(self, character_id: str, source_event_id: int, created_at: datetime, trace: dict) -> int:
         with self._lock:
-            self.conn.execute(
-                "INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) VALUES(?,?,?,?,?) "
-                "ON CONFLICT(source_event_id) DO UPDATE SET character_id=excluded.character_id,created_at=excluded.created_at,created_at_epoch=excluded.created_at_epoch,trace_json=excluded.trace_json",
-                (character_id, source_event_id, created_at.isoformat(), epoch_us(created_at), json.dumps(trace, ensure_ascii=False)),
-            )
+            self.conn.execute("INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO UPDATE SET character_id=excluded.character_id,created_at=excluded.created_at,created_at_epoch=excluded.created_at_epoch,trace_json=excluded.trace_json", (character_id, source_event_id, created_at.isoformat(), epoch_us(created_at), json.dumps(trace, ensure_ascii=False)))
             row = self.conn.execute("SELECT id FROM runtime_traces WHERE source_event_id=?", (source_event_id,)).fetchone()
             self._maybe_commit()
             return int(row["id"])
@@ -489,33 +442,19 @@ class SQLiteStore:
             if at is None:
                 row = self.conn.execute("SELECT content FROM mental_states WHERE character_id=?", (character_id,)).fetchone()
             else:
-                row = self.conn.execute(
-                    "SELECT content FROM mental_state_history WHERE character_id=? AND updated_at_epoch<=? ORDER BY updated_at_epoch DESC,id DESC LIMIT 1",
-                    (character_id, epoch_us(at)),
-                ).fetchone()
+                row = self.conn.execute("SELECT content FROM mental_state_history WHERE character_id=? AND updated_at_epoch<=? ORDER BY updated_at_epoch DESC,id DESC LIMIT 1", (character_id, epoch_us(at))).fetchone()
             return row["content"] if row else ""
 
     def set_mental_state(self, character_id: str, content: str, updated_at, source_event_id=None):
         with self._lock:
             stamp = epoch_us(updated_at)
-            self.conn.execute(
-                "INSERT INTO mental_state_history(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?)",
-                (character_id, content, updated_at.isoformat(), stamp, source_event_id),
-            )
-            self.conn.execute(
-                "INSERT INTO mental_states(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?) "
-                "ON CONFLICT(character_id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at,updated_at_epoch=excluded.updated_at_epoch,source_event_id=excluded.source_event_id "
-                "WHERE mental_states.updated_at_epoch IS NULL OR excluded.updated_at_epoch>=mental_states.updated_at_epoch",
-                (character_id, content, updated_at.isoformat(), stamp, source_event_id),
-            )
+            self.conn.execute("INSERT INTO mental_state_history(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?)", (character_id, content, updated_at.isoformat(), stamp, source_event_id))
+            self.conn.execute("INSERT INTO mental_states(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?) ON CONFLICT(character_id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at,updated_at_epoch=excluded.updated_at_epoch,source_event_id=excluded.source_event_id WHERE mental_states.updated_at_epoch IS NULL OR excluded.updated_at_epoch>=mental_states.updated_at_epoch", (character_id, content, updated_at.isoformat(), stamp, source_event_id))
             self._maybe_commit()
 
     def add_intent(self, character_id, content, preferred_action, created_at, earliest_at, expires_at, reason="", *, source_event_id=None):
         with self._lock:
-            cur = self.conn.execute(
-                "INSERT INTO intents(character_id,content,preferred_action,created_at,created_at_epoch,earliest_at,earliest_at_epoch,expires_at,expires_at_epoch,status,reason,source_event_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (character_id, content, preferred_action, created_at.isoformat(), epoch_us(created_at), earliest_at.isoformat(), epoch_us(earliest_at), expires_at.isoformat(), epoch_us(expires_at), "PENDING", reason, source_event_id),
-            )
+            cur = self.conn.execute("INSERT INTO intents(character_id,content,preferred_action,created_at,created_at_epoch,earliest_at,earliest_at_epoch,expires_at,expires_at_epoch,status,reason,source_event_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (character_id, content, preferred_action, created_at.isoformat(), epoch_us(created_at), earliest_at.isoformat(), epoch_us(earliest_at), expires_at.isoformat(), epoch_us(expires_at), "PENDING", reason, source_event_id))
             self._maybe_commit()
             return cur.lastrowid
 
@@ -527,10 +466,7 @@ class SQLiteStore:
     def due_intents(self, character_id, now):
         with self._lock:
             stamp = epoch_us(now)
-            return self.conn.execute(
-                "SELECT * FROM intents WHERE character_id=? AND status='PENDING' AND earliest_at_epoch<=? AND expires_at_epoch>=? ORDER BY earliest_at_epoch,id",
-                (character_id, stamp, stamp),
-            ).fetchall()
+            return self.conn.execute("SELECT * FROM intents WHERE character_id=? AND status='PENDING' AND earliest_at_epoch<=? AND expires_at_epoch>=? ORDER BY earliest_at_epoch,id", (character_id, stamp, stamp)).fetchall()
 
     def list_intents(self, character_id: str, limit: int = 30):
         with self._lock:
@@ -543,18 +479,11 @@ class SQLiteStore:
 
     def get_world_time(self, character_id: str) -> datetime | None:
         with self._lock:
-            row = self.conn.execute(
-                'SELECT "current_time",current_time_epoch FROM world_states WHERE character_id=?',
-                (character_id,),
-            ).fetchone()
+            row = self.conn.execute('SELECT "current_time",current_time_epoch FROM world_states WHERE character_id=?', (character_id,)).fetchone()
             if row is None:
                 return None
             if row["current_time_epoch"] is None:
-                logger.warning(
-                    "storage.world_time ignored_invalid character=%s value=%r",
-                    character_id,
-                    row["current_time"],
-                )
+                logger.warning("storage.world_time ignored_invalid character=%s value=%r", character_id, row["current_time"])
                 return None
             return parse_datetime(row["current_time"])
 
@@ -562,18 +491,9 @@ class SQLiteStore:
         with self._lock:
             stamp = epoch_us(current_time)
             if allow_rollback:
-                self.conn.execute(
-                    "INSERT INTO world_states(character_id,current_time,current_time_epoch) VALUES(?,?,?) "
-                    "ON CONFLICT(character_id) DO UPDATE SET current_time=excluded.current_time,current_time_epoch=excluded.current_time_epoch",
-                    (character_id, current_time.isoformat(), stamp),
-                )
+                self.conn.execute("INSERT INTO world_states(character_id,current_time,current_time_epoch) VALUES(?,?,?) ON CONFLICT(character_id) DO UPDATE SET current_time=excluded.current_time,current_time_epoch=excluded.current_time_epoch", (character_id, current_time.isoformat(), stamp))
             else:
-                self.conn.execute(
-                    "INSERT INTO world_states(character_id,current_time,current_time_epoch) VALUES(?,?,?) "
-                    "ON CONFLICT(character_id) DO UPDATE SET current_time=excluded.current_time,current_time_epoch=excluded.current_time_epoch "
-                    "WHERE world_states.current_time_epoch IS NULL OR excluded.current_time_epoch>=world_states.current_time_epoch",
-                    (character_id, current_time.isoformat(), stamp),
-                )
+                self.conn.execute("INSERT INTO world_states(character_id,current_time,current_time_epoch) VALUES(?,?,?) ON CONFLICT(character_id) DO UPDATE SET current_time=excluded.current_time,current_time_epoch=excluded.current_time_epoch WHERE world_states.current_time_epoch IS NULL OR excluded.current_time_epoch>=world_states.current_time_epoch", (character_id, current_time.isoformat(), stamp))
             self._maybe_commit()
 
     def close(self):

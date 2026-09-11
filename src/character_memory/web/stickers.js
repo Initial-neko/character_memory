@@ -9,6 +9,7 @@
   let importFile = null;
   let importNotice = "";
   let trigger = null;
+  let draftSticker = null;
 
   const stickerAsset = id => `/v1/stickers/${encodeURIComponent(id)}/asset`;
 
@@ -27,6 +28,7 @@
 
   function close() {
     panel?.classList.add("hidden");
+    draftSticker = null;
   }
 
   function setDisabled(disabled) {
@@ -53,6 +55,7 @@
 
   function render(stickers) {
     if (!panel) return;
+    draftSticker = null;
     if (!stickers.length) {
       panel.innerHTML = `${toolbar()}<div class="sticker-loading">还没有可用表情包。</div>`;
       return;
@@ -77,8 +80,20 @@
     catch (error) { panel.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
   }
 
+  function showStickerDraft(sticker) {
+    if (!panel || !sticker) return;
+    draftSticker = sticker;
+    panel.classList.remove("hidden");
+    panel.innerHTML = `<div class="image-draft-preview"><img src="${CM.escapeHtml(sticker.url || stickerAsset(sticker.id))}" alt="${CM.escapeHtml(sticker.label || "表情包")}"></div>
+      <div class="image-draft-meta">${CM.escapeHtml(sticker.label || "表情包")} · ${CM.escapeHtml(sticker.pack_name || "表情包")}</div>
+      <textarea id="stickerCaption" rows="2" maxlength="12000" placeholder="可以补一句话，也可以只发表情包"></textarea>
+      <div class="image-draft-actions"><button type="button" data-sticker-draft-cancel>返回</button><button class="image-send" type="button" data-sticker-send>发送表情包</button></div>`;
+    document.getElementById("stickerCaption")?.focus();
+  }
+
   function showImportDialog(file) {
     importFile = file;
+    draftSticker = null;
     panel.classList.remove("hidden");
     panel.innerHTML = `<div class="sticker-import-card">
       <div class="sticker-import-title">导入全局表情包</div>
@@ -125,8 +140,9 @@
     }
   }
 
-  async function sendDirect(sticker) {
+  async function sendDirect(sticker, caption = "") {
     const sentCharacter = CM.state.characterId;
+    const text = String(caption || "").trim();
     if (!sticker || CM.state.pendingCharacters.has(sentCharacter)) return;
     close();
     const conversationId = CM.conversationIdFor(sentCharacter);
@@ -135,11 +151,11 @@
     CM.renderCharacterList();
     CM.updateHeader();
     if (CM.dom.chat.querySelector(".empty")) CM.dom.chat.innerHTML = "";
-    CM.addMessage({role:"user", content:"", sticker, sticker_id:sticker.id, action:"STICKER", event_time:new Date().toISOString(), has_trace:false});
+    CM.addMessage({role:"user", content:text, sticker, sticker_id:sticker.id, action:text ? null : "STICKER", event_time:new Date().toISOString(), has_trace:false});
     CM.appendTypingForCurrent();
     CM.scrollToBottom();
     try {
-      const result = await CM.api("/v1/chat", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, message:"", sticker_id:sticker.id})});
+      const result = await CM.api("/v1/chat", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, message:text, sticker_id:sticker.id})});
       const browserTotal = performance.now() - browserStarted;
       if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
         CM.dom.chat.querySelector(".typing-row")?.remove();
@@ -161,9 +177,16 @@
     }
   }
 
-  async function send(sticker) {
-    if (CM.isGroupConversation()) return CM.features.groups?.sendSticker?.(sticker);
-    return sendDirect(sticker);
+  async function send(sticker, caption = "") {
+    if (CM.isGroupConversation()) return CM.features.groups?.sendSticker?.(sticker, caption);
+    return sendDirect(sticker, caption);
+  }
+
+  async function sendCurrentDraft() {
+    const sticker = draftSticker;
+    if (!sticker) return;
+    const caption = document.getElementById("stickerCaption")?.value.trim() || "";
+    return send(sticker, caption);
   }
 
   trigger = document.createElement("button");
@@ -195,15 +218,23 @@
     if (event.target.closest("[data-sticker-import-open]")) { importFile = null; importInput.click(); return; }
     if (event.target.closest("[data-sticker-import-cancel]")) { importFile = null; await open(); return; }
     if (event.target.closest("[data-sticker-import-confirm]")) { await importStickerFile(); return; }
+    if (event.target.closest("[data-sticker-draft-cancel]")) { await open(); return; }
+    if (event.target.closest("[data-sticker-send]")) { await sendCurrentDraft(); return; }
     const packButton = event.target.closest("[data-sticker-pack]");
     if (packButton) { selectedPackId = packButton.dataset.stickerPack; render(await load()); return; }
     const button = event.target.closest("[data-sticker-id]");
     if (!button) return;
     const sticker = (await load()).find(item => item.id === button.dataset.stickerId);
-    await send(sticker);
+    showStickerDraft(sticker);
+  });
+  panel.addEventListener("keydown", event => {
+    if (!event.target.closest("#stickerCaption")) return;
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    sendCurrentDraft().catch(console.error);
   });
   document.addEventListener("click", event => {
-    if (!event.target.closest(".sticker-panel") && !event.target.closest(".sticker-trigger")) close();
+    if (!event.target.closest(".sticker-panel") && !event.target.closest(".sticker-trigger") && !panel?.contains(document.activeElement)) close();
   });
   CM.on("conversationChanged", () => close());
 

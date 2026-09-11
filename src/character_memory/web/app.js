@@ -101,10 +101,10 @@
   CM.deliveryDelay = action => {
     const type = String(action?.type || "MESSAGE");
     const text = String(action?.message || "");
-    if (["EMOJI", "STICKER", "IMAGE"].includes(type)) return 180 + Math.floor(Math.random() * 260);
-    const base = 300 + Math.min(text.length * 14, 700);
-    const jitter = Math.floor(Math.random() * 260) - 80;
-    return Math.max(260, Math.min(base + jitter, 1200));
+    if (["EMOJI", "STICKER", "IMAGE"].includes(type)) return 120 + Math.floor(Math.random() * 160);
+    const base = 180 + Math.min(text.length * 8, 320);
+    const jitter = Math.floor(Math.random() * 120) - 30;
+    return Math.max(140, Math.min(base + jitter, 600));
   };
 
   CM.addMessage = message => {
@@ -307,6 +307,7 @@
     if (!message || CM.state.pendingCharacters.has(sentCharacter)) return;
     const conversationId = CM.conversationIdFor(sentCharacter);
     const browserStarted = performance.now();
+    let succeeded = false;
     CM.state.pendingCharacters.add(sentCharacter);
     CM.renderCharacterList();
     CM.updateHeader();
@@ -318,6 +319,7 @@
     CM.dom.input.style.height = "auto";
     try {
       const result = await CM.api("/v1/chat", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, message})});
+      succeeded = true;
       const browserTotal = performance.now() - browserStarted;
       console.info("[chat timings]", sentCharacter, {...(result.timings || {}), browser_total_ms:Number(browserTotal.toFixed(1))});
       if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
@@ -338,7 +340,12 @@
       CM.renderCharacterList();
       CM.updateHeader();
       if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) {
-        await CM.loadDirectHistory().catch(error => console.warn("history refresh failed", error));
+        // Success already rendered the optimistic user turn plus authoritative
+        // actions returned by POST /v1/chat. Avoid an immediate 180-message GET
+        // and full DOM rebuild; reconcile only after failures.
+        if (!succeeded) {
+          await CM.loadDirectHistory().catch(error => console.warn("history refresh failed", error));
+        }
         CM.updateComposerState();
         CM.scrollToBottom();
       }
@@ -411,7 +418,6 @@
     d.input.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); d.composer.requestSubmit(); }
     });
-    // Single submit owner. DIRECT/GROUP routing happens here and nowhere else.
     d.composer.addEventListener("submit", event => {
       event.preventDefault();
       CM.submitCurrentText().catch(error => console.error("submit failed", error));

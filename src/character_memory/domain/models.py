@@ -114,6 +114,17 @@ class MemoryCandidate(BaseModel):
     memory_type: str = "EPISODIC"
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_provider_shape(cls, value):
+        # Vision/text providers occasionally compress a simple memory object to
+        # a bare string. Accept that narrow, lossless drift at the schema
+        # boundary so one malformed optional candidate cannot fail the entire
+        # reaction. Complex non-object shapes remain invalid.
+        if isinstance(value, str):
+            return {"content": value}
+        return value
+
 
 class IntentCandidate(BaseModel):
     content: str

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
+import json
 import logging
+import time
 
 from character_memory.api import ChatRequest
 from character_memory.application.async_conversation import (
@@ -19,9 +22,61 @@ from character_memory.group_web import GroupChatRequest
 logger = logging.getLogger("character_memory.async_web")
 
 
+async def _stream_hub_events(
+    hub: ConversationEventHub,
+    channel_key: str,
+    *,
+    after_id: int = 0,
+    is_disconnected=None,
+    poll_seconds: float = 0.1,
+    heartbeat_seconds: float = 15.0,
+):
+    """Yield SSE frames without blocking an AnyIO worker thread.
+
+    The previous implementation delegated a synchronous generator to
+    ``StreamingResponse``. That generator waited on ``threading.Condition`` for
+    up to 15 seconds. During Uvicorn shutdown the response task could be
+    cancelled, but the worker thread running ``next()`` remained blocked, so
+    Ctrl+C waited indefinitely for the active SSE request to finish.
+
+    This loop only performs short, lock-protected snapshots and then awaits an
+    asyncio sleep. Cancellation therefore propagates immediately when Uvicorn
+    closes active HTTP connections. Durable chat state is still stored in
+    SQLite; this stream remains only a low-latency notification channel.
+    """
+    channel = hub._channel(channel_key)
+    cursor = max(0, int(after_id or 0))
+    next_heartbeat = time.monotonic() + max(0.1, heartbeat_seconds)
+    yield "retry: 1500\n\n"
+
+    while not hub._closed.is_set():
+        if is_disconnected is not None and await is_disconnected():
+            return
+
+        with channel.condition:
+            batch = [item for item in channel.events if item[0] > cursor]
+
+        if batch:
+            for seq, event_type, data in batch:
+                cursor = seq
+                payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+                yield f"id: {seq}\nevent: {event_type}\ndata: {payload}\n\n"
+            next_heartbeat = time.monotonic() + max(0.1, heartbeat_seconds)
+            # Give cancellation a scheduling point even during an event burst.
+            await asyncio.sleep(0)
+            continue
+
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            yield ": ping\n\n"
+            next_heartbeat = now + max(0.1, heartbeat_seconds)
+
+        await asyncio.sleep(max(0.01, poll_seconds))
+
+
 def attach_async_routes(app):
     """Attach non-blocking message acceptance and SSE delivery routes."""
-    from fastapi import Header, HTTPException
+    from fastapi import Header, HTTPException, Request
     from fastapi.responses import StreamingResponse
 
     access = getattr(app.state, "character_memory", None)
@@ -222,7 +277,8 @@ def attach_async_routes(app):
         }
 
     @app.get("/v1/events/stream")
-    def event_stream(
+    async def event_stream(
+        request: Request,
         scope: str,
         conversation_id: str,
         character_id: str | None = None,
@@ -255,13 +311,18 @@ def attach_async_routes(app):
                 last_id = int(raw_last_id or 0)
             except ValueError:
                 last_id = 0
+
         return StreamingResponse(
-            hub.stream(channel, after_id=last_id),
+            _stream_hub_events(
+                hub,
+                channel,
+                after_id=last_id,
+                is_disconnected=request.is_disconnected,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
-                "Connection": "keep-alive",
             },
         )
 

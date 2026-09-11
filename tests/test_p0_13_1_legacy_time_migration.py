@@ -48,6 +48,10 @@ def _create_legacy_db(path):
         'INSERT INTO world_states(character_id,"current_time") VALUES(?,?)',
         ("rin", "10:49:43"),
     )
+    conn.execute(
+        'INSERT INTO world_states(character_id,"current_time") VALUES(?,?)',
+        ("valid", "2026-09-11T10:49:43+08:00"),
+    )
     conn.commit()
     conn.close()
 
@@ -82,6 +86,14 @@ def test_invalid_legacy_time_only_values_are_preserved_but_quarantined(tmp_path,
             ).fetchone()
             assert world["current_time"] == "10:49:43"
             assert world["current_time_epoch"] is None
+
+            valid_world = store.conn.execute(
+                'SELECT "current_time",current_time_epoch FROM world_states WHERE character_id=?',
+                ("valid",),
+            ).fetchone()
+            assert valid_world["current_time"] == "2026-09-11T10:49:43+08:00"
+            assert valid_world["current_time_epoch"] is not None
+            assert store.get_world_time("valid") == datetime.fromisoformat("2026-09-11T10:49:43+08:00")
 
             history_count = store.conn.execute(
                 "SELECT COUNT(*) AS n FROM mental_state_history WHERE character_id='rin'"

@@ -77,6 +77,14 @@ class GroupRepository:
 
     def _init_schema(self) -> None:
         with self.store._lock:
+            self.store._ensure_migration_table_locked()
+            ready = self.store.conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE name=?",
+                ("group/002-indexes",),
+            ).fetchone()
+            if ready is not None:
+                return
+
             self.store.conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS conversations(

@@ -27,6 +27,17 @@ class CreateGroupRequest(BaseModel):
         return self
 
 
+class UpdateGroupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+    @model_validator(mode="after")
+    def clean_name(self):
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("group name must not be empty")
+        return self
+
+
 class GroupImageRequest(BaseModel):
     filename: str = Field(default="image", min_length=1, max_length=180)
     data_url: str = Field(min_length=16)
@@ -209,6 +220,19 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         logger.info("group.created id=%s members=%s", group.id, group.member_ids)
         return {"group": group_payload(group, profiles=known)}
+
+    @app.patch("/v1/groups/{conversation_id}")
+    def update_group(conversation_id: str, req: UpdateGroupRequest):
+        now = datetime.now().astimezone()
+        try:
+            with turn_lock_for(conversation_id):
+                group = repo().rename_group(conversation_id, req.name, now)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if group is None:
+            raise HTTPException(status_code=404, detail="group not found")
+        logger.info("group.renamed id=%s name=%s", group.id, group.name)
+        return {"group": group_payload(group)}
 
     @app.get("/v1/groups/{conversation_id}/history")
     def group_history(conversation_id: str, limit: int = 50, before_id: int | None = None):

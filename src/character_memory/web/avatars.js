@@ -97,7 +97,7 @@
       </section>
       <div class="avatar-planning-note"><strong>同一个视觉身份，两种取图方式</strong><span>搜索会把 LLM 规划后的短关键词发给搜索引擎；AI 生成会让 LLM 先编译角色视觉提示词，再交给所选图像 Provider。普通聊天不会暴露裸 ImageGen 控制台。</span></div>
       <label class="avatar-search-field"><span>补充偏好（可选）</span><input type="text" data-avatar-hint maxlength="600" value="" placeholder="例如：更温暖、自然近景、保持经典造型"></label>
-      <div class="avatar-manager-actions"><button class="primary" type="button" data-avatar-search>搜索候选</button></div>
+      <div class="avatar-manager-actions"><button class="primary" type="button" data-avatar-search>让角色决定并搜索</button></div>
       <div class="avatar-generation-controls">
         <label><span>AI 生成来源</span><select data-avatar-provider>${providerOptions()}</select></label>
         <button type="button" data-avatar-generate ${configured ? "" : "disabled"}>生成一个候选头像</button>
@@ -149,7 +149,7 @@
     } catch (error) {
       if (box) box.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
     } finally {
-      if (button) { button.disabled = false; button.textContent = "搜索候选"; }
+      if (button) { button.disabled = false; button.textContent = "让角色决定并搜索"; }
     }
   }
 

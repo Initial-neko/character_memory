@@ -38,6 +38,7 @@ def test_windows_bootstrap_prefers_package_native_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(bootstrap.os, "add_dll_directory", lambda value: calls.append(value) or Handle(), raising=False)
     monkeypatch.setenv("PATH", "ORIGINAL")
     bootstrap._DLL_DIRECTORY_HANDLES.clear()
+    bootstrap._PRELOADED_DLL_HANDLES.clear()
 
     added = bootstrap.prepare_windows_native_runtime()
 
@@ -46,3 +47,38 @@ def test_windows_bootstrap_prefers_package_native_dirs(monkeypatch, tmp_path):
     assert calls == added
     assert len(bootstrap._DLL_DIRECTORY_HANDLES) == len(added)
     assert bootstrap.os.environ["PATH"].endswith("ORIGINAL")
+
+
+def test_windows_bootstrap_preloads_core_wheel_ort_from_scripts(monkeypatch, tmp_path):
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    python_exe = scripts / "python.exe"
+    python_exe.write_bytes(b"")
+    ort_dll = scripts / "onnxruntime.dll"
+    ort_dll.write_bytes(b"fake")
+
+    added_dirs = []
+    loaded = []
+
+    class Handle:
+        pass
+
+    def fake_loader(path, **kwargs):
+        loaded.append((str(path), kwargs))
+        return Handle()
+
+    monkeypatch.setattr(bootstrap.sys, "platform", "win32")
+    monkeypatch.setattr(bootstrap.sys, "executable", str(python_exe))
+    monkeypatch.setattr(bootstrap.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(bootstrap.importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(bootstrap.os, "add_dll_directory", lambda value: added_dirs.append(value) or Handle(), raising=False)
+    monkeypatch.setattr(bootstrap.ctypes, "WinDLL", fake_loader, raising=False)
+    bootstrap._DLL_DIRECTORY_HANDLES.clear()
+    bootstrap._PRELOADED_DLL_HANDLES.clear()
+
+    added = bootstrap.prepare_windows_native_runtime()
+
+    assert str(scripts.resolve()) in added
+    assert loaded == [(str(ort_dll.resolve()), {"winmode": 0x00001100})]
+    assert bootstrap.bundled_onnxruntime_path() == str(ort_dll.resolve())
+    assert len(bootstrap._PRELOADED_DLL_HANDLES) == 1

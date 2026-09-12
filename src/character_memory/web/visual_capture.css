@@ -1,0 +1,27 @@
+.voice-visual-controls { display: flex; justify-content: center; gap: 7px; flex-wrap: wrap; margin: 0 0 12px; }
+.voice-visual-button { border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 8px 11px; background: rgba(255,255,255,.08); color: #eef1f7; cursor: pointer; font-size: 12px; }
+.voice-visual-button:hover { background: rgba(255,255,255,.14); }
+.voice-visual-button.active { border-color: rgba(103,151,255,.65); background: rgba(94,129,244,.26); color: #fff; }
+.voice-visual-button.stop { color: #ffc8c8; }
+.voice-visual-button.hidden { display: none; }
+.voice-visual-panel { margin: 0 0 14px; overflow: hidden; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; background: #0e1118; }
+.voice-visual-panel.hidden { display: none; }
+.voice-visual-preview { width: 100%; max-height: 150px; display: block; object-fit: contain; background: #080a0f; }
+.voice-visual-status { padding: 7px 9px; font-size: 10px; line-height: 1.35; color: #aeb7c7; text-align: left; }
+.voice-call-dock-visual { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 1px 5px; border-radius: 999px; background: rgba(94,129,244,.22); color: #dce5ff; font-size: 10px; }
+.voice-call-dock-visual.hidden { display: none; }
+
+.visual-dev-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+.visual-dev-stage { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(280px, 1.2fr); gap: 14px; align-items: start; }
+.visual-dev-preview-wrap { overflow: hidden; border: 1px solid #d7dbe3; border-radius: 12px; background: #11151d; }
+.visual-dev-preview { width: 100%; min-height: 220px; max-height: 420px; display: block; object-fit: contain; background: #0b0e14; }
+.visual-dev-status { padding: 8px 10px; font-size: 12px; color: #555f70; background: #f6f7f9; }
+.visual-dev-frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; min-height: 84px; }
+.visual-dev-frame { margin: 0; border: 1px solid #d7dbe3; border-radius: 9px; overflow: hidden; background: #fff; }
+.visual-dev-frame img { width: 100%; aspect-ratio: 4 / 3; display: block; object-fit: cover; background: #111; }
+.visual-dev-frame figcaption { padding: 5px 6px; font-size: 10px; color: #667085; }
+@media (max-width: 760px) {
+  .visual-dev-stage { grid-template-columns: 1fr; }
+  .visual-dev-preview { min-height: 180px; }
+  .voice-visual-preview { max-height: 120px; }
+}

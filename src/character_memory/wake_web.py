@@ -164,13 +164,17 @@ def attach_wake_routes(app):
     def _start_wake_loop():
         nonlocal thread
         if thread is None or not thread.is_alive():
+            stop.clear()
             thread = threading.Thread(target=loop, name="character-memory-wake", daemon=True)
             thread.start()
 
-    @app.on_event("shutdown")
     def _stop_wake_loop():
         stop.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=1.0)
+
+    # attach_wake_routes runs after async routes. Insert at the front so this
+    # producer stops before the SSE hub/scheduler are closed by async shutdown.
+    app.router.on_shutdown.insert(0, _stop_wake_loop)
 
     return app

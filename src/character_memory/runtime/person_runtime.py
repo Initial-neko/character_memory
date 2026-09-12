@@ -10,6 +10,7 @@ import numpy as np
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.context import compile_context
 from character_memory.runtime.sticker_retrieval import StickerRetriever
+from character_memory.visual_runtime import direct_visual_available, generate_direct_visual_action
 
 
 logger = logging.getLogger("character_memory.runtime")
@@ -139,6 +140,7 @@ class PersonRuntime:
         sticker_decisions = []
         image_decisions = []
         sanitized = []
+        generated_seen = False
         for action in reaction.actions:
             if action.type == ActionType.STICKER:
                 if allowed_sticker_ids is not None and action.sticker_id not in allowed_sticker_ids:
@@ -162,6 +164,18 @@ class PersonRuntime:
                     continue
                 sanitized.append(action)
                 image_decisions.append({"image_id": action.image_id, "decision": "ALLOW", "label": image.label})
+                continue
+
+            if action.type == ActionType.GENERATE_IMAGE:
+                if not direct_visual_available():
+                    image_decisions.append({"decision": "DROP_GENERATION_UNAVAILABLE", "purpose": action.image_purpose})
+                    continue
+                if generated_seen:
+                    image_decisions.append({"decision": "DROP_EXTRA_GENERATION", "purpose": action.image_purpose})
+                    continue
+                generated_seen = True
+                sanitized.append(action)
+                image_decisions.append({"decision": "ALLOW_GENERATION", "purpose": action.image_purpose})
                 continue
 
             sanitized.append(action)
@@ -218,6 +232,11 @@ class PersonRuntime:
         prompt_stickers = sticker_retrieval.catalog if sticker_retrieval is not None else None
         allowed_sticker_ids = {match.sticker_id for match in sticker_retrieval.matches} if sticker_retrieval is not None else set()
         timings["sticker_retrieval_ms"] = _ms(stage)
+        allow_generate_image = direct_visual_available() and event.event_type in {
+            EventType.USER_MESSAGE,
+            EventType.TIME_TICK,
+            EventType.PROACTIVE_INTENT,
+        }
         context = compile_context(
             self.persona,
             state_before,
@@ -227,14 +246,16 @@ class PersonRuntime:
             last_chat_event=last_chat_event,
             sticker_catalog=prompt_stickers,
             image_catalog=self.image_catalog,
+            allow_generate_image=allow_generate_image,
         )
         timings["context_ms"] = _ms(stage)
         logger.info(
-            "runtime.context ready chars=%d recent_events=%d sticker_candidates=%d has_state=%s duration_ms=%.1f",
+            "runtime.context ready chars=%d recent_events=%d sticker_candidates=%d has_state=%s generate_image=%s duration_ms=%.1f",
             len(context),
             len(recent),
             len(allowed_sticker_ids),
             bool(state_before),
+            allow_generate_image,
             timings["context_ms"],
         )
 
@@ -399,7 +420,29 @@ class PersonRuntime:
             logger.exception("runtime.derived_transaction failed event_id=%s character=%s", event.id, event.character_id)
             raise
 
-        timings["persist_ms"] = _ms(stage)
+        generation_action = next((action for action in reaction.actions if action.type == ActionType.GENERATE_IMAGE), None)
+        if generation_action is not None:
+            generation_started = time.perf_counter()
+            try:
+                generate_direct_visual_action(
+                    self,
+                    event,
+                    generation_action,
+                    still_current=commit_guard,
+                )
+            except Exception as exc:
+                # Text/state actions have already committed. A provider outage must
+                # not roll back or turn an otherwise valid character reaction into
+                # an HTTP/SSE failure.
+                logger.exception(
+                    "runtime.visual_generation failed event_id=%s character=%s error=%s",
+                    event.id,
+                    event.character_id,
+                    exc,
+                )
+            timings["image_generation_ms"] = _ms(generation_started)
+
+        timings["persist_ms"] = timings.get("persist_ms", _ms(stage))
         timings["runtime_total_ms"] = _ms(started)
         logger.info("runtime.timings event_id=%s %s", event.id, " ".join(f"{key}={value:.1f}ms" for key, value in timings.items()))
         logger.info("runtime.handle done event_id=%s actions=%s total_ms=%.1f", event.id, action_types or ["NO_REPLY"], timings["runtime_total_ms"])

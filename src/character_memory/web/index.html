@@ -44,9 +44,13 @@
       <section class="voice-call-identity">
         <div id="voiceCallAvatar" class="voice-call-avatar">R</div>
         <h2 id="voiceCallName">Rin</h2>
+        <div id="voiceCallContext" class="voice-call-context">单聊语音</div>
         <div id="voiceCallStatus" class="voice-call-status">正在连接…</div>
         <div id="voiceCallMetrics" class="voice-call-metrics"></div>
-        <button id="voiceHangupButton" class="voice-hangup" type="button">结束通话</button>
+        <div class="voice-call-actions">
+          <button id="voiceMinimizeButton" class="voice-minimize" type="button">收起</button>
+          <button id="voiceHangupButton" class="voice-hangup" type="button">结束通话</button>
+        </div>
       </section>
       <section class="voice-call-detail" aria-label="当前语音对话">
         <div class="voice-call-detail-head"><strong>当前对话</strong><span>语音内容会同时写入聊天历史</span></div>
@@ -54,6 +58,14 @@
         <div id="voiceCallTranscript" class="voice-call-transcript">直接说话即可；停顿后会自动发送。</div>
       </section>
     </div>
+  </div>
+
+  <div id="voiceCallDock" class="voice-call-dock hidden" aria-live="polite">
+    <button id="voiceDockExpandButton" class="voice-call-dock-main" type="button" title="展开语音通话">
+      <span id="voiceDockAvatar" class="voice-call-dock-avatar">R</span>
+      <span class="voice-call-dock-copy"><strong id="voiceDockTitle">语音通话</strong><span id="voiceDockStatus">正在听…</span></span>
+    </button>
+    <button id="voiceDockHangupButton" class="voice-call-dock-hangup" type="button" title="结束通话" aria-label="结束通话">×</button>
   </div>
 
   <template id="typingTemplate"><article class="message-row assistant typing-row"><div class="avatar">AI</div><div class="bubble-wrap"><div class="bubble typing"><span></span><span></span><span></span></div><div class="message-meta">正在输入中…</div></div></article></template>

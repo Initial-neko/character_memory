@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import sys
+from types import SimpleNamespace
 import wave
 from pathlib import Path
 
@@ -9,6 +11,8 @@ import pytest
 
 from character_memory.media_runtime import (
     MediaRuntime,
+    SherpaSenseVoiceProvider,
+    SherpaVitsProvider,
     SpeechRecognitionProvider,
     SynthesisResult,
     TextToSpeechProvider,
@@ -107,6 +111,11 @@ def test_runtime_records_bounded_asr_and_tts_metrics():
     assert metrics[0]["inference_ms"] == 12.5
     assert metrics[1]["inference_ms"] == 8.0
 
+    for _ in range(8):
+        runtime.transcribe_wav(make_wav(20))
+        runtime.synthesize("继续")
+    assert len(runtime.recent_metrics(200)) == 10
+
 
 def test_media_http_contract_with_fake_providers():
     pytest.importorskip("fastapi")
@@ -145,6 +154,120 @@ def test_asr_endpoint_rejects_wrong_media_type():
     client = TestClient(create_media_app(MediaRuntime(FakeAsr(), FakeTts())))
     response = client.post("/v1/asr", content=b"not wav", headers={"Content-Type": "audio/webm"})
     assert response.status_code == 415
+
+
+def test_sensevoice_adapter_is_lazy_and_maps_sherpa_contract(monkeypatch, tmp_path):
+    model = tmp_path / "model.int8.onnx"
+    tokens = tmp_path / "tokens.txt"
+    model.write_bytes(b"model")
+    tokens.write_text("tokens", encoding="utf-8")
+    captured = {}
+
+    class FakeStream:
+        def __init__(self):
+            self.result = SimpleNamespace(text="  你好，世界  ")
+
+        def accept_waveform(self, sample_rate, samples):
+            captured["sample_rate"] = sample_rate
+            captured["sample_count"] = len(samples)
+
+    class FakeRecognizer:
+        def create_stream(self):
+            return FakeStream()
+
+        def decode_stream(self, stream):
+            captured["decoded"] = True
+
+    class FakeOfflineRecognizer:
+        @classmethod
+        def from_sense_voice(cls, **kwargs):
+            captured["asr_config"] = kwargs
+            return FakeRecognizer()
+
+    monkeypatch.setitem(sys.modules, "sherpa_onnx", SimpleNamespace(OfflineRecognizer=FakeOfflineRecognizer))
+    provider = SherpaSenseVoiceProvider(
+        model=str(model),
+        tokens=str(tokens),
+        device="cpu",
+        language="zh",
+        num_threads=3,
+    )
+    assert provider.status()["loaded"] is False
+    assert "asr_config" not in captured
+
+    result = provider.transcribe(np.zeros(1600, dtype=np.float32), 16000)
+    assert result.text == "你好，世界"
+    assert result.provider == "sherpa-sensevoice"
+    assert provider.status()["loaded"] is True
+    assert captured["asr_config"]["model"] == str(model)
+    assert captured["asr_config"]["tokens"] == str(tokens)
+    assert captured["asr_config"]["provider"] == "cpu"
+    assert captured["asr_config"]["language"] == "zh"
+    assert captured["asr_config"]["num_threads"] == 3
+    assert captured["sample_rate"] == 16000
+    assert captured["sample_count"] == 1600
+    assert captured["decoded"] is True
+
+
+def test_vits_adapter_is_lazy_and_maps_sherpa_contract(monkeypatch, tmp_path):
+    model = tmp_path / "model.onnx"
+    tokens = tmp_path / "tokens.txt"
+    lexicon = tmp_path / "lexicon.txt"
+    for item in (model, tokens, lexicon):
+        item.write_bytes(b"x")
+    captured = {}
+
+    class Config:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            captured.setdefault("configs", []).append((type(self).__name__, kwargs))
+
+    class FakeVitsConfig(Config):
+        pass
+
+    class FakeModelConfig(Config):
+        pass
+
+    class FakeTtsConfig(Config):
+        pass
+
+    class FakeOfflineTts:
+        def __init__(self, config):
+            captured["tts_config"] = config
+
+        def generate(self, text, sid=0, speed=1.0):
+            captured["generate"] = (text, sid, speed)
+            return SimpleNamespace(samples=np.zeros(800, dtype=np.float32), sample_rate=16000)
+
+    fake_module = SimpleNamespace(
+        OfflineTtsVitsModelConfig=FakeVitsConfig,
+        OfflineTtsModelConfig=FakeModelConfig,
+        OfflineTtsConfig=FakeTtsConfig,
+        OfflineTts=FakeOfflineTts,
+    )
+    monkeypatch.setitem(sys.modules, "sherpa_onnx", fake_module)
+    provider = SherpaVitsProvider(
+        model=str(model),
+        tokens=str(tokens),
+        lexicon=str(lexicon),
+        device="cpu",
+        num_threads=4,
+    )
+    assert provider.status()["loaded"] is False
+    assert "tts_config" not in captured
+
+    result = provider.synthesize("测试 TTS", speaker_id=2, speed=1.1)
+    assert result.audio.startswith(b"RIFF")
+    assert result.sample_rate == 16000
+    assert result.provider == "sherpa-vits"
+    assert provider.status()["loaded"] is True
+    assert captured["generate"] == ("测试 TTS", 2, 1.1)
+    configs = captured["configs"]
+    assert configs[0][1]["model"] == str(model)
+    assert configs[0][1]["tokens"] == str(tokens)
+    assert configs[0][1]["lexicon"] == str(lexicon)
+    assert configs[1][1]["provider"] == "cpu"
+    assert configs[1][1]["num_threads"] == 4
 
 
 def test_media_process_does_not_import_character_runtime():

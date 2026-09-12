@@ -47,14 +47,17 @@ def _candidate_native_dirs() -> list[Path]:
     return unique
 
 
-def _preload_bundled_onnxruntime(native_dirs: list[Path]) -> str | None:
-    """Load the environment's ORT by absolute path before sherpa imports.
+def bundled_onnxruntime_path() -> str | None:
+    """Return a project/environment-local ORT DLL, never a system-wide copy."""
+    for directory in _candidate_native_dirs():
+        dll = directory / "onnxruntime.dll"
+        if dll.is_file():
+            return str(dll.resolve())
+    return None
 
-    add_dll_directory/PATH alone is not sufficient on machines that already
-    expose an incompatible onnxruntime.dll from System32. Loading the intended
-    DLL first makes subsequent sherpa dependencies bind to the already-loaded
-    module with the same basename, without changing or deleting any system DLL.
-    """
+
+def _preload_bundled_onnxruntime(native_dirs: list[Path]) -> str | None:
+    """Load the environment's ORT by absolute path before sherpa imports."""
     loader = getattr(ctypes, "WinDLL", None)
     if loader is None:
         return None
@@ -76,7 +79,7 @@ def _preload_bundled_onnxruntime(native_dirs: list[Path]) -> str | None:
 
 
 def prepare_windows_native_runtime() -> list[str]:
-    """Prefer wheel-bundled native DLLs over stale system-wide copies."""
+    """Prefer environment-local native DLLs over stale system-wide copies."""
     if sys.platform != "win32" or not hasattr(os, "add_dll_directory"):
         return []
 
@@ -98,13 +101,20 @@ def prepare_windows_native_runtime() -> list[str]:
     return added
 
 
-def bundled_onnxruntime_path() -> str | None:
-    """Expose the preferred wheel ORT path for startup diagnostics/tests."""
-    for directory in _candidate_native_dirs():
-        dll = directory / "onnxruntime.dll"
-        if dll.is_file():
-            return str(dll.resolve())
-    return None
+def require_windows_bundled_onnxruntime() -> str | None:
+    """Fail before sherpa import instead of falling back to System32 ORT."""
+    if sys.platform != "win32":
+        return None
+    bundled = bundled_onnxruntime_path()
+    if bundled:
+        return bundled
+    raise RuntimeError(
+        "Media Runtime native ONNX Runtime is missing from this environment. "
+        "Install the media extra with the matching sherpa native core "
+        "(sherpa-onnx==1.13.5 and sherpa-onnx-core==1.13.5). "
+        "Refusing to continue because Windows may otherwise load an incompatible "
+        "C:\\Windows\\System32\\onnxruntime.dll and crash the process."
+    )
 
 
 def main() -> None:
@@ -113,14 +123,16 @@ def main() -> None:
         print("media: Windows native DLL directories:")
         for path in added:
             print(f"  {path}")
-        bundled = bundled_onnxruntime_path()
-        if bundled:
-            print(f"media: preloaded bundled onnxruntime: {bundled}")
-        else:
-            print("media: WARNING bundled onnxruntime.dll not found in environment")
+
+    try:
+        bundled = require_windows_bundled_onnxruntime()
+    except RuntimeError as exc:
+        raise SystemExit(f"media: FATAL {exc}") from exc
+    if bundled:
+        print(f"media: bundled onnxruntime: {bundled}")
 
     # Import only after Windows native search paths and explicit ORT preload have
-    # been applied.
+    # been applied and a local ORT DLL has been verified.
     from character_memory.media_server import main as media_main
 
     media_main()

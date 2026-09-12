@@ -30,11 +30,11 @@ class MediaAsset(BaseModel):
 
 
 class MediaStorage:
-    """Small local image store for V0 chat attachments.
+    """Small local image store for chat and generated visual assets.
 
     The browser sends a base64 data URL so FastAPI does not need multipart
-    dependencies. Only the four image formats accepted by DeepSeek V4 Vision
-    are persisted. Raw image bytes never go into SQLite or Runtime Trace.
+    dependencies. Generated provider bytes are normalized through the same gate.
+    Raw image bytes never go into SQLite or Runtime Trace.
     """
 
     def __init__(self, root: str | Path, *, max_bytes: int = 8 * 1024 * 1024):
@@ -53,6 +53,39 @@ class MediaStorage:
             return "image/webp"
         return None
 
+    def save_bytes(
+        self,
+        *,
+        character_id: str,
+        original_name: str,
+        payload: bytes,
+        created_at: datetime,
+        source: str = "GENERATED",
+    ) -> MediaAsset:
+        data = bytes(payload or b"")
+        if not data:
+            raise ValueError("image is empty")
+        if len(data) > self.max_bytes:
+            raise ValueError(f"image exceeds {self.max_bytes // (1024 * 1024)} MiB limit")
+        mime_type = self._sniff_mime(data)
+        if mime_type is None:
+            raise ValueError("unsupported image format; use JPEG, PNG, GIF or WebP")
+        media_id = uuid.uuid4().hex
+        storage_name = f"{media_id}{_MIME_TO_EXT[mime_type]}"
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / storage_name).write_bytes(data)
+        safe_name = Path(original_name or "image").name[:180] or "image"
+        return MediaAsset(
+            id=media_id,
+            character_id=character_id,
+            source=str(source or "GENERATED").strip()[:64] or "GENERATED",
+            original_name=safe_name,
+            mime_type=mime_type,
+            storage_name=storage_name,
+            created_at=created_at,
+            size_bytes=len(data),
+        )
+
     def save_data_url(
         self,
         *,
@@ -60,6 +93,7 @@ class MediaStorage:
         original_name: str,
         data_url: str,
         created_at: datetime,
+        source: str = "USER_UPLOAD",
     ) -> tuple[MediaAsset, str]:
         match = _DATA_URL_RE.match((data_url or "").strip())
         if match is None:
@@ -68,34 +102,21 @@ class MediaStorage:
             data = base64.b64decode(match.group(2), validate=True)
         except ValueError as exc:
             raise ValueError("image base64 is invalid") from exc
-        if not data:
-            raise ValueError("image is empty")
-        if len(data) > self.max_bytes:
-            raise ValueError(f"image exceeds {self.max_bytes // (1024 * 1024)} MiB limit")
-
-        mime_type = self._sniff_mime(data)
-        if mime_type is None:
-            raise ValueError("unsupported image format; use JPEG, PNG, GIF or WebP")
-
-        media_id = uuid.uuid4().hex
-        storage_name = f"{media_id}{_MIME_TO_EXT[mime_type]}"
-        self.root.mkdir(parents=True, exist_ok=True)
-        path = self.root / storage_name
-        path.write_bytes(data)
-        safe_name = Path(original_name or "image").name[:180] or "image"
-        normalized = f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"
-        return (
-            MediaAsset(
-                id=media_id,
-                character_id=character_id,
-                original_name=safe_name,
-                mime_type=mime_type,
-                storage_name=storage_name,
-                created_at=created_at,
-                size_bytes=len(data),
-            ),
-            normalized,
+        asset = self.save_bytes(
+            character_id=character_id,
+            original_name=original_name,
+            payload=data,
+            created_at=created_at,
+            source=source,
         )
+        normalized = f"data:{asset.mime_type};base64,{base64.b64encode(data).decode('ascii')}"
+        return asset, normalized
+
+    def data_url(self, asset: MediaAsset) -> str:
+        path = self.asset_path(asset)
+        if path is None:
+            raise FileNotFoundError(asset.storage_name)
+        return f"data:{asset.mime_type};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
     def asset_path(self, asset: MediaAsset) -> Path | None:
         candidate = (self.root / asset.storage_name).resolve()

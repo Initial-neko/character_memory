@@ -13,18 +13,21 @@ dependencies = [
 [project.optional-dependencies]
 local-embedding = ["sentence-transformers>=3.0"]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
+media = ["sherpa-onnx>=1.13.5,<1.14"]
 ui = ["streamlit>=1.37"]
 dev = ["pytest>=8.0"]
 all = [
   "sentence-transformers>=3.0",
   "fastapi>=0.115",
   "uvicorn>=0.30",
+  "sherpa-onnx>=1.13.5,<1.14",
   "streamlit>=1.37",
   "pytest>=8.0",
 ]
 
 [project.scripts]
 character-memory = "character_memory.cli:main"
+character-media = "character_memory.media_server:main"
 
 [build-system]
 requires = ["setuptools>=69"]

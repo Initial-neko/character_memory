@@ -11,7 +11,11 @@ from urllib.request import urlopen
 from uuid import uuid4
 
 import pytest
-from playwright.sync_api import expect
+
+if os.getenv("RUN_PLAYWRIGHT") == "1":
+    from playwright.sync_api import expect
+else:
+    expect = None
 
 
 pytestmark = [
@@ -116,11 +120,14 @@ def test_browser_smoke_3_sse_reconnect_reconciles_durable_history_without_duplic
     _open(page, web_server)
     marker = f"reconnect-{uuid4().hex[:8]}"
 
+    # Let the initial EventSource open/reconcile finish, then close it. This
+    # ensures the message below truly lands while the page has no live stream.
+    page.evaluate("CM.closeDirectStream()")
+    page.wait_for_timeout(500)
     result = page.evaluate(
         """async marker => {
           const characterId = CM.state.characterId;
           const conversationId = CM.conversationIdFor(characterId);
-          CM.closeDirectStream();
           const response = await fetch('/v1/chat/messages', {
             method:'POST',
             headers:{'Content-Type':'application/json'},

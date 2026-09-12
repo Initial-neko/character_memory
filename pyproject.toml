@@ -25,6 +25,9 @@ media = [
   "sherpa-onnx==1.13.5",
   "sherpa-onnx-core==1.13.5",
 ]
+# Agnes uses the core httpx dependency. msimg stays opt-in because it pulls a
+# separate ModelScope image-generation client stack and is not needed for Voice.
+image-generation = ["msimg==0.0.4"]
 ui = ["streamlit>=1.37,<2"]
 dev = ["pytest==9.1.1"]
 browser = ["playwright>=1.55", "pytest-playwright>=0.7"]

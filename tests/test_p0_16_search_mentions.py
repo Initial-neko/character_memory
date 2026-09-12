@@ -246,7 +246,9 @@ def test_p0_16_frontend_modules_have_search_jump_and_mention_autocomplete_contra
     assert "mentionsForText" in mentions_js
     assert "/messages" in mentions_js
     assert 'id="conversationSearchButton"' in index_html
-    assert 'id="globalSearchButton"' in index_html
+    # Current UI intentionally has one Search entry; the drawer switches between
+    # current-conversation and global scope instead of exposing a redundant button.
+    assert 'id="globalSearchButton"' not in index_html
     assert '/static/mentions.js' in index_html
     assert '/static/search.js' in index_html
 

@@ -81,6 +81,34 @@
       </article>
 
       <article class="card wide">
+        <div class="card-title-row">
+          <h2>Resource Monitor</h2>
+          <div class="actions">
+            <label for="resourceInterval" class="subtle">自动刷新
+              <select id="resourceInterval">
+                <option value="0">关闭</option>
+                <option value="5">5 秒</option>
+                <option value="10">10 秒</option>
+                <option value="30">30 秒</option>
+                <option value="60" selected>60 秒</option>
+                <option value="300">5 分钟</option>
+              </select>
+            </label>
+            <button id="refreshResources" class="secondary compact">刷新</button>
+          </div>
+        </div>
+        <p class="subtle">默认 60 秒采样一次；平时也可以关闭自动刷新，仅在需要观察 RAM / VRAM 峰值时手动刷新。</p>
+        <pre id="resourceSummary" class="result">等待采样...</pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Process</th><th>PID</th><th>RAM RSS</th><th>GPU VRAM</th><th>State</th></tr></thead>
+            <tbody id="resourceBody"><tr><td colspan="5">暂无数据</td></tr></tbody>
+          </table>
+        </div>
+        <div class="audio-meta"><span id="resourceUpdated">尚未采样</span></div>
+      </article>
+
+      <article class="card wide">
         <div class="card-title-row"><h2>Media Metrics</h2><button id="refreshMetrics" class="secondary compact">刷新</button></div>
         <div class="table-wrap">
           <table>

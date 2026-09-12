@@ -14,7 +14,8 @@ dependencies = [
 local-embedding = ["sentence-transformers>=3.0,<6"]
 api = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
 ui = ["streamlit>=1.37,<2"]
-dev = ["pytest>=8.0,<9", "pytest-playwright>=0.5,<1"]
+dev = ["pytest>=8.0,<9"]
+browser = ["pytest-playwright>=0.5,<1"]
 all = [
   "sentence-transformers>=3.0,<6",
   "fastapi>=0.115,<1",

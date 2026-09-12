@@ -41,6 +41,7 @@ all = [
 character-memory = "character_memory.cli:main"
 character-media = "character_memory.media_bootstrap:main"
 character-dev = "character_memory.dev_server:main"
+character-stack = "character_memory.dev_stack:main"
 
 [build-system]
 requires = ["setuptools==80.9.0"]

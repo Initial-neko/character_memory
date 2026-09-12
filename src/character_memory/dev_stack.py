@@ -41,7 +41,7 @@ def _media_env(base: dict[str, str]) -> dict[str, str]:
         env.setdefault(key, str(value))
     env.setdefault("CHARACTER_MEDIA_ASR_DEVICE", "cpu")
     env.setdefault("CHARACTER_MEDIA_ASR_THREADS", "2")
-    env.setdefault("CHARACTER_MEDIA_ASR_LANGUAGE", "zh")
+    env.setdefault("CHARACTER_MEDIA_ASR_LANGUAGE", "auto")
     env.setdefault("CHARACTER_MEDIA_TTS_DEVICE", "cpu")
     env.setdefault("CHARACTER_MEDIA_TTS_THREADS", "2")
     env.setdefault("CHARACTER_MEDIA_HOST", "127.0.0.1")

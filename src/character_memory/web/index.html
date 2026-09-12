@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/static/p0_11.css">
   <link rel="stylesheet" href="/static/p0_15.css">
   <link rel="stylesheet" href="/static/p0_16.css">
+  <link rel="stylesheet" href="/static/voice.css">
 </head>
 <body>
   <div class="workspace">
@@ -25,7 +26,7 @@
     <main class="chat-shell">
       <header class="topbar">
         <div class="character-heading"><div id="headerAvatar" class="header-avatar">R</div><div><h1 id="characterName">Rin</h1><p id="characterIdentity">Persistent AI Person</p></div></div>
-        <div class="topbar-actions"><span id="nowText" class="now"></span><button id="conversationSearchButton" class="ghost-button search-button" type="button" title="搜索当前聊天">🔎 <span class="search-label">搜索</span></button><button id="globalSearchButton" class="ghost-button search-button" type="button" title="搜索所有聊天">全局搜索</button><button id="runtimeButton" class="ghost-button" type="button">Runtime</button></div>
+        <div class="topbar-actions"><span id="nowText" class="now"></span><button id="voiceCallButton" class="ghost-button voice-call-button" type="button" title="语音通话">📞</button><button id="conversationSearchButton" class="ghost-button search-button" type="button" title="搜索当前聊天">🔎 <span class="search-label">搜索</span></button><button id="globalSearchButton" class="ghost-button search-button" type="button" title="搜索所有聊天">全局搜索</button><button id="runtimeButton" class="ghost-button" type="button">Runtime</button></div>
       </header>
       <section id="chat" class="chat" aria-live="polite"></section>
       <div class="composer-wrap">
@@ -37,6 +38,17 @@
 
   <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
   <aside id="drawer" class="drawer" aria-hidden="true"><header class="drawer-header"><div><h2 id="drawerTitle">详情</h2><p id="drawerSubtitle"></p></div><button id="drawerClose" class="icon-button" type="button" aria-label="关闭">×</button></header><div id="drawerBody" class="drawer-body"></div></aside>
+
+  <div id="voiceCallOverlay" class="voice-call-overlay hidden" role="dialog" aria-modal="true" aria-label="语音通话">
+    <div class="voice-call-card">
+      <div id="voiceCallAvatar" class="voice-call-avatar">R</div>
+      <h2 id="voiceCallName">Rin</h2>
+      <div id="voiceCallStatus" class="voice-call-status">正在连接…</div>
+      <div id="voiceCallTranscript" class="voice-call-transcript"></div>
+      <div id="voiceCallMetrics" class="voice-call-metrics"></div>
+      <button id="voiceHangupButton" class="voice-hangup" type="button">结束通话</button>
+    </div>
+  </div>
 
   <template id="typingTemplate"><article class="message-row assistant typing-row"><div class="avatar">AI</div><div class="bubble-wrap"><div class="bubble typing"><span></span><span></span><span></span></div><div class="message-meta">正在输入中…</div></div></article></template>
 
@@ -52,5 +64,6 @@
   <script src="/static/avatars.js" defer></script>
   <script src="/static/search.js" defer></script>
   <script src="/static/intent.js" defer></script>
+  <script src="/static/voice.js" defer></script>
 </body>
 </html>

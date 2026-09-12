@@ -22,7 +22,7 @@ from character_memory.visual_generation import (
 _PNG = b"\x89PNG\r\n\x1a\nvisual-test"
 
 
-def test_agnes_provider_uses_reference_image_and_returns_base64():
+def test_agnes_provider_maps_ratio_to_explicit_size_and_returns_base64():
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -36,14 +36,16 @@ def test_agnes_provider_uses_reference_image_and_returns_base64():
     out = provider.generate(
         ImageGenerationRequest(
             prompt="same character, natural portrait",
-            aspect_ratio="1:1",
+            aspect_ratio="3:4",
             reference_images=["data:image/png;base64,AAAA"],
         )
     )
 
     assert seen["url"] == "https://apihub.agnes-ai.com/v1/images/generations"
     assert seen["authorization"] == "Bearer secret"
-    assert seen["body"]["model"] == "agnes-image-2.5-flash"
+    assert seen["body"]["model"] == "agnes-image-2.1-flash"
+    assert seen["body"]["size"] == "768x1024"
+    assert "ratio" not in seen["body"]
     assert seen["body"]["return_base64"] is True
     assert seen["body"]["extra_body"]["image"] == ["data:image/png;base64,AAAA"]
     assert seen["body"]["extra_body"]["response_format"] == "b64_json"
@@ -55,6 +57,8 @@ def test_agnes_provider_uses_reference_image_and_returns_base64():
 
 def test_agnes_provider_requires_key():
     provider = AgnesImageProvider("")
+    assert provider.configured() is False
+    assert provider.available() is False
     with pytest.raises(RuntimeError, match="AGNES_API_KEY"):
         provider.generate(ImageGenerationRequest(prompt="test"))
     provider.close()
@@ -76,6 +80,8 @@ def test_msimg_provider_is_lazy_and_maps_pil_like_image(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "msimg", SimpleNamespace(generate_image=generate_image))
     provider = MsimgProvider("modelscope-secret", models="qwen,flux-majic")
+    assert provider.configured() is True
+    assert provider.available() is True
     out = provider.generate(ImageGenerationRequest(prompt="portrait", aspect_ratio="3:4"))
 
     assert seen["api_configs"] == "modelscope-secret"
@@ -124,6 +130,27 @@ def test_visual_prompt_planner_is_structured_and_keeps_purpose():
     assert plan.purpose == VisualPurpose.SELFIE
     assert plan.aspect_ratio == "3:4"
     assert "same person" in plan.positive_prompt
+
+
+def test_visual_prompt_planner_rejects_purpose_drift():
+    class FakeModel:
+        def structured_for_session(self, prompt, schema, session_id):
+            return {
+                "purpose": "SCENE",
+                "visual_intent": "wrong",
+                "positive_prompt": "wrong purpose",
+                "negative_prompt": "",
+                "aspect_ratio": "1:1",
+                "identity_constraints": [],
+            }
+
+    with pytest.raises(ValueError, match="purpose mismatch"):
+        VisualPromptPlanner(FakeModel()).plan(
+            "mika",
+            purpose=VisualPurpose.SELFIE,
+            persona="Mika",
+            visual_intent="selfie",
+        )
 
 
 def test_generated_media_can_be_copied_to_avatar_with_provenance(tmp_path):

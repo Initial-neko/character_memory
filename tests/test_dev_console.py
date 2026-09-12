@@ -35,9 +35,15 @@ class FakeHttpClient:
         if url.endswith("/v1/metrics/recent"):
             return FakeResponse({"metrics": [{"kind": "tts", "inference_ms": 20.0, "total_ms": 21.0}]})
         if ":8000/health" in url:
-            return FakeResponse({"ok": True, "web": "ready"})
+            return FakeResponse({"ok": True, "web": "ready", "runtime_loaded": False})
         if ":8001/health" in url:
-            return FakeResponse({"ok": True, "asr": {"ready": True}, "tts": {"ready": True}})
+            return FakeResponse(
+                {
+                    "ok": True,
+                    "asr": {"ready": True, "loaded": False},
+                    "tts": {"ready": True, "loaded": False},
+                }
+            )
         return FakeResponse({}, status_code=404, text="not found")
 
     def post(self, url, **kwargs):
@@ -106,9 +112,12 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
     assert ">TTS<" in html
     assert ">ASR<" in html
     assert "Media Live Smoke" in html
+    assert "Resource Monitor" in html
+    assert 'value="60" selected' in html
     assert "Media Metrics" in html
     for endpoint in (
         "/v1/dev/status",
+        "/v1/dev/resources",
         "/v1/dev/llm",
         "/v1/dev/tts",
         "/v1/dev/asr",
@@ -129,6 +138,20 @@ def test_dev_status_probes_character_and_media_without_loading_person_runtime():
     assert data["dev"]["model"] == "fake-model"
     assert "api_key" not in response.text
     assert "test-key" not in response.text
+
+
+def test_dev_resources_are_best_effort_and_dependency_free():
+    app = create_dev_app(settings=settings(), http_client=FakeHttpClient(), model_factory=lambda _: FakeModel())
+    with TestClient(app) as client:
+        response = client.get("/v1/dev/resources")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert "system_memory" in data
+    assert "gpu" in data
+    assert "sampled_at" in data
+    names = [item["name"] for item in data["processes"]]
+    assert names == ["Character Runtime", "Media Runtime", "Dev Console"]
 
 
 def test_dev_llm_uses_configured_provider_path():

@@ -410,7 +410,7 @@
     if (button) showTurn(button.dataset.groupTurn).catch(console.error);
   });
 
-  const feature = CM.registerFeature("groups", {loadGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,applyHeader,applyComposerState,sendText,sendSticker,sendImage,renderList,closeStream});
+  CM.registerFeature("groups", {loadGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,current,applyHeader,applyComposerState,sendText,sendSticker,sendImage,renderList,closeStream});
   CM.on("ready", loadGroups);
   window.addEventListener("beforeunload", closeStream);
 })();

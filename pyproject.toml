@@ -18,7 +18,13 @@ api = [
   "fastapi==0.141.1",
   "uvicorn==0.52.4",
 ]
-media = ["sherpa-onnx==1.13.5"]
+# sherpa-onnx is the Python binding. sherpa-onnx-core carries the matching
+# native shared libraries (including ONNX Runtime on Windows). Keep both direct
+# and version-aligned so mirrors/lockfiles cannot silently omit the native core.
+media = [
+  "sherpa-onnx==1.13.5",
+  "sherpa-onnx-core==1.13.5",
+]
 ui = ["streamlit>=1.37,<2"]
 dev = ["pytest==9.1.1"]
 all = [
@@ -26,6 +32,7 @@ all = [
   "fastapi==0.141.1",
   "uvicorn==0.52.4",
   "sherpa-onnx==1.13.5",
+  "sherpa-onnx-core==1.13.5",
   "streamlit>=1.37,<2",
   "pytest==9.1.1",
 ]

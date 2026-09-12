@@ -3,12 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import character_memory.media_bootstrap as bootstrap
 
 
 def test_non_windows_bootstrap_is_noop(monkeypatch):
     monkeypatch.setattr(bootstrap.sys, "platform", "linux")
     assert bootstrap.prepare_windows_native_runtime() == []
+    assert bootstrap.require_windows_bundled_onnxruntime() is None
 
 
 def test_windows_bootstrap_prefers_package_native_dirs(monkeypatch, tmp_path):
@@ -81,4 +84,20 @@ def test_windows_bootstrap_preloads_core_wheel_ort_from_scripts(monkeypatch, tmp
     assert str(scripts.resolve()) in added
     assert loaded == [(str(ort_dll.resolve()), {"winmode": 0x00001100})]
     assert bootstrap.bundled_onnxruntime_path() == str(ort_dll.resolve())
+    assert bootstrap.require_windows_bundled_onnxruntime() == str(ort_dll.resolve())
     assert len(bootstrap._PRELOADED_DLL_HANDLES) == 1
+
+
+def test_windows_bootstrap_refuses_system_ort_fallback(monkeypatch, tmp_path):
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    python_exe = scripts / "python.exe"
+    python_exe.write_bytes(b"")
+
+    monkeypatch.setattr(bootstrap.sys, "platform", "win32")
+    monkeypatch.setattr(bootstrap.sys, "executable", str(python_exe))
+    monkeypatch.setattr(bootstrap.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(bootstrap.importlib.util, "find_spec", lambda name: None)
+
+    with pytest.raises(RuntimeError, match="native ONNX Runtime is missing"):
+        bootstrap.require_windows_bundled_onnxruntime()

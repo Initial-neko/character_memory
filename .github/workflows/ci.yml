@@ -59,7 +59,7 @@ jobs:
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium
 
-      - name: Run realtime browser smoke
+      - name: Run browser smoke
         env:
           RUN_PLAYWRIGHT: "1"
-        run: uv run pytest -q tests/test_p0_17b_playwright.py --browser chromium
+        run: uv run pytest -q tests/test_p0_17b_playwright.py tests/test_p0_17c_playwright.py --browser chromium

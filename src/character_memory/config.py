@@ -44,6 +44,12 @@ class Settings(BaseModel):
     persona_path: str = "personas/rin/persona.yaml"
     recall_limit: int = Field(default=8, ge=1, le=32)
 
+    # P0.17 direct-character wake. This is intentionally process-local scheduling:
+    # every eligible character gets a TIME_TICK opportunity roughly once per hour.
+    # It is not a durable background-job system and does not wake group chats.
+    proactive_wake_enabled: bool = True
+    proactive_wake_minutes: float = Field(default=60.0, ge=1.0, le=1440.0)
+
 
 def load_settings(path: str = "config.yaml") -> Settings:
     data: dict = {}

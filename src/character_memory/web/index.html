@@ -41,12 +41,18 @@
 
   <div id="voiceCallOverlay" class="voice-call-overlay hidden" role="dialog" aria-modal="true" aria-label="语音通话">
     <div class="voice-call-card">
-      <div id="voiceCallAvatar" class="voice-call-avatar">R</div>
-      <h2 id="voiceCallName">Rin</h2>
-      <div id="voiceCallStatus" class="voice-call-status">正在连接…</div>
-      <div id="voiceCallTranscript" class="voice-call-transcript"></div>
-      <div id="voiceCallMetrics" class="voice-call-metrics"></div>
-      <button id="voiceHangupButton" class="voice-hangup" type="button">结束通话</button>
+      <section class="voice-call-identity">
+        <div id="voiceCallAvatar" class="voice-call-avatar">R</div>
+        <h2 id="voiceCallName">Rin</h2>
+        <div id="voiceCallStatus" class="voice-call-status">正在连接…</div>
+        <div id="voiceCallMetrics" class="voice-call-metrics"></div>
+        <button id="voiceHangupButton" class="voice-hangup" type="button">结束通话</button>
+      </section>
+      <section class="voice-call-detail" aria-label="当前语音对话">
+        <div class="voice-call-detail-head"><strong>当前对话</strong><span>语音内容会同时写入聊天历史</span></div>
+        <div id="voiceCallLog" class="voice-call-log" aria-live="polite"></div>
+        <div id="voiceCallTranscript" class="voice-call-transcript">直接说话即可；停顿后会自动发送。</div>
+      </section>
     </div>
   </div>
 

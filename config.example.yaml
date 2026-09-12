@@ -45,3 +45,8 @@ avatar_dir: ""
 avatar_max_bytes: 8388608
 persona_path: "personas/rin/persona.yaml"
 recall_limit: 8
+
+# P0.17 direct-character wake. The timer is process-local and starts when WebUI starts.
+# A wake gives the character one TIME_TICK opportunity; it does not force a message.
+proactive_wake_enabled: true
+proactive_wake_minutes: 60

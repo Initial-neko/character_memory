@@ -66,6 +66,17 @@ class FakeHttpClient:
         return FakeResponse({}, status_code=404, text="not found")
 
 
+class FailingTtsHttpClient(FakeHttpClient):
+    def post(self, url, **kwargs):
+        if url.endswith("/v1/tts"):
+            return FakeResponse(
+                {"detail": "VITS model failed to initialize"},
+                status_code=503,
+                text='{"detail":"VITS model failed to initialize"}',
+            )
+        return super().post(url, **kwargs)
+
+
 class FakeModel:
     model = "fake-model"
 
@@ -94,8 +105,16 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
     assert ">LLM<" in html
     assert ">TTS<" in html
     assert ">ASR<" in html
+    assert "Media Live Smoke" in html
     assert "Media Metrics" in html
-    for endpoint in ("/v1/dev/status", "/v1/dev/llm", "/v1/dev/tts", "/v1/dev/asr", "/v1/dev/metrics"):
+    for endpoint in (
+        "/v1/dev/status",
+        "/v1/dev/llm",
+        "/v1/dev/tts",
+        "/v1/dev/asr",
+        "/v1/dev/media-smoke",
+        "/v1/dev/metrics",
+    ):
         assert endpoint in script
 
 
@@ -137,3 +156,34 @@ def test_dev_tts_and_asr_proxy_media_contracts():
     assert asr.json()["text"] == "测试成功"
     assert asr.json()["http_total_ms"] >= 0
     assert metrics.json()["metrics"][0]["kind"] == "tts"
+
+
+def test_dev_media_smoke_runs_real_contract_tts_then_asr():
+    fake_http = FakeHttpClient()
+    app = create_dev_app(settings=settings(), http_client=fake_http, model_factory=lambda _: FakeModel())
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/dev/media-smoke",
+            json={"text": "你好", "speaker_id": 0, "speed": 1.0},
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["kind"] == "media-smoke"
+    assert data["input_text"] == "你好"
+    assert data["transcript"] == "测试成功"
+    assert data["tts"]["provider"] == "fake-tts"
+    assert data["asr"]["provider"] == "fake-asr"
+    assert [call[0] for call in fake_http.calls if call[0] == "POST"] == ["POST", "POST"]
+
+
+def test_dev_media_error_preserves_upstream_operation_status_and_detail():
+    app = create_dev_app(settings=settings(), http_client=FailingTtsHttpClient(), model_factory=lambda _: FakeModel())
+    with TestClient(app) as client:
+        response = client.post("/v1/dev/tts", json={"text": "你好", "speaker_id": 0, "speed": 1.0})
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["service"] == "media-runtime"
+    assert detail["operation"] == "tts"
+    assert detail["status_code"] == 503
+    assert detail["detail"] == "VITS model failed to initialize"

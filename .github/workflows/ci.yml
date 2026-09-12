@@ -29,8 +29,46 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies
+      - name: Install dependencies and resolve lock
         run: uv sync --extra api --extra dev
 
       - name: Run tests
         run: uv run pytest -q
+
+      # P0.17 bootstrap only: the repository did not have uv.lock yet. The
+      # first PR run emits the generated lock so it can be committed; this step
+      # is removed once CI switches to `uv sync --frozen`.
+      - name: Emit generated lock
+        run: |
+          echo UV_LOCK_BEGIN
+          base64 uv.lock
+          echo UV_LOCK_END
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra api --extra dev
+
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run Playwright smoke tests
+        env:
+          RUN_PLAYWRIGHT: "1"
+        run: uv run pytest -q tests/test_p0_17_playwright.py

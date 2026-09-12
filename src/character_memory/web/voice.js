@@ -4,10 +4,15 @@
 
   const MEDIA_BASE_KEY = "character-memory:media-base-url";
   const TTS_SPEAKER_COUNT = 5;
+  const SPEAKABLE_ACTIONS = new Set(["MESSAGE", "REPLY", "MINIMAL_RESPONSE", "PROACTIVE_MESSAGE"]);
   const mediaBase = () => localStorage.getItem(MEDIA_BASE_KEY) || "http://127.0.0.1:8001";
+
   const voice = {
     active: false,
+    minimized: false,
     phase: "idle",
+    target: null,
+    currentSpeakerId: null,
     stream: null,
     audioContext: null,
     sourceNode: null,
@@ -35,16 +40,33 @@
     overlay: document.getElementById("voiceCallOverlay"),
     avatar: document.getElementById("voiceCallAvatar"),
     name: document.getElementById("voiceCallName"),
+    context: document.getElementById("voiceCallContext"),
     status: document.getElementById("voiceCallStatus"),
     transcript: document.getElementById("voiceCallTranscript"),
     log: document.getElementById("voiceCallLog"),
     metrics: document.getElementById("voiceCallMetrics"),
+    minimize: document.getElementById("voiceMinimizeButton"),
     hangup: document.getElementById("voiceHangupButton"),
+    dock: document.getElementById("voiceCallDock"),
+    dockExpand: document.getElementById("voiceDockExpandButton"),
+    dockAvatar: document.getElementById("voiceDockAvatar"),
+    dockTitle: document.getElementById("voiceDockTitle"),
+    dockStatus: document.getElementById("voiceDockStatus"),
+    dockHangup: document.getElementById("voiceDockHangupButton"),
   };
 
-  function setPhase(phase, text) {
-    voice.phase = phase;
-    if (dom.status) dom.status.textContent = text || phase;
+  function profileFor(characterId) {
+    return CM.state.characters.find(item => item.id === characterId) || null;
+  }
+
+  function groupMemberName(characterId) {
+    const member = voice.target?.members?.find(item => item.id === characterId);
+    return member?.name || characterId;
+  }
+
+  function speakerName(characterId) {
+    const profile = profileFor(characterId);
+    return profile?.name || groupMemberName(characterId) || characterId || "角色";
   }
 
   function stableSpeakerId(characterId) {
@@ -56,9 +78,102 @@
     return (hash >>> 0) % TTS_SPEAKER_COUNT;
   }
 
+  function setAvatar(container, characterId = null, fallback = "AI") {
+    if (!container) return;
+    const profile = characterId ? profileFor(characterId) : null;
+    const label = profile?.name || (characterId ? speakerName(characterId) : fallback) || "AI";
+    const initial = String(label).trim().slice(0, 1).toUpperCase() || "AI";
+    container.innerHTML = "";
+    if (profile?.avatar_url) {
+      const img = document.createElement("img");
+      img.className = "voice-call-avatar-image";
+      img.src = profile.avatar_url;
+      img.alt = `${label} 头像`;
+      img.addEventListener("error", () => { container.textContent = initial; }, {once:true});
+      container.appendChild(img);
+    } else {
+      container.textContent = initial;
+    }
+  }
+
+  function captureTarget() {
+    if (CM.isGroupConversation()) {
+      const group = CM.features.groups?.current?.();
+      if (!group?.id) throw new Error("当前群聊尚未准备好");
+      return {
+        scope: "group",
+        conversationId: group.id,
+        groupId: group.id,
+        title: group.name || "群聊",
+        members: (group.members || []).map(item => ({id:item.id, name:item.name || item.id})),
+      };
+    }
+    const profile = CM.currentProfile();
+    return {
+      scope: "direct",
+      conversationId: CM.conversationIdFor(profile.id),
+      characterId: profile.id,
+      title: profile.name || profile.id,
+      members: [{id:profile.id, name:profile.name || profile.id}],
+    };
+  }
+
+  function isViewingTarget() {
+    const target = voice.target;
+    if (!target) return false;
+    if (target.scope === "group") {
+      return CM.isGroupConversation() && CM.state.conversation.groupId === target.conversationId;
+    }
+    return !CM.isGroupConversation() && CM.state.characterId === target.characterId;
+  }
+
+  function renderCallIdentity() {
+    const target = voice.target;
+    if (!target) return;
+    const speakingId = voice.currentSpeakerId;
+    if (target.scope === "group") {
+      if (speakingId) {
+        const name = speakerName(speakingId);
+        setAvatar(dom.avatar, speakingId, target.title);
+        setAvatar(dom.dockAvatar, speakingId, target.title);
+        if (dom.name) dom.name.textContent = name;
+        if (dom.context) dom.context.textContent = `群聊 · ${target.title}`;
+        if (dom.dockTitle) dom.dockTitle.textContent = `${name} · ${target.title}`;
+      } else {
+        setAvatar(dom.avatar, null, target.title);
+        setAvatar(dom.dockAvatar, null, target.title);
+        if (dom.name) dom.name.textContent = target.title;
+        if (dom.context) dom.context.textContent = "群聊语音";
+        if (dom.dockTitle) dom.dockTitle.textContent = target.title;
+      }
+    } else {
+      const id = target.characterId;
+      const name = speakerName(id);
+      setAvatar(dom.avatar, id, name);
+      setAvatar(dom.dockAvatar, id, name);
+      if (dom.name) dom.name.textContent = name;
+      if (dom.context) dom.context.textContent = "单聊语音";
+      if (dom.dockTitle) dom.dockTitle.textContent = name;
+    }
+  }
+
+  function updateCallButton() {
+    if (!dom.button) return;
+    dom.button.classList.toggle("active", voice.active);
+    dom.button.title = voice.active ? "返回正在进行的语音通话" : "语音通话";
+  }
+
+  function setPhase(phase, text) {
+    voice.phase = phase;
+    const label = text || phase;
+    if (dom.status) dom.status.textContent = label;
+    if (dom.dockStatus) dom.dockStatus.textContent = label;
+  }
+
   function formatMetrics() {
     const m = voice.lastMetrics;
-    const parts = [`Voice #${voice.speakerId}`];
+    const parts = [];
+    if (voice.currentSpeakerId) parts.push(`Voice #${stableSpeakerId(voice.currentSpeakerId)}`);
     if (m.asr != null) parts.push(`ASR ${Math.round(m.asr)}ms`);
     if (m.llm != null) parts.push(`LLM ${Math.round(m.llm)}ms`);
     if (m.tts != null) parts.push(`TTS ${Math.round(m.tts)}ms`);
@@ -71,7 +186,7 @@
     if (dom.log) dom.log.innerHTML = '<div class="voice-call-log-empty">开始说话后，这里会显示本次通话的文字内容。</div>';
   }
 
-  function appendCallLog(role, text, messageId = null) {
+  function appendCallLog(role, text, messageId = null, actorId = null) {
     const value = String(text || "").trim();
     if (!value || !dom.log) return;
     if (messageId != null) {
@@ -82,7 +197,7 @@
     dom.log.querySelector(".voice-call-log-empty")?.remove();
     const line = document.createElement("div");
     line.className = `voice-call-line ${role}`;
-    const label = role === "user" ? "你" : (CM.currentProfile().name || "角色");
+    const label = role === "user" ? "你" : speakerName(actorId);
     const labelEl = document.createElement("span");
     labelEl.className = "voice-call-line-role";
     labelEl.textContent = label;
@@ -92,6 +207,21 @@
     line.append(labelEl, textEl);
     dom.log.appendChild(line);
     dom.log.scrollTop = dom.log.scrollHeight;
+  }
+
+  function minimizeCall() {
+    if (!voice.active) return;
+    voice.minimized = true;
+    dom.overlay?.classList.add("hidden");
+    dom.dock?.classList.remove("hidden");
+  }
+
+  function expandCall() {
+    if (!voice.active) return;
+    voice.minimized = false;
+    dom.dock?.classList.add("hidden");
+    dom.overlay?.classList.remove("hidden");
+    renderCallIdentity();
   }
 
   function rms(samples) {
@@ -163,45 +293,63 @@
     return health;
   }
 
+  function handleCharacterEvent(data, characterId) {
+    if (!voice.active) return;
+    const action = String(data.metadata?.action || "").toUpperCase();
+    const text = String(data.content || "").trim();
+    if (!SPEAKABLE_ACTIONS.has(action) || !text) return;
+
+    if (voice.target?.scope === "direct" && isViewingTarget() && CM.directEventToMessage && CM.mergeDirectMessage) {
+      CM.mergeDirectMessage(CM.directEventToMessage(data));
+    }
+    appendCallLog("assistant", text, data.id, characterId);
+    if (dom.transcript) dom.transcript.textContent = `${speakerName(characterId)}：${text}`;
+    if (voice.lastMetrics.llm == null && voice.turnStartedAt) {
+      voice.lastMetrics.llm = performance.now() - voice.turnStartedAt - Number(voice.lastMetrics.asr || 0);
+      formatMetrics();
+    }
+    voice.queue.push({text, characterId, messageId:data.id});
+    playQueue();
+  }
+
   function openVoiceEvents() {
     voice.eventSource?.close?.();
-    const characterId = CM.state.characterId;
-    const conversationId = CM.conversationIdFor(characterId);
-    const params = new URLSearchParams({scope:"direct", character_id:characterId, conversation_id:conversationId});
+    const target = voice.target;
+    if (!target) return;
+    const params = new URLSearchParams({scope:target.scope, conversation_id:target.conversationId});
+    if (target.scope === "direct") params.set("character_id", target.characterId);
     const source = new EventSource(`/v1/events/stream?${params.toString()}`);
     voice.eventSource = source;
+
     source.addEventListener("reaction_status", event => {
       if (!voice.active) return;
       const data = JSON.parse(event.data || "{}");
-      if (data.state === "typing" && voice.phase === "waiting") {
-        setPhase("waiting", "正在想…");
-      }
+      if (data.state === "typing" && voice.phase === "waiting") setPhase("waiting", "正在想…");
     });
-    source.addEventListener("character_event", event => {
-      if (!voice.active) return;
-      const data = JSON.parse(event.data || "{}");
-      const action = String(data.metadata?.action || "").toUpperCase();
-      if (CM.directEventToMessage && CM.mergeDirectMessage) {
-        CM.mergeDirectMessage(CM.directEventToMessage(data));
-      }
-      if (action === "MESSAGE" && String(data.content || "").trim()) {
-        const text = String(data.content).trim();
-        appendCallLog("assistant", text, data.id);
-        if (dom.transcript) dom.transcript.textContent = `${CM.currentProfile().name || "角色"}：${text}`;
-        if (voice.lastMetrics.llm == null && voice.turnStartedAt) {
-          voice.lastMetrics.llm = performance.now() - voice.turnStartedAt - Number(voice.lastMetrics.asr || 0);
-          formatMetrics();
-        }
-        voice.queue.push(text);
-        playQueue();
-      }
-    });
+
+    if (target.scope === "group") {
+      source.addEventListener("group_character_event", event => {
+        if (!voice.active) return;
+        const data = JSON.parse(event.data || "{}");
+        handleCharacterEvent(data, data.actor_id);
+      });
+    } else {
+      source.addEventListener("character_event", event => {
+        if (!voice.active) return;
+        const data = JSON.parse(event.data || "{}");
+        handleCharacterEvent(data, data.character_id || target.characterId);
+      });
+    }
+
     source.addEventListener("reaction_complete", () => {
       if (!voice.active) return;
       if (!voice.playing && voice.queue.length === 0 && voice.phase === "waiting") {
+        voice.currentSpeakerId = null;
+        renderCallIdentity();
         setPhase("listening", "正在听…");
       }
     });
+
     source.addEventListener("reaction_error", event => {
       if (!voice.active) return;
       let message = "角色响应失败";
@@ -212,16 +360,28 @@
   }
 
   async function sendTranscript(text) {
-    const characterId = CM.state.characterId;
-    const conversationId = CM.conversationIdFor(characterId);
-    const response = await fetch("/v1/chat/messages", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({message:text, character_id:characterId, conversation_id:conversationId}),
-    });
+    const target = voice.target;
+    if (!target) throw new Error("通话目标不存在");
+    let response;
+    if (target.scope === "group") {
+      response = await fetch(`/v1/groups/${encodeURIComponent(target.conversationId)}/messages`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({message:text}),
+      });
+    } else {
+      response = await fetch("/v1/chat/messages", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({message:text, character_id:target.characterId, conversation_id:target.conversationId}),
+      });
+    }
     if (!response.ok) throw new Error(await response.text());
     const result = await response.json();
-    if (result.message) CM.mergeDirectMessage?.(result.message);
+    if (target.scope === "direct" && isViewingTarget() && result.message) CM.mergeDirectMessage?.(result.message);
+    if (target.scope === "group" && isViewingTarget()) {
+      await CM.features.groups?.reconcileLatest?.(target.conversationId);
+    }
     return result;
   }
 
@@ -253,19 +413,21 @@
       if (dom.transcript) dom.transcript.textContent = `你：${text}`;
       setPhase("waiting", "正在想…");
       const sent = await sendTranscript(text);
-      appendCallLog("user", text, sent.message?.id ?? null);
+      appendCallLog("user", text, sent.message?.id ?? sent.event_id ?? null);
     } catch (error) {
       setPhase("error", `语音失败：${error.message}`);
       setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
     }
   }
 
-  async function synthesize(text) {
+  async function synthesize(item) {
     const started = performance.now();
+    const speakerId = stableSpeakerId(item.characterId);
+    voice.speakerId = speakerId;
     const response = await fetch(`${mediaBase()}/v1/tts`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({text, speaker_id:voice.speakerId, speed:1.0}),
+      body: JSON.stringify({text:item.text, speaker_id:speakerId, speed:1.0}),
     });
     if (!response.ok) throw new Error(await response.text());
     const blob = await response.blob();
@@ -279,9 +441,11 @@
     voice.playing = true;
     try {
       while (voice.active && voice.queue.length) {
-        const text = voice.queue.shift();
-        setPhase("speaking", "正在说…");
-        const url = await synthesize(text);
+        const item = voice.queue.shift();
+        voice.currentSpeakerId = item.characterId;
+        renderCallIdentity();
+        setPhase("speaking", `${speakerName(item.characterId)} 正在说…`);
+        const url = await synthesize(item);
         try {
           await new Promise((resolve, reject) => {
             const audio = new Audio(url);
@@ -294,12 +458,16 @@
         }
       }
       if (voice.active) {
+        voice.currentSpeakerId = null;
+        renderCallIdentity();
         voice.lastMetrics.total = voice.turnStartedAt ? performance.now() - voice.turnStartedAt + Number(voice.lastMetrics.asr || 0) : null;
         formatMetrics();
         setPhase("listening", "正在听…");
       }
     } catch (error) {
       if (voice.active) {
+        voice.currentSpeakerId = null;
+        renderCallIdentity();
         setPhase("error", `TTS 失败：${error.message}`);
         setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
       }
@@ -342,9 +510,13 @@
   }
 
   async function startCall() {
-    if (voice.active || CM.isGroupConversation()) return;
+    if (voice.active) {
+      expandCall();
+      return;
+    }
     dom.button.disabled = true;
     try {
+      const target = captureTarget();
       await checkMedia();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
@@ -358,25 +530,27 @@
       processor.connect(context.destination);
 
       voice.active = true;
+      voice.minimized = false;
+      voice.target = target;
       voice.stream = stream;
       voice.audioContext = context;
       voice.sourceNode = source;
       voice.processor = processor;
       voice.queue = [];
       voice.playing = false;
+      voice.currentSpeakerId = null;
       voice.lastMetrics = {};
       voice.preRoll = [];
       voice.chunks = [];
-      voice.speakerId = stableSpeakerId(CM.state.characterId);
       openVoiceEvents();
 
-      const profile = CM.currentProfile();
-      if (dom.avatar) dom.avatar.textContent = CM.initialFor(profile);
-      if (dom.name) dom.name.textContent = profile.name || profile.id;
       if (dom.transcript) dom.transcript.textContent = "直接说话即可；停顿后会自动发送。";
       resetCallLog();
+      renderCallIdentity();
       formatMetrics();
+      dom.dock?.classList.add("hidden");
       dom.overlay?.classList.remove("hidden");
+      updateCallButton();
       setPhase("listening", "正在听…");
     } catch (error) {
       alert(`无法开始语音：${error.message}`);
@@ -387,6 +561,7 @@
 
   async function stopCall() {
     voice.active = false;
+    voice.minimized = false;
     voice.eventSource?.close?.();
     voice.eventSource = null;
     voice.processor?.disconnect?.();
@@ -401,13 +576,28 @@
     voice.chunks = [];
     voice.preRoll = [];
     voice.playing = false;
+    voice.currentSpeakerId = null;
+    voice.target = null;
     setPhase("idle", "");
     dom.overlay?.classList.add("hidden");
+    dom.dock?.classList.add("hidden");
+    updateCallButton();
   }
 
   dom.button?.addEventListener("click", startCall);
+  dom.minimize?.addEventListener("click", minimizeCall);
   dom.hangup?.addEventListener("click", stopCall);
+  dom.dockExpand?.addEventListener("click", expandCall);
+  dom.dockHangup?.addEventListener("click", stopCall);
   window.addEventListener("beforeunload", () => { if (voice.active) stopCall(); });
-  CM.on("conversationChanged", () => { if (voice.active) stopCall(); });
-  CM.registerFeature("voice", {start:startCall, stop:stopCall, state:voice, stableSpeakerId});
+  CM.on("conversationChanged", () => { if (voice.active) renderCallIdentity(); });
+  CM.registerFeature("voice", {
+    start:startCall,
+    stop:stopCall,
+    minimize:minimizeCall,
+    expand:expandCall,
+    state:voice,
+    stableSpeakerId,
+  });
+  updateCallButton();
 })();

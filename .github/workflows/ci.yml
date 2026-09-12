@@ -36,10 +36,12 @@ jobs:
         run: uv run pytest -q
 
       # P0.17 bootstrap only: the repository did not have uv.lock yet. The
-      # first PR run emits the generated lock so it can be committed; this step
-      # is removed once CI switches to `uv sync --frozen`.
+      # PR run emits the generated lock so it can be committed; this step is
+      # removed once CI switches to `uv sync --frozen`.
       - name: Emit generated lock
+        if: always()
         run: |
+          test -f uv.lock || exit 0
           echo UV_LOCK_BEGIN
           base64 uv.lock
           echo UV_LOCK_END
@@ -63,7 +65,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra api --extra dev
+        run: uv sync --extra api --extra dev --extra browser
 
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium

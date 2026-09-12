@@ -27,7 +27,7 @@ all = [
 
 [project.scripts]
 character-memory = "character_memory.cli:main"
-character-media = "character_memory.media_server:main"
+character-media = "character_memory.media_bootstrap:main"
 
 [build-system]
 requires = ["setuptools>=69"]

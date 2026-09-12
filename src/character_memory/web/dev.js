@@ -1,6 +1,12 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { asrBlob: null, asrUrl: null, ttsUrl: null, recorder: null };
+  const state = {
+    asrBlob: null,
+    asrUrl: null,
+    ttsUrl: null,
+    recorder: null,
+    resourceTimer: null,
+  };
 
   function pretty(value) {
     return JSON.stringify(value, null, 2);
@@ -59,6 +65,7 @@
       });
       $("llmResult").textContent = data.reply || "";
       $("llmLatency").textContent = `${data.total_ms} ms · ${data.model}`;
+      refreshResources();
     } catch (error) {
       $("llmResult").textContent = `ERROR: ${error.message}`;
     } finally {
@@ -103,6 +110,7 @@
       });
       refreshStatus();
       refreshMetrics();
+      refreshResources();
     } catch (error) {
       $("ttsResult").textContent = `ERROR: ${error.message}`;
     } finally {
@@ -225,6 +233,7 @@
       $("asrResult").textContent = pretty({ ...data, rtf });
       refreshStatus();
       refreshMetrics();
+      refreshResources();
     } catch (error) {
       $("asrResult").textContent = `ERROR: ${error.message}`;
     } finally {
@@ -251,10 +260,84 @@
       $("mediaSmokeResult").textContent = pretty(data);
       refreshStatus();
       refreshMetrics();
+      refreshResources();
     } catch (error) {
       $("mediaSmokeResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;
+    }
+  }
+
+  function processState(item) {
+    if (item.name === "Media Runtime") {
+      const asr = item.asr_loaded == null ? "?" : (item.asr_loaded ? "loaded" : "idle");
+      const tts = item.tts_loaded == null ? "?" : (item.tts_loaded ? "loaded" : "idle");
+      return `ASR ${asr} · TTS ${tts}`;
+    }
+    if (item.name === "Character Runtime") {
+      if (item.runtime_loaded == null) return "unknown";
+      return item.runtime_loaded ? "runtime loaded" : "runtime idle";
+    }
+    return item.pid ? "running" : "unavailable";
+  }
+
+  async function refreshResources() {
+    const body = $("resourceBody");
+    try {
+      const data = await jsonFetch("/v1/dev/resources");
+      const ram = data.system_memory || {};
+      const gpu = data.gpu || {};
+      const gpuSummary = gpu.available
+        ? (gpu.devices || []).map((device) => `${device.name}: ${device.used_mb ?? "?"} / ${device.total_mb ?? "?"} MB`).join("\n") || "NVIDIA GPU detected"
+        : `unavailable${gpu.error ? ` · ${gpu.error}` : ""}`;
+      $("resourceSummary").textContent = pretty({
+        system_ram: ram.available ? `${ram.used_mb} / ${ram.total_mb} MB (${ram.used_percent}%)` : "unavailable",
+        gpu: gpuSummary,
+      });
+
+      const items = data.processes || [];
+      if (!items.length) {
+        body.innerHTML = '<tr><td colspan="5">暂无数据</td></tr>';
+      } else {
+        body.replaceChildren(...items.map((item) => {
+          const row = document.createElement("tr");
+          const values = [
+            item.name,
+            item.pid ?? "N/A",
+            item.rss_mb == null ? "N/A" : `${item.rss_mb} MB`,
+            item.gpu_vram_mb == null ? "N/A" : `${item.gpu_vram_mb} MB`,
+            processState(item),
+          ];
+          for (const value of values) {
+            const cell = document.createElement("td");
+            cell.textContent = String(value);
+            row.appendChild(cell);
+          }
+          return row;
+        }));
+      }
+      const sampled = data.sampled_at ? new Date(data.sampled_at * 1000) : new Date();
+      $("resourceUpdated").textContent = `上次采样：${sampled.toLocaleTimeString()}`;
+    } catch (error) {
+      $("resourceSummary").textContent = `Resource metrics unavailable: ${error.message}`;
+      body.innerHTML = "";
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.textContent = `Resource metrics unavailable: ${error.message}`;
+      row.appendChild(cell);
+      body.appendChild(row);
+    }
+  }
+
+  function scheduleResourceRefresh() {
+    if (state.resourceTimer) {
+      clearInterval(state.resourceTimer);
+      state.resourceTimer = null;
+    }
+    const seconds = Number($("resourceInterval").value || 0);
+    if (seconds > 0) {
+      state.resourceTimer = setInterval(refreshResources, seconds * 1000);
     }
   }
 
@@ -288,7 +371,7 @@
     }
   }
 
-  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); });
+  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); });
   $("runLlm").addEventListener("click", runLlm);
   $("runTts").addEventListener("click", runTts);
   $("runAsr").addEventListener("click", runAsr);
@@ -300,7 +383,11 @@
     if (file) setAsrBlob(file, `文件 · ${file.name}`);
   });
   $("refreshMetrics").addEventListener("click", refreshMetrics);
+  $("refreshResources").addEventListener("click", refreshResources);
+  $("resourceInterval").addEventListener("change", scheduleResourceRefresh);
 
   refreshStatus();
   refreshMetrics();
+  refreshResources();
+  scheduleResourceRefresh();
 })();

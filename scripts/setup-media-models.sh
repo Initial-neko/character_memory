@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This file is intentionally LF-only. See .gitattributes.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL_ROOT="${CHARACTER_MEDIA_MODEL_ROOT:-$ROOT/models}"
 ASR_NAME="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
@@ -9,6 +10,13 @@ ASR_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${AS
 TTS_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${TTS_NAME}.tar.bz2"
 
 mkdir -p "$MODEL_ROOT"
+
+for cmd in curl tar; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "[error] required command '$cmd' was not found in this shell." >&2
+    exit 1
+  fi
+done
 
 fetch_model() {
   local name="$1"

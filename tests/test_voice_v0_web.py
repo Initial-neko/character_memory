@@ -16,8 +16,10 @@ def test_voice_assets_are_wired_into_chat_shell():
 
 def test_voice_reuses_existing_async_chat_and_sse_contracts_for_direct_and_group():
     script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
-    assert 'fetch("/v1/chat/messages"' in script
+    assert '"/v1/chat/messages"' in script
     assert '/v1/groups/${encodeURIComponent(target.conversationId)}/messages' in script
+    assert '"/v1/visual/direct/messages"' in script
+    assert '/v1/visual/groups/${encodeURIComponent(target.conversationId)}/messages' in script
     assert 'new EventSource(`/v1/events/stream?' in script
     assert 'source.addEventListener("character_event"' in script
     assert 'source.addEventListener("group_character_event"' in script

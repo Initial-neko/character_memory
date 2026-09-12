@@ -12,16 +12,19 @@
     el.classList.toggle("bad", !ok);
   }
 
-  async function jsonFetch(url, options = {}) {
-    const response = await fetch(url, options);
+  async function responseError(response) {
     const text = await response.text();
     let data;
     try { data = text ? JSON.parse(text) : {}; } catch { data = { text }; }
-    if (!response.ok) {
-      const detail = data.detail || data.text || `${response.status} ${response.statusText}`;
-      throw new Error(typeof detail === "string" ? detail : pretty(detail));
-    }
-    return data;
+    const detail = data.detail || data.text || `${response.status} ${response.statusText}`;
+    return new Error(typeof detail === "string" ? detail : pretty(detail));
+  }
+
+  async function jsonFetch(url, options = {}) {
+    const response = await fetch(url, options);
+    if (!response.ok) throw await responseError(response);
+    const text = await response.text();
+    try { return text ? JSON.parse(text) : {}; } catch { return { text }; }
   }
 
   async function refreshStatus() {
@@ -79,7 +82,7 @@
           speed: Number($("ttsSpeed").value || 1),
         }),
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw await responseError(response);
       const blob = await response.blob();
       if (state.ttsUrl) URL.revokeObjectURL(state.ttsUrl);
       state.ttsUrl = URL.createObjectURL(blob);
@@ -229,6 +232,32 @@
     }
   }
 
+  async function runMediaSmoke() {
+    const button = $("runMediaSmoke");
+    button.disabled = true;
+    $("mediaSmokeResult").textContent = "真实推理中：TTS → WAV → ASR ...";
+    $("mediaSmokeLatency").textContent = "-";
+    try {
+      const data = await jsonFetch("/v1/dev/media-smoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: $("ttsText").value || "你好，这是 Character Memory 的媒体自检。",
+          speaker_id: Number($("speakerId").value || 0),
+          speed: Number($("ttsSpeed").value || 1),
+        }),
+      });
+      $("mediaSmokeLatency").textContent = `${data.total_ms} ms total`;
+      $("mediaSmokeResult").textContent = pretty(data);
+      refreshStatus();
+      refreshMetrics();
+    } catch (error) {
+      $("mediaSmokeResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function refreshMetrics() {
     const body = $("metricsBody");
     try {
@@ -263,6 +292,7 @@
   $("runLlm").addEventListener("click", runLlm);
   $("runTts").addEventListener("click", runTts);
   $("runAsr").addEventListener("click", runAsr);
+  $("runMediaSmoke").addEventListener("click", runMediaSmoke);
   $("recordAsr").addEventListener("click", () => startRecording().catch((error) => { $("asrResult").textContent = `ERROR: ${error.message}`; }));
   $("stopAsr").addEventListener("click", () => stopRecording().catch((error) => { $("asrResult").textContent = `ERROR: ${error.message}`; }));
   $("asrFile").addEventListener("change", (event) => {

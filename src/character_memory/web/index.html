@@ -30,8 +30,8 @@
       </header>
       <section id="chat" class="chat" aria-live="polite"></section>
       <div class="composer-wrap">
-        <form id="composer" class="composer"><textarea id="messageInput" rows="1" placeholder="发送消息" autocomplete="off"></textarea><button id="sendButton" type="submit">发送</button></form>
-        <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 群聊输入 @ 可点名</div>
+        <form id="composer" class="composer"><textarea id="messageInput" rows="1" placeholder="发送消息" autocomplete="off"></textarea><button id="voiceInputButton" class="voice-input-button" type="button" title="语音输入（识别后放入输入框）" aria-label="语音输入">🎤</button><button id="sendButton" type="submit">发送</button></form>
+        <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 🎤 语音转文字 · 群聊输入 @ 可点名</div>
       </div>
     </main>
   </div>
@@ -73,5 +73,6 @@
   <script src="/static/search.js" defer></script>
   <script src="/static/intent.js" defer></script>
   <script src="/static/voice.js" defer></script>
+  <script src="/static/dictation.js" defer></script>
 </body>
 </html>

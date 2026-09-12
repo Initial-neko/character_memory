@@ -34,3 +34,32 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -q
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra api --extra dev --extra browser
+
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run realtime browser smoke
+        env:
+          RUN_PLAYWRIGHT: "1"
+        run: uv run pytest -q tests/test_p0_17b_playwright.py --browser chromium

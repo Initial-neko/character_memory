@@ -10,7 +10,9 @@
   const mentionHints = new Map();
   const composerWrap = document.querySelector(".composer-wrap");
 
-  const currentGroup = () => groups.find(item => item.id === CM.state.conversation.groupId) || null;
+  const currentGroup = () => CM.features.groups?.current?.()
+    || groups.find(item => item.id === CM.state.conversation.groupId)
+    || null;
 
   async function refreshGroups() {
     try {
@@ -123,9 +125,9 @@
     return result;
   }
 
-  // Keep groups.js focused on transport/rendering. This lightweight request
-  // transform enriches only the async group-message contract with stable IDs;
-  // the backend also parses visible @Name tokens as a fallback for manual input.
+  // Keep transport ownership in groups.js. This request transform only enriches
+  // group-message JSON with stable Character IDs; backend text parsing remains a
+  // fallback for manually typed mentions.
   const baseApi = CM.api;
   CM.api = async (path, options = {}) => {
     const match = String(path).match(/^\/v1\/groups\/([^/]+)\/messages(?:\?|$)/);
@@ -135,7 +137,10 @@
     try {
       const payload = JSON.parse(options.body);
       const groupId = decodeURIComponent(match[1]);
-      const group = groups.find(item => item.id === groupId) || currentGroup();
+      const featureGroup = CM.features.groups?.current?.();
+      const group = featureGroup?.id === groupId
+        ? featureGroup
+        : (groups.find(item => item.id === groupId) || currentGroup());
       const mentions = mentionsForText(String(payload.message || ""), group);
       const result = await baseApi(path, {...options, body:JSON.stringify({...payload, mentions})});
       mentionHints.clear();
@@ -184,6 +189,6 @@
   });
 
   CM.on("ready", refreshGroups);
-  CM.on("conversationChanged", async () => { closeMenu(); mentionHints.clear(); await refreshGroups(); });
+  CM.on("conversationChanged", () => { closeMenu(); mentionHints.clear(); });
   CM.registerFeature("mentions", {refreshGroups,close:closeMenu,mentionsForText});
 })();

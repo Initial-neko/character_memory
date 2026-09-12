@@ -1,4 +1,9 @@
 .voice-call-button { min-width: 42px; }
+.voice-input-button { min-width: 38px !important; width: 38px; padding: 0 !important; border-radius: 50% !important; background: #f1f1f2 !important; color: #202123 !important; flex: 0 0 38px; }
+.voice-input-button:hover { background: #e7e7e9 !important; }
+.voice-input-button.recording { background: #b84242 !important; color: #fff !important; animation: voice-record-pulse 1.2s ease-in-out infinite; }
+.voice-input-button.transcribing { background: #dedfe3 !important; color: #555a64 !important; }
+@keyframes voice-record-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(184,66,66,.12); } 50% { box-shadow: 0 0 0 7px rgba(184,66,66,.08); } }
 .voice-call-overlay { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 24px; background: rgba(10, 12, 18, .48); backdrop-filter: blur(3px); }
 .voice-call-overlay.hidden { display: none; }
 .voice-call-card { width: min(820px, calc(100vw - 48px)); max-height: min(78vh, 720px); display: grid; grid-template-columns: 230px minmax(0, 1fr); overflow: hidden; border-radius: 24px; background: var(--panel, #171a22); box-shadow: 0 24px 80px rgba(0, 0, 0, .42); }

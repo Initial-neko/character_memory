@@ -20,7 +20,6 @@ embedding_model: "BAAI/bge-small-zh-v1.5"
 # embedding_api_key: ""
 
 # Image search provider for avatar candidates.
-# SearchAPI.io is the default; paste its API key here in your local config.yaml.
 search_provider: "searchapi"
 search_api_key: ""
 search_country: "jp"
@@ -34,13 +33,27 @@ search_safe_search: "strict"
 # web_search_enabled: false
 # web_fetch_enabled: false
 
+# P0.19 direct-character image generation. Chat does not expose a raw ImageGen
+# console; Dev Console and character visual actions reuse these providers.
+image_generation_provider: "agnes"   # agnes | msimg
+image_generation_timeout_seconds: 180
+# Prefer AGNES_API_KEY in the environment.
+agnes_api_key: ""
+agnes_base_url: "https://apihub.agnes-ai.com/v1"
+agnes_image_model: "agnes-image-2.1-flash"
+# Prefer MSIMG_API_KEY or MODELSCOPE_API_TOKEN in the environment.
+# msimg is installed through: uv sync --extra image-generation
+msimg_api_key: ""
+# Comma-separated model aliases/ModelScope model IDs. Multiple values enable failover.
+msimg_models: "qwen"
+
 db_path: "data/character-memory.db"
-# Empty means <db parent>/media. User-uploaded image bytes live here, not in SQLite.
+# Empty means <db parent>/media. User-uploaded and generated image bytes live here, not in SQLite.
 media_dir: ""
 media_max_bytes: 8388608
 # Empty means <db parent>/stickers. Web-imported sticker packs are global to all characters/groups.
 sticker_dir: ""
-# Empty means <db parent>/avatars. Chosen web avatars are downloaded locally.
+# Empty means <db parent>/avatars. Current avatars are copied locally regardless of source.
 avatar_dir: ""
 avatar_max_bytes: 8388608
 persona_path: "personas/rin/persona.yaml"
@@ -48,6 +61,7 @@ recall_limit: 8
 
 # P0.17C direct-character wake. The background loop checks periodically, but the
 # model is only called when a character reaches this interval. Manual Wake ignores
-# the interval. Wake may speak, create an Intent, or stay silent.
+# the interval. Wake may speak, create an Intent, or stay silent. P0.19 does not
+# allow TIME_TICK/PROACTIVE_INTENT to spend ImageGen quota yet.
 proactive_wake_enabled: true
 proactive_wake_minutes: 60

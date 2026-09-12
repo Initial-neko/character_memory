@@ -27,6 +27,7 @@ media = [
 ]
 ui = ["streamlit>=1.37,<2"]
 dev = ["pytest==9.1.1"]
+browser = ["playwright>=1.55", "pytest-playwright>=0.7"]
 all = [
   "sentence-transformers>=3.0,<6",
   "fastapi==0.141.1",
@@ -59,3 +60,6 @@ character_memory = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+  "browser: real-browser smoke tests run in the dedicated CI browser job",
+]

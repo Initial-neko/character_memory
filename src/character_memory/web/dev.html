@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Character Memory Dev Console</title>
   <link rel="stylesheet" href="/static/dev.css" />
+  <link rel="stylesheet" href="/static/dev_visual.css" />
 </head>
 <body>
   <main class="shell">
@@ -12,7 +13,7 @@
       <div>
         <p class="eyebrow">Character Memory</p>
         <h1>Dev Console</h1>
-        <p class="subtle">独立诊断 Character Runtime、Media Runtime 与外部模型接口。</p>
+        <p class="subtle">独立诊断 Character Runtime、Media Runtime、外部模型与视觉能力。</p>
       </div>
       <div class="service-links">
         <a class="secondary-link" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">打开 Chat :8000</a>
@@ -58,6 +59,34 @@
         <div class="actions"><button id="runTts">Generate</button><span id="ttsLatency" class="metric-inline">-</span></div>
         <audio id="ttsAudio" controls></audio>
         <pre id="ttsResult" class="result">等待请求...</pre>
+      </article>
+
+      <article class="card wide" id="imageGenCard">
+        <div class="card-title-row">
+          <div><h2>ImageGen</h2><p class="subtle">真实执行 VisualPromptPlanner → Provider → MediaStorage，不走 mock。</p></div>
+          <span class="pill">real provider</span>
+        </div>
+        <div class="visual-provider-row">
+          <label>Character<select id="imageCharacter"><option value="rin">rin</option></select></label>
+          <label>Provider<select id="imageProvider"><option value="agnes">agnes</option><option value="msimg">msimg</option></select></label>
+          <label>Purpose<select id="imagePurpose"><option value="SELFIE">SELFIE</option><option value="SCENE">SCENE</option><option value="AVATAR">AVATAR</option></select></label>
+        </div>
+        <label for="imageIntent">Visual Intent</label>
+        <textarea id="imageIntent" rows="4">自然分享一下现在的样子，保持人物身份一致，像日常聊天里随手发来的照片。</textarea>
+        <label class="visual-check"><input id="imageUseAvatar" type="checkbox" checked /> Provider 支持时使用当前头像作为 identity reference</label>
+        <div class="actions">
+          <button id="runImageGen">Generate Image</button>
+          <button id="refreshImageProviders" class="secondary">刷新 Provider</button>
+          <button id="useImageAsAvatar" class="secondary" hidden>设为当前头像</button>
+          <span id="imageGenLatency" class="metric-inline">-</span>
+        </div>
+        <div class="visual-grid">
+          <div class="visual-preview-wrap"><img id="imageGenPreview" class="visual-preview" alt="ImageGen 预览" hidden /></div>
+          <div>
+            <pre id="imageProviderStatus" class="result visual-provider-status">等待 Provider 状态...</pre>
+            <pre id="imageGenResult" class="result">等待请求...</pre>
+          </div>
+        </div>
       </article>
 
       <article class="card wide">
@@ -125,9 +154,10 @@
 
     <section class="card future">
       <div class="card-title-row"><h2>Extension Slots</h2><span class="pill">future</span></div>
-      <p>Vision、文生图、Embedding、完整 Pipeline benchmark 将复用同一套卡片与指标协议，不在 V0 里伪造未接入能力。</p>
+      <p>视频关键帧、Embedding 与完整 Pipeline benchmark 将继续复用同一套 Dev Console；已经接入的 ImageGen 不再放在 future 占位里。</p>
     </section>
   </main>
   <script src="/static/dev.js"></script>
+  <script src="/static/dev_visual.js"></script>
 </body>
 </html>

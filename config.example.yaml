@@ -29,6 +29,9 @@ search_safe_search: "strict"
 # search_provider: "brave"
 # search_country: "ALL"
 # search_language: "zh"
+# Reserved future capabilities; not implemented as character runtime tools yet.
+# web_search_enabled: false
+# web_fetch_enabled: false
 
 # P0.19 direct-character image generation. Chat does not expose a raw ImageGen
 # console; these providers are used by avatar/visual capabilities.

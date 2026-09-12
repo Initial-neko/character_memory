@@ -89,9 +89,6 @@ def create_media_app(runtime: MediaRuntime | None = None):
     return app
 
 
-app = create_media_app()
-
-
 def main():
     try:
         import uvicorn
@@ -100,7 +97,7 @@ def main():
     host = os.getenv("CHARACTER_MEDIA_HOST", "127.0.0.1")
     port = int(os.getenv("CHARACTER_MEDIA_PORT", "8001"))
     print(f"media: http://{host}:{port}")
-    uvicorn.run(app, host=host, port=port, reload=False, timeout_graceful_shutdown=2)
+    uvicorn.run(create_media_app(), host=host, port=port, reload=False, timeout_graceful_shutdown=2)
 
 
 if __name__ == "__main__":

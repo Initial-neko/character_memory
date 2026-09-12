@@ -26,6 +26,7 @@ _CONTENT_EXTENSIONS = {
     "image/gif": ".gif",
     "image/webp": ".webp",
 }
+_EXTENSION_CONTENT = {value: key for key, value in _CONTENT_EXTENSIONS.items()}
 
 
 class AvatarCandidate(BaseModel):
@@ -41,12 +42,16 @@ class AvatarCandidate(BaseModel):
 class AvatarMetadata(BaseModel):
     character_id: str
     local_file: str
-    source: str = "web_search"
-    source_page_url: str
-    source_image_url: str
-    source_domain: str
-    title: str
-    search_query: str
+    source: str = "WEB_SEARCH"
+    source_page_url: str = ""
+    source_image_url: str = ""
+    source_domain: str = ""
+    source_media_id: str | None = None
+    provider: str = ""
+    model: str = ""
+    title: str = ""
+    search_query: str = ""
+    prompt: str = ""
     content_type: str
     selected_at: datetime
 
@@ -112,10 +117,6 @@ class AvatarStore:
         self.max_bytes = max(64 * 1024, int(max_bytes))
         self.root.mkdir(parents=True, exist_ok=True)
         self._owns_client = client is None
-        # Avatar downloads intentionally do not follow redirects automatically.
-        # A redirect could turn a public search result into a private-network URL
-        # after our SSRF validation. Search-provider thumbnails remain a useful
-        # fallback when a source rejects direct server downloads.
         self.client = client or httpx.Client(timeout=30.0, follow_redirects=False)
 
     def _character_dir(self, character_id: str) -> Path:
@@ -134,7 +135,12 @@ class AvatarStore:
         if not path.exists():
             return None
         try:
-            return AvatarMetadata.model_validate(json.loads(path.read_text(encoding="utf-8")))
+            data = json.loads(path.read_text(encoding="utf-8"))
+            # Old metadata used lower-case web_search. Preserve compatibility but
+            # expose the new stable provenance value on the next write.
+            if data.get("source") == "web_search":
+                data["source"] = "WEB_SEARCH"
+            return AvatarMetadata.model_validate(data)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             logger.exception("avatar.metadata invalid character=%s path=%s", character_id, path)
             return None
@@ -173,6 +179,121 @@ class AvatarStore:
             raise ValueError(f"unsupported avatar content type: {content_type or '<missing>'}")
         return payload, content_type
 
+    def _save_payload(
+        self,
+        character_id: str,
+        payload: bytes,
+        content_type: str,
+        *,
+        source: str,
+        source_page_url: str = "",
+        source_image_url: str = "",
+        source_domain: str = "",
+        source_media_id: str | None = None,
+        provider: str = "",
+        model: str = "",
+        title: str = "",
+        search_query: str = "",
+        prompt: str = "",
+    ) -> AvatarMetadata:
+        data = bytes(payload or b"")
+        mime = str(content_type or "").split(";", 1)[0].strip().lower()
+        if not data:
+            raise ValueError("avatar image is empty")
+        if len(data) > self.max_bytes:
+            raise ValueError(f"avatar exceeds the {self.max_bytes} byte limit")
+        if mime not in _CONTENT_EXTENSIONS:
+            raise ValueError(f"unsupported avatar content type: {mime or '<missing>'}")
+
+        extension = _CONTENT_EXTENSIONS[mime]
+        directory = self._character_dir(character_id)
+        filename = f"avatar{extension}"
+        target = directory / filename
+        temp = directory / f".{filename}.{uuid.uuid4().hex}.tmp"
+        temp.write_bytes(data)
+        temp.replace(target)
+        for old in directory.glob("avatar.*"):
+            if old.name in {filename, "avatar.json"}:
+                continue
+            if old.is_file():
+                old.unlink(missing_ok=True)
+
+        metadata = AvatarMetadata(
+            character_id=character_id,
+            local_file=filename,
+            source=str(source or "CHAT_ASSET").strip().upper(),
+            source_page_url=source_page_url,
+            source_image_url=source_image_url,
+            source_domain=source_domain,
+            source_media_id=source_media_id,
+            provider=provider,
+            model=model,
+            title=title,
+            search_query=search_query,
+            prompt=prompt,
+            content_type=mime,
+            selected_at=datetime.now(timezone.utc),
+        )
+        self._metadata_path(character_id).write_text(
+            json.dumps(metadata.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        logger.info(
+            "avatar.saved character=%s bytes=%d source=%s provider=%s",
+            character_id,
+            len(data),
+            metadata.source,
+            provider or "-",
+        )
+        return metadata
+
+    def save_from_bytes(
+        self,
+        character_id: str,
+        payload: bytes,
+        content_type: str,
+        *,
+        source: str,
+        source_media_id: str | None = None,
+        provider: str = "",
+        model: str = "",
+        title: str = "",
+        prompt: str = "",
+    ) -> AvatarMetadata:
+        return self._save_payload(
+            character_id,
+            payload,
+            content_type,
+            source=source,
+            source_media_id=source_media_id,
+            provider=provider,
+            model=model,
+            title=title,
+            prompt=prompt,
+        )
+
+    def save_from_path(
+        self,
+        character_id: str,
+        path: str | Path,
+        *,
+        source: str,
+        source_media_id: str | None = None,
+        title: str = "",
+    ) -> AvatarMetadata:
+        source_path = Path(path)
+        mime = _EXTENSION_CONTENT.get(source_path.suffix.lower())
+        if mime is None:
+            raise ValueError(f"unsupported avatar extension: {source_path.suffix or '<missing>'}")
+        return self.save_from_bytes(
+            character_id,
+            source_path.read_bytes(),
+            mime,
+            source=source,
+            source_media_id=source_media_id,
+            title=title,
+        )
+
     def save_from_candidate(
         self,
         character_id: str,
@@ -183,8 +304,6 @@ class AvatarStore:
         payload: bytes | None = None
         content_type = ""
         errors: list[str] = []
-        # Prefer the original image, but a provider thumbnail is a useful
-        # fallback when a source rejects direct server downloads.
         urls = list(dict.fromkeys([candidate.image_url, candidate.thumbnail_url]))
         for url in urls:
             if not url:
@@ -196,43 +315,17 @@ class AvatarStore:
                 errors.append(str(exc))
         if payload is None:
             raise RuntimeError("avatar download failed: " + " | ".join(errors or ["no downloadable URL"]))
-
-        extension = _CONTENT_EXTENSIONS[content_type]
-        directory = self._character_dir(character_id)
-        filename = f"avatar{extension}"
-        target = directory / filename
-        temp = directory / f".{filename}.{uuid.uuid4().hex}.tmp"
-        temp.write_bytes(payload)
-        temp.replace(target)
-        for old in directory.glob("avatar.*"):
-            if old.name in {filename, "avatar.json"}:
-                continue
-            if old.is_file():
-                old.unlink(missing_ok=True)
-
-        metadata = AvatarMetadata(
-            character_id=character_id,
-            local_file=filename,
+        return self._save_payload(
+            character_id,
+            payload,
+            content_type,
+            source="WEB_SEARCH",
             source_page_url=candidate.source_page_url,
             source_image_url=candidate.image_url,
             source_domain=candidate.source_domain,
             title=candidate.title,
             search_query=query,
-            content_type=content_type,
-            selected_at=datetime.now(timezone.utc),
         )
-        metadata_path = directory / "avatar.json"
-        metadata_path.write_text(
-            json.dumps(metadata.model_dump(mode="json"), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        logger.info(
-            "avatar.saved character=%s bytes=%d source=%s",
-            character_id,
-            len(payload),
-            candidate.source_domain or "-",
-        )
-        return metadata
 
     def close(self) -> None:
         if self._owns_client:
@@ -289,10 +382,6 @@ class AvatarSearchService:
         candidates: dict[str, _CachedCandidate] = {}
         seen_images: set[str] = set()
         used_queries: list[str] = []
-
-        # Search the primary LLM query first. Extra planned queries are only used
-        # when the provider returns too few viable candidates, preserving free
-        # API quota in the common case.
         for query in normalized:
             remaining = target - len(candidates)
             if remaining <= 0:
@@ -314,11 +403,7 @@ class AvatarSearchService:
                     width=item.width,
                     height=item.height,
                 )
-                candidates[candidate_id] = _CachedCandidate(
-                    public=public,
-                    image_url=item.image_url,
-                    query=query,
-                )
+                candidates[candidate_id] = _CachedCandidate(public=public, image_url=item.image_url, query=query)
                 if len(candidates) >= target:
                     break
 

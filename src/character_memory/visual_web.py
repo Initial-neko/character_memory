@@ -122,6 +122,7 @@ def attach_visual_routes(app):
             at=now,
         )
         event.content = f"{event.content}\n[实时视觉：本轮同时提供 {len(frame_urls)} 张按时间顺序采集的摄像头/屏幕关键帧，请结合图像本体理解。]".strip()
+        event.metadata["display_text"] = req.message.strip()
         event.metadata["visual_capture"] = visual_metadata
         event = access.store().append_event(event)
         scheduler().enqueue_direct(

@@ -31,6 +31,9 @@ class ActionType(str, Enum):
     EMOJI = "EMOJI"
     STICKER = "STICKER"
     IMAGE = "IMAGE"
+    # P0.19 internal visual-tool intent. This is not a visible chat message by
+    # itself; direct-chat orchestration may turn it into a generated IMAGE event.
+    GENERATE_IMAGE = "GENERATE_IMAGE"
 
 
 class Event(BaseModel):
@@ -64,6 +67,8 @@ class ActionDecision(BaseModel):
     message: str | None = Field(default=None, validation_alias=AliasChoices("message", "text", "content"))
     sticker_id: str | None = None
     image_id: str | None = None
+    image_purpose: str | None = None
+    visual_intent: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -88,12 +93,16 @@ class ActionDecision(BaseModel):
             self.message = self.message.strip()
             self.sticker_id = None
             self.image_id = None
+            self.image_purpose = None
+            self.visual_intent = None
             return self
         if self.type == ActionType.STICKER:
             if not (self.sticker_id or "").strip():
                 raise ValueError("STICKER requires sticker_id")
             self.message = None
             self.image_id = None
+            self.image_purpose = None
+            self.visual_intent = None
             self.sticker_id = self.sticker_id.strip()
             return self
         if self.type == ActionType.IMAGE:
@@ -101,11 +110,28 @@ class ActionDecision(BaseModel):
                 raise ValueError("IMAGE requires image_id")
             self.message = None
             self.sticker_id = None
+            self.image_purpose = None
+            self.visual_intent = None
             self.image_id = self.image_id.strip()
+            return self
+        if self.type == ActionType.GENERATE_IMAGE:
+            purpose = str(self.image_purpose or "").strip().upper()
+            intent = str(self.visual_intent or "").strip()
+            if purpose not in {"SELFIE", "SCENE"}:
+                raise ValueError("GENERATE_IMAGE image_purpose must be SELFIE or SCENE")
+            if not intent:
+                raise ValueError("GENERATE_IMAGE requires visual_intent")
+            self.message = None
+            self.sticker_id = None
+            self.image_id = None
+            self.image_purpose = purpose
+            self.visual_intent = intent[:800]
             return self
         self.message = None
         self.sticker_id = None
         self.image_id = None
+        self.image_purpose = None
+        self.visual_intent = None
         return self
 
 
@@ -146,7 +172,7 @@ class PersonReaction(BaseModel):
     reaction: str = ""
     mental_state_update: str = ""
 
-    # P0 primary contract: zero to three outward actions. [] means genuine silence.
+    # P0 primary contract: zero to three outward/tool actions. [] means genuine silence.
     actions: list[ActionDecision] = Field(default_factory=list, max_length=3)
 
     # Legacy compatibility for existing callers/traces. Models do not need to emit

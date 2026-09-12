@@ -45,3 +45,9 @@ avatar_dir: ""
 avatar_max_bytes: 8388608
 persona_path: "personas/rin/persona.yaml"
 recall_limit: 8
+
+# P0.17C direct-character wake. The background loop checks periodically, but the
+# model is only called when a character reaches this interval. Manual Wake ignores
+# the interval. Wake may speak, create an Intent, or stay silent.
+proactive_wake_enabled: true
+proactive_wake_minutes: 60

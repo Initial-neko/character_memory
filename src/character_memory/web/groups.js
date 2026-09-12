@@ -172,6 +172,19 @@
     };
   }
 
+  async function reconcileLatest(groupId) {
+    const requested = groupId || activeId();
+    if (!requested || !CM.isGroupConversation() || requested !== activeId()) return;
+    const data = await CM.api(`/v1/groups/${encodeURIComponent(requested)}/history?limit=50`);
+    if (!CM.isGroupConversation() || requested !== activeId()) return;
+    const index = groups.findIndex(item => item.id === requested);
+    if (index >= 0 && data.group) groups[index] = data.group;
+    if (historyState.groupId !== requested) resetHistory(requested);
+    for (const message of data.messages || []) mergeMessage(message);
+    renderList();
+    renderHistory(historyState.messages, {preserveScroll:true});
+  }
+
   function connectStream(groupId) {
     if (groupStream && groupStreamId === groupId) return;
     closeStream();
@@ -179,6 +192,9 @@
     const source = new EventSource(`/v1/events/stream?${params.toString()}`);
     groupStream = source;
     groupStreamId = groupId;
+    source.addEventListener("open", () => {
+      reconcileLatest(groupId).catch(error => console.warn("[sse reconcile group]", error));
+    });
     source.addEventListener("reaction_status", event => {
       if (!CM.isGroupConversation() || groupId !== activeId()) return;
       const data = JSON.parse(event.data || "{}");
@@ -394,7 +410,7 @@
     if (button) showTurn(button.dataset.groupTurn).catch(console.error);
   });
 
-  const feature = CM.registerFeature("groups", {loadGroups,loadHistory,loadOlderHistory,enter,leave,applyHeader,applyComposerState,sendText,sendSticker,sendImage,renderList,closeStream});
+  CM.registerFeature("groups", {loadGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,current,applyHeader,applyComposerState,sendText,sendSticker,sendImage,renderList,closeStream});
   CM.on("ready", loadGroups);
   window.addEventListener("beforeunload", closeStream);
 })();

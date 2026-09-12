@@ -21,6 +21,25 @@ def _ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
+def _upstream_detail(response: httpx.Response, operation: str) -> dict:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and "detail" in payload:
+        detail = payload["detail"]
+    elif payload is not None:
+        detail = payload
+    else:
+        detail = (response.text or f"Media Runtime {operation} failed")[:4000]
+    return {
+        "service": "media-runtime",
+        "operation": operation,
+        "status_code": response.status_code,
+        "detail": detail,
+    }
+
+
 class DevLlmRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
     system_prompt: str = Field(default="", max_length=4000)
@@ -30,6 +49,10 @@ class DevTtsRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     speaker_id: int = Field(default=0, ge=0, le=10000)
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
+class DevMediaSmokeRequest(DevTtsRequest):
+    text: str = Field(default="你好，这是 Character Memory 的媒体自检。", min_length=1, max_length=4000)
 
 
 def create_dev_app(
@@ -85,7 +108,36 @@ def create_dev_app(
         except Exception as exc:
             return {"ok": False, "status_code": None, "total_ms": _ms(started), "error": str(exc)}
 
-    app = FastAPI(title="Character Memory Dev Console", version="0.1")
+    def request_tts(req: DevTtsRequest):
+        try:
+            response = client.post(f"{media_base}/v1/tts", json=req.model_dump(), timeout=120.0)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"service": "media-runtime", "operation": "tts", "detail": f"request failed: {exc}"},
+            ) from exc
+        if response.is_error:
+            raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "tts"))
+        return response
+
+    def request_asr(payload: bytes, content_type: str = "audio/wav"):
+        try:
+            response = client.post(
+                f"{media_base}/v1/asr",
+                content=payload,
+                headers={"Content-Type": content_type},
+                timeout=120.0,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"service": "media-runtime", "operation": "asr", "detail": f"request failed: {exc}"},
+            ) from exc
+        if response.is_error:
+            raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "asr"))
+        return response
+
+    app = FastAPI(title="Character Memory Dev Console", version="0.2")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
     @app.on_event("shutdown")
@@ -156,12 +208,7 @@ def create_dev_app(
     @app.post("/v1/dev/tts")
     def tts(req: DevTtsRequest):
         started = time.perf_counter()
-        try:
-            response = client.post(f"{media_base}/v1/tts", json=req.model_dump(), timeout=120.0)
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Media Runtime request failed: {exc}") from exc
-        if response.is_error:
-            raise HTTPException(status_code=response.status_code, detail=(response.text or "Media Runtime TTS failed")[:4000])
+        response = request_tts(req)
         headers = {
             key: value
             for key, value in response.headers.items()
@@ -181,23 +228,49 @@ def create_dev_app(
         if normalized not in {"audio/wav", "audio/x-wav", "application/octet-stream"}:
             raise HTTPException(status_code=415, detail="Dev Console ASR accepts WAV/PCM16")
         started = time.perf_counter()
-        try:
-            response = client.post(
-                f"{media_base}/v1/asr",
-                content=payload,
-                headers={"Content-Type": normalized},
-                timeout=120.0,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Media Runtime request failed: {exc}") from exc
-        if response.is_error:
-            raise HTTPException(status_code=response.status_code, detail=(response.text or "Media Runtime ASR failed")[:4000])
+        response = request_asr(payload, normalized)
         try:
             data = response.json()
         except ValueError as exc:
             raise HTTPException(status_code=502, detail="Media Runtime returned non-JSON ASR response") from exc
         data["http_total_ms"] = _ms(started)
         return data
+
+    @app.post("/v1/dev/media-smoke")
+    def media_smoke(req: DevMediaSmokeRequest):
+        total_started = time.perf_counter()
+        tts_started = time.perf_counter()
+        tts_response = request_tts(req)
+        tts_total_ms = _ms(tts_started)
+
+        asr_started = time.perf_counter()
+        asr_response = request_asr(tts_response.content, "audio/wav")
+        asr_total_ms = _ms(asr_started)
+        try:
+            asr_data = asr_response.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail="Media Runtime returned non-JSON ASR response during smoke test") from exc
+
+        tts_inference = tts_response.headers.get("x-media-inference-ms")
+        tts_audio_ms = tts_response.headers.get("x-media-audio-ms")
+        return {
+            "ok": True,
+            "kind": "media-smoke",
+            "input_text": req.text,
+            "transcript": asr_data.get("text", ""),
+            "tts": {
+                "provider": tts_response.headers.get("x-media-provider"),
+                "device": tts_response.headers.get("x-media-device"),
+                "inference_ms": float(tts_inference) if tts_inference else None,
+                "audio_ms": float(tts_audio_ms) if tts_audio_ms else None,
+                "http_total_ms": tts_total_ms,
+            },
+            "asr": {
+                **asr_data,
+                "http_total_ms": asr_total_ms,
+            },
+            "total_ms": _ms(total_started),
+        }
 
     @app.get("/v1/dev/metrics")
     def metrics(limit: int = Query(default=50, ge=1, le=200)):
@@ -206,7 +279,7 @@ def create_dev_app(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Media Runtime request failed: {exc}") from exc
         if response.is_error:
-            raise HTTPException(status_code=response.status_code, detail=(response.text or "Media Runtime metrics failed")[:4000])
+            raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "metrics"))
         return response.json()
 
     return app

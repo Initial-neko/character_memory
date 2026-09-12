@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This file is intentionally LF-only. See .gitattributes; CRLF breaks bash/WSL
+# by turning `pipefail` into `pipefail\r`.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL_ROOT="${CHARACTER_MEDIA_MODEL_ROOT:-$ROOT/models}"
 ASR_DIR="$MODEL_ROOT/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
@@ -20,6 +22,12 @@ for file in "${required[@]}"; do
     exit 1
   fi
 done
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "[error] uv was not found in this shell." >&2
+  echo "Run this script from the same Git Bash/WSL environment where 'uv --version' works." >&2
+  exit 1
+fi
 
 export CHARACTER_MEDIA_ASR_MODEL="$ASR_DIR/model.int8.onnx"
 export CHARACTER_MEDIA_ASR_TOKENS="$ASR_DIR/tokens.txt"

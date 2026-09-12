@@ -1,0 +1,30 @@
+# Keep source text portable across Windows, Git Bash and WSL.
+* text=auto
+
+# Shell scripts must always be checked out with LF. CRLF turns
+# `set -euo pipefail` into `pipefail\r` under bash/WSL.
+*.sh text eol=lf
+
+# Python and repository config files should also stay LF to make generated
+# scripts, snapshots and CI behavior deterministic across platforms.
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+
+# Windows-native launchers, if added later, should use CRLF explicitly.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary media/model assets are never line-normalized.
+*.wav binary
+*.onnx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.zip binary
+*.bz2 binary

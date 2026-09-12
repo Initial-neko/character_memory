@@ -15,7 +15,7 @@ class TtsRequest(BaseModel):
 
 def create_media_app(runtime: MediaRuntime | None = None):
     try:
-        from fastapi import FastAPI, HTTPException, Query, Request
+        from fastapi import Body, FastAPI, Header, HTTPException, Query
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import Response
     except ImportError as exc:
@@ -46,11 +46,13 @@ def create_media_app(runtime: MediaRuntime | None = None):
         return {"ok": True, **media.status()}
 
     @app.post("/v1/asr")
-    async def transcribe(request: Request):
-        content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-        if content_type not in {"audio/wav", "audio/x-wav", "application/octet-stream"}:
+    async def transcribe(
+        payload: bytes = Body(..., media_type="application/octet-stream"),
+        content_type: str | None = Header(default=None, alias="Content-Type"),
+    ):
+        normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
+        if normalized_type not in {"audio/wav", "audio/x-wav", "application/octet-stream"}:
             raise HTTPException(status_code=415, detail="Voice V0 accepts audio/wav PCM16")
-        payload = await request.body()
         max_bytes = int(os.getenv("CHARACTER_MEDIA_ASR_MAX_BYTES", str(4 * 1024 * 1024)))
         if not payload:
             raise HTTPException(status_code=400, detail="empty audio")

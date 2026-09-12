@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/static/p0_15.css">
   <link rel="stylesheet" href="/static/p0_16.css">
   <link rel="stylesheet" href="/static/voice.css">
+  <link rel="stylesheet" href="/static/visual_capture.css">
 </head>
 <body>
   <div class="workspace">
@@ -47,6 +48,15 @@
         <div id="voiceCallContext" class="voice-call-context">单聊语音</div>
         <div id="voiceCallStatus" class="voice-call-status">正在连接…</div>
         <div id="voiceCallMetrics" class="voice-call-metrics"></div>
+        <div class="voice-visual-controls" aria-label="视觉共享">
+          <button id="voiceCameraButton" class="voice-visual-button" type="button" title="打开前置摄像头">📷 摄像头</button>
+          <button id="voiceScreenButton" class="voice-visual-button" type="button" title="选择标签页、窗口或整个屏幕">🖥 屏幕</button>
+          <button id="voiceVisualStopButton" class="voice-visual-button stop hidden" type="button">关闭视觉</button>
+        </div>
+        <div id="voiceVisualPanel" class="voice-visual-panel hidden">
+          <video id="voiceVisualPreview" class="voice-visual-preview" muted autoplay playsinline></video>
+          <div id="voiceVisualStatus" class="voice-visual-status">视觉未开启</div>
+        </div>
         <div class="voice-call-actions">
           <button id="voiceMinimizeButton" class="voice-minimize" type="button">收起</button>
           <button id="voiceHangupButton" class="voice-hangup" type="button">结束通话</button>
@@ -63,7 +73,7 @@
   <div id="voiceCallDock" class="voice-call-dock hidden" aria-live="polite">
     <button id="voiceDockExpandButton" class="voice-call-dock-main" type="button" title="展开语音通话">
       <span id="voiceDockAvatar" class="voice-call-dock-avatar">R</span>
-      <span class="voice-call-dock-copy"><strong id="voiceDockTitle">语音通话</strong><span id="voiceDockStatus">正在听…</span></span>
+      <span class="voice-call-dock-copy"><strong id="voiceDockTitle">语音通话</strong><span><span id="voiceDockStatus">正在听…</span><span id="voiceDockVisual" class="voice-call-dock-visual hidden"></span></span></span>
     </button>
     <button id="voiceDockHangupButton" class="voice-call-dock-hangup" type="button" title="结束通话" aria-label="结束通话">×</button>
   </div>
@@ -84,6 +94,7 @@
   <script src="/static/avatars.js" defer></script>
   <script src="/static/search.js" defer></script>
   <script src="/static/intent.js" defer></script>
+  <script src="/static/visual_capture.js" defer></script>
   <script src="/static/voice.js" defer></script>
   <script src="/static/dictation.js" defer></script>
 </body>

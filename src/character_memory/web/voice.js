@@ -3,6 +3,7 @@
   if (!CM) return;
 
   const MEDIA_BASE_KEY = "character-memory:media-base-url";
+  const TTS_SPEAKER_COUNT = 5;
   const mediaBase = () => localStorage.getItem(MEDIA_BASE_KEY) || "http://127.0.0.1:8001";
   const voice = {
     active: false,
@@ -21,6 +22,8 @@
     playing: false,
     turnStartedAt: 0,
     lastMetrics: {},
+    speakerId: 0,
+    callMessageIds: new Set(),
     threshold: 0.025,
     silenceMs: 450,
     minSpeechMs: 250,
@@ -34,6 +37,7 @@
     name: document.getElementById("voiceCallName"),
     status: document.getElementById("voiceCallStatus"),
     transcript: document.getElementById("voiceCallTranscript"),
+    log: document.getElementById("voiceCallLog"),
     metrics: document.getElementById("voiceCallMetrics"),
     hangup: document.getElementById("voiceHangupButton"),
   };
@@ -43,14 +47,51 @@
     if (dom.status) dom.status.textContent = text || phase;
   }
 
+  function stableSpeakerId(characterId) {
+    let hash = 2166136261;
+    for (const char of String(characterId || "default")) {
+      hash ^= char.codePointAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) % TTS_SPEAKER_COUNT;
+  }
+
   function formatMetrics() {
     const m = voice.lastMetrics;
-    const parts = [];
+    const parts = [`Voice #${voice.speakerId}`];
     if (m.asr != null) parts.push(`ASR ${Math.round(m.asr)}ms`);
     if (m.llm != null) parts.push(`LLM ${Math.round(m.llm)}ms`);
     if (m.tts != null) parts.push(`TTS ${Math.round(m.tts)}ms`);
     if (m.total != null) parts.push(`总计 ${Math.round(m.total)}ms`);
     if (dom.metrics) dom.metrics.textContent = parts.join(" · ");
+  }
+
+  function resetCallLog() {
+    voice.callMessageIds.clear();
+    if (dom.log) dom.log.innerHTML = '<div class="voice-call-log-empty">开始说话后，这里会显示本次通话的文字内容。</div>';
+  }
+
+  function appendCallLog(role, text, messageId = null) {
+    const value = String(text || "").trim();
+    if (!value || !dom.log) return;
+    if (messageId != null) {
+      const key = `${role}:${messageId}`;
+      if (voice.callMessageIds.has(key)) return;
+      voice.callMessageIds.add(key);
+    }
+    dom.log.querySelector(".voice-call-log-empty")?.remove();
+    const line = document.createElement("div");
+    line.className = `voice-call-line ${role}`;
+    const label = role === "user" ? "你" : (CM.currentProfile().name || "角色");
+    const labelEl = document.createElement("span");
+    labelEl.className = "voice-call-line-role";
+    labelEl.textContent = label;
+    const textEl = document.createElement("div");
+    textEl.className = "voice-call-line-text";
+    textEl.textContent = value;
+    line.append(labelEl, textEl);
+    dom.log.appendChild(line);
+    dom.log.scrollTop = dom.log.scrollHeight;
   }
 
   function rms(samples) {
@@ -140,12 +181,18 @@
       if (!voice.active) return;
       const data = JSON.parse(event.data || "{}");
       const action = String(data.metadata?.action || "").toUpperCase();
+      if (CM.directEventToMessage && CM.mergeDirectMessage) {
+        CM.mergeDirectMessage(CM.directEventToMessage(data));
+      }
       if (action === "MESSAGE" && String(data.content || "").trim()) {
+        const text = String(data.content).trim();
+        appendCallLog("assistant", text, data.id);
+        if (dom.transcript) dom.transcript.textContent = `${CM.currentProfile().name || "角色"}：${text}`;
         if (voice.lastMetrics.llm == null && voice.turnStartedAt) {
           voice.lastMetrics.llm = performance.now() - voice.turnStartedAt - Number(voice.lastMetrics.asr || 0);
           formatMetrics();
         }
-        voice.queue.push(String(data.content).trim());
+        voice.queue.push(text);
         playQueue();
       }
     });
@@ -175,6 +222,7 @@
     if (!response.ok) throw new Error(await response.text());
     const result = await response.json();
     if (result.message) CM.mergeDirectMessage?.(result.message);
+    return result;
   }
 
   async function finishSpeech() {
@@ -204,7 +252,8 @@
       if (!text) throw new Error("没有识别到文字");
       if (dom.transcript) dom.transcript.textContent = `你：${text}`;
       setPhase("waiting", "正在想…");
-      await sendTranscript(text);
+      const sent = await sendTranscript(text);
+      appendCallLog("user", text, sent.message?.id ?? null);
     } catch (error) {
       setPhase("error", `语音失败：${error.message}`);
       setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
@@ -212,13 +261,11 @@
   }
 
   async function synthesize(text) {
-    const profileIndex = Math.max(0, CM.state.characters.findIndex(item => item.id === CM.state.characterId));
-    const speakerId = profileIndex % 5;
     const started = performance.now();
     const response = await fetch(`${mediaBase()}/v1/tts`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({text, speaker_id:speakerId, speed:1.0}),
+      body: JSON.stringify({text, speaker_id:voice.speakerId, speed:1.0}),
     });
     if (!response.ok) throw new Error(await response.text());
     const blob = await response.blob();
@@ -320,13 +367,15 @@
       voice.lastMetrics = {};
       voice.preRoll = [];
       voice.chunks = [];
+      voice.speakerId = stableSpeakerId(CM.state.characterId);
       openVoiceEvents();
 
       const profile = CM.currentProfile();
       if (dom.avatar) dom.avatar.textContent = CM.initialFor(profile);
       if (dom.name) dom.name.textContent = profile.name || profile.id;
       if (dom.transcript) dom.transcript.textContent = "直接说话即可；停顿后会自动发送。";
-      if (dom.metrics) dom.metrics.textContent = "";
+      resetCallLog();
+      formatMetrics();
       dom.overlay?.classList.remove("hidden");
       setPhase("listening", "正在听…");
     } catch (error) {
@@ -360,5 +409,5 @@
   dom.hangup?.addEventListener("click", stopCall);
   window.addEventListener("beforeunload", () => { if (voice.active) stopCall(); });
   CM.on("conversationChanged", () => { if (voice.active) stopCall(); });
-  CM.registerFeature("voice", {start:startCall, stop:stopCall, state:voice});
+  CM.registerFeature("voice", {start:startCall, stop:stopCall, state:voice, stableSpeakerId});
 })();

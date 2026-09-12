@@ -31,14 +31,25 @@ class Settings(BaseModel):
     search_language: str = "zh-cn"
     search_safe_search: str = "strict"
 
+    # P0.19 direct-character visual capability. Both providers share one
+    # provider-neutral request/result contract. Agnes supports reference images;
+    # msimg 0.0.4 is currently text-to-image only in this integration.
+    image_generation_provider: str = "agnes"
+    image_generation_timeout_seconds: float = Field(default=180.0, ge=10.0, le=600.0)
+    agnes_api_key: str = ""
+    agnes_base_url: str = "https://apihub.agnes-ai.com/v1"
+    agnes_image_model: str = "agnes-image-2.5-flash"
+    msimg_api_key: str = ""
+    msimg_models: str = "qwen"
+
     db_path: str = "data/character-memory.db"
     media_dir: str = ""
     media_max_bytes: int = Field(default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)
     # User-imported stickers are account/application resources, not character-owned.
     # Empty means <db parent>/stickers.
     sticker_dir: str = ""
-    # Empty means <db parent>/avatars. Selected web avatars are downloaded here
-    # so chat UI never depends on a third-party hotlink remaining alive.
+    # Empty means <db parent>/avatars. Selected web/generated/chat avatars are
+    # copied here so current avatar state never depends on another asset staying alive.
     avatar_dir: str = ""
     avatar_max_bytes: int = Field(default=8 * 1024 * 1024, ge=64 * 1024, le=32 * 1024 * 1024)
     persona_path: str = "personas/rin/persona.yaml"
@@ -70,6 +81,13 @@ def load_settings(path: str = "config.yaml") -> Settings:
     else:
         data["search_api_key"] = configured_search_key
 
+    # Image generation credentials never need to be committed. Agnes and
+    # ModelScope/msimg remain independently configurable so both can be A/B tested.
+    data["agnes_api_key"] = os.getenv("AGNES_API_KEY", data.get("agnes_api_key", ""))
+    data["msimg_api_key"] = os.getenv(
+        "MSIMG_API_KEY",
+        os.getenv("MODELSCOPE_API_TOKEN", data.get("msimg_api_key", "")),
+    )
     data["db_path"] = os.getenv("CHARACTER_MEMORY_DB_PATH", data.get("db_path", "data/character-memory.db"))
     return Settings.model_validate(data)
 

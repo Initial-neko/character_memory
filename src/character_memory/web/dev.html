@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Character Memory Dev Console</title>
+  <link rel="stylesheet" href="/static/dev.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Character Memory</p>
+        <h1>Dev Console</h1>
+        <p class="subtle">独立诊断 Character Runtime、Media Runtime 与外部模型接口。</p>
+      </div>
+      <div class="service-links">
+        <a class="secondary-link" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">打开 Chat :8000</a>
+        <a class="secondary-link" href="http://127.0.0.1:8001/health" target="_blank" rel="noreferrer">Media :8001</a>
+        <button id="refreshAll" class="secondary">刷新状态</button>
+      </div>
+    </header>
+
+    <section class="grid status-grid" aria-label="System status">
+      <article class="card status-card">
+        <div class="card-title-row"><h2>Character Runtime</h2><span id="characterBadge" class="badge">unknown</span></div>
+        <pre id="characterStatus" class="status-block">等待检测...</pre>
+      </article>
+      <article class="card status-card">
+        <div class="card-title-row"><h2>Media Runtime</h2><span id="mediaBadge" class="badge">unknown</span></div>
+        <pre id="mediaStatus" class="status-block">等待检测...</pre>
+      </article>
+      <article class="card status-card">
+        <div class="card-title-row"><h2>Configured Models</h2><span id="llmBadge" class="badge">unknown</span></div>
+        <pre id="modelStatus" class="status-block">等待检测...</pre>
+      </article>
+    </section>
+
+    <section class="grid feature-grid">
+      <article class="card">
+        <div class="card-title-row"><h2>LLM</h2><span class="pill">cloud</span></div>
+        <label for="llmSystem">System Prompt</label>
+        <textarea id="llmSystem" rows="3" placeholder="可选；留空则直接发送用户 Prompt"></textarea>
+        <label for="llmPrompt">Prompt</label>
+        <textarea id="llmPrompt" rows="7">请只回复：LLM 接口正常。</textarea>
+        <div class="actions"><button id="runLlm">Run LLM</button><span id="llmLatency" class="metric-inline">-</span></div>
+        <pre id="llmResult" class="result">等待请求...</pre>
+      </article>
+
+      <article class="card">
+        <div class="card-title-row"><h2>TTS</h2><span class="pill">media</span></div>
+        <label for="ttsText">Text</label>
+        <textarea id="ttsText" rows="5">你好，这是 Character Memory 的语音测试。</textarea>
+        <div class="two-col">
+          <label>Speaker ID<input id="speakerId" type="number" min="0" value="0" /></label>
+          <label>Speed<input id="ttsSpeed" type="number" min="0.5" max="2" step="0.1" value="1.0" /></label>
+        </div>
+        <div class="actions"><button id="runTts">Generate</button><span id="ttsLatency" class="metric-inline">-</span></div>
+        <audio id="ttsAudio" controls></audio>
+        <pre id="ttsResult" class="result">等待请求...</pre>
+      </article>
+
+      <article class="card wide">
+        <div class="card-title-row"><h2>ASR</h2><span class="pill">media</span></div>
+        <div class="asr-controls">
+          <label class="file-button">选择 WAV<input id="asrFile" type="file" accept="audio/wav,.wav" /></label>
+          <button id="recordAsr" class="secondary">开始录音</button>
+          <button id="stopAsr" class="secondary" disabled>停止录音</button>
+          <button id="runAsr" disabled>Transcribe</button>
+        </div>
+        <div class="audio-meta">
+          <span id="asrSource">尚未选择音频</span>
+          <span id="asrDuration">-</span>
+          <span id="asrLatency" class="metric-inline">-</span>
+        </div>
+        <audio id="asrAudio" controls></audio>
+        <pre id="asrResult" class="result">等待请求...</pre>
+      </article>
+
+      <article class="card wide">
+        <div class="card-title-row"><h2>Media Live Smoke</h2><span class="pill">real inference</span></div>
+        <p class="subtle">真实执行 TTS → WAV → ASR。它不是 mock；失败时会显示 Media Runtime 的原始状态码与 detail。</p>
+        <div class="actions"><button id="runMediaSmoke">Run Media Smoke</button><span id="mediaSmokeLatency" class="metric-inline">-</span></div>
+        <pre id="mediaSmokeResult" class="result">等待请求...</pre>
+      </article>
+
+      <article class="card wide">
+        <div class="card-title-row">
+          <h2>Resource Monitor</h2>
+          <div class="actions">
+            <label for="resourceInterval" class="subtle">自动刷新
+              <select id="resourceInterval">
+                <option value="0">关闭</option>
+                <option value="5">5 秒</option>
+                <option value="10">10 秒</option>
+                <option value="30">30 秒</option>
+                <option value="60" selected>60 秒</option>
+                <option value="300">5 分钟</option>
+              </select>
+            </label>
+            <button id="refreshResources" class="secondary compact">刷新</button>
+          </div>
+        </div>
+        <p class="subtle">默认 60 秒采样一次；平时也可以关闭自动刷新，仅在需要观察 RAM / VRAM 峰值时手动刷新。</p>
+        <pre id="resourceSummary" class="result">等待采样...</pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Process</th><th>PID</th><th>RAM RSS</th><th>GPU VRAM</th><th>State</th></tr></thead>
+            <tbody id="resourceBody"><tr><td colspan="5">暂无数据</td></tr></tbody>
+          </table>
+        </div>
+        <div class="audio-meta"><span id="resourceUpdated">尚未采样</span></div>
+      </article>
+
+      <article class="card wide">
+        <div class="card-title-row"><h2>Media Metrics</h2><button id="refreshMetrics" class="secondary compact">刷新</button></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Kind</th><th>Provider</th><th>Device</th><th>Inference</th><th>Audio</th><th>HTTP/Total</th></tr></thead>
+            <tbody id="metricsBody"><tr><td colspan="6">暂无数据</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="card future">
+      <div class="card-title-row"><h2>Extension Slots</h2><span class="pill">future</span></div>
+      <p>Vision、文生图、Embedding、完整 Pipeline benchmark 将复用同一套卡片与指标协议，不在 V0 里伪造未接入能力。</p>
+    </section>
+  </main>
+  <script src="/static/dev.js"></script>
+</body>
+</html>

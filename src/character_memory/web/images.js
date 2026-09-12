@@ -7,6 +7,7 @@
   let inputEl = null;
   let trigger = null;
   let lightbox = null;
+  let lightboxAvatarSource = null;
 
   function close() {
     panel?.classList.add("hidden");
@@ -18,14 +19,25 @@
     if (trigger) trigger.disabled = Boolean(disabled);
   }
 
+  function avatarSourceFor(rawUrl) {
+    if (!rawUrl || CM.isGroupConversation()) return null;
+    let pathname = "";
+    try { pathname = new URL(rawUrl, window.location.origin).pathname; } catch { return null; }
+    let match = pathname.match(/^\/v1\/media\/([^/]+)$/);
+    if (match) return {mediaId:decodeURIComponent(match[1]), characterId:CM.state.characterId};
+    match = pathname.match(/^\/v1\/images\/([^/]+)\/([^/]+)\/asset$/);
+    if (match && decodeURIComponent(match[1]) === CM.state.characterId) {
+      return {imageId:decodeURIComponent(match[2]), characterId:CM.state.characterId};
+    }
+    return null;
+  }
+
   function closeLightbox() {
     if (!lightbox) return;
     lightbox.classList.add("hidden");
+    lightboxAvatarSource = null;
     const image = lightbox.querySelector("img");
-    if (image) {
-      image.removeAttribute("src");
-      image.alt = "";
-    }
+    if (image) { image.removeAttribute("src"); image.alt = ""; }
   }
 
   function openLightbox(image) {
@@ -34,6 +46,13 @@
     if (!preview) return;
     preview.src = image.currentSrc || image.src;
     preview.alt = image.alt || "图片预览";
+    lightboxAvatarSource = avatarSourceFor(preview.src);
+    const avatarButton = lightbox.querySelector("[data-image-set-avatar]");
+    if (avatarButton) {
+      avatarButton.hidden = !lightboxAvatarSource;
+      avatarButton.disabled = false;
+      avatarButton.textContent = "设为当前头像";
+    }
     lightbox.classList.remove("hidden");
   }
 
@@ -73,10 +92,7 @@
   async function sendDirect(currentDraft, caption) {
     if (!currentDraft) return;
     try {
-      await CM.sendDirectPayload({
-        message:caption,
-        image:{filename:currentDraft.filename, data_url:currentDraft.data_url},
-      });
+      await CM.sendDirectPayload({message:caption, image:{filename:currentDraft.filename, data_url:currentDraft.data_url}});
     } catch (error) {
       const box = document.createElement("div");
       box.className = "error";
@@ -116,7 +132,7 @@
   lightbox.setAttribute("role", "dialog");
   lightbox.setAttribute("aria-modal", "true");
   lightbox.setAttribute("aria-label", "图片预览");
-  lightbox.innerHTML = '<button type="button" class="image-lightbox-close" data-image-lightbox-close aria-label="关闭图片预览">×</button><div class="image-lightbox-stage"><img alt=""></div>';
+  lightbox.innerHTML = '<button type="button" class="image-lightbox-close" data-image-lightbox-close aria-label="关闭图片预览">×</button><div class="image-lightbox-stage"><img alt=""></div><div class="image-lightbox-actions"><button type="button" data-image-set-avatar hidden>设为当前头像</button></div>';
   document.body.appendChild(lightbox);
 
   trigger.addEventListener("click", event => {
@@ -152,7 +168,18 @@
     openLightbox(image);
   });
   lightbox.addEventListener("click", event => {
-    if (event.target === lightbox || event.target.closest("[data-image-lightbox-close]")) closeLightbox();
+    if (event.target === lightbox || event.target.closest("[data-image-lightbox-close]")) { closeLightbox(); return; }
+    const avatarButton = event.target.closest("[data-image-set-avatar]");
+    if (avatarButton && lightboxAvatarSource) {
+      avatarButton.disabled = true;
+      avatarButton.textContent = "正在设置…";
+      CM.features.avatars?.useChatImage?.(lightboxAvatarSource)
+        .then(() => closeLightbox())
+        .catch(error => {
+          avatarButton.disabled = false;
+          avatarButton.textContent = `设置失败：${error.message}`;
+        });
+    }
   });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && !lightbox.classList.contains("hidden")) closeLightbox();
@@ -160,10 +187,7 @@
   document.addEventListener("click", event => {
     if (!event.target.closest(".image-panel") && !event.target.closest(".image-trigger") && !panel?.contains(document.activeElement)) close();
   });
-  CM.on("conversationChanged", () => {
-    close();
-    closeLightbox();
-  });
+  CM.on("conversationChanged", () => { close(); closeLightbox(); });
 
   CM.registerFeature("images", {openDraft, close, setDisabled, openLightbox, closeLightbox, trigger});
 })();

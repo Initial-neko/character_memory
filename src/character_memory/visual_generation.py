@@ -52,9 +52,6 @@ class ImageGenerationResult(BaseModel):
     width: int | None = None
     height: int | None = None
 
-    class Config:
-        arbitrary_types_allowed = True
-
 
 class ImageGenerationProvider(Protocol):
     name: str

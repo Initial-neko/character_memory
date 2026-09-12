@@ -208,6 +208,56 @@ class ChatService:
                 )
             )
 
+    def dispatch_wake(
+        self,
+        *,
+        character_id: str,
+        at: datetime,
+        reason: str = "PERIODIC",
+        conversation_id: str | None = None,
+    ):
+        """Give one direct character a TIME_TICK opportunity to think.
+
+        A wake is not an instruction to speak. Runtime keeps the ordinary
+        TIME_TICK contract, so MESSAGE/STICKER/IMAGE, future Intent, or silence
+        are all valid outcomes.
+        """
+
+        runtime = self._runtime_for(character_id)
+        normalized_reason = str(reason or "PERIODIC").strip().upper()
+        with self._lock_for(character_id):
+            resolved_conversation = str(conversation_id or "").strip() or self._latest_conversation_id(character_id)
+            self.store.set_world_time(character_id, at)
+            if normalized_reason == "MANUAL":
+                content = (
+                    "现在进行一次手动唤醒后的主动判断。结合最近聊天、Memory、Mental State 和 Persona，"
+                    "看看此刻是否真的有想表达或想留到未来的念头；这不是要求你必须回复。"
+                )
+            else:
+                content = (
+                    "时间自然过去了一段。结合最近聊天、Memory、Mental State 和 Persona，"
+                    "判断此刻是否真的有想主动表达或想留到未来的念头；不要为了活跃而强行说话。"
+                )
+            logger.info(
+                "chat.wake character=%s reason=%s conversation=%s at=%s",
+                character_id,
+                normalized_reason,
+                resolved_conversation,
+                at.isoformat(),
+            )
+            return runtime.handle(
+                Event(
+                    character_id=character_id,
+                    event_type=EventType.TIME_TICK,
+                    event_time=at,
+                    content=content,
+                    metadata={
+                        "wake_reason": normalized_reason,
+                        "conversation_id": resolved_conversation,
+                    },
+                )
+            )
+
     def history(self, character_id: str = "rin", limit: int = 160) -> dict:
         events = self.store.list_chat_events(character_id, limit=limit)
         trace_sources = self.store.list_runtime_trace_sources(character_id)

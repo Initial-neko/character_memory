@@ -21,6 +21,7 @@ from character_memory.runtime.person_runtime import PersonRuntime
 from character_memory.search_web import attach_search_routes
 from character_memory.stickers import load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
+from character_memory.wake_web import attach_wake_routes
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,7 @@ class DeterministicPersonModel(PersonModel):
     @staticmethod
     def _current_text(context: str) -> str:
         block = context.rsplit("# Current Event", 1)[-1]
-        match = re.search(r"USER_MESSAGE:\s*([^\n]+)", block)
+        match = re.search(r"(?:USER_MESSAGE|TIME_TICK):\s*([^\n]+)", block)
         if not match:
             return "event"
         text = " ".join(match.group(1).split()).strip()
@@ -45,7 +46,12 @@ class DeterministicPersonModel(PersonModel):
 
     def _reaction(self, context: str) -> PersonReaction:
         current = self._current_text(context)
-        message = f"E2E group reply: {current}" if "# Group Conversation Contract" in context else f"E2E reply: {current}"
+        if "# Group Conversation Contract" in context:
+            message = f"E2E group reply: {current}"
+        elif "TIME_TICK" in context or "手动唤醒后的主动判断" in context or "时间自然过去了一段" in context:
+            message = "E2E wake reply"
+        else:
+            message = f"E2E reply: {current}"
         return PersonReaction(
             perception="E2E deterministic perception",
             reaction="E2E deterministic reaction",
@@ -78,6 +84,7 @@ settings = Settings(
     sticker_dir=str(DB_PATH.parent / "e2e-stickers"),
     avatar_dir=str(DB_PATH.parent / "e2e-avatars"),
     persona_path=str(ROOT / "personas" / "rin" / "persona.yaml"),
+    proactive_wake_enabled=False,
 )
 store = SQLiteStore(settings.db_path)
 embeddings = DeterministicEmbedding()
@@ -121,6 +128,7 @@ attach_history_routes(app)
 attach_group_routes(app, str(ROOT / "config.example.yaml"))
 attach_search_routes(app)
 attach_async_routes(app)
+attach_wake_routes(app)
 
 
 def _close_test_store():

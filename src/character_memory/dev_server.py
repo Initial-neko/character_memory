@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from character_memory.app import build_model
 from character_memory.config import Settings, load_settings
+from character_memory.resource_metrics import collect_resource_snapshot
 
 
 logger = logging.getLogger("character_memory.dev_server")
@@ -137,7 +138,7 @@ def create_dev_app(
             raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "asr"))
         return response
 
-    app = FastAPI(title="Character Memory Dev Console", version="0.2")
+    app = FastAPI(title="Character Memory Dev Console", version="0.3")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
     @app.on_event("shutdown")
@@ -180,6 +181,21 @@ def create_dev_app(
             "character": probe(f"{character_base}/health"),
             "media": probe(f"{media_base}/health"),
         }
+
+    @app.get("/v1/dev/resources")
+    def resources():
+        character_probe = probe(f"{character_base}/health")
+        media_probe = probe(f"{media_base}/health")
+        character_health = character_probe.get("data") if character_probe.get("ok") else None
+        media_health = media_probe.get("data") if media_probe.get("ok") else None
+        snapshot = collect_resource_snapshot(
+            character_base_url=character_base,
+            media_base_url=media_base,
+            character_health=character_health,
+            media_health=media_health,
+        )
+        snapshot["sampled_at"] = time.time()
+        return snapshot
 
     @app.post("/v1/dev/llm")
     def llm(req: DevLlmRequest):

@@ -18,14 +18,14 @@ api = [
   "fastapi==0.141.1",
   "uvicorn==0.52.4",
 ]
-media = ["sherpa-onnx==1.13.8"]
+media = ["sherpa-onnx==1.13.5"]
 ui = ["streamlit>=1.37,<2"]
 dev = ["pytest==9.1.1"]
 all = [
   "sentence-transformers>=3.0,<6",
   "fastapi==0.141.1",
   "uvicorn==0.52.4",
-  "sherpa-onnx==1.13.8",
+  "sherpa-onnx==1.13.5",
   "streamlit>=1.37,<2",
   "pytest==9.1.1",
 ]

@@ -74,6 +74,9 @@ class PersonModel(ABC):
     ):
         raise RuntimeError("this PersonModel does not support generic structured vision analysis")
 
+    def structured_for_session(self, prompt: str, schema: type[BaseModel], session_id: str):
+        return self.structured_with_images_for_session(prompt, [], schema, session_id)
+
     @abstractmethod
     def plan_day(self, context: str) -> DailyLifePlan:
         ...
@@ -282,6 +285,26 @@ class OpenAICompatibleModel(PersonModel):
             return "根据输入写简短日记并返回 JSON 对象，包含 diary、mental_state_update、memory_candidates。没有值得记忆的内容时 memory_candidates 可以为空数组。"
         return "根据输入返回符合目标对象语义的 JSON 对象，不要添加 JSON 之外的解释。"
 
+    @staticmethod
+    def _repair_prompt(schema: type[BaseModel], error: Exception) -> str:
+        """Build a schema-specific repair request after structured validation fails."""
+        if schema is PersonReaction:
+            return (
+                "上一份 JSON 不符合 PersonReaction。只修正结构，不扩写内容："
+                "actions 必须是 0~3 个动作，MESSAGE/EMOJI 需要 message，STICKER 需要 sticker_id，IMAGE 需要 image_id；"
+                "没有想回复时 actions=[]；memory_candidates 和 intent_candidates 必须是数组。只返回修正后的 JSON。"
+            )
+
+        fields = ", ".join(schema.model_fields.keys()) or "目标字段"
+        message = " ".join(str(error).split())
+        if len(message) > 700:
+            message = message[:700] + "…"
+        return (
+            f"上一份 JSON 不符合 {schema.__name__}。请只修正为该对象的 JSON 结构，不要改成聊天回复格式。"
+            f"目标字段：{fields}。校验错误：{message}。"
+            "字段为空时使用该对象允许的空值/空数组；不要添加 JSON 之外的解释，只返回修正后的 JSON。"
+        )
+
     def preview_messages(self, prompt: str, schema: type[BaseModel], image_data_urls: list[str] | None = None) -> list[dict]:
         if image_data_urls:
             user_content: str | list[dict] = [{"type": "text", "text": prompt}]
@@ -361,12 +384,7 @@ class OpenAICompatibleModel(PersonModel):
                 if attempt_number >= self.attempts:
                     break
                 messages.append({"role": "assistant", "content": text if "text" in locals() else "{}"})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "上一份 JSON 不符合目标对象约束。只修正结构：actions 为 0~3 个 MESSAGE/EMOJI/STICKER/IMAGE；STICKER/IMAGE 必须使用已列出的资源 id；没有想回复时 actions=[]；非关键内部字段可以留空。",
-                    }
-                )
+                messages.append({"role": "user", "content": self._repair_prompt(schema, exc)})
         raise RuntimeError(
             f"Model returned invalid structured output after {self.attempts} attempts: {last_error}"
         ) from last_error
@@ -410,6 +428,9 @@ class OpenAICompatibleModel(PersonModel):
             conversation_id=session_id,
             image_data_urls=image_data_urls,
         )
+
+    def structured_for_session(self, prompt: str, schema: type[BaseModel], session_id: str):
+        return self._call(prompt, schema, conversation_id=session_id)
 
     def structured_with_images_for_session(
         self,

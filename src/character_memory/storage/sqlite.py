@@ -446,11 +446,20 @@ class SQLiteStore:
             return row["content"] if row else ""
 
     def set_mental_state(self, character_id: str, content: str, updated_at, source_event_id=None):
+        """Write a new mental-state version only when the state actually changes."""
         with self._lock:
             stamp = epoch_us(updated_at)
-            self.conn.execute("INSERT INTO mental_state_history(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?)", (character_id, content, updated_at.isoformat(), stamp, source_event_id))
-            self.conn.execute("INSERT INTO mental_states(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?) ON CONFLICT(character_id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at,updated_at_epoch=excluded.updated_at_epoch,source_event_id=excluded.source_event_id WHERE mental_states.updated_at_epoch IS NULL OR excluded.updated_at_epoch>=mental_states.updated_at_epoch", (character_id, content, updated_at.isoformat(), stamp, source_event_id))
+            normalized = str(content or "").strip()
+            previous = self.conn.execute(
+                "SELECT content FROM mental_state_history WHERE character_id=? AND updated_at_epoch<=? ORDER BY updated_at_epoch DESC,id DESC LIMIT 1",
+                (character_id, stamp),
+            ).fetchone()
+            if previous is not None and str(previous["content"] or "").strip() == normalized:
+                return False
+            self.conn.execute("INSERT INTO mental_state_history(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?)", (character_id, normalized, updated_at.isoformat(), stamp, source_event_id))
+            self.conn.execute("INSERT INTO mental_states(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?) ON CONFLICT(character_id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at,updated_at_epoch=excluded.updated_at_epoch,source_event_id=excluded.source_event_id WHERE mental_states.updated_at_epoch IS NULL OR excluded.updated_at_epoch>=mental_states.updated_at_epoch", (character_id, normalized, updated_at.isoformat(), stamp, source_event_id))
             self._maybe_commit()
+            return True
 
     def add_intent(self, character_id, content, preferred_action, created_at, earliest_at, expires_at, reason="", *, source_event_id=None):
         with self._lock:

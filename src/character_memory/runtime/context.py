@@ -70,7 +70,7 @@ def compile_context(
         generate_contract = """
 GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片，也不是用户命令。只有当你作为这个人物自己确实想用图片表达时才使用；即使用户说“发张自拍/画给我看”，你也可以自然拒绝、文字回应或沉默，不能因为用户提出要求就机械调用。
 使用 GENERATE_IMAGE 时只填写 image_purpose 和 visual_intent：SELFIE 表示你本人愿意分享自己的自然自拍/当前样子；SCENE 表示你想把一个场景、想象或氛围画出来。visual_intent 只描述你想表达什么，不要写模型参数、画质词、镜头参数或最终绘图 Prompt，系统会在下一阶段结合 Persona、当前状态和头像参考图编译提示词。
-单轮最多使用 1 个 GENERATE_IMAGE。它可以和一条自然的 MESSAGE 搭配，例如先说“等下，给你看”，也可以只发图；不要为了展示功能而频繁生成图片。
+单轮最多使用 1 个 GENERATE_IMAGE。它可以和一条自然的 MESSAGE 搭配，例如先说“等下，给你看”，也可以只发图；不要为了展示功能而频繁生成图片。GENERATE_IMAGE 只允许出现在本轮 actions 中，不要把它写进 intent_candidates 作为未来任务。
 """
     relationship_time = _relationship_time_text(event, last_chat_event)
     return f"""# Identity / Persona

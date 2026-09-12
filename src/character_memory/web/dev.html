@@ -74,6 +74,13 @@
       </article>
 
       <article class="card wide">
+        <div class="card-title-row"><h2>Media Live Smoke</h2><span class="pill">real inference</span></div>
+        <p class="subtle">真实执行 TTS → WAV → ASR。它不是 mock；失败时会显示 Media Runtime 的原始状态码与 detail。</p>
+        <div class="actions"><button id="runMediaSmoke">Run Media Smoke</button><span id="mediaSmokeLatency" class="metric-inline">-</span></div>
+        <pre id="mediaSmokeResult" class="result">等待请求...</pre>
+      </article>
+
+      <article class="card wide">
         <div class="card-title-row"><h2>Media Metrics</h2><button id="refreshMetrics" class="secondary compact">刷新</button></div>
         <div class="table-wrap">
           <table>

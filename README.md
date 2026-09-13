@@ -1,474 +1,165 @@
 # character_memory
 
-一个用于研究 **Persistent AI Person / 持久化 AI 人物** 的 V0 原型。
+`character_memory` 是一个用于研究 **Persistent AI Person / 持久化 AI 人物** 的实验项目。
 
-当前阶段只做 **Phase 1 — Prove the Person / Relationship**：验证同一个 AI 人物能否在长期交互中保持人格、拥有可追溯经历、选择性记忆、持续心理状态，并自然地表达、追问、沉默、使用表情包/图片和再次相遇。
+项目当前仍以 **Prove the Person** 为核心：验证一个人物能否在长期互动中保持可辨识的人格、拥有可追溯经历、选择性记忆、持续心理状态与自主表达，并让今天的行为能够被过去解释。
 
-## 当前实现
+语音、头像、图片生成、群聊等能力已经进入仓库，但它们都是人物表达与交互的渠道，不改变这条核心产品判断：
 
-- SQLite 单文件持久化。
-- Append-only Event Log：原始经历是事实源。
-- Embedding + SQLite `float32 BLOB` + Vector Recall。
-- Memory Admission：低价值/近重复 Memory Candidate 可跳过，并记录决策 Trace。
-- 语言形式 Mental State；空 update 表示本轮沿用旧状态。
-- Relationship Time：Runtime 知道最近一次聊天和距今时间，不写死机械问候。
-- `PersonRuntime.handle(event)` 统一处理用户消息、Time Tick、Intent。
-- P0 对外行为：`actions[0..3]`，当前支持 `MESSAGE / EMOJI / STICKER / IMAGE`；`actions=[]` 是真正沉默。
-- 旧 `REPLY / MINIMAL_RESPONSE / NO_REPLY / DEFER / PROACTIVE_MESSAGE / NO_ACTION` 保留兼容，不再是新聊天主 contract。
-- OpenAI-compatible Person Model；默认 OpenCode Go `deepseek-flash`（DeepSeek V4.1 Flash）。
-- 用户本轮附带真实图片时，自动路由到 OpenCode Go `deepseek-v4-flash-vision-exp`。
-- 两种模型路径都继续使用 `response_format=json_object` + Pydantic validation 和稳定 `x-opencode-session`。
-- 多 Character：每个 Character 独立 Persona、聊天历史、Mental State、Memory、conversation session、可选 Sticker Catalog / Image Catalog；Embedding / Provider / SQLite 共享。
-- Persistent World Time、Life Event、Diary、Pending Intent、时间模拟（当前冻结，不作为 P0 扩展重点）。
-- P0.6 主动消息：后台只检查已经存在且到期的 Intent；没有 due Intent 时不调用模型。
-- P0.6 未读红点：一次 `/v1/characters/summaries` 请求返回全部人物摘要，前端本地维护 read state。
-- P0.7 Intent Preview：可查看 Intent 状态、计划时间、来源 Event，并跳到产生它的 Runtime Trace。
-- P0.7 Sticker：用户和人物都能发送本地表情包；人物只能选择 Manifest 中真实存在的 Sticker ID。
-- P0.8 Vision：用户可上传 JPEG / PNG / GIF / WebP，人物基于真实视觉内容回应。
-- P0.8 Image Action：人物可以发送自身 `images/manifest.yaml` 中的已有图片；主动 Intent 也可产生 IMAGE。
-- 用户上传图片文件保存在本地 media 目录，SQLite 只保存媒体元数据；base64 不进入 Event / Trace。
-- Runtime Trace 独立持久化，可按单轮回看 Context / Recall / Reaction / Actions / Sticker/Image Decision / Memory Admission / Intent / model used / timings。
-- FastAPI + 原生 HTML/CSS/JS 聊天 WebUI。
-- 用户可选「想法」视图：只展示安全 `perception / reaction` 摘要，不展示 raw chain-of-thought。
-- Streamlit Developer Inspector。
-- 结构化后端日志与单轮耗时指标。
-- JSONL Eval regression harness 与 pytest。
+> 不优化“人物有多喜欢用户”，而优化“人物现在为什么会这样做”。
 
-## 当前聊天结构
+## 当前能力
+
+- 多 Character Persona；`personas/*/persona.yaml` 是人物定义事实源。
+- SQLite Event Log、Memory、Mental State、Intent、Runtime Trace。
+- 本地 BGE Embedding + Vector Recall；同一进程内所有人物共享 Embedding / LLM Provider。
+- `PersonReaction.actions[0..3]`：`MESSAGE / EMOJI / STICKER / IMAGE`，以及内部工具意图 `GENERATE_IMAGE`。
+- `actions=[]` 是合法沉默；辅助 Memory/Intent 字段允许安全容错，主 outward action contract 仍严格。
+- Direct Chat + Group Chat；群聊共享事实只保存一次，成员按因果顺序逐个判断。
+- 异步消息接受：用户消息先持久化并立即返回 202，人物反应通过 SSE 渐进推送。
+- Message Search、Group Mentions、Unread、Intent Preview。
+- 用户图片输入 + Vision；本地 Sticker / Image Catalog。
+- ImageGen：角色自主 `SELFIE / SCENE`，以及用户显式“AI 生成图片”工具；生成后可像粘贴图片一样先进入草稿再手动发送。
+- Avatar Search / Avatar Generate / 从聊天图片设头像。
+- 独立 Media Runtime：本地 ASR（SenseVoice）+ TTS（VITS）。
+- Dev Console：统一测试 LLM、ASR/TTS、ImageGen、资源与运行状态。
+- pytest、Browser Smoke、JSONL Eval regression。
+
+## 运行架构
 
 ```text
-HTML / JS
-    ↓
-FastAPI
-    ↓
-ChatService
-    ├── RealClock
-    ├── conversation_id
-    ├── per-character turn lock
-    └── optional image attachment
-    ↓
-PersonRuntime(character persona)
-    ├── Relationship Time
-    ├── Vector Recall
-    ├── Person Model
-    │   ├── text -> deepseek-flash
-    │   └── image -> deepseek-v4-flash-vision-exp
-    ├── Mental State
-    ├── Sticker Catalog
-    ├── Image Catalog
-    ├── actions[0..3]
-    └── Memory Admission
-    ↓
-SQLite Event / Memory / Intent / Media metadata / Trace
+Browser
+├─ Chat UI ------------------------------┐
+└─ Dev Console :8002                     │
+                                         │
+Character Runtime :8000                  │
+├─ FastAPI routes                        │
+├─ async message accept + SSE            │
+├─ ReactionScheduler                     │
+├─ PersonRuntime                         │
+│  ├─ Persona / Relationship Time        │
+│  ├─ Memory Recall / Mental State       │
+│  ├─ Cloud LLM / Vision                 │
+│  └─ MESSAGE / STICKER / IMAGE / ...    │
+├─ Visual Runtime / Image Providers      │
+└─ SQLite + local media metadata/files   │
+                                         │
+Media Runtime :8001 <--------------------┘
+├─ local ASR
+└─ local TTS
 ```
 
-CLI 的 `chat` 也调用同一个 `ChatService`。Streamlit 不再承担正式聊天交互，只保留为 Developer Inspector。
+Character Runtime 与 Media Runtime 是独立进程。Voice 只是同一个 Persistent Person 的另一条输入/输出渠道，不存在第二套“语音人物”。
 
-## 安装
+## 开发环境
 
-要求 Python 3.12+。
+要求：
 
-```powershell
+- Python `>=3.12,<3.13`
+- 推荐 `uv`
+- Windows 开发主路径支持 Git Bash
+
+首次准备完整开发环境：
+
+```bash
 git clone https://github.com/Initial-neko/character_memory.git
 cd character_memory
-uv sync --extra all
+bash scripts/sync-all.sh
 uv run character-memory init
-$env:OPENCODE_GO_API_KEY="YOUR_KEY"
 ```
 
-默认：
+配置本地 `config.yaml`，API Key 建议通过环境变量注入，例如：
 
-```yaml
-base_url: "https://opencode.ai/zen/go/v1"
-chat_model: "deepseek-flash"
-vision_model: "deepseek-v4-flash-vision-exp"
-embedding_provider: "sentence-transformers"
-embedding_model: "BAAI/bge-small-zh-v1.5"
-db_path: "data/character-memory.db"
-media_dir: ""
-media_max_bytes: 8388608
+```bash
+export OPENCODE_GO_API_KEY="..."
+export AGNES_API_KEY="..."
+export MSIMG_API_KEY="..."       # 或 MODELSCOPE_API_TOKEN
 ```
 
-`media_dir` 留空时使用 `<db parent>/media`。第一次加载本地 BGE embedding 时会下载模型。
+不要把真实密钥提交到仓库。
 
-## 主要入口：HTML / JS WebUI
+### 推荐启动方式
 
-```powershell
-uv run character-memory web
+```bash
+uv run character-stack
 ```
 
-打开：
+默认启动并检查：
 
-```text
-http://127.0.0.1:8000
+- Character Runtime: `http://127.0.0.1:8000`
+- Media Runtime: `http://127.0.0.1:8001`
+- Dev Console: `http://127.0.0.1:8002/dev`
+
+`character-stack` 会复用已经健康运行的服务。修改 Runtime 代码后如果发现行为仍像旧版本，请先结束旧进程，再重新启动，避免复用旧 `:8000`。
+
+可选：
+
+```bash
+uv run character-stack --open chat
+uv run character-stack --no-browser
 ```
 
-页面采用聊天优先的双栏结构：左侧是 Character 列表，右侧是当前 Character 的聊天。切换 Character 时，历史记录和 conversation session 都跟随角色切换；某个 Character 等待模型回复时仍可切换到其他 Character 继续聊天。
+## 常用测试
 
-页面支持：
-
-- 左侧 Character 切换、最近消息预览和未读红点；
-- `/v1/characters/summaries` 一次返回全部人物摘要，不按人物逐个请求；
-- Enter 发送、Shift+Enter 换行；
-- `☺` 打开当前人物可用的 Sticker 面板；
-- 用户可单独发送一个 Sticker；
-- 图片按钮选择 JPEG / PNG / GIF / WebP，可添加一句文字后发送；
-- 发送真实图片时仅这一轮自动使用 Vision 模型；纯文本仍使用 DeepSeek V4.1 Flash；
-- 人物一轮按顺序显示 0~3 条 MESSAGE / EMOJI / STICKER / IMAGE；
-- 真正沉默时不伪造角色消息，只显示轻量 `已读 · 没有回复`；
-- 非流式等待时显示“正在输入中”；
-- 聊天历史与时间分隔；
-- 顶部 `Intent` 按钮查看当前人物的 Intent Preview；
-- 每条有 Trace 的角色消息可点 `想法` 查看安全 Perception / Reaction 摘要；
-- 每条有 Trace 的消息通过 `···` 打开 Developer Detail；
-- 查看 Mental State Before / After；
-- 查看本轮 Recall；
-- 查看实际发送给模型的 messages；图片 data URL 在 Trace 中会替换为 `<base64 omitted>`；
-- 查看 Compiled Context / Relationship Time / Available Stickers / Available Images；
-- 查看 Memory Candidate 的 WRITE / SKIP_LOW_VALUE / SKIP_DUPLICATE；
-- 查看 Intent Candidate、创建的 Intent ID 和来源 Event；
-- 查看 Sticker/Image 决策，包括无效资源 ID 被丢弃的原因；
-- 查看 Raw Model Response；
-- 查看本轮实际使用的 text / vision model 和各阶段耗时；
-- 顶部 `Runtime` 按钮按需查看当前 Character 的 Persona、Mental State、Memory、Intent、Sticker、Image、Provider。
-
-前端不直接操作 Runtime/SQLite，只调用 FastAPI。
-
-## Character / Persona
-
-Character 直接从以下目录自动发现：
-
-```text
-personas/<character_id>/persona.yaml
-```
-
-不维护第二份 Character 注册表。新增人物只需新增一个 persona 文件。
-
-当前内置：
-
-- `rin`：25 岁，慢热、有自己的节奏；
-- `momo`：22 岁，可爱、活泼、有主见的女生；
-- `haru`：24 岁，非常温柔、耐心但有稳定判断的男生；
-- `rei`：23 岁，表面冷淡、真正感兴趣时会明显热情的女生。
-
-Persona 不只控制语气，也描述：
-
-- 标点、emoji、颜文字和句子节奏；
-- 自然追问；
-- 沉默；
-- 主动；
-- 关心；
-- 分歧；
-- 边界行为。
-
-## Multi-action / Silence / Sticker / Image
-
-新聊天主 contract：
-
-```json
-{
-  "perception": "可选的一句安全摘要",
-  "reaction": "可选的一句安全摘要",
-  "mental_state_update": "没有持续变化时可以为空",
-  "actions": [
-    {"type": "MESSAGE", "message": "诶？？"},
-    {"type": "STICKER", "sticker_id": "round_cat_pleading"},
-    {"type": "IMAGE", "image_id": "afternoon_tea"}
-  ],
-  "memory_candidates": [],
-  "intent_candidates": []
-}
-```
-
-一轮最多 3 个 action，但不要求拆分；普通一条消息仍然是默认情况。
-
-`STICKER` / `IMAGE` 都不接受任意 URL。Runtime 每轮把当前人物可用资源编译进 `# Available Stickers` / `# Available Images`，模型只能选择真实存在的 ID；编造不存在的 ID 时 Runtime 会丢弃该动作并记录 Trace。
-
-真正不想回复：
-
-```json
-{"actions": []}
-```
-
-用户发了消息 ≠ 人物必须回复。明确说“不用回复”、对话自然结束、需要空间或确实没有想说的话时，沉默是合法产品行为。
-
-## Sticker Catalog
-
-人物可在自己的 Persona 目录覆盖默认表情包：
-
-```text
-personas/<character_id>/stickers/
-├── manifest.yaml
-├── happy.webp
-├── speechless.gif
-└── sleepy.png
-```
-
-Manifest 示例：
-
-```yaml
-stickers:
-  - id: happy
-    file: happy.webp
-    label: 开心
-    tags: [开心, 庆祝]
-```
-
-若人物目录没有 `stickers/manifest.yaml`，使用程序内置的原创圆鸭/圆猫测试包。当前支持 PNG / WebP / GIF / SVG / JPG。内置测试包只是验证 Sticker 行为与 UI，不包含从互联网复制的小刘鸭、蜜桃猫等第三方 IP 素材。
-
-用户点击 Sticker 后，Event 内会保留 `sticker_id`，同时把 Sticker 的标签语义转成文本上下文交给当前文本模型，因此人物能够理解用户发来的表情包含义，而不要求默认聊天模型具备视觉能力。
-
-## Vision / User Image
-
-用户发送真实图片时，服务端先验证真实文件内容，再把这一轮路由到：
-
-```text
-deepseek-v4-flash-vision-exp
-```
-
-图片以 OpenAI-compatible Chat Completions 的 `image_url` content block 发送给模型。当前支持 JPEG / PNG / GIF / WebP，默认单张最大 8 MiB。
-
-图片字节保存在本地 media 目录。SQLite 的 `media_assets` 只保存文件引用与元数据；Event 也只保存 `media_id` 等引用。Runtime Trace 会保存多模态 messages 的结构，但会把实际 base64 内容替换为 `<base64 omitted>`。
-
-后续轮次不会自动把所有历史图片重新发给 Vision。真正值得长期记住的视觉信息，应由当轮模型形成语言形式的 Memory Candidate，再走正常 Memory Admission。
-
-## Character Image Catalog
-
-人物主动/被动发送的 `IMAGE` 来自自己的可控图片库：
-
-```text
-personas/<character_id>/images/
-├── manifest.yaml
-├── tea.png
-└── street-cat.webp
-```
-
-Manifest 示例：
-
-```yaml
-images:
-  - id: afternoon_tea
-    file: tea.png
-    label: 下午茶照片
-    tags: [日常, 分享, 下午茶]
-
-  - id: street_cat
-    file: street-cat.webp
-    label: 路边小猫
-    tags: [猫, 分享]
-```
-
-当前没有默认 Character Image Catalog，因此人物不会凭空拥有照片。添加真实图片和 manifest 后，模型才能选择对应 `image_id`。这与图片生成是两个不同能力。
-
-## Intent / Proactive Message
-
-正常聊天的一次 Person Model 调用同时可以返回 `intent_candidates`。只有人物真的形成未来行动意图时才应产生 Intent；没有必要时保持空数组。
-
-到达 `earliest_at` 后，后台 Dispatcher 会把已持久化 Intent 作为 `PROACTIVE_INTENT` 再交给 PersonRuntime 判断是否执行、沉默或放弃。没有 due Intent 时只做轻量 SQLite 检查，不调用模型。
-
-到期 Intent 的 PersonReaction 现在也允许 `IMAGE`。如果当前人物图片库中存在匹配资源，人物可以主动发送图片；有效 IMAGE 与 MESSAGE/STICKER 一样会把 Intent 标记为 `EXECUTED`，并沿用聊天历史、未读红点和 Trace 链路。
-
-P0.7 起 Intent 记录 `source_event_id`。WebUI 顶部 `Intent` 可查看：
-
-- PENDING / PROCESSING / EXECUTED / SUPPRESSED / DEFERRED / EXPIRED / ERROR；
-- Intent 内容；
-- created / earliest / expires；
-- 产生它的 Event；
-- 当时保存的 reason。
-
-这样可以区分“模型根本没产生 Intent”“还没到时间”“到期后选择不发”“已经执行”。
-
-## Memory Admission / Recall
-
-Memory Candidate 不再无条件落库。
-
-当前 admission baseline：
-
-```text
-importance < 0.35       -> SKIP_LOW_VALUE
-exact duplicate         -> SKIP_DUPLICATE
-embedding cosine >= .93 -> SKIP_DUPLICATE
-otherwise               -> WRITE
-```
-
-这些阈值只是 Eval baseline，后续根据真实数据调整。
-
-Recall 继续使用：
-
-```text
-0.70 semantic + 0.20 recency + 0.10 importance
-```
-
-并保持 future-memory barrier：只能 Recall `event_time <= now` 的 Memory。
-
-## Relationship Time / Re-encounter
-
-每轮 Runtime 会看到：
-
-```text
-# Relationship Time
-- 上次聊天时间：...
-- 距离上次聊天：7 天
-```
-
-人物自己决定是否提旧事、问结果、还是完全不提。
-
-不会写死：
-
-```text
-if gap > N:
-    say("好久不见")
-```
-
-目标是让“昨天说过的事”“隔几天回来”自然影响行为，而不是机械时间模板。
-
-## Developer Inspector / Safe Thought Summary
-
-用户聊天页中的 `想法` 只展示：
-
-- `perception`
-- `reaction`
-
-它们是简短、安全、可调试的人物反应摘要，**不是模型隐藏 chain-of-thought**。
-
-完整 Developer Trace 仍用于开发调试，包括 Context、Recall、Actions、Sticker/Image Decision、Memory Admission、Mental State、Intent、Model Used、Raw Structured Response 和 timings。
-
-## CLI
-
-```powershell
-uv run character-memory doctor
-uv run character-memory doctor --remote
-uv run character-memory chat "今天工作终于结束了"
-uv run character-memory tick
-uv run character-memory day
-uv run character-memory simulate 7
-uv run character-memory inspect
-```
-
-`chat` 默认使用现实时间；模拟命令继续使用 persistent simulated world time。
-
-## Runtime Trace
-
-Trace 不放进 `ACTION.metadata_json`，使用独立 `runtime_traces`。
-
-当前数据库中：
-
-```text
-events
-memories
-mental_states
-intents
-media_assets
-world_states
-runtime_traces
-```
-
-正常聊天历史只查询 `USER_MESSAGE / CHARACTER_MESSAGE`；只有点击详情时才读取对应 Trace，避免每次页面刷新解析大量 Context / Prompt / Raw Response。
-
-## 一轮写入一致性
-
-原始用户 Event 会先持久化，因为它是 Source of Truth。
-
-LLM 成功后，以下派生状态在一个 SQLite transaction 中提交：
-
-```text
-Mental State
-Accepted Memory
-Intent
-0..3 Character Messages / Stickers / Images
-Runtime Trace
-ACTION Event
-```
-
-如果派生写入失败，则整组 rollback，避免出现“状态改了一半、Trace 又没有”的半轮数据。
-
-用户上传图片的媒体文件/`media_assets` 在进入 Runtime 前持久化；即使随后模型调用失败，原始媒体仍可作为该次用户输入的持久化来源保存。
-
-## Provider
-
-默认聊天模型是 OpenCode Go 上的 DeepSeek V4.1 Flash：
-
-```text
-deepseek-flash
-```
-
-图片输入模型：
-
-```text
-deepseek-v4-flash-vision-exp
-```
-
-两者都走：
-
-```text
-https://opencode.ai/zen/go/v1/chat/completions
-```
-
-OpenCode Go inference 会携带 `x-opencode-session` / `x-opencode-client` / `User-Agent`。
-
-结构化调用使用：
-
-```json
-{"response_format":{"type":"json_object"}}
-```
-
-JSON 语法由 Provider 约束，业务 contract 继续由 Pydantic validation 负责。
-
-Web 前端为每个 Character 分别把 `conversation_id` 保存在浏览器 `localStorage`；Provider adapter 会将 conversation ID 稳定映射为 UUID。
-
-`httpx.Client` 在 Model 生命周期内复用，不再每次请求重新建立连接。
-
-## 后端日志
-
-Web/API 默认输出 `INFO` 日志：
-
-```text
-API → ChatService → Runtime Event → Recall → Context → Provider → Actions → Memory Admission → Persist
-```
-
-图片轮次日志会显示 `images=1` 和实际 `model=deepseek-v4-flash-vision-exp`；纯文本轮次保持 `model=deepseek-flash`。Provider HTTP error body 会直接输出，但不会输出 API Key 或图片 base64。
-
-更细日志：
-
-```powershell
-$env:CHARACTER_MEMORY_LOG_LEVEL="DEBUG"
-uv run character-memory web
-```
-
-## Eval / Test
-
-```powershell
+```bash
+# Python contract / integration tests
 uv run pytest -q
-uv run character-memory eval evals/smoke.jsonl
+
+# 完整开发依赖重新同步
+bash scripts/sync-all.sh
+
+# Media 本地 benchmark
+uv run python scripts/benchmark_media.py --wav path/to/test.wav --iterations 20
+
+# Relationship eval
 uv run character-memory eval evals/p0_relationship.jsonl
 ```
 
-P0 Relationship suite 当前是：
+Browser Smoke 在 CI 的独立 job 中安装 Playwright/Chromium，不放入默认 `all` extra。
+
+## 仓库目录
 
 ```text
-4 Characters × 6 scenarios = 24 cases
+.
+├─ src/character_memory/    Python 主代码
+├─ personas/                人物定义
+├─ docs/                    当前文档、研究资料与历史里程碑
+│  ├─ current/              当前事实源文档
+│  ├─ research/             研究参考
+│  └─ archive/              历史交付说明，不作为当前实现依据
+├─ tests/                   单元/集成/浏览器 contract tests
+├─ evals/                   JSONL Eval 数据
+├─ scripts/                 开发、Media、同步脚本
+├─ config.example.yaml      配置示例
+└─ pyproject.toml           Python 依赖与入口
 ```
 
-覆盖普通聊天、Memory Precision、情绪/追问、观点冲突、明确沉默、重要事件写入、7 天后 Recall / Re-encounter，并按 tag 汇总 pass/fail。
+代码模块导航见 [`docs/current/CODEBASE_LAYOUT.md`](docs/current/CODEBASE_LAYOUT.md)。
 
-Persona 主观自然度仍需要后续 blind judge；当前 harness 只验证可观测 contract。
+## 文档入口
 
-## 文档职责
+**当前实现以源码为最终事实源。** 当前文档集中在 [`docs/current/`](docs/current/)：
 
-- `docs/DESIGN.md`：产品与 Persistent Person 已确认原则。
-- `docs/ARCHITECTURE.md`：当前工程边界与数据流。
-- `docs/MEMORY.md`：Memory / Embedding / Admission / Recall 原则。
-- `docs/PERSON_RUNTIME.md`：Reaction / Multi-action / Mental State / Silence / Re-encounter / Safe Thought。
-- `docs/EVALS.md`：评测计划与 P0 Relationship suite。
-- `docs/P0_6_PROACTIVE.md`：主动消息与未读闭环。
-- `docs/P0_7_STICKER_INTENT.md`：Sticker、Intent Preview 与 V4.1 Flash 切换。
-- `docs/P0_8_VISION_IMAGES.md`：Vision、用户图片、Image Action、媒体持久化与主动发图。
-- `docs/RESEARCH.md`：外部研究参考。
+- [Architecture](docs/current/ARCHITECTURE.md)
+- [Product Design](docs/current/DESIGN.md)
+- [Codebase Layout](docs/current/CODEBASE_LAYOUT.md)
+- [Person Runtime](docs/current/PERSON_RUNTIME.md)
+- [Conversation Runtime](docs/current/CONVERSATION_RUNTIME.md)
+- [Memory](docs/current/MEMORY.md)
+- [Visual Generation](docs/current/VISUAL_GENERATION.md)
+- [Media Runtime](docs/current/MEDIA_RUNTIME.md)
+- [Dev Console](docs/current/DEV_CONSOLE.md)
+- [Avatar Search](docs/current/AVATAR_SEARCH.md)
+- [Evals](docs/current/EVALS.md)
 
-## 当前明确不做
+`docs/archive/milestones/` 保存 P0.x 历史交付说明，用于理解演进过程，但其中“当前不做”“当前入口”“轮询频率”等描述可能已经被后续版本取代，不能覆盖源码和 `docs/current/`。
 
-V0 不引入 LangChain/LangGraph、Redis、Celery、PostgreSQL、Knowledge Graph、复杂 Emotion 数值系统、Voice/TTS、Avatar、Video、完整 Feed、多用户生产架构。
+## 核心工程原则
 
-P0.8 已经支持图片理解和已有图片发送，但仍不做图片生成、搜索引擎自动抓第三方图片、头像自动替换和 External Information / Web Tool Agent。当前人物不知道实时事实时应承认不知道或自然询问；后续如果加入外部能力，再采用 `人物决定查询 -> 外部结果 Event -> Person Runtime 再反应` 的路径。
-
-先把 **同一个人持续聊天、会记、会沉默、会主动回来、会自然使用自己的表情包和图片** 跑稳，再扩展外部能力。
+1. **Event 是事实源。** Memory、Mental State、Diary、Trace 都是派生层。
+2. **人物可以沉默。** 用户输入不意味着必须回复。
+3. **辅助认知失败不应轻易吞掉有效主回复。** 但 outward action 本身仍需要明确合法。
+4. **群聊事实只保存一次。** 不把同一房间消息复制成多个彼此独立的“事实”。
+5. **慢能力隔离。** ASR/TTS、ImageGen 等不能因为失败而破坏已经成立的文本主链路。
+6. **先测量再复杂化。** 不因为“以后可能需要”提前引入 Redis、Celery、向量数据库、LangGraph 或大型前端框架。
+7. **历史文档不是当前 contract。** 当前 HEAD 与 `docs/current/` 优先。

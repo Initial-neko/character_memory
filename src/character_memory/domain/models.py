@@ -84,11 +84,21 @@ class ActionDecision(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def normalize_nullable_reason(cls, value):
-        if isinstance(value, dict) and value.get("reason") is None:
-            value = dict(value)
-            value["reason"] = ""
-        return value
+    def normalize_provider_shape(cls, value):
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        # A common JSON-model drift is to emit {"action":"MESSAGE"} instead
+        # of the canonical {"type":"MESSAGE"}. The meaning is unambiguous, so
+        # normalize it locally instead of paying for a second LLM repair call.
+        if "type" not in normalized and normalized.get("action") is not None:
+            normalized["type"] = normalized.get("action")
+        raw_type = normalized.get("type")
+        if isinstance(raw_type, str):
+            normalized["type"] = raw_type.strip().upper()
+        if normalized.get("reason") is None:
+            normalized["reason"] = ""
+        return normalized
 
     @model_validator(mode="after")
     def validate_message_contract(self):

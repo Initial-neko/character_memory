@@ -36,6 +36,7 @@ docs/
 - [`current/VISUAL_GENERATION.md`](current/VISUAL_GENERATION.md) — SELFIE/SCENE、显式 AI 生图工具、Provider、草稿与头像。
 - [`current/MEDIA_RUNTIME.md`](current/MEDIA_RUNTIME.md) — 本地 ASR/TTS 与 Windows runtime 边界。
 - [`current/DEV_CONSOLE.md`](current/DEV_CONSOLE.md) — `:8002/dev` 的统一开发测试入口。
+- [`current/TTS_PROVIDER_LAB.md`](current/TTS_PROVIDER_LAB.md) — `:9002/tts` 的 Sherpa/Kokoro/CosyVoice 音质与延迟试听实验入口。
 - [`current/AVATAR_SEARCH.md`](current/AVATAR_SEARCH.md) — Avatar Search 与隐私边界。
 - [`current/EVALS.md`](current/EVALS.md) — Eval 与 regression 方向。
 

@@ -92,11 +92,17 @@
     }
   }
 
+  function decodedHeader(headers, name) {
+    const value = headers.get(name);
+    if (!value) return value;
+    try { return decodeURIComponent(value); } catch (_) { return value; }
+  }
+
   function metadataFromHeaders(headers) {
     return {
       provider: headers.get("x-tts-provider"),
-      voice: headers.get("x-tts-voice"),
-      model: headers.get("x-tts-model"),
+      voice: decodedHeader(headers, "x-tts-voice"),
+      model: decodedHeader(headers, "x-tts-model"),
       device: headers.get("x-tts-device"),
       inference_ms: Number(headers.get("x-tts-inference-ms") || 0),
       audio_ms: Number(headers.get("x-tts-audio-ms") || 0),

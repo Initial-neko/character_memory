@@ -25,6 +25,12 @@ media = [
   "sherpa-onnx==1.13.5",
   "sherpa-onnx-core==1.13.5",
 ]
+# Kokoro is an audition-only TTS provider. Keep it opt-in because it brings a
+# much heavier torch/model stack than the current sherpa Voice V0 baseline.
+tts-kokoro = [
+  "kokoro>=0.9.4,<1",
+  "misaki[zh]>=0.9.4,<1",
+]
 # Agnes uses the core httpx dependency. msimg stays opt-in when selecting only
 # the image-generation extra, but it is also part of the canonical `all` dev
 # stack below so `uv sync --extra all` keeps Voice/API/ImageGen together.
@@ -47,6 +53,7 @@ all = [
 character-memory = "character_memory.cli:main"
 character-media = "character_memory.media_bootstrap:main"
 character-dev = "character_memory.dev_server:main"
+character-tts-lab = "character_memory.tts_lab:main"
 character-stack = "character_memory.dev_stack:main"
 
 [build-system]

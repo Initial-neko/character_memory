@@ -11,12 +11,45 @@
     panel?.classList.add("hidden");
   }
 
+  function currentGroup() {
+    return CM.features.groups?.current?.() || null;
+  }
+
+  function groupMembers() {
+    return currentGroup()?.members || [];
+  }
+
+  function syncTargetOptions() {
+    if (!panel) return;
+    const wrap = panel.querySelector("[data-ai-image-target-wrap]");
+    const select = panel.querySelector("[data-ai-image-target]");
+    if (!wrap || !select) return;
+
+    if (!CM.isGroupConversation()) {
+      wrap.hidden = true;
+      return;
+    }
+
+    const members = groupMembers();
+    const previous = select.value;
+    select.replaceChildren(...members.map(member => {
+      const option = document.createElement("option");
+      option.value = member.id;
+      option.textContent = `${member.name || member.id} · ${member.id}`;
+      return option;
+    }));
+    if (members.some(member => member.id === previous)) select.value = previous;
+    else if (members[0]) select.value = members[0].id;
+    wrap.hidden = false;
+  }
+
   function syncState() {
     if (!trigger) return;
-    const disabled = CM.isGroupConversation();
-    trigger.disabled = disabled;
-    trigger.title = disabled ? "AI 生成图片暂只支持单聊" : "AI 生成图片";
-    if (disabled) close();
+    syncTargetOptions();
+    const noGroupMember = CM.isGroupConversation() && groupMembers().length === 0;
+    trigger.disabled = noGroupMember;
+    trigger.title = CM.isGroupConversation() ? "AI 生成群聊图片" : "AI 生成图片";
+    if (noGroupMember) close();
   }
 
   function requestBody() {
@@ -24,6 +57,28 @@
     const purpose = panel?.querySelector("[data-ai-image-purpose]")?.value || "SCENE";
     const useAvatar = Boolean(panel?.querySelector("[data-ai-image-reference]")?.checked);
     return {instruction, purpose, use_avatar_reference:useAvatar};
+  }
+
+  function targetCharacterId() {
+    if (!CM.isGroupConversation()) return CM.state.characterId;
+    const selected = panel?.querySelector("[data-ai-image-target]")?.value || "";
+    if (selected) return selected;
+    return groupMembers()[0]?.id || "";
+  }
+
+  function conversationSnapshot() {
+    if (CM.isGroupConversation()) {
+      return {type:"GROUP", groupId:CM.state.conversation.groupId, characterId:targetCharacterId()};
+    }
+    return {type:"DIRECT", groupId:null, characterId:CM.state.characterId};
+  }
+
+  function sameConversation(snapshot) {
+    if (!snapshot) return false;
+    if (snapshot.type === "GROUP") {
+      return CM.isGroupConversation() && CM.state.conversation.groupId === snapshot.groupId;
+    }
+    return !CM.isGroupConversation() && CM.state.characterId === snapshot.characterId;
   }
 
   function setStatus(text, kind = "") {
@@ -53,7 +108,11 @@
   }
 
   function open() {
-    if (CM.isGroupConversation()) return;
+    syncTargetOptions();
+    if (CM.isGroupConversation() && !targetCharacterId()) {
+      setStatus("当前群聊没有可用的人物作为视觉参考。", "error");
+      return;
+    }
     CM.features.stickers?.close?.();
     CM.features.images?.close?.();
     panel.classList.remove("hidden");
@@ -66,18 +125,25 @@
       setStatus("先写一句你想生成什么。", "error");
       return;
     }
+    const characterId = targetCharacterId();
+    if (!characterId) {
+      setStatus("请选择一个群成员作为本次视觉参考。", "error");
+      return;
+    }
+    const snapshot = conversationSnapshot();
     setBusy(true);
     setStatus("AI 正在把你的描述润色成绘图 Prompt…");
     try {
-      const characterId = encodeURIComponent(CM.state.characterId);
-      const data = await CM.api(`/v1/characters/${characterId}/images/rewrite`, {
+      const data = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/images/rewrite`, {
         method:"POST",
         body:JSON.stringify(body),
       });
+      if (!sameConversation(snapshot)) return;
       setPrompt(data.prompt);
-      setStatus(`润色完成 · ${data.duration_ms ?? "-"} ms · ${data.aspect_ratio || "-"}`);
+      const target = CM.isGroupConversation() ? ` · 参考 ${groupMembers().find(item => item.id === characterId)?.name || characterId}` : "";
+      setStatus(`润色完成 · ${data.duration_ms ?? "-"} ms · ${data.aspect_ratio || "-"}${target}`);
     } catch (error) {
-      setStatus(`润色失败：${error.message}`, "error");
+      if (sameConversation(snapshot)) setStatus(`润色失败：${error.message}`, "error");
     } finally {
       setBusy(false);
     }
@@ -89,14 +155,20 @@
       setStatus("先写一句你想生成什么。", "error");
       return;
     }
+    const characterId = targetCharacterId();
+    if (!characterId) {
+      setStatus("请选择一个群成员作为本次视觉参考。", "error");
+      return;
+    }
+    const snapshot = conversationSnapshot();
     setBusy(true);
     setStatus("AI 正在润色并生成图片，这可能需要一会儿…");
     try {
-      const characterId = encodeURIComponent(CM.state.characterId);
-      const data = await CM.api(`/v1/characters/${characterId}/images/generate`, {
+      const data = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/images/generate`, {
         method:"POST",
         body:JSON.stringify(body),
       });
+      if (!sameConversation(snapshot)) return;
       setPrompt(data.prompt);
       const image = data.image || {};
       if (!image.data_url) throw new Error("生成接口没有返回可发送的图片草稿");
@@ -109,7 +181,7 @@
         source:"AI_GENERATED",
       });
     } catch (error) {
-      setStatus(`生成失败：${error.message}`, "error");
+      if (sameConversation(snapshot)) setStatus(`生成失败：${error.message}`, "error");
     } finally {
       setBusy(false);
     }
@@ -150,8 +222,9 @@
   panel.innerHTML = `
     <div class="ai-image-head"><strong>AI 生成图片</strong><button type="button" data-ai-image-close aria-label="关闭">×</button></div>
     <div class="ai-image-options">
+      <label data-ai-image-target-wrap hidden>视觉参考人物<select data-ai-image-target></select></label>
       <label>用途<select data-ai-image-purpose><option value="SCENE">场景 / 配图</option><option value="SELFIE">角色自拍</option></select></label>
-      <label class="ai-image-check"><input type="checkbox" data-ai-image-reference> 使用当前头像作为人物身份参考</label>
+      <label class="ai-image-check"><input type="checkbox" data-ai-image-reference> 使用所选人物当前头像作为身份参考</label>
     </div>
     <textarea data-ai-image-instruction rows="4" maxlength="1600" placeholder="例如：画一张 Rin 在图书馆窗边看雨的日常场景，安静一点，不要像棚拍。"></textarea>
     <div class="ai-image-actions">
@@ -159,7 +232,7 @@
       <button type="button" data-ai-image-generate>生成图片</button>
       <button type="button" class="secondary" data-ai-image-copy hidden>复制 Prompt</button>
     </div>
-    <div class="ai-image-status" data-ai-image-status>生成后会进入图片草稿，你确认后再发送。</div>
+    <div class="ai-image-status" data-ai-image-status>生成后会进入图片草稿，你确认后再发送；群聊中可选择一个成员作为视觉参考。</div>
     <pre class="ai-image-prompt" data-ai-image-prompt hidden></pre>`;
   document.querySelector(".composer-wrap")?.appendChild(panel);
 

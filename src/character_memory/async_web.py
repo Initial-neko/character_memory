@@ -27,6 +27,7 @@ async def _stream_hub_events(
     channel_key: str,
     *,
     after_id: int = 0,
+    initial_event: tuple[str, dict] | None = None,
     poll_seconds: float = 0.1,
     heartbeat_seconds: float = 15.0,
 ):
@@ -48,6 +49,14 @@ async def _stream_hub_events(
     cursor = max(0, int(after_id or 0))
     next_heartbeat = time.monotonic() + max(0.1, heartbeat_seconds)
     yield "retry: 1500\n\n"
+
+    # Brand-new UI streams skip old ephemeral events by design, but they still
+    # need one authoritative status snapshot. Otherwise a locally cached typing
+    # flag can survive a tab/character/group switch forever after missing idle.
+    if initial_event is not None:
+        event_type, data = initial_event
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        yield f"event: {event_type}\ndata: {payload}\n\n"
 
     while not hub._closed.is_set():
         with channel.condition:
@@ -294,14 +303,16 @@ def attach_async_routes(app):
             raise HTTPException(status_code=400, detail="scope must be direct or group")
 
         raw_last_id = last_event_id
+        initial_event = None
         if raw_last_id is None:
-            # A brand-new UI stream has already reconciled durable state through
-            # the history endpoint. Start at the current ephemeral tail so old
-            # typing/member-complete notifications are not replayed on tab/group
-            # switches. Native EventSource reconnects do send Last-Event-ID.
+            # A brand-new UI stream has already reconciled durable history, so
+            # skip old ephemeral events but immediately send the scheduler's
+            # current state. This re-synchronizes a stale local "typing" flag
+            # after character/group/tab switches without replaying old chatter.
             hub_channel = hub._channel(channel)
             with hub_channel.condition:
                 last_id = hub_channel.next_id - 1
+            initial_event = ("reaction_status", scheduler.status_snapshot(channel))
         else:
             try:
                 last_id = int(raw_last_id or 0)
@@ -309,7 +320,7 @@ def attach_async_routes(app):
                 last_id = 0
 
         return StreamingResponse(
-            _stream_hub_events(hub, channel, after_id=last_id),
+            _stream_hub_events(hub, channel, after_id=last_id, initial_event=initial_event),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

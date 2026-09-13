@@ -35,9 +35,12 @@ def test_avatar_ui_uses_llm_hint_and_search_session_ids_without_arbitrary_image_
 
 def test_example_config_declares_searchapi_and_avatar_storage_without_enabling_future_web_tools():
     config = (ROOT / "config.example.yaml").read_text(encoding="utf-8")
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
     assert 'search_provider: "searchapi"' in config
-    assert 'search_api_key: ""' in config
+    assert 'search_api_key: ""' not in config
+    assert "SEARCHAPI_API_KEY=" in env_example
+    assert "BRAVE_SEARCH_API_KEY=" in env_example
     assert 'search_country: "jp"' in config
     assert 'search_language: "zh-cn"' in config
     assert 'search_safe_search: "strict"' in config

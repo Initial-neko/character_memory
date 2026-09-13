@@ -159,6 +159,51 @@ C continues
 
 如果这一轮所有成员都失败，才提升为 group-level reaction error，避免把系统性故障伪装成“大家都沉默”。
 
+### Conversation Archive
+
+群聊支持 Codex 风格的归档/恢复。归档是 **soft hide**，不是删除事实。
+
+SQLite `conversations` 保存：
+
+```text
+archived_at
+archived_at_epoch
+```
+
+默认：
+
+```text
+GET /v1/groups
+```
+
+只返回 `archived_at IS NULL` 的活跃群聊。
+
+归档列表：
+
+```text
+GET /v1/groups?archived=true
+```
+
+状态变更：
+
+```text
+POST /v1/groups/{conversation_id}/archive
+POST /v1/groups/{conversation_id}/restore
+```
+
+归档不会删除：
+
+- `conversation_events`
+- `conversation_runtime_traces`
+- Character 已经形成的 Memory
+- MediaAsset / 本地媒体文件
+
+归档后的 history/trace 仍可读取，因此数据仍然可恢复、可审计；但普通列表、普通 message search、群聊发送以及新的 group SSE 连接都会把该群视为非活跃，直到 Restore。
+
+Archive 与 group reaction 使用同一 per-group lock。若归档动作撞上正在提交的群成员反应，会等待当前临界区安全结束，不通过删除/取消事实来制造半提交状态。
+
+当前 Direct Chat 仍是 Character-centric persistent timeline，并没有正式的多 Thread Registry，因此本 contract 暂时只用于 Group Conversation。不要把“隐藏 Character”与“归档 Conversation”混为一件事。
+
 ## 7. Group Mentions
 
 Mention 是**注意力与顺序信号**，不是独占路由权限。
@@ -209,7 +254,9 @@ AI 生成工具默认只把结果放进前端 draft；用户最终按发送后�
 Search 只查真实 durable chat facts：
 
 - Direct：`events` 中 USER/CHARACTER message；
-- Group：`conversation_events`。
+- Group：活跃 `conversations` 的 `conversation_events`。
+
+归档 Group 默认不进入普通 message search；恢复后自动重新进入搜索范围。底层 Event 没有被删除。
 
 不搜索：
 

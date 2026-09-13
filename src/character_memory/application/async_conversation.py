@@ -94,7 +94,7 @@ class ConversationEventHub:
 class _PendingState:
     condition: threading.Condition = field(default_factory=threading.Condition)
     latest_event: object | None = None
-    image_urls: dict[int, str] = field(default_factory=dict)
+    image_urls: dict[int, list[str]] = field(default_factory=dict)
     mention_by_event: dict[int, list[str]] = field(default_factory=dict)
     processed_id: int = 0
     pending_since: float | None = None
@@ -162,16 +162,17 @@ class ReactionScheduler:
                 return {"state": "typing", "watermark": latest_id}
             return {"state": "idle", "watermark": state.processed_id}
 
-    def _enqueue(self, key: str, event, image_data_url: str | None, target: Callable[[str, _PendingState], None]) -> None:
+    def _enqueue(self, key: str, event, image_data_urls: list[str] | None, target: Callable[[str, _PendingState], None]) -> None:
         if event.id is None:
             raise ValueError("asynchronous reaction requires a persisted event id")
         state = self._state(key)
         now = time.monotonic()
         should_start = False
+        urls = [str(value).strip() for value in (image_data_urls or []) if str(value).strip()]
         with state.condition:
             state.latest_event = event
-            if image_data_url:
-                state.image_urls[int(event.id)] = image_data_url
+            if urls:
+                state.image_urls[int(event.id)] = list(dict.fromkeys(urls))
             metadata = getattr(event, "metadata", {}) or {}
             raw_mentions = metadata.get("mentions") if isinstance(metadata, dict) else None
             if isinstance(raw_mentions, list) and raw_mentions:
@@ -187,22 +188,44 @@ class ReactionScheduler:
         if should_start:
             threading.Thread(target=target, args=(key, state), daemon=True, name=f"reaction-{key[:32]}").start()
 
-    def enqueue_direct(self, character_id: str, conversation_id: str, event, *, image_data_url: str | None = None) -> None:
+    @staticmethod
+    def _image_urls(image_data_url: str | None = None, image_data_urls: list[str] | None = None) -> list[str]:
+        values = [str(value).strip() for value in (image_data_urls or []) if str(value).strip()]
+        if image_data_url and str(image_data_url).strip():
+            values.append(str(image_data_url).strip())
+        return list(dict.fromkeys(values))
+
+    def enqueue_direct(
+        self,
+        character_id: str,
+        conversation_id: str,
+        event,
+        *,
+        image_data_url: str | None = None,
+        image_data_urls: list[str] | None = None,
+    ) -> None:
         key = direct_channel(character_id, conversation_id)
         event.metadata.setdefault("conversation_id", conversation_id)
         self._enqueue(
             key,
             event,
-            image_data_url,
+            self._image_urls(image_data_url, image_data_urls),
             lambda channel, state: self._run_direct(channel, state, character_id, conversation_id),
         )
 
-    def enqueue_group(self, conversation_id: str, event, *, image_data_url: str | None = None) -> None:
+    def enqueue_group(
+        self,
+        conversation_id: str,
+        event,
+        *,
+        image_data_url: str | None = None,
+        image_data_urls: list[str] | None = None,
+    ) -> None:
         key = group_channel(conversation_id)
         self._enqueue(
             key,
             event,
-            image_data_url,
+            self._image_urls(image_data_url, image_data_urls),
             lambda channel, state: self._run_group(channel, state, conversation_id),
         )
 
@@ -236,7 +259,12 @@ class ReactionScheduler:
                     state.condition.wait(timeout=remaining)
                     continue
                 watermark = int(event.id)
-                image_urls = [url for event_id, url in sorted(state.image_urls.items()) if state.processed_id < event_id <= watermark]
+                image_urls = [
+                    url
+                    for event_id, urls in sorted(state.image_urls.items())
+                    if state.processed_id < event_id <= watermark
+                    for url in urls
+                ]
                 mentions = self._ordered_mentions(state, watermark)
                 state.pending_since = None
                 return event, watermark, image_urls, mentions

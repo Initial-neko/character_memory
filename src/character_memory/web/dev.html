@@ -6,6 +6,7 @@
   <title>Character Memory Dev Console</title>
   <link rel="stylesheet" href="/static/dev.css" />
   <link rel="stylesheet" href="/static/dev_visual.css" />
+  <link rel="stylesheet" href="/static/visual_capture.css" />
 </head>
 <body>
   <main class="shell">
@@ -59,6 +60,40 @@
         <div class="actions"><button id="runTts">Generate</button><span id="ttsLatency" class="metric-inline">-</span></div>
         <audio id="ttsAudio" controls></audio>
         <pre id="ttsResult" class="result">等待请求...</pre>
+      </article>
+
+      <article class="card wide" id="visualCaptureCard">
+        <div class="card-title-row">
+          <div><h2>Visual Capture + Vision</h2><p class="subtle">摄像头/屏幕原始视频只留在浏览器；仅选中的少量关键帧发送给 Vision LLM。</p></div>
+          <div class="actions"><span id="visualCandidateCount" class="metric-inline">0 candidates</span><span class="pill">real vision</span></div>
+        </div>
+        <div class="visual-dev-controls">
+          <button id="visualCamera" type="button">📷 前置摄像头</button>
+          <button id="visualScreen" type="button">🖥 选择窗口 / Tab / 屏幕</button>
+          <button id="visualStop" type="button" class="secondary" disabled>停止采集</button>
+          <button id="visualSample" type="button" class="secondary">立即采样</button>
+          <button id="visualSelect" type="button" class="secondary">选择关键帧</button>
+          <label class="subtle">最多
+            <select id="visualFrameLimit">
+              <option value="3">3</option>
+              <option value="4" selected>4</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+        </div>
+        <div class="visual-dev-stage">
+          <div class="visual-dev-preview-wrap">
+            <video id="visualPreview" class="visual-dev-preview" muted autoplay playsinline></video>
+            <div id="visualStatus" class="visual-dev-status">视觉未开启</div>
+          </div>
+          <div><div id="visualFrames" class="visual-dev-frames"></div></div>
+        </div>
+        <label for="visionSystem">Vision System Prompt</label>
+        <textarea id="visionSystem" rows="2">只根据提供的图像回答；如果看不清就明确说看不清，不要猜测画面中不存在的内容。</textarea>
+        <label for="visionPrompt">Vision Prompt</label>
+        <textarea id="visionPrompt" rows="4">请按时间顺序看看这些关键帧，简洁说明你看到了什么，以及画面是否发生了明显变化。</textarea>
+        <div class="actions"><button id="runVision">Run Vision Test</button><span id="visionLatency" class="metric-inline">-</span></div>
+        <pre id="visionResult" class="result">等待视觉测试...</pre>
       </article>
 
       <article class="card wide" id="imageGenCard">
@@ -158,10 +193,12 @@
 
     <section class="card future">
       <div class="card-title-row"><h2>Extension Slots</h2><span class="pill">future</span></div>
-      <p>视频关键帧、Embedding 与完整 Pipeline benchmark 将继续复用同一套 Dev Console；已经接入的 ImageGen 不再放在 future 占位里。</p>
+      <p>Embedding 与完整 Pipeline benchmark 将继续复用同一套 Dev Console；ImageGen 与 Visual Capture 已有真实测试入口。</p>
     </section>
   </main>
+  <script src="/static/visual_capture.js"></script>
   <script src="/static/dev.js"></script>
   <script src="/static/dev_visual.js"></script>
+  <script src="/static/dev_capture.js"></script>
 </body>
 </html>

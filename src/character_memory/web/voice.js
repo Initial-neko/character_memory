@@ -3,7 +3,7 @@
   if (!CM) return;
 
   const MEDIA_BASE_KEY = "character-memory:media-base-url";
-  const TTS_SPEAKER_COUNT = 5;
+  const TTS_SPEAKER_IDS = [0, 2, 5];
   const SPEAKABLE_ACTIONS = new Set(["MESSAGE", "REPLY", "MINIMAL_RESPONSE", "PROACTIVE_MESSAGE"]);
   const mediaBase = () => localStorage.getItem(MEDIA_BASE_KEY) || "http://127.0.0.1:8001";
 
@@ -18,6 +18,7 @@
     sourceNode: null,
     processor: null,
     eventSource: null,
+    visualSession: null,
     chunks: [],
     preRoll: [],
     speechStartedAt: 0,
@@ -52,7 +53,14 @@
     dockAvatar: document.getElementById("voiceDockAvatar"),
     dockTitle: document.getElementById("voiceDockTitle"),
     dockStatus: document.getElementById("voiceDockStatus"),
+    dockVisual: document.getElementById("voiceDockVisual"),
     dockHangup: document.getElementById("voiceDockHangupButton"),
+    camera: document.getElementById("voiceCameraButton"),
+    screen: document.getElementById("voiceScreenButton"),
+    visualStop: document.getElementById("voiceVisualStopButton"),
+    visualPanel: document.getElementById("voiceVisualPanel"),
+    visualPreview: document.getElementById("voiceVisualPreview"),
+    visualStatus: document.getElementById("voiceVisualStatus"),
   };
 
   function profileFor(characterId) {
@@ -75,7 +83,7 @@
       hash ^= char.codePointAt(0);
       hash = Math.imul(hash, 16777619);
     }
-    return (hash >>> 0) % TTS_SPEAKER_COUNT;
+    return TTS_SPEAKER_IDS[(hash >>> 0) % TTS_SPEAKER_IDS.length];
   }
 
   function setAvatar(container, characterId = null, fallback = "AI") {
@@ -168,6 +176,51 @@
     const label = text || phase;
     if (dom.status) dom.status.textContent = label;
     if (dom.dockStatus) dom.dockStatus.textContent = label;
+  }
+
+  function updateVisualUi(snapshot = null) {
+    const value = snapshot || voice.visualSession?.getState?.() || {active:false, source:null, candidateCount:0};
+    const active = Boolean(value.active);
+    dom.camera?.classList.toggle("active", active && value.source === "CAMERA");
+    dom.screen?.classList.toggle("active", active && value.source === "DISPLAY");
+    dom.visualStop?.classList.toggle("hidden", !active);
+    dom.visualPanel?.classList.toggle("hidden", !active);
+    if (dom.dockVisual) {
+      dom.dockVisual.classList.toggle("hidden", !active);
+      dom.dockVisual.textContent = value.source === "CAMERA" ? "📷" : value.source === "DISPLAY" ? "🖥" : "";
+      dom.dockVisual.title = active ? `${value.source === "CAMERA" ? "摄像头" : "屏幕共享"} · ${value.candidateCount || 0} 个候选帧` : "";
+    }
+  }
+
+  function ensureVisualSession() {
+    if (voice.visualSession) return voice.visualSession;
+    if (!window.VisualCapture?.createSession) throw new Error("Visual Capture 模块未加载");
+    voice.visualSession = window.VisualCapture.createSession({
+      preview:dom.visualPreview,
+      status:dom.visualStatus,
+      onStateChange:updateVisualUi,
+    });
+    updateVisualUi();
+    return voice.visualSession;
+  }
+
+  async function startCameraVisual() {
+    if (!voice.active) throw new Error("请先开始通话");
+    const session = ensureVisualSession();
+    await session.startCamera();
+    updateVisualUi();
+  }
+
+  async function startScreenVisual() {
+    if (!voice.active) throw new Error("请先开始通话");
+    const session = ensureVisualSession();
+    await session.startDisplay();
+    updateVisualUi();
+  }
+
+  function stopVisual({clearCandidates = false} = {}) {
+    voice.visualSession?.stop?.({clearCandidates, reason:"视觉已关闭"});
+    updateVisualUi();
   }
 
   function formatMetrics() {
@@ -359,21 +412,31 @@
     });
   }
 
-  async function sendTranscript(text) {
+  async function sendTranscript(text, visualFrames = []) {
     const target = voice.target;
     if (!target) throw new Error("通话目标不存在");
+    const hasVisual = Array.isArray(visualFrames) && visualFrames.length > 0;
     let response;
     if (target.scope === "group") {
-      response = await fetch(`/v1/groups/${encodeURIComponent(target.conversationId)}/messages`, {
+      const path = hasVisual
+        ? `/v1/visual/groups/${encodeURIComponent(target.conversationId)}/messages`
+        : `/v1/groups/${encodeURIComponent(target.conversationId)}/messages`;
+      response = await fetch(path, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({message:text}),
+        body: JSON.stringify(hasVisual ? {message:text, visual_frames:visualFrames} : {message:text}),
       });
     } else {
-      response = await fetch("/v1/chat/messages", {
+      const path = hasVisual ? "/v1/visual/direct/messages" : "/v1/chat/messages";
+      response = await fetch(path, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({message:text, character_id:target.characterId, conversation_id:target.conversationId}),
+        body: JSON.stringify({
+          message:text,
+          character_id:target.characterId,
+          conversation_id:target.conversationId,
+          ...(hasVisual ? {visual_frames:visualFrames} : {}),
+        }),
       });
     }
     if (!response.ok) throw new Error(await response.text());
@@ -387,6 +450,12 @@
 
   async function finishSpeech() {
     if (!voice.active || !voice.chunks.length) return;
+    const speechEndedAt = performance.now();
+    const visualFrames = voice.visualSession?.selectFrames?.({
+      fromMs:Math.max(0, voice.speechStartedAt - 1000),
+      toMs:speechEndedAt,
+      maxFrames:4,
+    }) || [];
     const chunks = voice.chunks;
     voice.chunks = [];
     voice.preRoll = [];
@@ -410,9 +479,9 @@
       formatMetrics();
       const text = String(result.text || "").trim();
       if (!text) throw new Error("没有识别到文字");
-      if (dom.transcript) dom.transcript.textContent = `你：${text}`;
+      if (dom.transcript) dom.transcript.textContent = `你：${text}${visualFrames.length ? ` · 附 ${visualFrames.length} 个视觉关键帧` : ""}`;
       setPhase("waiting", "正在想…");
-      const sent = await sendTranscript(text);
+      const sent = await sendTranscript(text, visualFrames);
       appendCallLog("user", text, sent.message?.id ?? sent.event_id ?? null);
     } catch (error) {
       setPhase("error", `语音失败：${error.message}`);
@@ -542,12 +611,14 @@
       voice.lastMetrics = {};
       voice.preRoll = [];
       voice.chunks = [];
+      ensureVisualSession();
       openVoiceEvents();
 
-      if (dom.transcript) dom.transcript.textContent = "直接说话即可；停顿后会自动发送。";
+      if (dom.transcript) dom.transcript.textContent = "直接说话即可；停顿后会自动发送。摄像头/屏幕开启后只会抽取少量关键帧。";
       resetCallLog();
       renderCallIdentity();
       formatMetrics();
+      updateVisualUi();
       dom.dock?.classList.add("hidden");
       dom.overlay?.classList.remove("hidden");
       updateCallButton();
@@ -567,6 +638,8 @@
     voice.processor?.disconnect?.();
     voice.sourceNode?.disconnect?.();
     voice.stream?.getTracks?.().forEach(track => track.stop());
+    voice.visualSession?.stop?.({clearCandidates:true, reason:"视觉已关闭"});
+    voice.visualSession = null;
     try { await voice.audioContext?.close?.(); } catch (_) {}
     voice.stream = null;
     voice.audioContext = null;
@@ -578,6 +651,7 @@
     voice.playing = false;
     voice.currentSpeakerId = null;
     voice.target = null;
+    updateVisualUi({active:false, source:null, candidateCount:0});
     setPhase("idle", "");
     dom.overlay?.classList.add("hidden");
     dom.dock?.classList.add("hidden");
@@ -589,6 +663,11 @@
   dom.hangup?.addEventListener("click", stopCall);
   dom.dockExpand?.addEventListener("click", expandCall);
   dom.dockHangup?.addEventListener("click", stopCall);
+  dom.camera?.addEventListener("click", () => startCameraVisual().catch(error => alert(`无法打开摄像头：${error.message}`)));
+  dom.screen?.addEventListener("click", () => startScreenVisual().catch(error => {
+    if (error?.name !== "NotAllowedError") alert(`无法开始屏幕共享：${error.message}`);
+  }));
+  dom.visualStop?.addEventListener("click", () => stopVisual({clearCandidates:false}));
   window.addEventListener("beforeunload", () => { if (voice.active) stopCall(); });
   CM.on("conversationChanged", () => { if (voice.active) renderCallIdentity(); });
   CM.registerFeature("voice", {
@@ -596,8 +675,12 @@
     stop:stopCall,
     minimize:minimizeCall,
     expand:expandCall,
+    startCamera:startCameraVisual,
+    startScreen:startScreenVisual,
+    stopVisual,
     state:voice,
     stableSpeakerId,
   });
   updateCallButton();
+  updateVisualUi({active:false, source:null, candidateCount:0});
 })();

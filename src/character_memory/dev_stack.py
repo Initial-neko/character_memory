@@ -99,7 +99,11 @@ def main() -> None:
         ),
         (
             "TTS Provider Lab",
-            "http://127.0.0.1:9002/health",
+            # Do not use /health here: that endpoint probes the provider inventory,
+            # including the optional CosyVoice sidecar. If that sidecar is absent,
+            # the probe can take seconds while the stack readiness timeout is 0.8s.
+            # /tts proves the lab process itself is listening without provider I/O.
+            "http://127.0.0.1:9002/tts",
             [python, "-m", "character_memory.tts_lab"],
             _tts_lab_env(base_env),
         ),

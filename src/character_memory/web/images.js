@@ -56,6 +56,40 @@
     lightbox.classList.remove("hidden");
   }
 
+  function renderDraft(nextDraft) {
+    if (!panel || !nextDraft?.data_url) return;
+    draft = nextDraft;
+    CM.features.stickers?.close?.();
+    CM.features.aiImages?.close?.();
+    panel.classList.remove("hidden");
+    const sourceLabel = draft.source === "CLIPBOARD"
+      ? "来自剪贴板"
+      : draft.source === "AI_GENERATED"
+        ? "来自 AI 生成"
+        : CM.escapeHtml(draft.filename || "image");
+    const sizeText = Number(draft.size || 0) > 0 ? ` · ${(Number(draft.size) / 1024).toFixed(0)} KB` : "";
+    panel.innerHTML = `<div class="image-draft-preview"><img src="${CM.escapeHtml(draft.data_url)}" alt="图片预览"></div>
+      <div class="image-draft-meta">${sourceLabel}${sizeText}</div>
+      <textarea id="imageCaption" rows="2" maxlength="12000" placeholder="可以补一句话，也可以只发图片"></textarea>
+      <div class="image-draft-actions"><button type="button" data-image-cancel>取消</button><button class="image-send" type="button" data-image-send>发送图片</button></div>`;
+    document.getElementById("imageCaption")?.focus();
+  }
+
+  function openDataDraft({filename = "image", data_url = "", size = 0, source = "AI_GENERATED"} = {}) {
+    const value = String(data_url || "").trim();
+    if (!/^data:image\/(?:jpeg|png|gif|webp);base64,/i.test(value)) {
+      panel.classList.remove("hidden");
+      panel.innerHTML = '<div class="error">生成结果不是可发送的 JPEG / PNG / GIF / WebP 图片。</div>';
+      return;
+    }
+    if (Number(size || 0) > 8 * 1024 * 1024) {
+      panel.classList.remove("hidden");
+      panel.innerHTML = '<div class="error">图片不能超过 8 MiB。</div>';
+      return;
+    }
+    renderDraft({filename:String(filename || "image"), data_url:value, size:Number(size || 0), source});
+  }
+
   function openDraft(file, {source = "FILE_PICKER"} = {}) {
     if (!panel || !file) return;
     const allowed = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -73,14 +107,12 @@
     const reader = new FileReader();
     reader.onload = () => {
       const defaultName = source === "CLIPBOARD" ? `clipboard-${Date.now()}.png` : "image";
-      draft = {filename:file.name || defaultName, data_url:String(reader.result || ""), size:file.size, source};
-      CM.features.stickers?.close?.();
-      panel.classList.remove("hidden");
-      panel.innerHTML = `<div class="image-draft-preview"><img src="${CM.escapeHtml(draft.data_url)}" alt="图片预览"></div>
-        <div class="image-draft-meta">${source === "CLIPBOARD" ? "来自剪贴板" : CM.escapeHtml(draft.filename)} · ${(file.size / 1024).toFixed(0)} KB</div>
-        <textarea id="imageCaption" rows="2" maxlength="12000" placeholder="可以补一句话，也可以只发图片"></textarea>
-        <div class="image-draft-actions"><button type="button" data-image-cancel>取消</button><button class="image-send" type="button" data-image-send>发送图片</button></div>`;
-      document.getElementById("imageCaption")?.focus();
+      openDataDraft({
+        filename:file.name || defaultName,
+        data_url:String(reader.result || ""),
+        size:file.size,
+        source,
+      });
     };
     reader.onerror = () => {
       panel.classList.remove("hidden");
@@ -138,6 +170,7 @@
   trigger.addEventListener("click", event => {
     event.stopPropagation();
     CM.features.stickers?.close?.();
+    CM.features.aiImages?.close?.();
     inputEl.click();
   });
   inputEl.addEventListener("change", () => openDraft(inputEl.files?.[0], {source:"FILE_PICKER"}));
@@ -189,5 +222,5 @@
   });
   CM.on("conversationChanged", () => { close(); closeLightbox(); });
 
-  CM.registerFeature("images", {openDraft, close, setDisabled, openLightbox, closeLightbox, trigger});
+  CM.registerFeature("images", {openDraft, openDataDraft, close, setDisabled, openLightbox, closeLightbox, trigger});
 })();

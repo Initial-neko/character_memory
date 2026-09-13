@@ -145,6 +145,23 @@ class ReactionScheduler:
                 self._states[key] = state
             return state
 
+    def status_snapshot(self, key: str) -> dict:
+        """Return the current authoritative pending state for a conversation.
+
+        SSE status events are intentionally ephemeral. A UI that closes one
+        stream and later opens a brand-new stream must not keep an old local
+        "typing" flag forever just because it missed the terminal idle event.
+        """
+        with self._guard:
+            state = self._states.get(key)
+        if state is None:
+            return {"state": "idle", "watermark": 0}
+        with state.condition:
+            latest_id = int(state.latest_event.id) if state.latest_event is not None else state.processed_id
+            if state.active and latest_id > state.processed_id:
+                return {"state": "typing", "watermark": latest_id}
+            return {"state": "idle", "watermark": state.processed_id}
+
     def _enqueue(self, key: str, event, image_data_url: str | None, target: Callable[[str, _PendingState], None]) -> None:
         if event.id is None:
             raise ValueError("asynchronous reaction requires a persisted event id")

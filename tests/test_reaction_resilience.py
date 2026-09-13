@@ -53,6 +53,36 @@ def test_optional_intent_drift_is_bounded_instead_of_breaking_the_reply():
     assert intent.expires_hours == 720
 
 
+def test_unambiguous_action_and_text_aliases_are_normalized_locally():
+    reaction = PersonReaction.model_validate(
+        {
+            "actions": [
+                {"action": "sticker", "sticker_id": "cute_cat_01", "reason": None},
+                {"action": "message", "text": "我还在这呢。"},
+            ],
+            "memory_candidates": [],
+            "intent_candidates": [],
+        }
+    )
+
+    assert [action.type for action in reaction.actions] == [ActionType.STICKER, ActionType.MESSAGE]
+    assert reaction.actions[0].sticker_id == "cute_cat_01"
+    assert reaction.actions[0].reason == ""
+    assert reaction.actions[1].message == "我还在这呢。"
+
+
+def test_missing_actions_remains_strict_instead_of_guessing_silence():
+    with pytest.raises(ValidationError):
+        PersonReaction.model_validate(
+            {
+                "perception": "看到了消息",
+                "reaction": "犹豫了一下",
+                "memory_candidates": [],
+                "intent_candidates": [],
+            }
+        )
+
+
 def test_outward_action_contract_remains_strict():
     with pytest.raises(ValidationError):
         PersonReaction.model_validate(

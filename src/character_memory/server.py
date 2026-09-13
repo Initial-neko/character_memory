@@ -6,6 +6,7 @@ from character_memory.avatar_web import attach_avatar_routes
 from character_memory.group_web import attach_group_routes
 from character_memory.history_web import attach_history_routes
 from character_memory.search_web import attach_search_routes
+from character_memory.visual_capture_web import attach_visual_capture_routes
 from character_memory.visual_web import attach_visual_routes
 from character_memory.wake_web import attach_wake_routes
 
@@ -18,4 +19,5 @@ attach_visual_routes(app)
 attach_group_routes(app, config_path)
 attach_search_routes(app)
 attach_async_routes(app)
+attach_visual_capture_routes(app)
 attach_wake_routes(app)

@@ -16,6 +16,7 @@ from character_memory.visual_generation import (
     MsimgProvider,
     VisualPromptPlanner,
     VisualPurpose,
+    visual_aspect_ratio,
 )
 
 
@@ -102,23 +103,17 @@ def test_msimg_provider_rejects_reference_images_before_import():
     provider.close()
 
 
-def test_visual_prompt_planner_is_structured_and_keeps_purpose():
-    class FakeModel:
-        def structured_for_session(self, prompt, schema, session_id):
-            assert "purpose=SELFIE" in prompt
-            assert "Has reference image: True" in prompt
-            assert "不要决定是否应该发图" in prompt
-            assert session_id == "visual-plan:mika:selfie"
-            return {
-                "purpose": "SELFIE",
-                "visual_intent": "分享现在的自然状态",
-                "positive_prompt": "same person, casual phone selfie, warm indoor light",
-                "negative_prompt": "different person, changed hair color",
-                "aspect_ratio": "3:4",
-                "identity_constraints": ["same face", "same hair"],
-            }
+def test_visual_prompt_planner_requests_plain_text_and_adds_reference_policy():
+    seen = {}
 
-    plan = VisualPromptPlanner(FakeModel()).plan(
+    class FakeModel:
+        def _request(self, messages, *, conversation_id=None, json_object=False, model=None):
+            seen["messages"] = messages
+            seen["conversation_id"] = conversation_id
+            seen["json_object"] = json_object
+            return "same person, casual phone selfie, warm indoor light"
+
+    prompt = VisualPromptPlanner(FakeModel()).compile_prompt(
         "mika",
         purpose=VisualPurpose.SELFIE,
         persona="Mika, black hair, blue eyes",
@@ -127,30 +122,34 @@ def test_visual_prompt_planner_is_structured_and_keeps_purpose():
         visual_intent="想发一张现在的自拍",
         has_reference_image=True,
     )
-    assert plan.purpose == VisualPurpose.SELFIE
-    assert plan.aspect_ratio == "3:4"
-    assert "same person" in plan.positive_prompt
+
+    assert seen["conversation_id"] == "visual-plan:mika:selfie"
+    assert seen["json_object"] is False
+    assert "不返回 JSON" in seen["messages"][0]["content"]
+    assert "只输出最终绘图提示词纯文本" in seen["messages"][1]["content"]
+    assert "same person" in prompt
+    assert "reference image as the identity anchor" in prompt
 
 
-def test_visual_prompt_planner_rejects_purpose_drift():
+def test_visual_prompt_planner_strips_code_fence_without_schema_validation():
     class FakeModel:
-        def structured_for_session(self, prompt, schema, session_id):
-            return {
-                "purpose": "SCENE",
-                "visual_intent": "wrong",
-                "positive_prompt": "wrong purpose",
-                "negative_prompt": "",
-                "aspect_ratio": "1:1",
-                "identity_constraints": [],
-            }
+        def _request(self, messages, *, conversation_id=None, json_object=False, model=None):
+            return "```text\na calm rainy street at night\n```"
 
-    with pytest.raises(ValueError, match="purpose mismatch"):
-        VisualPromptPlanner(FakeModel()).plan(
-            "mika",
-            purpose=VisualPurpose.SELFIE,
-            persona="Mika",
-            visual_intent="selfie",
-        )
+    prompt = VisualPromptPlanner(FakeModel()).compile_prompt(
+        "mika",
+        purpose=VisualPurpose.SCENE,
+        persona="Mika",
+        visual_intent="画一个安静雨夜",
+    )
+    assert prompt == "a calm rainy street at night"
+
+
+def test_visual_aspect_ratio_is_application_owned():
+    assert visual_aspect_ratio(VisualPurpose.AVATAR) == "1:1"
+    assert visual_aspect_ratio(VisualPurpose.SELFIE) == "3:4"
+    assert visual_aspect_ratio(VisualPurpose.SCENE) == "4:3"
+    assert visual_aspect_ratio(VisualPurpose.STICKER) == "1:1"
 
 
 def test_generated_media_can_be_copied_to_avatar_with_provenance(tmp_path):

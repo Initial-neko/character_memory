@@ -73,7 +73,8 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
     server = Path("src/character_memory/tts_lab.py").read_text(encoding="utf-8")
     sidecar = Path("scripts/cosyvoice_sidecar.py").read_text(encoding="utf-8")
-    setup = Path("scripts/setup-tts-models.sh").read_text(encoding="utf-8")
+    setup_media = Path("scripts/setup-media-models.sh").read_text(encoding="utf-8")
+    setup_tts = Path("scripts/setup-tts-models.sh").read_text(encoding="utf-8")
     prefetch = Path("scripts/prefetch_tts_models.py").read_text(encoding="utf-8")
 
     assert 'tts-kokoro = [' in pyproject
@@ -95,8 +96,9 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert '"http://127.0.0.1:9012"' in server
     assert 'port = int(os.getenv("CHARACTER_TTS_LAB_PORT", "9002"))' in server
 
-    assert "bash scripts/sync-all.sh" in setup
-    assert "prefetch_tts_models.py" in setup
+    assert "bash scripts/sync-all.sh" in setup_media
+    assert "prefetch_tts_models.py" in setup_media
+    assert "exec bash scripts/setup-media-models.sh" in setup_tts
     assert '"kokoro-v1_1-zh.pth"' in prefetch
     assert '"config.json"' in prefetch
 

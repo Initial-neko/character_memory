@@ -3,11 +3,21 @@ set -euo pipefail
 
 # This file is intentionally LF-only. See .gitattributes.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 MODEL_ROOT="${CHARACTER_MEDIA_MODEL_ROOT:-$ROOT/models}"
 ASR_NAME="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
 TTS_NAME="sherpa-onnx-vits-zh-ll"
 ASR_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${ASR_NAME}.tar.bz2"
 TTS_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${TTS_NAME}.tar.bz2"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "[error] uv is not available on PATH" >&2
+  exit 127
+fi
+
+# One setup entry for dependencies + all local media/TTS model assets.
+echo "[sync] canonical Character Memory environment"
+bash scripts/sync-all.sh
 
 mkdir -p "$MODEL_ROOT"
 
@@ -48,16 +58,12 @@ fetch_model "$TTS_NAME" "$TTS_URL" "model.onnx"
 # Reuse this existing model-setup entry for the :9002 Kokoro assets as well.
 # The helper uses the Hugging Face cache under models/huggingface and downloads
 # the model + valid v1.1 Chinese voice packs before runtime synthesis.
-if ! command -v uv >/dev/null 2>&1; then
-  echo "[error] uv is required to prefetch Kokoro assets." >&2
-  exit 1
-fi
 export HF_HOME="${HF_HOME:-$MODEL_ROOT/huggingface}"
 uv run python scripts/prefetch_tts_models.py
 
 cat <<EOF
 
-Media/TTS models are ready under:
+Media/TTS setup is ready under:
   $MODEL_ROOT
 
 Start the full stack with:

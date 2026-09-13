@@ -7,7 +7,10 @@ from fastapi.testclient import TestClient
 from character_memory.api import create_api
 
 
-def test_web_starts_before_runtime_and_without_api_key(tmp_path):
+def test_web_starts_before_runtime_and_without_api_key(tmp_path, monkeypatch):
+    # Settings supports system env > .env > legacy config. This test explicitly
+    # exercises the no-key branch, so isolate it from developer/CI environment.
+    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
     config = tmp_path / "config.yaml"
     config.write_text(
         "api_key: ''\n"

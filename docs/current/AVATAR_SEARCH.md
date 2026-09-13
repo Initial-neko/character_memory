@@ -1,36 +1,72 @@
-# Avatar Search
+# Avatar Search & Avatar Sources
 
-Avatar discovery is the first consumer of the search abstraction. This phase intentionally does **not** expose general web browsing to character chat runtime.
+Avatar is a local Character asset. Current product supports several ways to obtain a candidate, but all selected avatars are ultimately copied into local avatar storage so current identity does not depend on an external URL remaining alive.
 
-## Current flow
+## 1. Current avatar sources
 
-1. The Web UI opens the avatar manager from the character header avatar.
-2. The optional text box is a **preference hint**, not a raw search-engine query.
-3. `AvatarIntentPlanner` asks the existing character model to judge what avatar fits the character **right now**, using bounded context:
+Current avatar can come from:
+
+1. external image search candidate;
+2. generated avatar candidate;
+3. an existing chat/generated MediaAsset;
+4. a Character Image Catalog asset.
+
+Search and generation are different capabilities:
+
+```text
+Avatar Search
+  -> short web image query
+  -> external candidate
+  -> validate/download
+  -> local avatar asset
+
+Avatar Generate
+  -> character visual prompt
+  -> ImageGen provider
+  -> generated MediaAsset candidate
+  -> explicit user selection
+  -> local avatar asset
+```
+
+Neither path should silently replace the current avatar without user action.
+
+## 2. Avatar Search flow
+
+1. Web UI opens avatar manager from Character header/avatar.
+2. Optional user text is a **preference hint**, not a raw search-engine query.
+3. `AvatarIntentPlanner` asks the existing Character model what visual direction fits the person now, with bounded context:
    - Persona
    - current Mental State
-   - at most 8 recent short chat lines
-   - optional user preference
-4. The planner returns a compact `AvatarSearchIntent` containing:
+   - at most a few recent short chat lines
+   - optional preference
+4. Planner returns compact search intent:
    - `visual_intent`
    - 1~3 short image-search queries
    - optional mood/style labels
-5. `AvatarSearchService` searches the primary query first. It only spends a second/third provider request when the previous query did not produce enough viable candidates.
-6. `SearchApiProvider` uses SearchAPI.io Google Images by default. `BraveSearchProvider` remains an optional fallback.
-7. The server returns thumbnail candidates plus opaque `search_id` / `candidate_id` values.
-8. The browser selects only those opaque IDs; it never sends an arbitrary download URL to the backend.
-9. The backend downloads the cached search result, validates image content type/size, and stores it under `avatar_dir/<character_id>/`.
-10. Character profiles expose a versioned local `/avatar/asset` URL; sidebar/header/direct chat/group chat render that local asset.
+5. Search service queries the primary query first and only spends extra provider requests when needed.
+6. Provider results are normalized into opaque candidate IDs.
+7. Browser chooses `search_id/candidate_id`, not arbitrary download URL.
+8. Backend downloads the cached candidate, validates content type/size and stores a local avatar copy.
+9. Character profile exposes a versioned local `/avatar/asset` URL.
 
-If LLM planning fails, the server falls back to the previous deterministic `name + identity + avatar` style query so avatar search remains usable. That fixed query is now a fallback only, not the normal path.
+If LLM planning fails, deterministic fallback search remains available so avatar management does not become unusable.
 
-## Privacy boundary
+## 3. Privacy boundary
 
-Persona, Mental State and recent dialogue are used only inside the LLM planning step. The image-search provider receives only the short generated search query. The planner prompt explicitly forbids copying user names, private facts, relationship secrets or chat quotations into search queries.
+Persona, Mental State and recent dialogue can be used inside the local/server-side planner.
 
-The avatar plan is ephemeral tool context. It is **not** written to Character Memory and does not become a normal PersonRuntime action.
+The external search provider only receives short generated search queries.
 
-## Configuration
+Planner instructions must not copy:
+
+- user names/private identifiers；
+- relationship secrets；
+- long chat quotations；
+- unrelated Memory content。
+
+Avatar search intent is ephemeral tool context. It does not automatically become Character Memory or a normal PersonRuntime action.
+
+## 4. Search configuration
 
 ```yaml
 search_provider: "searchapi"
@@ -42,36 +78,75 @@ avatar_dir: ""
 avatar_max_bytes: 8388608
 ```
 
-`config.yaml` is git-ignored and is the normal place to put the local API key. `config.example.yaml` declares the available fields.
+`config.yaml` is git-ignored and is the normal local configuration location.
 
-For SearchAPI.io, `search_safe_search: "strict"` maps to Google Images `safe=active`. `SEARCHAPI_API_KEY` can optionally override `search_api_key` for deployment secret injection.
+SearchAPI.io env override：
 
-Brave remains available without changing the avatar service or UI:
+```text
+SEARCHAPI_API_KEY
+```
+
+Brave alternative：
 
 ```yaml
 search_provider: "brave"
-search_api_key: ""
 search_country: "ALL"
 search_language: "zh"
 search_safe_search: "strict"
 ```
 
-When `search_provider: "brave"`, `BRAVE_SEARCH_API_KEY` is the optional environment override.
+Env：
 
-## Provider boundary
+```text
+BRAVE_SEARCH_API_KEY
+```
 
-Both providers normalize results into `ImageSearchResult`:
+## 5. Provider abstraction
 
-- original image URL
-- thumbnail URL
-- source page URL
-- source domain
-- width / height when available
+Image search providers normalize results into a shared result shape including：
 
-This keeps avatar caching, candidate selection, SSRF controls and local asset persistence provider-independent.
+- original image URL；
+- thumbnail URL；
+- source page URL/domain；
+- width/height when available。
 
-## Reserved boundaries
+This keeps SSRF/download validation, avatar persistence and UI selection independent from a specific search vendor.
 
-`SearchProvider.search_web()` and `WebFetcher.fetch()` are deliberately present but raise `NotImplementedError`. A later phase can implement `web_search` and `web_fetch` without coupling those capabilities to avatar storage or the character reaction loop.
+Reserved `search_web()` / `WebFetcher.fetch()` boundaries do **not** mean Character chat currently has general-purpose web browsing. Search remains a narrow avatar tool until a separate product/tool design explicitly opens web context to PersonRuntime.
 
-Search/tool output must remain external context by default; it should not automatically become persistent character memory.
+## 6. Generated avatar
+
+Image generation routes：
+
+```text
+POST /v1/characters/{character_id}/avatar/generate
+POST /v1/characters/{character_id}/avatar/from-chat
+```
+
+Generate compiles Persona/Mental State/recent mood into a plain-text visual prompt and calls the configured ImageGen provider.
+
+If Provider supports reference images, current avatar may be supplied as an identity anchor.
+
+Generated result is a **candidate**, not automatic current avatar.
+
+The user can explicitly choose the generated/chat asset and copy it into avatar storage via `avatar/from-chat`.
+
+ImageGen provider/config details are documented in [`VISUAL_GENERATION.md`](VISUAL_GENERATION.md).
+
+## 7. Local ownership
+
+Once selected, avatar state is copied under configured avatar directory (default derived from DB directory).
+
+This means：
+
+- current avatar does not point directly to a third-party CDN；
+- deleting a source chat media later should not silently break selected avatar；
+- sidebar/header/direct/group UI can all resolve the same local versioned avatar URL。
+
+## 8. Boundaries
+
+- Avatar is an asset, not a relationship score.
+- Search result selection does not become long-term Memory by default.
+- Search Provider is not exposed as arbitrary Character web browsing.
+- Generated avatar does not auto-commit over current avatar.
+- Current avatar reference can help SELFIE/AVATAR identity consistency, but SCENE generation does not need to force the person into every image.

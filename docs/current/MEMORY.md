@@ -1,114 +1,183 @@
 # Memory Design
 
-本文只定义已经确认的 Memory 原则和当前 baseline。
+本文定义当前已经确认的 Memory 原则和 baseline。Memory 仍然是 Persistent Person 的核心研究面之一，但不会为了“更像长期记忆系统”提前堆复杂层次。
 
-## 1. Event Log 才是历史事实源
+## 1. Event Log 是历史事实源
 
 原始经历首先进入 append-only Event Log。
 
-`Event Log` 是 Source of Truth；`Memory`、`Diary`、未来的 Summary 都是从经历派生出来的认知层。
+```text
+Event Log = Source of Truth
+Memory / Mental State / Diary / Summary = derived cognition
+```
 
 因此：
 
-- Memory 写错，不修改原始 Event。
-- Memory Writer 未来换版本，可以从 Event Log 重建。
-- Diary 不能替代当天真实事件。
-- 每条派生 Memory 必须保留 `source_event_id`。
+- Memory 写错，不修改原始 Event；
+- Memory 策略未来换版本，可以从 Event 重建；
+- Diary 不能替代当天真实事件；
+- 每条派生 Memory 保留 `source_event_id`；
+- 图片/语音等媒体二进制不是 Memory，值得长期记住的意义应语言化后进入正常 Memory Candidate。
 
-这是为了避免一次错误总结永久污染人物历史。
+群聊尤其要区分：房间里的共享事实只在 `conversation_events` 中保存一次，不为每个人复制一份“原始事实”；每个 Character 可以基于同一事实形成不同 Memory。
 
 ## 2. Memory 使用自然语言
 
-当前方向明确选择 **language-level memory**，不先做复杂 World State / Knowledge Graph。
+当前选择 **language-level memory**，不先做复杂 Knowledge Graph / world-state ontology。
 
-Memory 不只是“用户事实”。至少包括：
+常见类型：
 
-- `USER`：关于用户、且未来值得想起的信息。
-- `SELF`：人物关于自己的经历、判断或变化。
-- `SHARED`：人物与用户共同经历。
-- `LIFE`：人物自己的生活事件。
-- `DIARY`：一天结束后的主观记录。
+- `USER`：关于用户、未来值得想起的信息；
+- `SELF`：人物关于自己的经历、判断或变化；
+- `SHARED`：人物与用户共同经历；
+- `LIFE`：人物自己的生活事件；
+- `DIARY`：一天结束后的主观记录；
 - `EPISODIC`：尚未进一步分类的事件性记忆。
 
-真正重要的一点是人物也要“记得自己”。
+重要原则：人物不只“记用户”，也要能记得自己的经历和共同历史。
 
-## 3. 从第一天就 Embedding
+## 3. Embedding path
 
-正式链路从 V0 即为：
+正式路径：
 
-`Memory text -> Embedding -> SQLite BLOB -> Vector Recall -> Runtime`
+```text
+Memory text
+  -> Embedding
+  -> SQLite float32 BLOB
+  -> Vector Recall
+  -> Runtime context
+```
 
-SQLite 负责持久化；Vector Retrieval 是可替换索引层。当前用 NumPy 扫描 active memory，未来只有在 benchmark 证明性能不够时才换 ANN/sqlite-vec/FAISS 等实现。
+默认：
 
-## 4. P0 Memory Admission
+```text
+embedding_provider: sentence-transformers
+embedding_model: BAAI/bge-small-zh-v1.5
+```
 
-模型给出 `memory_candidates` 不等于数据库必须全部接受。
+当前 SentenceTransformer wrapper 优先使用本地 HuggingFace cache；本地没有时才 fallback 到 Hub 获取模型。
 
-当前增加一层非常小的 deterministic admission gate：
+因此要区分：
+
+- **下载缓存**：避免每次从网络重新下载模型；
+- **进程加载**：每次 Character Runtime 冷启动仍要 import torch/transformers 并把权重从磁盘加载到内存。
+
+冷启动耗时不能和 steady-state Recall latency 混为一谈。
+
+SQLite 当前负责持久化；Vector retrieval 是可替换索引层。只有 benchmark 证明 NumPy full scan 不够时，才讨论 FTS/vector extension/FAISS/专用向量数据库。
+
+## 4. Memory Candidate 不是 Memory Write
+
+Person Model 在正常 reaction 中可以返回：
+
+```text
+memory_candidates[]
+```
+
+不增加第二次“要不要记住”的 LLM 调用。
+
+Candidate 再进入 deterministic admission：
 
 ```text
 Memory Candidate
       ↓
-低价值？ ──是──> SKIP_LOW_VALUE
-      ↓否
-与已有 Memory 完全相同 / 近重复？ ──是──> SKIP_DUPLICATE
-      ↓否
-     WRITE
+importance < 0.35 ? ---- yes -> SKIP_LOW_VALUE
+      ↓ no
+exact duplicate ? -------- yes -> SKIP_DUPLICATE
+      ↓ no
+cosine >= 0.93 ? ---------- yes -> SKIP_DUPLICATE
+      ↓ no
+WRITE
 ```
 
-当前 baseline：
+这些是 Eval baseline，不是永久产品定律。
 
-- `importance < 0.35`：`SKIP_LOW_VALUE`
-- 文本规范化后完全相同：`SKIP_DUPLICATE`
-- Embedding cosine `>= 0.93`：`SKIP_DUPLICATE`
-- 其余：`WRITE`
-
-这些阈值是 **Eval baseline，不是最终产品结论**。
-
-Admission 不使用第二次 LLM 调用，避免普通聊天为了“判断要不要记”增加额外模型延迟。
-
-每个候选的结果会写入 Runtime Trace：
+Trace 记录：
 
 ```text
 candidate
- decision = WRITE / SKIP_LOW_VALUE / SKIP_DUPLICATE
- duplicate_memory_id
- similarity
+decision
+similarity
+duplicate_memory_id
 ```
 
-这样 Memory Precision 可以被实际调试，而不是只能看到最后数据库里剩了什么。
+## 5. Optional metadata resilience
 
-未来如果 Eval 证明单纯 importance + duplicate gate 不够，再讨论 Memory Writer/Consolidation，不提前增加复杂架构。
+Memory Candidate 是 outward reaction 的辅助派生信息。
 
-## 5. Recall baseline
+因此类似：
 
-当前实验基线：
+```json
+{"content":"用户提到了一个偏好","importance":4}
+```
 
-`score = 0.70 * semantic + 0.20 * recency + 0.10 * importance`
+不会因为 importance 评分范围漂移就让一个已经合法的 MESSAGE 一起失败。当前 schema 会对 harmless numeric drift 做 bounded normalization；真正缺少 `content` 等无法解释的 candidate 可以单独丢弃。
 
-Recall 有两条硬规则：
+这个容错不意味着最终 Memory 可以无限制写脏数据：Admission 和最终 `Memory` model 仍保留自己的约束。
 
-- 只能 Recall `event_time <= now` 的 Memory，防止虚拟时间中的未来泄漏。
-- Embedding 维度变化后，旧向量不混用；使用 `character-memory reembed` 重建。
+优先级是：
 
-长期 Recall 方向是 semantic relevance、recency、importance、emotional salience、relationship relevance、associative activation 等信号共同作用，但当前不提前实现未验证复杂度。
+```text
+有效 outward reaction
+  > optional candidate annotation
+```
 
-## 6. 多粒度记忆方向
+## 6. Recall baseline
 
-长期需要保留多层信息，而不是“不断总结然后删除原文”：
+当前基线：
 
-`Raw Event -> Episode -> Daily/Diary -> Long-term Landmark`
+```text
+score = 0.70 * semantic
+      + 0.20 * recency
+      + 0.10 * importance
+```
 
-高层 Memory 不能替代底层 Event。未来做 consolidation 时，应保留 landmark，并允许追溯到真实经历。
+硬规则：
 
-## 7. 尚未决定的部分
+- 只能 Recall `event_time <= now` 的 Memory，避免研究模式未来泄漏；
+- embedding 维度变化后，旧向量不混用；使用 re-embed 工具重建；
+- Recall 结果只是 Context，不等于人物必须在回复中提起它。
+
+长期可研究的信号包括 emotional salience、relationship relevance、associative activation 等，但当前不提前复杂化 ranking。
+
+## 7. 多粒度记忆方向
+
+长期可能需要：
+
+```text
+Raw Event
+  -> Episode
+  -> Daily / Diary
+  -> Long-term Landmark
+```
+
+但高层摘要不能替代底层 Event。未来 consolidation 必须保留 provenance，并允许追溯到真实经历。
+
+## 8. Group memory semantics
+
+群聊当前模型：
+
+```text
+one shared conversation event
+   ├─ Character A perceives -> maybe Memory A
+   ├─ Character B perceives -> maybe Memory B
+   └─ Character C perceives -> maybe Memory C
+```
+
+共享事实不能因为三个角色都参与而在事实层复制三次；认知派生可以不同。
+
+某一个 group member 本轮 structured output 失败，也不应该让其他成员失去形成 reaction/memory 的机会。
+
+## 9. 尚未决定
 
 以下故意没有写死：
 
-- Memory Writer 的最终 Prompt/算法。
-- `0.35 / 0.93` 是否应该调整或按 Memory Type 区分。
-- Consolidation 周期与阈值。
-- Forgetting / Reconsolidation 具体策略。
-- 最终 Recall ranking 公式。
+- 最终 Memory Writer 算法；
+- admission threshold 是否按 Memory Type 动态调整；
+- consolidation 周期；
+- forgetting / reconsolidation；
+- 最终 Recall ranking；
+- 是否需要 ANN / sqlite-vec / dedicated vector store；
+- relationship-specific memory state 是否应成为独立层。
 
-这些必须由 Eval 和真实长期运行数据决定，而不是现在凭感觉复杂化。
+这些应由 Eval、真实长期运行数据和性能测量决定，而不是先把架构画复杂。

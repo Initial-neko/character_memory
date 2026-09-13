@@ -49,6 +49,16 @@ def _media_env(base: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def _tts_lab_env(base: dict[str, str]) -> dict[str, str]:
+    env = dict(base)
+    env.setdefault("CHARACTER_TTS_LAB_HOST", "127.0.0.1")
+    env.setdefault("CHARACTER_TTS_LAB_PORT", "9002")
+    env.setdefault("CHARACTER_TTS_LAB_MEDIA_BASE", "http://127.0.0.1:8001")
+    env.setdefault("CHARACTER_TTS_COSYVOICE_BASE", "http://127.0.0.1:9012")
+    env.setdefault("CHARACTER_TTS_KOKORO_DEVICE", "cpu")
+    return env
+
+
 def _spawn(name: str, command: list[str], env: dict[str, str]) -> subprocess.Popen:
     print(f"stack: starting {name}: {' '.join(command)}", flush=True)
     return subprocess.Popen(command, cwd=ROOT, env=env)
@@ -58,7 +68,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="character-stack")
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--open", choices=("dev", "chat"), default="dev")
+    parser.add_argument("--open", choices=("dev", "chat", "tts"), default="dev")
     args = parser.parse_args()
 
     base_env = os.environ.copy()
@@ -86,6 +96,12 @@ def main() -> None:
             "http://127.0.0.1:8002/health",
             [python, "-m", "character_memory.dev_server"],
             base_env,
+        ),
+        (
+            "TTS Provider Lab",
+            "http://127.0.0.1:9002/health",
+            [python, "-m", "character_memory.tts_lab"],
+            _tts_lab_env(base_env),
         ),
     ]
 
@@ -116,14 +132,19 @@ def main() -> None:
             raise SystemExit(f"Timed out waiting for: {missing}")
 
         print("\nCharacter Memory stack is ready:", flush=True)
-        print("  Chat:  http://127.0.0.1:8000", flush=True)
-        print("  Media: http://127.0.0.1:8001/health", flush=True)
-        print("  Dev:   http://127.0.0.1:8002/dev", flush=True)
+        print("  Chat:    http://127.0.0.1:8000", flush=True)
+        print("  Media:   http://127.0.0.1:8001/health", flush=True)
+        print("  Dev:     http://127.0.0.1:8002/dev", flush=True)
+        print("  TTS Lab: http://127.0.0.1:9002/tts", flush=True)
         print("Press Ctrl+C to stop processes started by this launcher.\n", flush=True)
 
-        target = "http://127.0.0.1:8000" if args.open == "chat" else "http://127.0.0.1:8002/dev"
+        targets = {
+            "chat": "http://127.0.0.1:8000",
+            "dev": "http://127.0.0.1:8002/dev",
+            "tts": "http://127.0.0.1:9002/tts",
+        }
         if not args.no_browser:
-            webbrowser.open(target)
+            webbrowser.open(targets[args.open])
 
         while True:
             for name, process in owned:

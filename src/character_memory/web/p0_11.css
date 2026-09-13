@@ -14,24 +14,48 @@
   text-transform: uppercase;
 }
 
-.group-create-button {
+.group-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.group-create-button,
+.group-archive-list-button {
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: 20px;
   line-height: 1;
-  width: 28px;
-  height: 28px;
   border-radius: 7px;
 }
 
-.group-create-button:hover { background: rgba(0,0,0,.06); }
+.group-create-button {
+  font-size: 20px;
+  width: 28px;
+  height: 28px;
+}
+
+.group-archive-list-button {
+  height: 28px;
+  padding: 0 7px;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.group-create-button:hover,
+.group-archive-list-button:hover { background: rgba(0,0,0,.06); }
 
 .group-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.group-item-wrap {
+  position: relative;
+  min-width: 0;
 }
 
 .group-item {
@@ -43,13 +67,60 @@
   gap: 10px;
   align-items: center;
   text-align: left;
-  padding: 8px 12px;
+  padding: 8px 38px 8px 12px;
   border-radius: 10px;
   cursor: pointer;
 }
 
 .group-item:hover,
 .group-item.active { background: rgba(0,0,0,.065); }
+
+.group-more-button {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted, #777);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease, background .12s ease;
+}
+
+.group-item-wrap:hover .group-more-button,
+.group-item-wrap:focus-within .group-more-button { opacity: 1; }
+.group-more-button:hover { background: rgba(0,0,0,.07); }
+
+.group-context-menu {
+  position: absolute;
+  right: 7px;
+  top: calc(50% + 18px);
+  z-index: 24;
+  min-width: 94px;
+  padding: 5px;
+  border: 1px solid rgba(0,0,0,.1);
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+}
+
+.group-context-menu button {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+  color: #444;
+  cursor: pointer;
+}
+.group-context-menu button:hover { background: rgba(0,0,0,.055); }
+.group-empty-hint { padding: 6px 12px; }
 
 .group-avatar {
   width: 38px;
@@ -116,6 +187,34 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
 .group-create-actions button { padding: 9px 14px; border-radius: 9px; border: 1px solid rgba(0,0,0,.13); cursor: pointer; }
 .group-create-actions .primary { background: #111; color: #fff; border-color: #111; }
 
+.group-archive-list { display: grid; gap: 9px; }
+.group-archive-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid rgba(0,0,0,.09);
+  border-radius: 10px;
+}
+.group-archive-copy { min-width: 0; display: grid; gap: 3px; }
+.group-archive-copy strong,
+.group-archive-copy span,
+.group-archive-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-archive-copy span,
+.group-archive-copy small { color: var(--muted, #777); }
+.group-archive-copy span { font-size: 12px; }
+.group-archive-copy small { font-size: 10px; }
+.group-archive-card > button {
+  flex: 0 0 auto;
+  border: 1px solid rgba(0,0,0,.13);
+  border-radius: 8px;
+  padding: 7px 11px;
+  background: #fff;
+  cursor: pointer;
+}
+.group-archive-card > button:hover { background: rgba(0,0,0,.04); }
+
 .group-turn-debug {
   display: inline-flex;
   border: 0;
@@ -156,6 +255,7 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
 }
 
 @media (max-width: 720px) {
+  .group-more-button { opacity: 1; }
   .group-message-sticker { max-width: 96px; max-height: 96px; }
   .group-message-image { max-width: 72vw; }
 }

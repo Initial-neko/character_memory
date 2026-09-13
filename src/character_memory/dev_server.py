@@ -61,7 +61,7 @@ class DevImageGenRequest(BaseModel):
     character_id: str = Field(default="rin", min_length=1, max_length=64)
     provider: str = Field(default="", max_length=32)
     purpose: str = Field(default="SELFIE", max_length=16)
-    visual_intent: str = Field(default="自然分享一下现在的样子", min_length=1, max_length=800)
+    visual_intent: str = Field(default="自然分享一下现在的样子", min_length=1, max_length=1600)
     use_avatar_reference: bool = True
 
 
@@ -238,18 +238,43 @@ def create_dev_app(
     def dev_visual_providers():
         return request_character("GET", "/v1/visual/providers", operation="visual-providers", timeout=10.0)
 
+    def visual_request_payload(req: DevImageGenRequest) -> dict:
+        return {
+            "instruction": req.visual_intent,
+            "provider": req.provider,
+            "purpose": req.purpose,
+            "use_avatar_reference": req.use_avatar_reference,
+        }
+
+    @app.post("/v1/dev/imagegen/rewrite")
+    def dev_imagegen_rewrite(req: DevImageGenRequest):
+        character_id = quote(req.character_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/characters/{character_id}/images/rewrite",
+            operation="imagegen-rewrite",
+            json=visual_request_payload(req),
+            timeout=120.0,
+        )
+
     @app.post("/v1/dev/imagegen")
     def dev_imagegen(req: DevImageGenRequest):
         timeout = max(120.0, float(getattr(cfg, "image_generation_timeout_seconds", 180.0)) + 30.0)
+        character_id = quote(req.character_id, safe="")
+        payload = visual_request_payload(req)
+        payload["persist_result"] = True
         data = request_character(
             "POST",
-            "/v1/visual/test",
+            f"/v1/characters/{character_id}/images/generate",
             operation="imagegen",
-            json=req.model_dump(),
+            json=payload,
             timeout=timeout,
         )
         image = data.get("image") if isinstance(data, dict) else None
         if isinstance(image, dict):
+            # Dev uses the persisted asset URL for preview/avatar promotion. Avoid
+            # dumping a multi-megabyte base64 data URL into the diagnostics <pre>.
+            image.pop("data_url", None)
             url = str(image.get("url") or "")
             if url.startswith("/"):
                 image["url"] = f"{character_base}{url}"

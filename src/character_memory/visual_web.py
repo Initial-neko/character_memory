@@ -14,6 +14,7 @@ from character_memory.visual_generation import (
     VisualPromptPlanner,
     VisualPurpose,
     build_image_providers,
+    visual_aspect_ratio,
 )
 from character_memory.visual_runtime import configure_direct_visual_runtime
 
@@ -112,7 +113,7 @@ def attach_visual_routes(app) -> None:
             raise HTTPException(status_code=503, detail=f"{provider_name} is not configured; set {key_hint}")
         if not provider.available():
             if provider_name == "msimg":
-                raise HTTPException(status_code=503, detail="msimg is configured but unavailable; install with uv sync --extra image-generation")
+                raise HTTPException(status_code=503, detail="msimg is configured but unavailable; run bash scripts/sync-all.sh")
             raise HTTPException(status_code=503, detail=f"{provider_name} is configured but unavailable")
         return provider_name, provider
 
@@ -154,11 +155,7 @@ def attach_visual_routes(app) -> None:
 
     @app.post("/v1/visual/test")
     def visual_test(req: VisualTestRequest):
-        """Real planner + provider + MediaStorage smoke test for Dev Console.
-
-        It intentionally does not create a chat event. Normal chat generation is
-        tested separately through GENERATE_IMAGE and the existing SSE/history path.
-        """
+        """Real plain-text prompt planner + provider + MediaStorage smoke test."""
         item = profile(req.character_id)
         provider_name, provider = provider_for(req.provider)
         started = time.perf_counter()
@@ -168,7 +165,7 @@ def attach_visual_routes(app) -> None:
         if req.use_avatar_reference and req.purpose in {VisualPurpose.AVATAR, VisualPurpose.SELFIE} and provider.supports_reference_images:
             reference = current_avatar_data_url(req.character_id)
         try:
-            plan = VisualPromptPlanner(current.model).plan(
+            prompt = VisualPromptPlanner(current.model).compile_prompt(
                 req.character_id,
                 purpose=req.purpose,
                 persona=persona,
@@ -177,11 +174,10 @@ def attach_visual_routes(app) -> None:
                 visual_intent=req.visual_intent.strip(),
                 has_reference_image=bool(reference),
             )
-            aspect_ratio = "1:1" if req.purpose == VisualPurpose.AVATAR else plan.aspect_ratio
+            aspect_ratio = visual_aspect_ratio(req.purpose)
             result = provider.generate(
                 ImageGenerationRequest(
-                    prompt=plan.positive_prompt,
-                    negative_prompt=plan.negative_prompt,
+                    prompt=prompt,
                     aspect_ratio=aspect_ratio,
                     size="1K",
                     reference_images=[reference] if reference else [],
@@ -214,11 +210,9 @@ def attach_visual_routes(app) -> None:
             "duration_ms": elapsed,
             "used_avatar_reference": bool(reference),
             "plan": {
-                "visual_intent": plan.visual_intent,
-                "positive_prompt": plan.positive_prompt,
-                "negative_prompt": plan.negative_prompt,
+                "visual_intent": req.visual_intent.strip(),
+                "prompt": prompt,
                 "aspect_ratio": aspect_ratio,
-                "identity_constraints": plan.identity_constraints,
             },
             "image": {
                 "media_id": asset.id,
@@ -238,20 +232,20 @@ def attach_visual_routes(app) -> None:
         mental_state = access.read_store.get_mental_state(character_id)
         reference = current_avatar_data_url(character_id) if provider.supports_reference_images else None
         try:
-            plan = VisualPromptPlanner(current.model).plan(
+            visual_intent = req.hint.strip() or "生成一张保持人物核心身份、适合作为当前聊天头像的自然头像"
+            prompt = VisualPromptPlanner(current.model).compile_prompt(
                 character_id,
                 purpose=VisualPurpose.AVATAR,
                 persona=persona,
                 mental_state=mental_state,
                 recent_dialogue=recent_dialogue(character_id),
-                visual_intent=req.hint.strip() or "生成一张保持人物核心身份、适合作为当前聊天头像的自然头像",
+                visual_intent=visual_intent,
                 has_reference_image=bool(reference),
             )
             result = provider.generate(
                 ImageGenerationRequest(
-                    prompt=plan.positive_prompt,
-                    negative_prompt=plan.negative_prompt,
-                    aspect_ratio="1:1",
+                    prompt=prompt,
+                    aspect_ratio=visual_aspect_ratio(VisualPurpose.AVATAR),
                     size="1K",
                     reference_images=[reference] if reference else [],
                 )
@@ -290,8 +284,8 @@ def attach_visual_routes(app) -> None:
                 "model": result.model,
                 "supports_reference_images": bool(provider.supports_reference_images),
             },
-            "visual_intent": plan.visual_intent,
-            "aspect_ratio": plan.aspect_ratio,
+            "visual_intent": visual_intent,
+            "aspect_ratio": visual_aspect_ratio(VisualPurpose.AVATAR),
             "duration_ms": elapsed,
         }
 

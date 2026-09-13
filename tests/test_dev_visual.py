@@ -50,23 +50,43 @@ class FakeVisualHttpClient:
                     ],
                 }
             )
-        if url.endswith("/v1/visual/test"):
+        if url.endswith("/v1/characters/mika/images/rewrite"):
+            request = kwargs.get("json") or {}
             return FakeResponse(
                 {
                     "ok": True,
                     "character_id": "mika",
-                    "purpose": "SELFIE",
+                    "purpose": request.get("purpose") or "SELFIE",
+                    "provider": request.get("provider") or "agnes",
+                    "instruction": request.get("instruction") or "",
+                    "prompt": "same person, natural casual selfie",
+                    "aspect_ratio": "3:4",
+                    "used_avatar_reference": True,
+                    "duration_ms": 220.0,
+                }
+            )
+        if url.endswith("/v1/characters/mika/images/generate"):
+            request = kwargs.get("json") or {}
+            return FakeResponse(
+                {
+                    "ok": True,
+                    "character_id": "mika",
+                    "purpose": request.get("purpose") or "SELFIE",
                     "provider": "agnes",
                     "model": "agnes-image-2.1-flash",
-                    "duration_ms": 1234.5,
+                    "instruction": request.get("instruction") or "",
+                    "prompt": "same person, natural casual selfie",
+                    "aspect_ratio": "3:4",
                     "used_avatar_reference": True,
-                    "plan": {"visual_intent": "test", "positive_prompt": "portrait", "negative_prompt": "", "aspect_ratio": "3:4"},
+                    "duration_ms": 1234.5,
                     "image": {
+                        "filename": "ai-generated-selfie.png",
+                        "data_url": "data:image/png;base64,omitted-by-dev-proxy",
                         "media_id": "media-1",
                         "url": "/v1/media/media-1",
                         "mime_type": "image/png",
                         "size_bytes": 123,
-                        "source": "DEV_GENERATED_SELFIE",
+                        "source": "TOOL_GENERATED_SELFIE",
                     },
                 }
             )
@@ -100,18 +120,31 @@ def test_dev_console_exposes_real_imagegen_controls():
     assert 'id="imageProvider"' in html
     assert 'id="imagePurpose"' in html
     assert 'id="imageGenPreview"' in html
+    assert 'id="rewriteImagePrompt"' in html
+    assert 'id="imageRewriteResult"' in html
     assert 'id="useImageAsAvatar"' in html
     assert "/v1/dev/visual/providers" in script
+    assert "/v1/dev/imagegen/rewrite" in script
     assert "/v1/dev/imagegen" in script
     assert "/v1/dev/avatar-from-media" in script
 
 
-def test_dev_visual_proxy_uses_character_runtime_visual_stack():
+def test_dev_visual_proxy_uses_explicit_character_runtime_image_tool():
     fake = FakeVisualHttpClient()
     app = create_dev_app(settings=settings(), http_client=fake, model_factory=lambda _: object())
     with TestClient(app) as client:
         providers = client.get("/v1/dev/visual/providers")
         characters = client.get("/v1/dev/characters")
+        rewritten = client.post(
+            "/v1/dev/imagegen/rewrite",
+            json={
+                "character_id": "mika",
+                "provider": "agnes",
+                "purpose": "SELFIE",
+                "visual_intent": "自然自拍",
+                "use_avatar_reference": True,
+            },
+        )
         generated = client.post(
             "/v1/dev/imagegen",
             json={
@@ -130,12 +163,39 @@ def test_dev_visual_proxy_uses_character_runtime_visual_stack():
     assert providers.status_code == 200
     assert providers.json()["providers"][0]["available"] is True
     assert characters.json()["characters"][0]["id"] == "mika"
+    assert rewritten.status_code == 200
+    assert rewritten.json()["prompt"] == "same person, natural casual selfie"
     assert generated.status_code == 200
     assert generated.json()["image"]["url"] == "http://127.0.0.1:8000/v1/media/media-1"
+    assert "data_url" not in generated.json()["image"]
     assert avatar.status_code == 200
-    image_call = next(call for call in fake.calls if call[1].endswith("/v1/visual/test"))
+
+    rewrite_call = next(call for call in fake.calls if call[1].endswith("/v1/characters/mika/images/rewrite"))
+    assert rewrite_call[2]["json"]["instruction"] == "自然自拍"
+    assert rewrite_call[2]["json"]["purpose"] == "SELFIE"
+    assert rewrite_call[2]["json"]["use_avatar_reference"] is True
+
+    image_call = next(call for call in fake.calls if call[1].endswith("/v1/characters/mika/images/generate"))
+    assert image_call[2]["json"]["instruction"] == "自然自拍"
     assert image_call[2]["json"]["purpose"] == "SELFIE"
     assert image_call[2]["json"]["use_avatar_reference"] is True
+    assert image_call[2]["json"]["persist_result"] is True
+
+
+def test_chat_ai_image_tool_generates_into_existing_image_draft_instead_of_auto_sending():
+    ai_script = Path("src/character_memory/web/ai_images.js").read_text(encoding="utf-8")
+    image_script = Path("src/character_memory/web/images.js").read_text(encoding="utf-8")
+    index = Path("src/character_memory/web/index.html").read_text(encoding="utf-8")
+
+    assert "/images/rewrite" in ai_script
+    assert "/images/generate" in ai_script
+    assert "openDataDraft" in ai_script
+    assert 'source:"AI_GENERATED"' in ai_script
+    assert "CM.sendDirectPayload" not in ai_script
+    assert "openDataDraft" in image_script
+    assert "来自 AI 生成" in image_script
+    assert "/static/ai_images.js" in index
+    assert "/static/ai_images.css" in index
 
 
 def test_generated_media_sse_client_uses_media_asset_route():

@@ -1,6 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { lastImage: null, providers: [] };
+  const state = { lastImage: null, lastPrompt: "", providers: [] };
 
   function pretty(value) { return JSON.stringify(value, null, 2); }
 
@@ -17,6 +17,22 @@
     if (!response.ok) throw await responseError(response);
     const text = await response.text();
     return text ? JSON.parse(text) : {};
+  }
+
+  function imageRequestPayload() {
+    return {
+      character_id: $("imageCharacter").value,
+      provider: $("imageProvider").value,
+      purpose: $("imagePurpose").value,
+      visual_intent: $("imageIntent").value.trim(),
+      use_avatar_reference: $("imageUseAvatar").checked,
+    };
+  }
+
+  function renderPrompt(prompt) {
+    state.lastPrompt = String(prompt || "").trim();
+    $("imageRewriteResult").textContent = state.lastPrompt || "尚未润色 Prompt。";
+    $("copyImagePrompt").hidden = !state.lastPrompt;
   }
 
   function renderProviderStatus(data) {
@@ -65,33 +81,49 @@
     }
   }
 
+  async function rewriteImagePrompt() {
+    const button = $("rewriteImagePrompt");
+    button.disabled = true;
+    $("imageRewriteResult").textContent = "AI 正在润色绘图 Prompt...";
+    try {
+      const data = await jsonFetch("/v1/dev/imagegen/rewrite", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(imageRequestPayload()),
+      });
+      renderPrompt(data.prompt);
+      $("imageGenLatency").textContent = `${data.duration_ms ?? "-"} ms · rewrite`;
+    } catch (error) {
+      $("imageRewriteResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function runImageGen() {
     const button = $("runImageGen");
     button.disabled = true;
+    $("rewriteImagePrompt").disabled = true;
     $("useImageAsAvatar").hidden = true;
     $("imageGenPreview").hidden = true;
     $("imageGenPreview").removeAttribute("src");
     $("imageGenLatency").textContent = "-";
-    $("imageGenResult").textContent = "真实生成中：Planner → Provider → MediaStorage ...";
+    $("imageGenResult").textContent = "真实生成中：AI Rewrite → Provider → MediaStorage ...";
     state.lastImage = null;
     try {
       const data = await jsonFetch("/v1/dev/imagegen", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({
-          character_id: $("imageCharacter").value,
-          provider: $("imageProvider").value,
-          purpose: $("imagePurpose").value,
-          visual_intent: $("imageIntent").value.trim(),
-          use_avatar_reference: $("imageUseAvatar").checked,
-        }),
+        body: JSON.stringify(imageRequestPayload()),
       });
       state.lastImage = data.image || null;
+      renderPrompt(data.prompt);
       $("imageGenLatency").textContent = `${data.duration_ms ?? "-"} ms · ${data.provider || "-"} / ${data.model || "-"}`;
       $("imageGenResult").textContent = pretty(data);
-      if (data.image?.url) {
+      const previewUrl = data.image?.url || data.image?.data_url;
+      if (previewUrl) {
         const preview = $("imageGenPreview");
-        preview.src = data.image.url;
+        preview.src = previewUrl;
         preview.hidden = false;
       }
       if (data.image?.media_id) $("useImageAsAvatar").hidden = false;
@@ -99,7 +131,23 @@
       $("imageGenResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;
+      $("rewriteImagePrompt").disabled = false;
       refreshProviders();
+    }
+  }
+
+  async function copyImagePrompt() {
+    if (!state.lastPrompt) return;
+    const button = $("copyImagePrompt");
+    const original = button.textContent;
+    try {
+      await navigator.clipboard.writeText(state.lastPrompt);
+      button.textContent = "已复制";
+    } catch (error) {
+      button.textContent = "复制失败";
+      console.warn("copy image prompt failed", error);
+    } finally {
+      setTimeout(() => { button.textContent = original; }, 1200);
     }
   }
 
@@ -128,6 +176,8 @@
     }
   }
 
+  $("rewriteImagePrompt")?.addEventListener("click", rewriteImagePrompt);
+  $("copyImagePrompt")?.addEventListener("click", copyImagePrompt);
   $("runImageGen")?.addEventListener("click", runImageGen);
   $("refreshImageProviders")?.addEventListener("click", refreshProviders);
   $("useImageAsAvatar")?.addEventListener("click", useAsAvatar);

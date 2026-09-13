@@ -11,8 +11,8 @@ from character_memory.media_runtime import MediaRuntime, build_media_runtime_fro
 
 class TtsRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
-    speaker_id: int = Field(default=0, ge=0, le=10000)
-    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    speaker_id: int | None = Field(default=None, ge=0, le=10000)
+    speed: float | None = Field(default=None, ge=0.5, le=2.0)
     voice: str | None = Field(default=None, max_length=128)
 
 
@@ -24,6 +24,9 @@ def create_media_app(runtime: MediaRuntime | None = None):
     except ImportError as exc:
         raise RuntimeError("Media Runtime requires the api extra: pip install -e '.[api]'") from exc
 
+    # Explicit runtime injection is the provider-neutral test/embedding contract.
+    # Production startup passes no runtime and therefore uses configured routing.
+    configured_routing = runtime is None
     media = runtime or build_media_runtime_from_env()
     config_path = os.getenv("CHARACTER_CONFIG_PATH", os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml"))
     settings = load_settings(config_path)
@@ -57,11 +60,11 @@ def create_media_app(runtime: MediaRuntime | None = None):
     def health():
         status = media.status()
         status["tts_selected"] = {
-            "provider": settings.tts_provider,
-            "voice": settings.tts_voice,
-            "speed": settings.tts_speed,
-            "device": settings.tts_device,
-            "restart_required_for_config_changes": True,
+            "provider": settings.tts_provider if configured_routing else "injected-runtime",
+            "voice": settings.tts_voice if configured_routing else None,
+            "speed": settings.tts_speed if configured_routing else None,
+            "device": settings.tts_device if configured_routing else None,
+            "restart_required_for_config_changes": configured_routing,
         }
         return {"ok": True, **status}
 
@@ -88,12 +91,12 @@ def create_media_app(runtime: MediaRuntime | None = None):
     @app.post("/v1/tts")
     def synthesize(req: TtsRequest):
         selected = str(settings.tts_provider or "sherpa").strip().lower()
-        if selected == "kokoro":
+        if configured_routing and selected == "kokoro":
             # :9002 is both the audition UI and the local provider service in V1.
             # Media Runtime remains the stable browser-facing TTS endpoint, so the
             # chat page does not need provider-specific URLs or CORS rules.
             voice = str(req.voice or settings.tts_voice or "zf_001")
-            speed = float(req.speed if req.voice else settings.tts_speed)
+            speed = float(req.speed if req.speed is not None else settings.tts_speed)
             try:
                 response = provider_client.post(
                     f"{tts_lab_base}/v1/tts",
@@ -125,10 +128,14 @@ def create_media_app(runtime: MediaRuntime | None = None):
             )
 
         try:
-            speaker_id = req.speaker_id
-            if req.voice is None and str(settings.tts_voice).isdigit():
-                speaker_id = int(settings.tts_voice)
-            speed = float(req.speed if req.voice else settings.tts_speed)
+            if configured_routing:
+                speaker_id = int(settings.tts_voice) if str(settings.tts_voice).isdigit() else 0
+                if req.speaker_id is not None:
+                    speaker_id = req.speaker_id
+                speed = float(req.speed if req.speed is not None else settings.tts_speed)
+            else:
+                speaker_id = int(req.speaker_id or 0)
+                speed = float(req.speed if req.speed is not None else 1.0)
             result = media.synthesize(req.text, speaker_id=speaker_id, speed=speed)
         except (RuntimeError, ValueError) as exc:
             code = 503 if isinstance(exc, RuntimeError) else 400

@@ -7,7 +7,7 @@ from urllib.parse import quote
 import yaml
 from pydantic import BaseModel, Field
 
-from character_memory.envfile import load_env_file
+from character_memory.envfile import effective_env_value
 
 
 class Settings(BaseModel):
@@ -76,32 +76,40 @@ class Settings(BaseModel):
 
 def load_settings(path: str = "config.yaml") -> Settings:
     p = Path(path)
-    # System environment always wins. load_env_file only fills names that do not
-    # already exist, so .env is a local fallback rather than an override.
-    load_env_file(p.resolve().parent / ".env", override=False)
+    env_path = p.resolve().parent / ".env"
 
     data: dict = {}
     if p.exists():
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    data["api_key"] = os.getenv("OPENCODE_GO_API_KEY", data.get("api_key", ""))
-    data["embedding_api_key"] = os.getenv("EMBEDDING_API_KEY", data.get("embedding_api_key", ""))
+
+    # Secrets resolve without mutating os.environ:
+    # system environment > adjacent .env > legacy config field.
+    data["api_key"] = effective_env_value("OPENCODE_GO_API_KEY", env_path, str(data.get("api_key", "") or ""))
+    data["embedding_api_key"] = effective_env_value(
+        "EMBEDDING_API_KEY",
+        env_path,
+        str(data.get("embedding_api_key", "") or ""),
+    )
 
     provider = str(data.get("search_provider", "searchapi") or "searchapi").strip().lower()
-    configured_search_key = data.get("search_api_key", "")
+    configured_search_key = str(data.get("search_api_key", "") or "")
     if provider in {"searchapi", "searchapi.io", "search_api"}:
-        data["search_api_key"] = os.getenv("SEARCHAPI_API_KEY", configured_search_key)
+        data["search_api_key"] = effective_env_value("SEARCHAPI_API_KEY", env_path, configured_search_key)
     elif provider == "brave":
-        data["search_api_key"] = os.getenv("BRAVE_SEARCH_API_KEY", configured_search_key)
+        data["search_api_key"] = effective_env_value("BRAVE_SEARCH_API_KEY", env_path, configured_search_key)
     else:
         data["search_api_key"] = configured_search_key
 
     # Image generation credentials stay out of config.yaml. Agnes and
     # ModelScope/msimg are independently configurable so Dev Console can A/B test.
-    data["agnes_api_key"] = os.getenv("AGNES_API_KEY", data.get("agnes_api_key", ""))
-    data["msimg_api_key"] = os.getenv(
-        "MSIMG_API_KEY",
-        os.getenv("MODELSCOPE_API_TOKEN", data.get("msimg_api_key", "")),
+    data["agnes_api_key"] = effective_env_value(
+        "AGNES_API_KEY",
+        env_path,
+        str(data.get("agnes_api_key", "") or ""),
     )
+    legacy_msimg = str(data.get("msimg_api_key", "") or "")
+    modelscope_fallback = effective_env_value("MODELSCOPE_API_TOKEN", env_path, legacy_msimg)
+    data["msimg_api_key"] = effective_env_value("MSIMG_API_KEY", env_path, modelscope_fallback)
     data["db_path"] = os.getenv("CHARACTER_MEMORY_DB_PATH", data.get("db_path", "data/character-memory.db"))
     return Settings.model_validate(data)
 

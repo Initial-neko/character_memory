@@ -346,6 +346,19 @@
     return health;
   }
 
+  function validateAsrTranscript(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return {valid:false, text:"", reason:"empty"};
+
+    const meaningful = text.replace(/[\s\p{P}\p{S}]/gu, "");
+    if (!meaningful) return {valid:false, text, reason:"punctuation_only"};
+    if (/\p{Script=Han}/u.test(text)) return {valid:true, text, reason:"valid"};
+
+    const latinOrDigitCount = (text.match(/[A-Za-z0-9]/g) || []).length;
+    if (latinOrDigitCount >= 2) return {valid:true, text, reason:"valid"};
+    return {valid:false, text, reason:"too_short"};
+  }
+
   function handleCharacterEvent(data, characterId) {
     if (!voice.active) return;
     const action = String(data.metadata?.action || "").toUpperCase();
@@ -475,10 +488,19 @@
       if (!response.ok) throw new Error(await response.text());
       const result = await response.json();
       voice.lastMetrics = {asr: performance.now() - asrStarted};
-      voice.turnStartedAt = performance.now();
       formatMetrics();
-      const text = String(result.text || "").trim();
-      if (!text) throw new Error("没有识别到文字");
+
+      const validation = validateAsrTranscript(result.text);
+      if (!validation.valid) {
+        voice.turnStartedAt = 0;
+        if (dom.transcript) dom.transcript.textContent = "没有识别到有效内容";
+        setPhase("listening", "正在听…");
+        console.debug("[voice] ignored invalid ASR transcript", validation.reason, validation.text);
+        return;
+      }
+
+      const text = validation.text;
+      voice.turnStartedAt = performance.now();
       if (dom.transcript) dom.transcript.textContent = `你：${text}${visualFrames.length ? ` · 附 ${visualFrames.length} 个视觉关键帧` : ""}`;
       setPhase("waiting", "正在想…");
       const sent = await sendTranscript(text, visualFrames);
@@ -680,6 +702,7 @@
     stopVisual,
     state:voice,
     stableSpeakerId,
+    validateAsrTranscript,
   });
   updateCallButton();
   updateVisualUi({active:false, source:null, candidateCount:0});

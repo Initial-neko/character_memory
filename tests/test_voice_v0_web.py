@@ -84,6 +84,27 @@ def test_voice_keeps_live_call_text_visible_and_direct_chat_sync_is_scoped():
     assert 'CM.features.groups?.reconcileLatest?.(target.conversationId)' in script
 
 
+def test_voice_asr_gate_rejects_empty_punctuation_and_low_information_before_send():
+    script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
+    assert 'function validateAsrTranscript(raw)' in script
+    assert 'reason:"empty"' in script
+    assert 'text.replace(/[\\s\\p{P}\\p{S}]/gu, "")' in script
+    assert '/\\p{Script=Han}/u.test(text)' in script
+    assert 'text.match(/[A-Za-z0-9]/g)' in script
+    assert 'latinOrDigitCount >= 2' in script
+    assert 'reason:"punctuation_only"' in script
+    assert 'reason:"too_short"' in script
+
+    finish_speech = script.split('async function finishSpeech()', 1)[1].split('async function synthesize', 1)[0]
+    assert 'const validation = validateAsrTranscript(result.text);' in finish_speech
+    invalid_block = finish_speech.split('if (!validation.valid) {', 1)[1].split('const text = validation.text;', 1)[0]
+    assert 'dom.transcript.textContent = "没有识别到有效内容"' in invalid_block
+    assert 'setPhase("listening", "正在听…")' in invalid_block
+    assert 'return;' in invalid_block
+    assert 'sendTranscript' not in invalid_block
+    assert finish_speech.index('const validation = validateAsrTranscript(result.text);') < finish_speech.index('await sendTranscript(text, visualFrames)')
+
+
 def test_voice_css_has_explicit_contrast_and_dock_styles():
     css = Path("src/character_memory/web/voice.css").read_text(encoding="utf-8")
     assert '.voice-call-card' in css and 'color: #f6f7fb' in css

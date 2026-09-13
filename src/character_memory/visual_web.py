@@ -52,8 +52,31 @@ class VisualTestRequest(BaseModel):
         return self
 
 
+class ImageRewriteRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=1600)
+    provider: str = Field(default="", max_length=32)
+    purpose: VisualPurpose = VisualPurpose.SCENE
+    use_avatar_reference: bool = True
+
+    @model_validator(mode="after")
+    def supported_purpose(self):
+        if self.purpose not in {VisualPurpose.AVATAR, VisualPurpose.SELFIE, VisualPurpose.SCENE}:
+            raise ValueError("image purpose must be AVATAR, SELFIE or SCENE")
+        self.instruction = self.instruction.strip()
+        if not self.instruction:
+            raise ValueError("instruction must not be empty")
+        return self
+
+
+class ImageGenerateRequest(ImageRewriteRequest):
+    # Chat generation keeps the result in-memory until the user presses Send, so
+    # generated drafts behave exactly like pasted images and do not pollute chat
+    # history. Dev Console may persist a candidate for inspection/avatar testing.
+    persist_result: bool = False
+
+
 def attach_visual_routes(app) -> None:
-    """Attach direct-character visual capability and Dev-facing smoke endpoints."""
+    """Attach direct-character visual capability, explicit user tools and Dev smoke routes."""
 
     from fastapi import HTTPException
 
@@ -102,11 +125,15 @@ def attach_visual_routes(app) -> None:
         payload = path.read_bytes()
         return f"data:{metadata.content_type};base64,{base64.b64encode(payload).decode('ascii')}"
 
-    def provider_for(name: str):
+    def provider_named(name: str):
         provider_name = (name or getattr(settings, "image_generation_provider", "agnes") or "agnes").strip().lower()
         provider = providers.get(provider_name)
         if provider is None:
             raise HTTPException(status_code=400, detail=f"Unknown image provider: {provider_name}")
+        return provider_name, provider
+
+    def provider_for(name: str):
+        provider_name, provider = provider_named(name)
         configured = provider.configured() if hasattr(provider, "configured") else provider.available()
         if not configured:
             key_hint = "AGNES_API_KEY" if provider_name == "agnes" else "MSIMG_API_KEY / MODELSCOPE_API_TOKEN"
@@ -146,11 +173,147 @@ def attach_visual_routes(app) -> None:
             persona = load_persona(item["persona_path"])
         return current, runtime, persona
 
+    def compile_instruction(character_id: str, req: ImageRewriteRequest, *, provider=None):
+        item = profile(character_id)
+        current, _runtime, persona = runtime_persona(character_id, item)
+        mental_state = access.read_store.get_mental_state(character_id)
+        reference = None
+        if req.use_avatar_reference and (provider is None or provider.supports_reference_images):
+            reference = current_avatar_data_url(character_id)
+        prompt = VisualPromptPlanner(current.model).compile_prompt(
+            character_id,
+            purpose=req.purpose,
+            persona=persona,
+            mental_state=mental_state,
+            recent_dialogue=recent_dialogue(character_id),
+            visual_intent=req.instruction,
+            has_reference_image=bool(reference),
+        )
+        return current, prompt, reference, visual_aspect_ratio(req.purpose)
+
+    def generated_payload_bytes(payload: bytes) -> tuple[bytes, str, str]:
+        data = bytes(payload or b"")
+        if not data:
+            raise ValueError("generated image is empty")
+        max_bytes = int(getattr(access.media_storage, "max_bytes", 8 * 1024 * 1024))
+        if len(data) > max_bytes:
+            raise ValueError(f"generated image exceeds {max_bytes // (1024 * 1024)} MiB limit")
+        mime = access.media_storage._sniff_mime(data)
+        if mime is None:
+            raise ValueError("generated image format is unsupported")
+        extension = {
+            "image/jpeg": "jpg",
+            "image/png": "png",
+            "image/gif": "gif",
+            "image/webp": "webp",
+        }[mime]
+        return data, mime, extension
+
     @app.get("/v1/visual/providers")
     def visual_providers():
         return {
             "default": str(getattr(settings, "image_generation_provider", "agnes") or "agnes"),
             "providers": [provider_status(name, provider) for name, provider in providers.items()],
+        }
+
+    @app.post("/v1/characters/{character_id}/images/rewrite")
+    def rewrite_user_image_prompt(character_id: str, req: ImageRewriteRequest):
+        """Polish a natural-language drawing instruction without generating an image."""
+        provider_name, provider = provider_named(req.provider)
+        started = time.perf_counter()
+        try:
+            _current, prompt, reference, aspect_ratio = compile_instruction(character_id, req, provider=provider)
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("visual.rewrite failed character=%s purpose=%s error=%s", character_id, req.purpose.value, exc)
+            raise HTTPException(status_code=502, detail=f"图片 Prompt 润色失败：{exc}") from exc
+        return {
+            "ok": True,
+            "character_id": character_id,
+            "purpose": req.purpose.value,
+            "provider": provider_name,
+            "instruction": req.instruction,
+            "prompt": prompt,
+            "aspect_ratio": aspect_ratio,
+            "used_avatar_reference": bool(reference),
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+
+    @app.post("/v1/characters/{character_id}/images/generate")
+    def generate_user_image(character_id: str, req: ImageGenerateRequest):
+        """Rewrite an instruction with AI, generate it, and return a sendable image draft.
+
+        By default no chat event or MediaAsset is created. The browser receives a
+        data URL and feeds it into the existing image-draft flow; persistence only
+        happens after the user explicitly presses Send, just like clipboard paste.
+        """
+        provider_name, provider = provider_for(req.provider)
+        started = time.perf_counter()
+        try:
+            _current, prompt, reference, aspect_ratio = compile_instruction(character_id, req, provider=provider)
+            result = provider.generate(
+                ImageGenerationRequest(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    size="1K",
+                    reference_images=[reference] if reference else [],
+                )
+            )
+            payload, mime_type, extension = generated_payload_bytes(result.payload)
+            filename = f"ai-generated-{req.purpose.value.lower()}.{extension}"
+            data_url = f"data:{mime_type};base64,{base64.b64encode(payload).decode('ascii')}"
+            asset = None
+            if req.persist_result:
+                asset = access.media_storage.save_bytes(
+                    character_id=character_id,
+                    original_name=filename,
+                    payload=payload,
+                    created_at=datetime.now().astimezone(),
+                    source=f"TOOL_GENERATED_{req.purpose.value}",
+                )
+                access.store().add_media_asset(asset)
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("visual.user_generate failed character=%s provider=%s purpose=%s error=%s", character_id, provider_name, req.purpose.value, exc)
+            raise HTTPException(status_code=502, detail=f"AI 图片生成失败：{exc}") from exc
+
+        elapsed = round((time.perf_counter() - started) * 1000, 1)
+        image = {
+            "filename": filename,
+            "data_url": data_url,
+            "mime_type": mime_type,
+            "size_bytes": len(payload),
+            "media_id": asset.id if asset is not None else None,
+            "url": f"/v1/media/{asset.id}" if asset is not None else "",
+            "source": asset.source if asset is not None else "AI_GENERATED_DRAFT",
+        }
+        logger.info(
+            "visual.user_generate done character=%s provider=%s model=%s purpose=%s persisted=%s duration_ms=%.1f",
+            character_id,
+            result.provider,
+            result.model,
+            req.purpose.value,
+            bool(asset),
+            elapsed,
+        )
+        return {
+            "ok": True,
+            "character_id": character_id,
+            "purpose": req.purpose.value,
+            "provider": result.provider,
+            "model": result.model,
+            "instruction": req.instruction,
+            "prompt": prompt,
+            "aspect_ratio": aspect_ratio,
+            "used_avatar_reference": bool(reference),
+            "duration_ms": elapsed,
+            "image": image,
         }
 
     @app.post("/v1/visual/test")
@@ -305,7 +468,7 @@ def attach_visual_routes(app) -> None:
                 metadata = avatar_store.save_from_path(
                     character_id,
                     path,
-                    source="CHAT_ASSET" if not asset.source.startswith(("GENERATED", "DEV_GENERATED")) else "GENERATED",
+                    source="CHAT_ASSET" if not asset.source.startswith(("GENERATED", "DEV_GENERATED", "TOOL_GENERATED")) else "GENERATED",
                     source_media_id=asset.id,
                     title=asset.original_name,
                 )

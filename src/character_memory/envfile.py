@@ -8,7 +8,6 @@ import tempfile
 
 
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_INJECTED: set[tuple[str, str]] = set()
 
 
 def _decode_value(raw: str) -> str:
@@ -23,7 +22,7 @@ def _decode_value(raw: str) -> str:
             return value[1:-1]
     if value.startswith("'") and value.endswith("'"):
         return value[1:-1]
-    # Keep inline '#' characters as part of the value. The Settings Center writes
+    # Keep inline '#' characters as part of the value. Settings Center writes
     # quoted values, so this intentionally avoids shell-style comment guessing.
     return value
 
@@ -49,26 +48,25 @@ def parse_env_file(path: str | Path) -> dict[str, str]:
     return values
 
 
-def load_env_file(path: str | Path, *, override: bool = False) -> dict[str, str]:
-    target = Path(path).resolve()
-    values = parse_env_file(target)
-    for name, value in values.items():
-        if override or name not in os.environ:
-            os.environ[name] = value
-            _INJECTED.add((str(target), name))
-    return values
+def effective_env_value(name: str, path: str | Path, fallback: str = "") -> str:
+    """Resolve one secret without mutating process environment.
+
+    Process environment is the deployment override. Project-local .env is the
+    persistent Settings Center store. The fallback is only for legacy config.
+    Keeping this read side-effect free prevents one config root/test from leaking
+    its .env values into another config root in the same Python process.
+    """
+
+    if name in os.environ:
+        return os.environ[name]
+    return parse_env_file(path).get(name, fallback)
 
 
 def env_source(name: str, path: str | Path) -> str | None:
-    target = Path(path).resolve()
-    file_values = parse_env_file(target)
-    injected = (str(target), name) in _INJECTED
-    if name in os.environ and not injected:
-        return "system"
-    if name in file_values:
-        return ".env"
     if name in os.environ:
         return "system"
+    if name in parse_env_file(path):
+        return ".env"
     return None
 
 
@@ -114,11 +112,6 @@ def upsert_env_value(path: str | Path, name: str, value: str) -> None:
             updated.append("")
         updated.append(replacement)
     _atomic_write(target, "\n".join(updated))
-    # The current process should immediately observe Settings Center writes unless
-    # a system-level environment variable already owns the effective value.
-    if env_source(name, target) != "system":
-        os.environ[name] = str(value)
-        _INJECTED.add((str(target.resolve()), name))
 
 
 def delete_env_value(path: str | Path, name: str) -> bool:
@@ -131,8 +124,4 @@ def delete_env_value(path: str | Path, name: str) -> bool:
     if updated == lines:
         return False
     _atomic_write(target, "\n".join(updated))
-    key = (str(target.resolve()), name)
-    if key in _INJECTED:
-        _INJECTED.discard(key)
-        os.environ.pop(name, None)
     return True

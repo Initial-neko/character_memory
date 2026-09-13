@@ -98,52 +98,57 @@ class GroupRepository:
     def _init_schema(self) -> None:
         with self.store._lock:
             self.store._ensure_migration_table_locked()
-            self.store.conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS conversations(
-                    id TEXT PRIMARY KEY,
-                    type TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    archived_at TEXT,
-                    archived_at_epoch INTEGER
-                );
+            ready = self.store.conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE name=?",
+                ("group/002-indexes",),
+            ).fetchone()
+            if ready is None:
+                self.store.conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS conversations(
+                        id TEXT PRIMARY KEY,
+                        type TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        archived_at TEXT,
+                        archived_at_epoch INTEGER
+                    );
 
-                CREATE TABLE IF NOT EXISTS conversation_members(
-                    conversation_id TEXT NOT NULL,
-                    actor_type TEXT NOT NULL,
-                    actor_id TEXT NOT NULL,
-                    position INTEGER NOT NULL,
-                    joined_at TEXT NOT NULL,
-                    PRIMARY KEY(conversation_id, actor_type, actor_id)
-                );
+                    CREATE TABLE IF NOT EXISTS conversation_members(
+                        conversation_id TEXT NOT NULL,
+                        actor_type TEXT NOT NULL,
+                        actor_id TEXT NOT NULL,
+                        position INTEGER NOT NULL,
+                        joined_at TEXT NOT NULL,
+                        PRIMARY KEY(conversation_id, actor_type, actor_id)
+                    );
 
-                CREATE TABLE IF NOT EXISTS conversation_events(
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    conversation_id TEXT NOT NULL,
-                    turn_id TEXT NOT NULL,
-                    actor_type TEXT NOT NULL,
-                    actor_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    event_time TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    metadata_json TEXT NOT NULL DEFAULT '{}'
-                );
+                    CREATE TABLE IF NOT EXISTS conversation_events(
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        conversation_id TEXT NOT NULL,
+                        turn_id TEXT NOT NULL,
+                        actor_type TEXT NOT NULL,
+                        actor_id TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        event_time TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        metadata_json TEXT NOT NULL DEFAULT '{}'
+                    );
 
-                CREATE TABLE IF NOT EXISTS conversation_runtime_traces(
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    conversation_id TEXT NOT NULL,
-                    turn_id TEXT NOT NULL,
-                    character_id TEXT NOT NULL,
-                    source_conversation_event_id INTEGER NOT NULL,
-                    created_at TEXT NOT NULL,
-                    trace_json TEXT NOT NULL,
-                    UNIQUE(source_conversation_event_id, character_id)
-                );
-                """
-            )
-            self.store.conn.commit()
+                    CREATE TABLE IF NOT EXISTS conversation_runtime_traces(
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        conversation_id TEXT NOT NULL,
+                        turn_id TEXT NOT NULL,
+                        character_id TEXT NOT NULL,
+                        source_conversation_event_id INTEGER NOT NULL,
+                        created_at TEXT NOT NULL,
+                        trace_json TEXT NOT NULL,
+                        UNIQUE(source_conversation_event_id, character_id)
+                    );
+                    """
+                )
+                self.store.conn.commit()
 
         self.store.apply_schema_migration("group/001-epoch-time-keys", self._migrate_epoch_keys)
         self.store.apply_schema_migration("group/002-indexes", self._create_indexes)

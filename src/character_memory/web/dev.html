@@ -63,7 +63,7 @@
 
       <article class="card wide" id="imageGenCard">
         <div class="card-title-row">
-          <div><h2>ImageGen</h2><p class="subtle">真实执行 VisualPromptPlanner → Provider → MediaStorage，不走 mock。</p></div>
+          <div><h2>ImageGen</h2><p class="subtle">真实执行 AI Prompt Rewrite → Provider；Dev 结果额外持久化，便于预览和设为头像。</p></div>
           <span class="pill">real provider</span>
         </div>
         <div class="visual-provider-row">
@@ -71,15 +71,19 @@
           <label>Provider<select id="imageProvider"><option value="agnes">agnes</option><option value="msimg">msimg</option></select></label>
           <label>Purpose<select id="imagePurpose"><option value="SELFIE">SELFIE</option><option value="SCENE">SCENE</option><option value="AVATAR">AVATAR</option></select></label>
         </div>
-        <label for="imageIntent">Visual Intent</label>
+        <label for="imageIntent">Instruction / Visual Intent</label>
         <textarea id="imageIntent" rows="4">自然分享一下现在的样子，保持人物身份一致，像日常聊天里随手发来的照片。</textarea>
         <label class="visual-check"><input id="imageUseAvatar" type="checkbox" checked /> Provider 支持时使用当前头像作为 identity reference</label>
         <div class="actions">
+          <button id="rewriteImagePrompt" class="secondary">Rewrite Prompt</button>
           <button id="runImageGen">Generate Image</button>
+          <button id="copyImagePrompt" class="secondary" hidden>复制 Prompt</button>
           <button id="refreshImageProviders" class="secondary">刷新 Provider</button>
           <button id="useImageAsAvatar" class="secondary" hidden>设为当前头像</button>
           <span id="imageGenLatency" class="metric-inline">-</span>
         </div>
+        <label>Polished Prompt</label>
+        <pre id="imageRewriteResult" class="result">尚未润色 Prompt。</pre>
         <div class="visual-grid">
           <div class="visual-preview-wrap"><img id="imageGenPreview" class="visual-preview" alt="ImageGen 预览" hidden /></div>
           <div>

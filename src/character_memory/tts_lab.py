@@ -16,6 +16,9 @@ from pydantic import BaseModel, Field
 from character_memory.media_runtime import float_audio_to_wav
 
 
+ROOT = Path(__file__).resolve().parents[2]
+
+
 @dataclass(frozen=True)
 class LabSynthesisResult:
     audio: bytes
@@ -105,13 +108,45 @@ class SherpaMediaProvider:
 
 class KokoroProvider:
     REPO_ID = "hexgrad/Kokoro-82M-v1.1-zh"
+    MODEL_FILENAME = "kokoro-v1_1-zh.pth"
     SAMPLE_RATE = 24000
-    DEFAULT_VOICES = ["zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi"]
+    # v1.1-zh uses numbered Chinese speaker packs. The old zf_xiaobei/... names
+    # belong to the base Kokoro-82M repository and return 404 against v1.1-zh.
+    DEFAULT_VOICES = ["zf_001", "zf_002", "zf_003", "zf_004"]
 
     def __init__(self, device: str = "cpu"):
         self.device = device or "cpu"
         self._pipeline = None
+        self._voice_paths: dict[str, str] = {}
         self._lock = threading.RLock()
+        self.hf_home = Path(os.getenv("HF_HOME", ROOT / "models" / "huggingface")).resolve()
+        self.hub_cache = self.hf_home / "hub"
+
+    @property
+    def required_files(self) -> list[str]:
+        return [
+            "config.json",
+            self.MODEL_FILENAME,
+            *(f"voices/{voice}.pt" for voice in self.DEFAULT_VOICES),
+        ]
+
+    def _cached_files(self) -> dict[str, Path]:
+        if importlib.util.find_spec("huggingface_hub") is None:
+            return {}
+        from huggingface_hub import try_to_load_from_cache
+
+        cached: dict[str, Path] = {}
+        for filename in self.required_files:
+            value = try_to_load_from_cache(
+                self.REPO_ID,
+                filename,
+                cache_dir=str(self.hub_cache),
+            )
+            if isinstance(value, str):
+                path = Path(value)
+                if path.is_file():
+                    cached[filename] = path
+        return cached
 
     def _ensure(self):
         if self._pipeline is not None:
@@ -119,33 +154,70 @@ class KokoroProvider:
         with self._lock:
             if self._pipeline is not None:
                 return self._pipeline
+            installed = importlib.util.find_spec("kokoro") is not None and importlib.util.find_spec("misaki") is not None
+            if not installed:
+                raise RuntimeError("Kokoro 未安装；执行 bash scripts/setup-tts-models.sh")
+
+            cached = self._cached_files()
+            missing = [filename for filename in self.required_files if filename not in cached]
+            if missing:
+                raise RuntimeError(
+                    "Kokoro 模型未预下载或不完整；执行 bash scripts/setup-tts-models.sh。"
+                    f" 缺少: {', '.join(missing)}"
+                )
+
             try:
                 from kokoro import KPipeline
+                from kokoro.model import KModel
             except ImportError as exc:
-                raise RuntimeError(
-                    'Kokoro 未安装；执行 uv sync --extra api --extra media --extra tts-kokoro --extra dev'
-                ) from exc
+                raise RuntimeError("Kokoro 导入失败；重新执行 bash scripts/setup-tts-models.sh") from exc
+
+            # Give Kokoro explicit local files so request-time synthesis never
+            # reaches Hugging Face. Network/model setup belongs to setup scripts.
+            model = KModel(
+                repo_id=self.REPO_ID,
+                config=str(cached["config.json"]),
+                model=str(cached[self.MODEL_FILENAME]),
+            ).to(self.device).eval()
             self._pipeline = KPipeline(
                 lang_code="z",
                 repo_id=self.REPO_ID,
+                model=model,
                 device=self.device,
             )
+            self._voice_paths = {
+                voice: str(cached[f"voices/{voice}.pt"])
+                for voice in self.DEFAULT_VOICES
+            }
             return self._pipeline
 
     def status(self) -> dict:
-        installed = importlib.util.find_spec("kokoro") is not None and importlib.util.find_spec("misaki") is not None
+        installed = (
+            importlib.util.find_spec("kokoro") is not None
+            and importlib.util.find_spec("misaki") is not None
+            and importlib.util.find_spec("huggingface_hub") is not None
+        )
+        cached = self._cached_files() if installed else {}
+        missing = [filename for filename in self.required_files if filename not in cached]
+        ready = installed and not missing
+        if not installed:
+            reason = "Run bash scripts/setup-tts-models.sh to install the Kokoro stack."
+        elif missing:
+            reason = "Run bash scripts/setup-tts-models.sh to prefetch Kokoro model assets."
+        else:
+            reason = None
         return {
             "id": "kokoro",
             "label": "Kokoro 82M v1.1 zh",
-            "ready": installed,
+            "ready": ready,
             "loaded": self._pipeline is not None,
             "voices": list(self.DEFAULT_VOICES),
-            "default_voice": "zf_xiaobei",
+            "default_voice": self.DEFAULT_VOICES[0],
             "supports_speed": True,
             "model": self.REPO_ID,
             "device": self.device,
-            "reason": None if installed else "Install the optional tts-kokoro extra first.",
-            "note": "首次生成会从 Hugging Face 下载模型/音色并缓存。",
+            "reason": reason,
+            "note": "模型与音色必须由 setup-tts-models.sh 预下载；生成请求不会联网下载。",
         }
 
     @staticmethod
@@ -167,10 +239,13 @@ class KokoroProvider:
         value = str(text or "").strip()
         if not value:
             raise ValueError("empty TTS text")
+        if voice not in self.DEFAULT_VOICES:
+            raise ValueError(f"Unknown Kokoro voice: {voice}")
         pipeline = self._ensure()
         started = time.perf_counter()
         chunks: list[np.ndarray] = []
-        for item in pipeline(value, voice=voice, speed=float(speed), split_pattern=r"\n+"):
+        voice_path = self._voice_paths[voice]
+        for item in pipeline(value, voice=voice_path, speed=float(speed), split_pattern=r"\n+"):
             audio = self._audio_array(item)
             if audio is not None and audio.size:
                 chunks.append(audio)

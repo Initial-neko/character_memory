@@ -47,6 +47,10 @@ class DevLlmRequest(BaseModel):
     system_prompt: str = Field(default="", max_length=4000)
 
 
+class DevVisionRequest(DevLlmRequest):
+    image_data_urls: list[str] = Field(min_length=1, max_length=5)
+
+
 class DevTtsRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     speaker_id: int = Field(default=0, ge=0, le=10000)
@@ -272,8 +276,6 @@ def create_dev_app(
         )
         image = data.get("image") if isinstance(data, dict) else None
         if isinstance(image, dict):
-            # Dev uses the persisted asset URL for preview/avatar promotion. Avoid
-            # dumping a multi-megabyte base64 data URL into the diagnostics <pre>.
             image.pop("data_url", None)
             url = str(image.get("url") or "")
             if url.startswith("/"):
@@ -296,7 +298,7 @@ def create_dev_app(
         started = time.perf_counter()
         try:
             model = get_model()
-            messages: list[dict[str, str]] = []
+            messages: list[dict] = []
             if req.system_prompt.strip():
                 messages.append({"role": "system", "content": req.system_prompt.strip()})
             messages.append({"role": "user", "content": req.prompt})
@@ -313,6 +315,42 @@ def create_dev_app(
             }
         except Exception as exc:
             logger.exception("dev.llm failed error=%s", exc)
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/v1/dev/vision")
+    def vision(req: DevVisionRequest):
+        started = time.perf_counter()
+        try:
+            if any(not value.startswith("data:image/") for value in req.image_data_urls):
+                raise ValueError("Vision test accepts image data URLs only")
+            model = get_model()
+            selected_model = str(getattr(model, "vision_model", "") or getattr(cfg, "vision_model", "") or "")
+            if not selected_model:
+                raise RuntimeError("vision_model is not configured")
+            request = getattr(model, "_request", None)
+            if not callable(request):
+                raise RuntimeError("configured model does not expose the OpenAI-compatible request path")
+            messages: list[dict] = []
+            if req.system_prompt.strip():
+                messages.append({"role": "system", "content": req.system_prompt.strip()})
+            content: list[dict] = [{"type": "text", "text": req.prompt}]
+            content.extend({"type": "image_url", "image_url": {"url": value}} for value in req.image_data_urls)
+            messages.append({"role": "user", "content": content})
+            reply = request(
+                messages,
+                conversation_id="dev-console-vision",
+                model=selected_model,
+            )
+            return {
+                "ok": True,
+                "kind": "vision",
+                "model": selected_model,
+                "frame_count": len(req.image_data_urls),
+                "reply": reply,
+                "total_ms": _ms(started),
+            }
+        except Exception as exc:
+            logger.exception("dev.vision failed error=%s", exc)
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/v1/dev/tts")

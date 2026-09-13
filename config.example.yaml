@@ -33,8 +33,8 @@ search_safe_search: "strict"
 # web_search_enabled: false
 # web_fetch_enabled: false
 
-# P0.19 direct-character image generation. Chat does not expose a raw ImageGen
-# console; Dev Console and character visual actions reuse these providers.
+# P0.19 direct-character image generation. Chat exposes a guided AI image tool,
+# while Dev Console provides the provider-oriented diagnostics surface.
 image_generation_provider: "agnes"   # agnes | msimg
 image_generation_timeout_seconds: 180
 # Prefer AGNES_API_KEY in the environment.
@@ -42,7 +42,7 @@ agnes_api_key: ""
 agnes_base_url: "https://apihub.agnes-ai.com/v1"
 agnes_image_model: "agnes-image-2.1-flash"
 # Prefer MSIMG_API_KEY or MODELSCOPE_API_TOKEN in the environment.
-# msimg is installed through: uv sync --extra image-generation
+# For the complete local dev environment run: bash scripts/sync-all.sh
 msimg_api_key: ""
 # Comma-separated model aliases/ModelScope model IDs. Multiple values enable failover.
 msimg_models: "qwen"
@@ -59,9 +59,9 @@ avatar_max_bytes: 8388608
 persona_path: "personas/rin/persona.yaml"
 recall_limit: 8
 
-# P0.17C direct-character wake. The background loop checks periodically, but the
-# model is only called when a character reaches this interval. Manual Wake ignores
-# the interval. Wake may speak, create an Intent, or stay silent. P0.19 does not
-# allow TIME_TICK/PROACTIVE_INTENT to spend ImageGen quota yet.
+# Direct-character wake. The background loop checks periodically, but the model is
+# only called when a character reaches this interval. Manual Wake ignores the
+# interval. Wake may speak, create an Intent, or stay silent. TIME_TICK /
+# PROACTIVE_INTENT do not spend ImageGen quota automatically.
 proactive_wake_enabled: true
 proactive_wake_minutes: 60

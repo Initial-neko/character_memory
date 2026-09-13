@@ -7,8 +7,13 @@ from urllib.parse import quote
 import yaml
 from pydantic import BaseModel, Field
 
+from character_memory.envfile import load_env_file
+
 
 class Settings(BaseModel):
+    # Secret fields remain in the runtime model for backward compatibility, but
+    # Settings Center migrates their persisted values out of config.yaml and into
+    # the project-local .env file.
     api_key: str = ""
     base_url: str = "https://opencode.ai/zen/go/v1"
     chat_model: str = "deepseek-flash"
@@ -22,6 +27,13 @@ class Settings(BaseModel):
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     embedding_api_key: str = ""
     embedding_base_url: str = ""
+
+    # Formal chat TTS selection. Kokoro is now the default after local audition;
+    # the Provider Lab remains available for A/B testing other providers.
+    tts_provider: str = Field(default="kokoro", pattern=r"^(kokoro|sherpa)$")
+    tts_voice: str = "zf_001"
+    tts_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    tts_device: str = Field(default="cpu", pattern=r"^(cpu|cuda)$")
 
     # Search is deliberately separate from the LLM runtime. Avatar discovery
     # uses image search only; web_search/web_fetch remain reserved.
@@ -63,15 +75,17 @@ class Settings(BaseModel):
 
 
 def load_settings(path: str = "config.yaml") -> Settings:
-    data: dict = {}
     p = Path(path)
+    # System environment always wins. load_env_file only fills names that do not
+    # already exist, so .env is a local fallback rather than an override.
+    load_env_file(p.resolve().parent / ".env", override=False)
+
+    data: dict = {}
     if p.exists():
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     data["api_key"] = os.getenv("OPENCODE_GO_API_KEY", data.get("api_key", ""))
+    data["embedding_api_key"] = os.getenv("EMBEDDING_API_KEY", data.get("embedding_api_key", ""))
 
-    # config.yaml remains the primary search credential declaration. Provider-
-    # specific env vars are optional deployment overrides and never need to be
-    # present for local use.
     provider = str(data.get("search_provider", "searchapi") or "searchapi").strip().lower()
     configured_search_key = data.get("search_api_key", "")
     if provider in {"searchapi", "searchapi.io", "search_api"}:
@@ -81,7 +95,7 @@ def load_settings(path: str = "config.yaml") -> Settings:
     else:
         data["search_api_key"] = configured_search_key
 
-    # Image generation credentials stay out of version control. Agnes and
+    # Image generation credentials stay out of config.yaml. Agnes and
     # ModelScope/msimg are independently configurable so Dev Console can A/B test.
     data["agnes_api_key"] = os.getenv("AGNES_API_KEY", data.get("agnes_api_key", ""))
     data["msimg_api_key"] = os.getenv(

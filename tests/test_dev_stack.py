@@ -9,7 +9,8 @@ def test_stack_entrypoint_and_runtime_ports_are_declared():
     assert "127.0.0.1:8000/health" in script
     assert "127.0.0.1:8001/health" in script
     assert "127.0.0.1:8002/health" in script
-    assert "127.0.0.1:9002/health" in script
+    assert '"http://127.0.0.1:9002/tts"' in script
+    assert '"http://127.0.0.1:9002/health"' not in script
     assert '"character_memory.media_bootstrap"' in script
     assert '"character_memory.dev_server"' in script
     assert '"character_memory.tts_lab"' in script

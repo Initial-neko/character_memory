@@ -1,12 +1,17 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 import character_memory.async_web as async_web
 from character_memory.api import create_api
-from character_memory.application.async_conversation import ConversationEventHub
+from character_memory.application.async_conversation import (
+    ConversationEventHub,
+    ReactionScheduler,
+    direct_channel,
+)
 from character_memory.async_web import _stream_hub_events, attach_async_routes
 from character_memory.group_web import attach_group_routes
 
@@ -86,6 +91,57 @@ def test_direct_and_group_sse_routes_return_event_stream_without_request_query(t
         assert group_stream.status_code == 200, group_stream.text
         assert group_stream.headers["content-type"].startswith("text/event-stream")
         assert "retry: 1500" in group_stream.text
+
+
+def test_scheduler_status_snapshot_reports_authoritative_idle_or_typing_state():
+    hub = ConversationEventHub()
+    scheduler = ReactionScheduler(lambda: None, lambda: [], hub)
+    key = direct_channel("rin", "snapshot")
+    try:
+        assert scheduler.status_snapshot(key) == {"state": "idle", "watermark": 0}
+
+        state = scheduler._state(key)
+        with state.condition:
+            state.latest_event = SimpleNamespace(id=42)
+            state.processed_id = 41
+            state.active = True
+        assert scheduler.status_snapshot(key) == {"state": "typing", "watermark": 42}
+
+        with state.condition:
+            state.processed_id = 42
+            state.active = False
+        assert scheduler.status_snapshot(key) == {"state": "idle", "watermark": 42}
+    finally:
+        scheduler.close()
+        hub.close()
+
+
+def test_async_sse_stream_sends_fresh_status_snapshot_before_live_events():
+    async def scenario():
+        hub = ConversationEventHub()
+        stream = _stream_hub_events(
+            hub,
+            "direct:rin:snapshot",
+            initial_event=("reaction_status", {"state": "idle", "watermark": 12}),
+            poll_seconds=0.01,
+            heartbeat_seconds=60,
+        )
+        try:
+            assert await anext(stream) == "retry: 1500\n\n"
+            snapshot = await asyncio.wait_for(anext(stream), timeout=0.5)
+            assert "event: reaction_status" in snapshot
+            assert '"state":"idle"' in snapshot
+            assert '"watermark":12' in snapshot
+
+            hub.publish("direct:rin:snapshot", "character_event", {"id": 7, "content": "hello"})
+            frame = await asyncio.wait_for(anext(stream), timeout=0.5)
+            assert "event: character_event" in frame
+            assert '"content":"hello"' in frame
+        finally:
+            await stream.aclose()
+            hub.close()
+
+    asyncio.run(scenario())
 
 
 def test_async_sse_stream_delivers_events_without_blocking_thread_condition():

@@ -40,16 +40,11 @@ class FakeProvider:
 
 
 class FakePlannerModel:
-    def structured_for_session(self, prompt, schema, session_id):
-        assert "你不是在回复用户" in prompt
-        return {
-            "purpose": "SELFIE" if "Purpose: SELFIE" in prompt else "SCENE",
-            "visual_intent": "自然分享当前状态",
-            "positive_prompt": "same person, natural casual image",
-            "negative_prompt": "different identity",
-            "aspect_ratio": "3:4",
-            "identity_constraints": ["same face"],
-        }
+    def _request(self, messages, *, conversation_id=None, json_object=False, model=None):
+        assert json_object is False
+        assert "不返回 JSON" in messages[0]["content"]
+        assert conversation_id.startswith("visual-plan:mika:")
+        return "same person, natural casual image"
 
 
 def _runtime(tmp_path):
@@ -139,8 +134,10 @@ def test_direct_selfie_uses_avatar_reference_and_persists_generated_image(tmp_pa
     assert generated.metadata["conversation_id"] == "conv-1"
     assert "prompt" not in generated.metadata
     assert len(provider.requests) == 1
+    assert provider.requests[0].aspect_ratio == "3:4"
     assert len(provider.requests[0].reference_images) == 1
     assert provider.requests[0].reference_images[0].startswith("data:image/png;base64,")
+    assert "reference image as the identity anchor" in provider.requests[0].prompt
 
     asset = store.get_media_asset(generated.metadata["media_id"])
     assert asset is not None
@@ -171,6 +168,7 @@ def test_scene_generation_does_not_force_avatar_reference(tmp_path):
     generated = service.generate(runtime, source, action)
     assert generated is not None
     assert provider.requests[0].reference_images == []
+    assert provider.requests[0].aspect_ratio == "4:3"
     assert generated.metadata["generation_purpose"] == "SCENE"
     avatar_store.close()
     store.close()

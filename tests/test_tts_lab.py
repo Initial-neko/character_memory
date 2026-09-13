@@ -81,7 +81,7 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert '"misaki[zh]>=0.9.4,<1"' in pyproject
     assert '"huggingface-hub>=0.30,<2"' in pyproject
     assert 'character-tts-lab = "character_memory.tts_lab:main"' in pyproject
-    all_extra = pyproject.split("all = [", 1)[1].split("]", 1)[0]
+    all_extra = pyproject.split("all = [", 1)[1].split("\n]\n", 1)[0]
     assert '"kokoro>=0.9.4,<1"' in all_extra
     assert '"misaki[zh]>=0.9.4,<1"' in all_extra
     assert "CosyVoice" not in all_extra

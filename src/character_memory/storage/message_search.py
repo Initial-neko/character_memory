@@ -68,7 +68,14 @@ class MessageSearchRepository:
             )
         return result
 
-    def search_group(self, query: str, *, conversation_id: str | None = None, limit: int = 50) -> list[dict]:
+    def search_group(
+        self,
+        query: str,
+        *,
+        conversation_id: str | None = None,
+        limit: int = 50,
+        include_archived: bool = False,
+    ) -> list[dict]:
         pattern = self._pattern(query.strip())
         page_size = max(1, min(int(limit), 50))
         with self.store._lock:
@@ -78,6 +85,8 @@ class MessageSearchRepository:
                 "WHERE e.event_time_epoch IS NOT NULL "
             )
             args: list = []
+            if not include_archived:
+                sql += "AND c.archived_at IS NULL "
             if conversation_id:
                 sql += "AND e.conversation_id=? "
                 args.append(conversation_id)

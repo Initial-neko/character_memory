@@ -113,6 +113,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             ],
             "created_at": group.created_at.isoformat(),
             "updated_at": group.updated_at.isoformat(),
+            "archived_at": group.archived_at.isoformat() if group.archived_at else None,
         }
 
     def resource_snapshot(group=None) -> dict:
@@ -211,9 +212,14 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 runtime.image_catalog = load_image_catalog(profile["persona_path"])
 
     @app.get("/v1/groups")
-    def list_groups():
+    def list_groups(archived: bool = False):
         profiles = profiles_by_id()
-        return {"groups": [group_payload(group, profiles=profiles) for group in repo().list_groups()]}
+        return {
+            "groups": [
+                group_payload(group, profiles=profiles)
+                for group in repo().list_groups(archived=archived)
+            ]
+        }
 
     @app.post("/v1/groups")
     def create_group(req: CreateGroupRequest):
@@ -242,10 +248,30 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         logger.info("group.renamed id=%s name=%s", group.id, group.name)
         return {"group": group_payload(group)}
 
+    @app.post("/v1/groups/{conversation_id}/archive")
+    def archive_group(conversation_id: str):
+        repository = repo()
+        with turn_lock_for(conversation_id):
+            group = repository.archive_group(conversation_id, datetime.now().astimezone())
+        if group is None:
+            raise HTTPException(status_code=404, detail="group not found")
+        logger.info("group.archived id=%s", group.id)
+        return {"group": group_payload(group)}
+
+    @app.post("/v1/groups/{conversation_id}/restore")
+    def restore_group(conversation_id: str):
+        repository = repo()
+        with turn_lock_for(conversation_id):
+            group = repository.restore_group(conversation_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="group not found")
+        logger.info("group.restored id=%s", group.id)
+        return {"group": group_payload(group)}
+
     @app.get("/v1/groups/{conversation_id}/history")
     def group_history(conversation_id: str, limit: int = 50, before_id: int | None = None):
         repository = repo()
-        group = repository.get_group(conversation_id)
+        group = repository.get_group(conversation_id, include_archived=True)
         if group is None:
             raise HTTPException(status_code=404, detail="group not found")
         page = repository.list_event_page(conversation_id, limit=limit, before_id=before_id)
@@ -262,7 +288,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
     @app.get("/v1/groups/{conversation_id}/turns/{turn_id}/traces")
     def group_turn_traces(conversation_id: str, turn_id: str):
         repository = repo()
-        if repository.get_group(conversation_id) is None:
+        if repository.get_group(conversation_id, include_archived=True) is None:
             raise HTTPException(status_code=404, detail="group not found")
         traces = repository.list_turn_traces(conversation_id, turn_id)
         profiles = profiles_by_id()

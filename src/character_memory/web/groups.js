@@ -3,6 +3,7 @@
   if (!CM) throw new Error("CM core must load before groups.js");
 
   let groups = [];
+  let archivedGroups = [];
   const pending = new Set();
   let groupStream = null;
   let groupStreamId = null;
@@ -11,10 +12,11 @@
   const sidebarFoot = document.querySelector(".sidebar-foot");
   const section = document.createElement("section");
   section.className = "group-section";
-  section.innerHTML = `<div class="group-section-head"><span>Groups</span><button class="group-create-button" type="button" title="创建群聊">＋</button></div><nav class="group-list" aria-label="Groups"></nav>`;
+  section.innerHTML = `<div class="group-section-head"><span>Groups</span><span class="group-section-actions"><button class="group-archive-list-button" type="button" title="查看已归档群聊">归档</button><button class="group-create-button" type="button" title="创建群聊">＋</button></span></div><nav class="group-list" aria-label="Groups"></nav>`;
   sidebar?.insertBefore(section, sidebarFoot || null);
   const list = section.querySelector(".group-list");
   const createButton = section.querySelector(".group-create-button");
+  const archiveListButton = section.querySelector(".group-archive-list-button");
 
   const activeId = () => CM.state.conversation.groupId;
   const current = () => groups.find(item => item.id === activeId()) || null;
@@ -30,16 +32,24 @@
     groupStreamId = null;
   }
 
+  function closeMenus(exceptId = null) {
+    list?.querySelectorAll("[data-group-menu]").forEach(menu => {
+      if (exceptId && menu.dataset.groupMenu === exceptId) return;
+      menu.classList.add("hidden");
+    });
+  }
+
   function renderList() {
     if (!list) return;
     if (!groups.length) {
-      list.innerHTML = '<div class="group-members" style="padding:6px 12px">还没有群聊</div>';
+      list.innerHTML = '<div class="group-members group-empty-hint">还没有群聊</div>';
       return;
     }
     list.innerHTML = groups.map(group => {
       const names = (group.members || []).map(item => item.name || item.id).join("、");
       const active = CM.isGroupConversation() && group.id === activeId();
-      return `<button class="group-item ${active ? "active" : ""}" type="button" data-group="${CM.escapeHtml(group.id)}"><span class="group-avatar">${CM.escapeHtml(initial(group))}</span><span class="group-copy"><span class="group-name">${CM.escapeHtml(group.name)}</span><span class="group-members">${CM.escapeHtml(names)}</span></span></button>`;
+      const id = CM.escapeHtml(group.id);
+      return `<div class="group-item-wrap" data-group-row="${id}"><button class="group-item ${active ? "active" : ""}" type="button" data-group="${id}"><span class="group-avatar">${CM.escapeHtml(initial(group))}</span><span class="group-copy"><span class="group-name">${CM.escapeHtml(group.name)}</span><span class="group-members">${CM.escapeHtml(names)}</span></span></button><button class="group-more-button" type="button" data-group-more="${id}" title="群聊操作" aria-label="群聊操作">···</button><div class="group-context-menu hidden" data-group-menu="${id}"><button type="button" data-group-archive="${id}">归档</button></div></div>`;
     }).join("");
   }
 
@@ -47,6 +57,55 @@
     const data = await CM.api("/v1/groups");
     groups = data.groups || [];
     renderList();
+  }
+
+  async function loadArchivedGroups() {
+    const data = await CM.api("/v1/groups?archived=true");
+    archivedGroups = data.groups || [];
+    return archivedGroups;
+  }
+
+  function renderArchivedDrawer() {
+    if (!archivedGroups.length) {
+      CM.dom.drawerBody.innerHTML = '<p class="muted">还没有归档的群聊。</p>';
+      return;
+    }
+    CM.dom.drawerBody.innerHTML = `<div class="group-archive-list">${archivedGroups.map(group => {
+      const names = (group.members || []).map(item => item.name || item.id).join("、");
+      const archivedAt = group.archived_at ? CM.fmtDate(group.archived_at) : "";
+      return `<div class="group-archive-card"><div class="group-archive-copy"><strong>${CM.escapeHtml(group.name)}</strong><span>${CM.escapeHtml(names)}</span>${archivedAt ? `<small>归档于 ${CM.escapeHtml(archivedAt)}</small>` : ""}</div><button type="button" data-group-restore="${CM.escapeHtml(group.id)}">恢复</button></div>`;
+    }).join("")}</div>`;
+  }
+
+  async function showArchivedGroups() {
+    CM.openDrawer("已归档群聊", "归档只隐藏任务，不删除消息、Memory、Trace 或媒体；可随时恢复");
+    CM.dom.drawerBody.innerHTML = "<p>正在读取归档群聊…</p>";
+    try {
+      await loadArchivedGroups();
+      renderArchivedDrawer();
+    } catch (error) {
+      CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  async function archiveGroup(groupId) {
+    if (!groupId) return;
+    closeMenus();
+    await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/archive`, {method:"POST"});
+    groups = groups.filter(item => item.id !== groupId);
+    pending.delete(groupId);
+    renderList();
+    if (CM.isGroupConversation() && activeId() === groupId) {
+      await CM.switchCharacter(CM.state.characterId);
+    }
+  }
+
+  async function restoreArchivedGroup(groupId) {
+    if (!groupId) return;
+    await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/restore`, {method:"POST"});
+    archivedGroups = archivedGroups.filter(item => item.id !== groupId);
+    await loadGroups();
+    renderArchivedDrawer();
   }
 
   function groupMessageAvatar(message) {
@@ -397,10 +456,40 @@
   }
 
   createButton?.addEventListener("click", showCreateGroup);
-  list?.addEventListener("click", event => { const button = event.target.closest("[data-group]"); if (button) enter(button.dataset.group).catch(console.error); });
+  archiveListButton?.addEventListener("click", () => showArchivedGroups().catch(console.error));
+  list?.addEventListener("click", event => {
+    const archive = event.target.closest("[data-group-archive]");
+    if (archive) {
+      event.preventDefault();
+      event.stopPropagation();
+      archiveGroup(archive.dataset.groupArchive).catch(error => console.error("archive group failed", error));
+      return;
+    }
+    const more = event.target.closest("[data-group-more]");
+    if (more) {
+      event.preventDefault();
+      event.stopPropagation();
+      const groupId = more.dataset.groupMore;
+      const menu = list.querySelector(`[data-group-menu="${CSS.escape(groupId)}"]`);
+      const wasHidden = menu?.classList.contains("hidden") ?? true;
+      closeMenus();
+      if (wasHidden) menu?.classList.remove("hidden");
+      return;
+    }
+    const button = event.target.closest("[data-group]");
+    if (button) {
+      closeMenus();
+      enter(button.dataset.group).catch(console.error);
+    }
+  });
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".group-item-wrap")) closeMenus();
+  });
   CM.dom.drawerBody.addEventListener("click", event => {
     if (event.target.closest("[data-group-create-cancel]")) CM.closeDrawer();
     if (event.target.closest("[data-group-create-confirm]")) createGroupFromDrawer().catch(console.error);
+    const restore = event.target.closest("[data-group-restore]");
+    if (restore) restoreArchivedGroup(restore.dataset.groupRestore).catch(error => console.error("restore group failed", error));
   });
   CM.dom.chat.addEventListener("click", event => {
     if (!CM.isGroupConversation()) return;
@@ -410,7 +499,7 @@
     if (button) showTurn(button.dataset.groupTurn).catch(console.error);
   });
 
-  CM.registerFeature("groups", {loadGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,current,applyHeader,applyComposerState,sendText,sendSticker,sendImage,renderList,closeStream});
+  CM.registerFeature("groups", {loadGroups,loadArchivedGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,current,applyHeader,applyComposerState,sendText,sendSticker,sendImage,archiveGroup,restoreArchivedGroup,showArchivedGroups,renderList,closeStream});
   CM.on("ready", loadGroups);
   window.addEventListener("beforeunload", closeStream);
 })();

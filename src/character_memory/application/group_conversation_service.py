@@ -525,18 +525,54 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 raise SupersededGroupReaction(
                     f"group reaction for source event {source_event.id} was superseded before {character_id}"
                 )
-            decision = self._react_member(
-                group=group,
-                source_event=source_event,
-                character_id=character_id,
-                image_data_urls=image_data_urls,
-                commit_guard=commit_guard,
-                mentioned_ids=explicit_mentions,
-            )
+            try:
+                decision = self._react_member(
+                    group=group,
+                    source_event=source_event,
+                    character_id=character_id,
+                    image_data_urls=image_data_urls,
+                    commit_guard=commit_guard,
+                    mentioned_ids=explicit_mentions,
+                )
+            except SupersededGroupReaction:
+                # Supersession is a conversation-level ordering signal, not a
+                # member-local failure. It must still abort this stale turn.
+                raise
+            except Exception as exc:
+                # Each character is an independent participant. A malformed model
+                # result or provider hiccup should look like that member missing a
+                # turn, not like the whole room disappearing. Errors stay visible
+                # in logs/result metadata and an all-member failure is escalated
+                # below so systemic runtime/storage outages are not hidden.
+                logger.exception(
+                    "group.member failed conversation=%s turn=%s character=%s error=%s",
+                    group.id,
+                    source_event.turn_id,
+                    character_id,
+                    exc,
+                )
+                decision = {
+                    "character_id": character_id,
+                    "actions": [],
+                    "emitted_event_ids": [],
+                    "emitted_events": [],
+                    "created_memory_ids": [],
+                    "perception": "",
+                    "reaction": "",
+                    "model_ms": 0.0,
+                    "explicitly_mentioned": "*" in explicit_mentions or character_id in explicit_mentions,
+                    "error": str(exc),
+                }
             decisions.append(decision)
             if on_member is not None:
                 on_member(decision)
-        logger.info("group.reaction done conversation=%s source_event=%s responders=%d", group.id, source_event.id, sum(bool(item["actions"]) for item in decisions))
+
+        failures = [item for item in decisions if item.get("error")]
+        if decisions and len(failures) == len(decisions):
+            summary = "; ".join(f"{item['character_id']}: {item['error']}" for item in failures)
+            raise RuntimeError(f"all group members failed for source event {source_event.id}: {summary}")
+
+        logger.info("group.reaction done conversation=%s source_event=%s responders=%d failures=%d", group.id, source_event.id, sum(bool(item["actions"]) for item in decisions), len(failures))
         return {
             "conversation_id": group.id,
             "turn_id": source_event.turn_id,

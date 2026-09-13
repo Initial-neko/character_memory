@@ -25,6 +25,10 @@ media = [
   "sherpa-onnx==1.13.5",
   "sherpa-onnx-core==1.13.5",
 ]
+# Agnes uses the core httpx dependency. msimg stays opt-in when selecting only
+# the image-generation extra, but it is also part of the canonical `all` dev
+# stack below so `uv sync --extra all` keeps Voice/API/ImageGen together.
+image-generation = ["msimg==0.0.4"]
 ui = ["streamlit>=1.37,<2"]
 dev = ["pytest==9.1.1"]
 browser = ["playwright>=1.55", "pytest-playwright>=0.7"]
@@ -34,6 +38,7 @@ all = [
   "uvicorn==0.52.4",
   "sherpa-onnx==1.13.5",
   "sherpa-onnx-core==1.13.5",
+  "msimg==0.0.4",
   "streamlit>=1.37,<2",
   "pytest==9.1.1",
 ]

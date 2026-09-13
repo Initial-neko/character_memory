@@ -6,6 +6,7 @@ from pathlib import Path
 import threading
 import time
 from typing import Callable
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel, Field
@@ -22,7 +23,7 @@ def _ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
-def _upstream_detail(response: httpx.Response, operation: str) -> dict:
+def _upstream_detail(response: httpx.Response, operation: str, *, service: str = "media-runtime") -> dict:
     try:
         payload = response.json()
     except ValueError:
@@ -32,9 +33,9 @@ def _upstream_detail(response: httpx.Response, operation: str) -> dict:
     elif payload is not None:
         detail = payload
     else:
-        detail = (response.text or f"Media Runtime {operation} failed")[:4000]
+        detail = (response.text or f"upstream {operation} failed")[:4000]
     return {
-        "service": "media-runtime",
+        "service": service,
         "operation": operation,
         "status_code": response.status_code,
         "detail": detail,
@@ -54,6 +55,19 @@ class DevTtsRequest(BaseModel):
 
 class DevMediaSmokeRequest(DevTtsRequest):
     text: str = Field(default="你好，这是 Character Memory 的媒体自检。", min_length=1, max_length=4000)
+
+
+class DevImageGenRequest(BaseModel):
+    character_id: str = Field(default="rin", min_length=1, max_length=64)
+    provider: str = Field(default="", max_length=32)
+    purpose: str = Field(default="SELFIE", max_length=16)
+    visual_intent: str = Field(default="自然分享一下现在的样子", min_length=1, max_length=1600)
+    use_avatar_reference: bool = True
+
+
+class DevAvatarFromMediaRequest(BaseModel):
+    character_id: str = Field(min_length=1, max_length=64)
+    media_id: str = Field(min_length=1, max_length=80)
 
 
 def create_dev_app(
@@ -109,6 +123,24 @@ def create_dev_app(
         except Exception as exc:
             return {"ok": False, "status_code": None, "total_ms": _ms(started), "error": str(exc)}
 
+    def request_character(method: str, path: str, *, operation: str, json: dict | None = None, timeout: float = 120.0):
+        try:
+            response = client.request(method, f"{character_base}{path}", json=json, timeout=timeout)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"service": "character-runtime", "operation": operation, "detail": f"request failed: {exc}"},
+            ) from exc
+        if response.is_error:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=_upstream_detail(response, operation, service="character-runtime"),
+            )
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=f"Character Runtime returned non-JSON response for {operation}") from exc
+
     def request_tts(req: DevTtsRequest):
         try:
             response = client.post(f"{media_base}/v1/tts", json=req.model_dump(), timeout=120.0)
@@ -138,7 +170,7 @@ def create_dev_app(
             raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "asr"))
         return response
 
-    app = FastAPI(title="Character Memory Dev Console", version="0.3")
+    app = FastAPI(title="Character Memory Dev Console", version="0.4")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
     @app.on_event("shutdown")
@@ -180,6 +212,7 @@ def create_dev_app(
             },
             "character": probe(f"{character_base}/health"),
             "media": probe(f"{media_base}/health"),
+            "visual": probe(f"{character_base}/v1/visual/providers"),
         }
 
     @app.get("/v1/dev/resources")
@@ -196,6 +229,67 @@ def create_dev_app(
         )
         snapshot["sampled_at"] = time.time()
         return snapshot
+
+    @app.get("/v1/dev/characters")
+    def dev_characters():
+        return request_character("GET", "/v1/characters", operation="characters", timeout=10.0)
+
+    @app.get("/v1/dev/visual/providers")
+    def dev_visual_providers():
+        return request_character("GET", "/v1/visual/providers", operation="visual-providers", timeout=10.0)
+
+    def visual_request_payload(req: DevImageGenRequest) -> dict:
+        return {
+            "instruction": req.visual_intent,
+            "provider": req.provider,
+            "purpose": req.purpose,
+            "use_avatar_reference": req.use_avatar_reference,
+        }
+
+    @app.post("/v1/dev/imagegen/rewrite")
+    def dev_imagegen_rewrite(req: DevImageGenRequest):
+        character_id = quote(req.character_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/characters/{character_id}/images/rewrite",
+            operation="imagegen-rewrite",
+            json=visual_request_payload(req),
+            timeout=120.0,
+        )
+
+    @app.post("/v1/dev/imagegen")
+    def dev_imagegen(req: DevImageGenRequest):
+        timeout = max(120.0, float(getattr(cfg, "image_generation_timeout_seconds", 180.0)) + 30.0)
+        character_id = quote(req.character_id, safe="")
+        payload = visual_request_payload(req)
+        payload["persist_result"] = True
+        data = request_character(
+            "POST",
+            f"/v1/characters/{character_id}/images/generate",
+            operation="imagegen",
+            json=payload,
+            timeout=timeout,
+        )
+        image = data.get("image") if isinstance(data, dict) else None
+        if isinstance(image, dict):
+            # Dev uses the persisted asset URL for preview/avatar promotion. Avoid
+            # dumping a multi-megabyte base64 data URL into the diagnostics <pre>.
+            image.pop("data_url", None)
+            url = str(image.get("url") or "")
+            if url.startswith("/"):
+                image["url"] = f"{character_base}{url}"
+        return data
+
+    @app.post("/v1/dev/avatar-from-media")
+    def dev_avatar_from_media(req: DevAvatarFromMediaRequest):
+        character_id = quote(req.character_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/characters/{character_id}/avatar/from-chat",
+            operation="avatar-from-media",
+            json={"media_id": req.media_id},
+            timeout=30.0,
+        )
 
     @app.post("/v1/dev/llm")
     def llm(req: DevLlmRequest):

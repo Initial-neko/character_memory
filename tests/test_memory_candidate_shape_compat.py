@@ -3,9 +3,6 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-import pytest
-from pydantic import ValidationError
-
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService
 from character_memory.domain.models import DiaryResult, PersonReaction
@@ -51,14 +48,16 @@ def test_existing_memory_candidate_object_shape_is_unchanged():
     assert candidate.importance == 0.84
 
 
-def test_complex_invalid_memory_candidate_shape_still_fails_validation():
-    with pytest.raises(ValidationError):
-        PersonReaction.model_validate(
-            {
-                "actions": [],
-                "memory_candidates": [["not", "a", "memory", "object"]],
-            }
-        )
+def test_complex_invalid_optional_memory_candidate_is_dropped_locally():
+    reaction = PersonReaction.model_validate(
+        {
+            "actions": [{"type": "MESSAGE", "message": "主体回复仍然有效。"}],
+            "memory_candidates": [["not", "a", "memory", "object"]],
+        }
+    )
+
+    assert reaction.actions[0].message == "主体回复仍然有效。"
+    assert reaction.memory_candidates == []
 
 
 def test_diary_memory_candidates_share_the_same_string_compatibility():

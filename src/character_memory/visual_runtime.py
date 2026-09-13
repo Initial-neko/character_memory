@@ -6,7 +6,12 @@ import threading
 from typing import Callable
 
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType
-from character_memory.visual_generation import ImageGenerationRequest, VisualPromptPlanner, VisualPurpose
+from character_memory.visual_generation import (
+    ImageGenerationRequest,
+    VisualPromptPlanner,
+    VisualPurpose,
+    visual_aspect_ratio,
+)
 
 
 logger = logging.getLogger("character_memory.visual_runtime")
@@ -103,7 +108,7 @@ class DirectVisualRuntime:
             reference = self._avatar_reference(source_event.character_id)
 
         state = runtime.store.get_mental_state(source_event.character_id, at=source_event.event_time)
-        plan = VisualPromptPlanner(runtime.model).plan(
+        prompt = VisualPromptPlanner(runtime.model).compile_prompt(
             source_event.character_id,
             purpose=purpose,
             persona=runtime.persona,
@@ -114,9 +119,8 @@ class DirectVisualRuntime:
         )
         result = provider.generate(
             ImageGenerationRequest(
-                prompt=plan.positive_prompt,
-                negative_prompt=plan.negative_prompt,
-                aspect_ratio=plan.aspect_ratio,
+                prompt=prompt,
+                aspect_ratio=visual_aspect_ratio(purpose),
                 size="1K",
                 reference_images=[reference] if reference else [],
             )

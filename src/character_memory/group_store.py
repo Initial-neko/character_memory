@@ -17,6 +17,7 @@ class GroupConversation(BaseModel):
     member_ids: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+    archived_at: datetime | None = None
 
 
 class GroupEvent(BaseModel):
@@ -44,6 +45,9 @@ class GroupRepository:
     Group events intentionally do not reuse the character-local `events` table.
     The same group fact must exist only once even though several characters may
     observe and remember it differently.
+
+    Archiving is UI lifecycle only: archived conversations disappear from the
+    default list but their events/traces/memories/media remain untouched.
     """
 
     def __init__(self, store):
@@ -83,16 +87,17 @@ class GroupRepository:
             """
         )
 
+    def _migrate_archive_state(self) -> None:
+        self.store._ensure_column_locked("conversations", "archived_at", "TEXT")
+        self.store._ensure_column_locked("conversations", "archived_at_epoch", "INTEGER")
+        self.store.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conversations_archive_updated "
+            "ON conversations(type,archived_at_epoch,updated_at_epoch DESC,id DESC)"
+        )
+
     def _init_schema(self) -> None:
         with self.store._lock:
             self.store._ensure_migration_table_locked()
-            ready = self.store.conn.execute(
-                "SELECT 1 FROM schema_migrations WHERE name=?",
-                ("group/002-indexes",),
-            ).fetchone()
-            if ready is not None:
-                return
-
             self.store.conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS conversations(
@@ -100,7 +105,9 @@ class GroupRepository:
                     type TEXT NOT NULL,
                     name TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT,
+                    archived_at_epoch INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS conversation_members(
@@ -140,6 +147,7 @@ class GroupRepository:
 
         self.store.apply_schema_migration("group/001-epoch-time-keys", self._migrate_epoch_keys)
         self.store.apply_schema_migration("group/002-indexes", self._create_indexes)
+        self.store.apply_schema_migration("group/003-conversation-archive", self._migrate_archive_state)
 
     @staticmethod
     def _event_from_row(row) -> GroupEvent:
@@ -155,14 +163,25 @@ class GroupRepository:
             metadata=json.loads(row["metadata_json"]),
         )
 
+    def _group_from_row(self, row) -> GroupConversation:
+        archived_at = row["archived_at"] if "archived_at" in row.keys() else None
+        return GroupConversation(
+            id=row["id"],
+            name=row["name"],
+            member_ids=self._member_ids(row["id"]),
+            created_at=parse_datetime(row["created_at"]),
+            updated_at=parse_datetime(row["updated_at"]),
+            archived_at=parse_datetime(archived_at) if archived_at else None,
+        )
+
     def create_group(self, name: str, member_ids: list[str], now: datetime) -> GroupConversation:
         conversation_id = f"group-{uuid4().hex[:12]}"
         cleaned_name = name.strip() or "新群聊"
         stamp = epoch_us(now)
         with self.store.transaction():
             self.store.conn.execute(
-                "INSERT INTO conversations(id,type,name,created_at,created_at_epoch,updated_at,updated_at_epoch) VALUES(?,?,?,?,?,?,?)",
-                (conversation_id, "GROUP", cleaned_name, now.isoformat(), stamp, now.isoformat(), stamp),
+                "INSERT INTO conversations(id,type,name,created_at,created_at_epoch,updated_at,updated_at_epoch,archived_at,archived_at_epoch) VALUES(?,?,?,?,?,?,?,?,?)",
+                (conversation_id, "GROUP", cleaned_name, now.isoformat(), stamp, now.isoformat(), stamp, None, None),
             )
             self.store.conn.execute(
                 "INSERT INTO conversation_members(conversation_id,actor_type,actor_id,position,joined_at,joined_at_epoch) VALUES(?,?,?,?,?,?)",
@@ -179,6 +198,7 @@ class GroupRepository:
             member_ids=list(member_ids),
             created_at=now,
             updated_at=now,
+            archived_at=None,
         )
 
     def rename_group(self, conversation_id: str, name: str, now: datetime) -> GroupConversation | None:
@@ -188,12 +208,41 @@ class GroupRepository:
         stamp = epoch_us(now)
         with self.store._lock:
             cur = self.store.conn.execute(
-                "UPDATE conversations SET name=?,updated_at=?,updated_at_epoch=? WHERE id=? AND type='GROUP'",
+                "UPDATE conversations SET name=?,updated_at=?,updated_at_epoch=? "
+                "WHERE id=? AND type='GROUP' AND archived_at IS NULL",
                 (cleaned_name, now.isoformat(), stamp, conversation_id),
             )
             self.store._maybe_commit()
         if cur.rowcount <= 0:
             return None
+        return self.get_group(conversation_id)
+
+    def archive_group(self, conversation_id: str, now: datetime) -> GroupConversation | None:
+        existing = self.get_group(conversation_id, include_archived=True)
+        if existing is None:
+            return None
+        if existing.archived_at is not None:
+            return existing
+        with self.store._lock:
+            self.store.conn.execute(
+                "UPDATE conversations SET archived_at=?,archived_at_epoch=? WHERE id=? AND type='GROUP' AND archived_at IS NULL",
+                (now.isoformat(), epoch_us(now), conversation_id),
+            )
+            self.store._maybe_commit()
+        return self.get_group(conversation_id, include_archived=True)
+
+    def restore_group(self, conversation_id: str) -> GroupConversation | None:
+        existing = self.get_group(conversation_id, include_archived=True)
+        if existing is None:
+            return None
+        if existing.archived_at is None:
+            return existing
+        with self.store._lock:
+            self.store.conn.execute(
+                "UPDATE conversations SET archived_at=NULL,archived_at_epoch=NULL WHERE id=? AND type='GROUP'",
+                (conversation_id,),
+            )
+            self.store._maybe_commit()
         return self.get_group(conversation_id)
 
     def _member_ids(self, conversation_id: str) -> list[str]:
@@ -204,37 +253,29 @@ class GroupRepository:
             ).fetchall()
         return [str(row["actor_id"]) for row in rows]
 
-    def get_group(self, conversation_id: str) -> GroupConversation | None:
+    def get_group(self, conversation_id: str, *, include_archived: bool = False) -> GroupConversation | None:
         with self.store._lock:
-            row = self.store.conn.execute(
-                "SELECT * FROM conversations WHERE id=? AND type='GROUP'",
-                (conversation_id,),
-            ).fetchone()
+            sql = "SELECT * FROM conversations WHERE id=? AND type='GROUP'"
+            if not include_archived:
+                sql += " AND archived_at IS NULL"
+            row = self.store.conn.execute(sql, (conversation_id,)).fetchone()
         if row is None:
             return None
-        return GroupConversation(
-            id=row["id"],
-            name=row["name"],
-            member_ids=self._member_ids(conversation_id),
-            created_at=parse_datetime(row["created_at"]),
-            updated_at=parse_datetime(row["updated_at"]),
-        )
+        return self._group_from_row(row)
 
-    def list_groups(self) -> list[GroupConversation]:
+    def list_groups(self, *, archived: bool = False) -> list[GroupConversation]:
         with self.store._lock:
-            rows = self.store.conn.execute(
-                "SELECT * FROM conversations WHERE type='GROUP' ORDER BY updated_at_epoch DESC, id DESC"
-            ).fetchall()
-        return [
-            GroupConversation(
-                id=row["id"],
-                name=row["name"],
-                member_ids=self._member_ids(row["id"]),
-                created_at=parse_datetime(row["created_at"]),
-                updated_at=parse_datetime(row["updated_at"]),
-            )
-            for row in rows
-        ]
+            if archived:
+                rows = self.store.conn.execute(
+                    "SELECT * FROM conversations WHERE type='GROUP' AND archived_at IS NOT NULL "
+                    "ORDER BY archived_at_epoch DESC,id DESC"
+                ).fetchall()
+            else:
+                rows = self.store.conn.execute(
+                    "SELECT * FROM conversations WHERE type='GROUP' AND archived_at IS NULL "
+                    "ORDER BY updated_at_epoch DESC,id DESC"
+                ).fetchall()
+        return [self._group_from_row(row) for row in rows]
 
     def append_event(self, event: GroupEvent) -> GroupEvent:
         stamp = epoch_us(event.event_time)

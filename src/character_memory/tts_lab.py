@@ -7,6 +7,7 @@ from pathlib import Path
 import threading
 import time
 from typing import Protocol
+from urllib.parse import quote
 
 import httpx
 import numpy as np
@@ -328,8 +329,8 @@ def create_tts_lab_app(runtime: TtsLabRuntime | None = None):
             media_type="audio/wav",
             headers={
                 "X-TTS-Provider": result.provider,
-                "X-TTS-Voice": result.voice,
-                "X-TTS-Model": result.model,
+                "X-TTS-Voice": quote(result.voice, safe=""),
+                "X-TTS-Model": quote(result.model, safe="/:._-"),
                 "X-TTS-Device": result.device,
                 "X-TTS-Inference-Ms": str(result.inference_ms),
                 "X-TTS-Audio-Ms": str(result.audio_ms),

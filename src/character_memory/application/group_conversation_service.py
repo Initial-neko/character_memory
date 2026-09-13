@@ -539,10 +539,11 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 # member-local failure. It must still abort this stale turn.
                 raise
             except Exception as exc:
-                # A single model/provider/schema failure belongs to this member.
-                # Treat it as a failed/silent member and keep the rest of the
-                # group moving; one person's malformed optional output must not
-                # swallow everybody else's valid reply.
+                # Each character is an independent participant. A malformed model
+                # result or provider hiccup should look like that member missing a
+                # turn, not like the whole room disappearing. Errors stay visible
+                # in logs/result metadata and an all-member failure is escalated
+                # below so systemic runtime/storage outages are not hidden.
                 logger.exception(
                     "group.member failed conversation=%s turn=%s character=%s error=%s",
                     group.id,
@@ -565,7 +566,13 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             decisions.append(decision)
             if on_member is not None:
                 on_member(decision)
-        logger.info("group.reaction done conversation=%s source_event=%s responders=%d failures=%d", group.id, source_event.id, sum(bool(item["actions"]) for item in decisions), sum(bool(item.get("error")) for item in decisions))
+
+        failures = [item for item in decisions if item.get("error")]
+        if decisions and len(failures) == len(decisions):
+            summary = "; ".join(f"{item['character_id']}: {item['error']}" for item in failures)
+            raise RuntimeError(f"all group members failed for source event {source_event.id}: {summary}")
+
+        logger.info("group.reaction done conversation=%s source_event=%s responders=%d failures=%d", group.id, source_event.id, sum(bool(item["actions"]) for item in decisions), len(failures))
         return {
             "conversation_id": group.id,
             "turn_id": source_event.turn_id,

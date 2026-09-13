@@ -270,7 +270,7 @@ class OpenAICompatibleModel(PersonModel):
         if schema is PersonReaction:
             return (
                 "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State、Available Stickers、Available Images 和 Behavioral Contract。"
-                "返回一个 JSON 对象。actions 是必填的顶层字段，即使决定沉默也必须显式输出 actions=[]。actions 中每个对象使用 type 字段表示动作类型，不要使用 action 字段；文本动作使用 message 字段，不要使用 text 字段。"
+                "返回一个 JSON 对象。actions 是必填的顶层字段；actions 必须可以是空数组，即使决定沉默也必须显式输出 actions=[]。actions 中每个对象使用 type 字段表示动作类型，不要使用 action 字段；文本动作使用 message 字段，不要使用 text 字段。"
                 "actions 为 0 到 3 个动作；通常使用 MESSAGE，单独字符表情可用 EMOJI；若输入列出了 Available Stickers，可以用 STICKER 并填写 sticker_id；若列出了 Available Images，可以用 IMAGE 并填写 image_id。"
                 "STICKER/IMAGE 只能选择输入中真实存在的 id，不要编造资源 id，也不要为了显得活泼而强行发送媒体。"
                 "如果当前用户事件附带真实图片，请结合你实际看到的图片内容理解和回应，不要只依赖文件名。"

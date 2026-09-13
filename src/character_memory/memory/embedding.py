@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import hashlib
+import logging
+import time
 
 import httpx
 import numpy as np
+
+
+logger = logging.getLogger("character_memory.embedding")
 
 
 class EmbeddingProvider(ABC):
@@ -35,12 +40,47 @@ class DeterministicEmbedding(EmbeddingProvider):
 
 
 class SentenceTransformerEmbedding(EmbeddingProvider):
-    """Local semantic embedding. The model downloads once and is then cached."""
+    """Local semantic embedding with cache-first HuggingFace resolution.
+
+    A model id such as ``BAAI/bge-small-zh-v1.5`` normally lives in the local
+    HuggingFace cache after its first download. Always try that cache in strict
+    local-only mode first so startup does not pay remote Hub metadata/network
+    latency on every process launch. Only a genuine local cache miss falls back
+    to the normal online-capable SentenceTransformer load.
+    """
 
     def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5"):
+        started = time.perf_counter()
+        import_started = time.perf_counter()
         from sentence_transformers import SentenceTransformer
 
-        self.model = SentenceTransformer(model_name)
+        import_ms = round((time.perf_counter() - import_started) * 1000, 1)
+        source = "local-cache"
+        load_started = time.perf_counter()
+        try:
+            self.model = SentenceTransformer(model_name, local_files_only=True)
+        except Exception as exc:
+            # First install (or an incomplete cache) still needs a one-time Hub
+            # download. Keep this fallback explicit and observable rather than
+            # silently probing the network on every normal startup.
+            source = "hub-fallback"
+            logger.warning(
+                "embedding local cache unavailable model=%s error=%s; falling back to Hub-capable load",
+                model_name,
+                exc,
+            )
+            self.model = SentenceTransformer(model_name)
+
+        load_ms = round((time.perf_counter() - load_started) * 1000, 1)
+        total_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.info(
+            "embedding ready model=%s source=%s import_ms=%.1f load_ms=%.1f total_ms=%.1f",
+            model_name,
+            source,
+            import_ms,
+            load_ms,
+            total_ms,
+        )
 
     def embed(self, text: str) -> list[float]:
         return self.model.encode(text, normalize_embeddings=True).astype(np.float32).tolist()

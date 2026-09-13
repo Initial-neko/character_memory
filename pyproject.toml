@@ -26,8 +26,8 @@ media = [
   "sherpa-onnx-core==1.13.5",
 ]
 # Kokoro belongs to the canonical local stack now that :9002 exposes it as a
-# supported audition provider. Model weights are still prefetched explicitly by
-# scripts/setup-tts-models.sh so normal synthesis never downloads at request time.
+# supported audition/provider service. Model weights are prefetched explicitly
+# by scripts/setup-media-models.sh so normal synthesis never downloads on demand.
 tts-kokoro = [
   "kokoro>=0.9.4,<1",
   "misaki[zh]>=0.9.4,<1",
@@ -58,6 +58,7 @@ all = [
 character-memory = "character_memory.cli:main"
 character-media = "character_memory.media_bootstrap:main"
 character-dev = "character_memory.dev_server:main"
+character-settings = "character_memory.settings_server:main"
 character-tts-lab = "character_memory.tts_lab:main"
 character-stack = "character_memory.dev_stack:main"
 

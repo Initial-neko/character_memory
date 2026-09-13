@@ -10,6 +10,8 @@ from urllib.error import URLError
 from urllib.request import urlopen
 import webbrowser
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,6 +22,16 @@ def _healthy(url: str, timeout: float = 0.8) -> bool:
             return 200 <= int(response.status) < 300
     except (OSError, URLError):
         return False
+
+
+def _configured_tts_device(config_path: str) -> str:
+    try:
+        path = Path(config_path)
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        value = str((data or {}).get("tts_device", "cpu") or "cpu").strip().lower()
+        return value if value in {"cpu", "cuda"} else "cpu"
+    except (OSError, yaml.YAMLError):
+        return "cpu"
 
 
 def _media_env(base: dict[str, str]) -> dict[str, str]:
@@ -46,16 +58,28 @@ def _media_env(base: dict[str, str]) -> dict[str, str]:
     env.setdefault("CHARACTER_MEDIA_TTS_THREADS", "2")
     env.setdefault("CHARACTER_MEDIA_HOST", "127.0.0.1")
     env.setdefault("CHARACTER_MEDIA_PORT", "8001")
+    env.setdefault("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002")
     return env
 
 
-def _tts_lab_env(base: dict[str, str]) -> dict[str, str]:
+def _tts_lab_env(base: dict[str, str], config_path: str) -> dict[str, str]:
     env = dict(base)
     env.setdefault("CHARACTER_TTS_LAB_HOST", "127.0.0.1")
     env.setdefault("CHARACTER_TTS_LAB_PORT", "9002")
     env.setdefault("CHARACTER_TTS_LAB_MEDIA_BASE", "http://127.0.0.1:8001")
     env.setdefault("CHARACTER_TTS_COSYVOICE_BASE", "http://127.0.0.1:9012")
-    env.setdefault("CHARACTER_TTS_KOKORO_DEVICE", "cpu")
+    env.setdefault("CHARACTER_TTS_KOKORO_DEVICE", _configured_tts_device(config_path))
+    return env
+
+
+def _settings_env(base: dict[str, str]) -> dict[str, str]:
+    env = dict(base)
+    env.setdefault("CHARACTER_SETTINGS_HOST", "127.0.0.1")
+    env.setdefault("CHARACTER_SETTINGS_PORT", "8003")
+    env.setdefault("CHARACTER_SETTINGS_CHARACTER_BASE", "http://127.0.0.1:8000")
+    env.setdefault("CHARACTER_SETTINGS_MEDIA_BASE", "http://127.0.0.1:8001")
+    env.setdefault("CHARACTER_SETTINGS_DEV_BASE", "http://127.0.0.1:8002")
+    env.setdefault("CHARACTER_SETTINGS_TTS_LAB_BASE", "http://127.0.0.1:9002")
     return env
 
 
@@ -68,7 +92,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="character-stack")
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--open", choices=("dev", "chat", "tts"), default="dev")
+    parser.add_argument("--open", choices=("dev", "chat", "settings", "tts"), default="dev")
     args = parser.parse_args()
 
     base_env = os.environ.copy()
@@ -98,6 +122,12 @@ def main() -> None:
             base_env,
         ),
         (
+            "Settings Center",
+            "http://127.0.0.1:8003/health",
+            [python, "-m", "character_memory.settings_server"],
+            _settings_env(base_env),
+        ),
+        (
             "TTS Provider Lab",
             # Do not use /health here: that endpoint probes the provider inventory,
             # including the optional CosyVoice sidecar. If that sidecar is absent,
@@ -105,7 +135,7 @@ def main() -> None:
             # /tts proves the lab process itself is listening without provider I/O.
             "http://127.0.0.1:9002/tts",
             [python, "-m", "character_memory.tts_lab"],
-            _tts_lab_env(base_env),
+            _tts_lab_env(base_env, args.config),
         ),
     ]
 
@@ -136,15 +166,17 @@ def main() -> None:
             raise SystemExit(f"Timed out waiting for: {missing}")
 
         print("\nCharacter Memory stack is ready:", flush=True)
-        print("  Chat:    http://127.0.0.1:8000", flush=True)
-        print("  Media:   http://127.0.0.1:8001/health", flush=True)
-        print("  Dev:     http://127.0.0.1:8002/dev", flush=True)
-        print("  TTS Lab: http://127.0.0.1:9002/tts", flush=True)
+        print("  Chat:     http://127.0.0.1:8000", flush=True)
+        print("  Media:    http://127.0.0.1:8001/health", flush=True)
+        print("  Dev:      http://127.0.0.1:8002/dev", flush=True)
+        print("  Settings: http://127.0.0.1:8003/settings", flush=True)
+        print("  TTS Lab:  http://127.0.0.1:9002/tts", flush=True)
         print("Press Ctrl+C to stop processes started by this launcher.\n", flush=True)
 
         targets = {
             "chat": "http://127.0.0.1:8000",
             "dev": "http://127.0.0.1:8002/dev",
+            "settings": "http://127.0.0.1:8003/settings",
             "tts": "http://127.0.0.1:9002/tts",
         }
         if not args.no_browser:

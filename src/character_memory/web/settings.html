@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Character Memory Settings</title>
+  <link rel="stylesheet" href="/static/settings.css" />
+</head>
+<body>
+  <main class="settings-shell">
+    <header class="settings-topbar">
+      <div>
+        <p class="eyebrow">Character Memory</p>
+        <h1>Settings Center</h1>
+        <p class="subtle">统一管理正式运行配置与本地 Secret。V1 保存后统一重启 stack 生效。</p>
+      </div>
+      <nav class="service-links" aria-label="Service links">
+        <a href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Chat :8000</a>
+        <a href="http://127.0.0.1:8002/dev" target="_blank" rel="noreferrer">Dev :8002</a>
+        <a href="http://127.0.0.1:9002/tts" target="_blank" rel="noreferrer">TTS Lab :9002</a>
+      </nav>
+    </header>
+
+    <section id="notice" class="notice hidden" role="status"></section>
+
+    <section class="toolbar card">
+      <div>
+        <strong>配置文件</strong>
+        <div id="configPath" class="mono subtle">loading...</div>
+      </div>
+      <div class="toolbar-actions">
+        <button id="reloadSettings" class="secondary" type="button">重新读取</button>
+        <button id="saveSettings" type="button">保存配置</button>
+      </div>
+    </section>
+
+    <section class="runtime-grid" aria-label="Runtime status">
+      <article class="card runtime-card"><div><strong>Character</strong><span>:8000</span></div><span id="runtime-character" class="badge unknown">unknown</span></article>
+      <article class="card runtime-card"><div><strong>Media</strong><span>:8001</span></div><span id="runtime-media" class="badge unknown">unknown</span></article>
+      <article class="card runtime-card"><div><strong>Dev</strong><span>:8002</span></div><span id="runtime-dev" class="badge unknown">unknown</span></article>
+      <article class="card runtime-card"><div><strong>TTS Lab</strong><span>:9002</span></div><span id="runtime-tts_lab" class="badge unknown">unknown</span></article>
+    </section>
+
+    <section id="settingsSections" class="settings-grid" aria-label="Settings"></section>
+
+    <section class="card secrets-card">
+      <div class="section-heading">
+        <div>
+          <h2>Secrets</h2>
+          <p>API Key / Token 只保存到 <code>.env</code>；系统环境变量优先级更高。页面不会读取或返回明文 Key。</p>
+        </div>
+        <button id="migrateSecrets" class="secondary" type="button">迁移旧 config Key</button>
+      </div>
+      <div id="secretList" class="secret-list"></div>
+    </section>
+
+    <section class="card footer-card">
+      <h2>生效规则</h2>
+      <p>当前 V1 不做部分热更新。保存普通配置会先生成 <code>config.yaml.bak.YYYYMMDD-HHMMSS</code>，再原子替换配置；Secret 写入 <code>.env</code>，不会生成包含 Key 的历史备份。</p>
+      <p>保存完成后执行一次 <code>Ctrl+C</code> 停止当前 stack，再运行 <code>uv run character-stack</code>。正式聊天 TTS 默认由这里的 <strong>TTS Provider / Default Voice</strong> 决定。</p>
+    </section>
+  </main>
+  <script src="/static/settings.js"></script>
+</body>
+</html>

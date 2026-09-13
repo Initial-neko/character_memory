@@ -1,7 +1,6 @@
-# Copy to config.yaml. Prefer OPENCODE_GO_API_KEY instead of writing the key here.
-api_key: ""
+# Copy to config.yaml. Secrets belong in .env and are managed by Settings Center.
 base_url: "https://opencode.ai/zen/go/v1"
-# OpenCode Go model id. deepseek-flash is used for both text and image turns by default.
+# OpenCode Go model id. deepseek-flash is used for text and image turns by default.
 chat_model: "deepseek-flash"
 # Optional compatibility override for providers that still require a dedicated vision model.
 # Leave empty to reuse chat_model for image input.
@@ -12,16 +11,20 @@ llm_attempts: 2
 # Real semantic embeddings are enabled from Day 1.
 embedding_provider: "sentence-transformers"
 embedding_model: "BAAI/bge-small-zh-v1.5"
-
 # Alternative for any provider exposing POST /embeddings:
 # embedding_provider: "openai-compatible"
 # embedding_base_url: "https://your-provider/v1"
 # embedding_model: "your-embedding-model"
-# embedding_api_key: ""
 
-# Image search provider for avatar candidates.
+# Formal chat TTS. Provider Lab :9002 is still the audition/benchmark surface.
+# setup-media-models.sh prepares Kokoro model/voice files before runtime.
+tts_provider: "kokoro"       # kokoro | sherpa
+tts_voice: "zf_001"          # Kokoro zf_001..zf_004; Sherpa 0 / 2 / 5
+tts_speed: 1.0
+tts_device: "cpu"            # cpu | cuda (Kokoro)
+
+# Image search provider for avatar candidates. Keys live in .env.
 search_provider: "searchapi"
-search_api_key: ""
 search_country: "jp"
 search_language: "zh-cn"
 search_safe_search: "strict"
@@ -37,13 +40,9 @@ search_safe_search: "strict"
 # while Dev Console provides the provider-oriented diagnostics surface.
 image_generation_provider: "agnes"   # agnes | msimg
 image_generation_timeout_seconds: 180
-# Prefer AGNES_API_KEY in the environment.
-agnes_api_key: ""
 agnes_base_url: "https://apihub.agnes-ai.com/v1"
 agnes_image_model: "agnes-image-2.1-flash"
-# Prefer MSIMG_API_KEY or MODELSCOPE_API_TOKEN in the environment.
 # For the complete local dev environment run: bash scripts/sync-all.sh
-msimg_api_key: ""
 # Comma-separated model aliases/ModelScope model IDs. Multiple values enable failover.
 msimg_models: "qwen"
 

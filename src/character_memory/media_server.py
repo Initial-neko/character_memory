@@ -11,6 +11,8 @@ from character_memory.media_runtime import MediaRuntime, build_media_runtime_fro
 
 class TtsRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+    # Legacy Sherpa request fields stay accepted. In production configured routing,
+    # formal defaults are authoritative unless `voice` is explicitly supplied.
     speaker_id: int | None = Field(default=None, ge=0, le=10000)
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
     voice: str | None = Field(default=None, max_length=128)
@@ -91,12 +93,16 @@ def create_media_app(runtime: MediaRuntime | None = None):
     @app.post("/v1/tts")
     def synthesize(req: TtsRequest):
         selected = str(settings.tts_provider or "sherpa").strip().lower()
+        explicit_voice = str(req.voice or "").strip()
+
         if configured_routing and selected == "kokoro":
             # :9002 is both the audition UI and the local provider service in V1.
             # Media Runtime remains the stable browser-facing TTS endpoint, so the
             # chat page does not need provider-specific URLs or CORS rules.
-            voice = str(req.voice or settings.tts_voice or "zf_001")
-            speed = float(req.speed if req.speed is not None else settings.tts_speed)
+            voice = explicit_voice or str(settings.tts_voice or "zf_001")
+            # Browser Voice V0 still carries legacy speed=1.0. Treat it as formal
+            # config unless a caller also supplies an explicit voice override.
+            speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
             try:
                 response = provider_client.post(
                     f"{tts_lab_base}/v1/tts",
@@ -129,10 +135,10 @@ def create_media_app(runtime: MediaRuntime | None = None):
 
         try:
             if configured_routing:
-                speaker_id = int(settings.tts_voice) if str(settings.tts_voice).isdigit() else 0
-                if req.speaker_id is not None:
-                    speaker_id = req.speaker_id
-                speed = float(req.speed if req.speed is not None else settings.tts_speed)
+                configured_voice = str(settings.tts_voice or "0")
+                voice_value = explicit_voice or configured_voice
+                speaker_id = int(voice_value) if voice_value.isdigit() else 0
+                speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
             else:
                 speaker_id = int(req.speaker_id or 0)
                 speed = float(req.speed if req.speed is not None else 1.0)

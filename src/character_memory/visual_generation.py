@@ -4,12 +4,13 @@ import base64
 import importlib.util
 import io
 import logging
+import re
 import sys
 from enum import Enum
 from typing import Any, Protocol
 
 import httpx
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 logger = logging.getLogger("character_memory.visual_generation")
@@ -22,20 +23,17 @@ class VisualPurpose(str, Enum):
     STICKER = "STICKER"
 
 
-class VisualPromptPlan(BaseModel):
-    purpose: VisualPurpose
-    visual_intent: str = Field(min_length=1, max_length=600)
-    positive_prompt: str = Field(min_length=1, max_length=6000)
-    negative_prompt: str = Field(default="", max_length=2000)
-    aspect_ratio: str = Field(default="1:1", max_length=16)
-    identity_constraints: list[str] = Field(default_factory=list, max_length=12)
+_DEFAULT_ASPECT_RATIO = {
+    VisualPurpose.AVATAR: "1:1",
+    VisualPurpose.SELFIE: "3:4",
+    VisualPurpose.SCENE: "4:3",
+    VisualPurpose.STICKER: "1:1",
+}
 
-    @field_validator("aspect_ratio")
-    @classmethod
-    def normalize_ratio(cls, value: str) -> str:
-        ratio = str(value or "1:1").strip()
-        allowed = {"1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"}
-        return ratio if ratio in allowed else "1:1"
+
+def visual_aspect_ratio(purpose: VisualPurpose) -> str:
+    """Business-owned output shape; the prompt LLM does not control transport parameters."""
+    return _DEFAULT_ASPECT_RATIO.get(purpose, "1:1")
 
 
 class ImageGenerationRequest(BaseModel):
@@ -274,7 +272,12 @@ class MsimgProvider:
 
 
 class VisualPromptPlanner:
-    """Compile character state + visual intent into provider-neutral image prompts."""
+    """Compile character state + visual intent into one provider-ready text prompt.
+
+    The character LLM already made the structured GENERATE_IMAGE decision. This
+    stage deliberately returns plain text only; aspect ratio, reference images,
+    provider selection and persistence remain application-owned.
+    """
 
     def __init__(self, model):
         self.model = model
@@ -288,7 +291,16 @@ class VisualPromptPlanner:
         text = str(value).strip()
         return text[:limit]
 
-    def plan(
+    @staticmethod
+    def _clean_output(value: str) -> str:
+        text = str(value or "").strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:text|txt|markdown)?\s*|\s*```$", "", text, flags=re.S | re.I).strip()
+        if not text:
+            raise RuntimeError("visual prompt planner returned an empty prompt")
+        return text
+
+    def compile_prompt(
         self,
         character_id: str,
         *,
@@ -298,28 +310,33 @@ class VisualPromptPlanner:
         recent_dialogue: list[str] | None = None,
         visual_intent: str = "",
         has_reference_image: bool = False,
-    ) -> VisualPromptPlan:
-        recent = []
+    ) -> str:
+        recent: list[str] = []
         for raw in recent_dialogue or []:
             text = " ".join(str(raw or "").split()).strip()
             if text:
                 recent.append(text[:360])
             if len(recent) >= 8:
                 break
-        prompt = f"""你正在为持续存在的聊天角色编译一条绘图提示词。你不是在回复用户，也不要决定是否应该发图；角色已经做出了视觉表达决定。
 
-目标：
-1. 严格保持人物核心身份、年龄感、发色、眼睛、气质和标志性特征的一致性，不要为了画面效果擅自换人。
-2. purpose={purpose.value}。AVATAR 要适合聊天头像；SELFIE 要像人物本人自然分享的自拍；SCENE 是人物想表达的场景/配图；STICKER 要突出单一聊天情绪并简洁清晰。
-3. 有参考头像时，把它视为人物身份锚点；提示词强调保留身份而不是重新设计角色。
-4. 最近对话和 Mental State 只用于推断合理氛围，不要原样泄露隐私、姓名、关系秘密或长期记忆内容到绘图提示词。
-5. 不虚构会改变人物事实的重要事件。自拍场景应自然、日常，不要自动变成摄影棚写真。
-6. 输出给通用图像模型的 positive_prompt 要完整、具体、可直接使用；negative_prompt 只写真正有助于避免身份漂移/低质量的问题。
-7. aspect_ratio 只能从 1:1、3:4、4:3、16:9、9:16、2:3、3:2、21:9 中选择。头像默认 1:1，自拍通常 3:4 或 4:3，贴图默认 1:1。
-8. 不要输出解释或思维过程，只返回 VisualPromptPlan JSON。
+        purpose_guidance = {
+            VisualPurpose.AVATAR: "适合作为聊天头像，主体清楚，构图简洁自然。",
+            VisualPurpose.SELFIE: "像人物本人自然分享的日常自拍，不要自动变成摄影棚写真。",
+            VisualPurpose.SCENE: "生成角色想表达给对方看的场景或配图，不要求人物必须出镜。",
+            VisualPurpose.STICKER: "突出一个清晰聊天情绪，画面简洁。",
+        }[purpose]
+
+        user_prompt = f"""把下面信息编译成一条可以直接交给图像生成模型的最终绘图提示词。
+
+要求：
+- 只输出最终绘图提示词纯文本；不要 JSON、Markdown、代码块、字段名、解释或分析。
+- 保持 Persona 中人物核心身份、年龄感、发色、眼睛、气质和标志性特征一致，不要为了画面效果擅自重新设计角色。
+- Purpose={purpose.value}：{purpose_guidance}
+- 最近对话和 Mental State 只用于推断合理氛围，不要把姓名、关系秘密、长期记忆原文等隐私内容机械抄进绘图提示词。
+- 不虚构会改变人物事实的重要事件。
+- 是否携带参考头像、画布比例、Provider 参数由程序处理；不要输出这些控制参数。
 
 Character ID: {character_id}
-Purpose: {purpose.value}
 Has reference image: {has_reference_image}
 
 [Persona]
@@ -332,20 +349,38 @@ Has reference image: {has_reference_image}
 {chr(10).join(recent) or '暂无近期对话'}
 
 [Character Visual Intent]
-{self._compact(visual_intent, 800) or '保持人物身份一致，生成自然且适合当前 purpose 的图像'}
+{self._compact(visual_intent, 800) or '保持人物身份一致，生成自然且适合当前用途的图像'}
 """
-        method = getattr(self.model, "structured_for_session", None)
-        if callable(method):
-            result = method(prompt, VisualPromptPlan, f"visual-plan:{character_id}:{purpose.value.lower()}")
-        else:
-            method = getattr(self.model, "structured_with_images_for_session", None)
-            if not callable(method):
-                raise RuntimeError("loaded model does not support structured visual planning")
-            result = method(prompt, [], VisualPromptPlan, f"visual-plan:{character_id}:{purpose.value.lower()}")
-        plan = result if isinstance(result, VisualPromptPlan) else VisualPromptPlan.model_validate(result)
-        if plan.purpose != purpose:
-            raise ValueError(f"visual planner purpose mismatch: requested {purpose.value}, got {plan.purpose.value}")
-        return plan
+        messages = [
+            {
+                "role": "system",
+                "content": "你是绘图提示词编译器。只写最终可直接用于图像生成的 prompt 纯文本，不返回 JSON。",
+            },
+            {"role": "user", "content": user_prompt},
+        ]
+        session_id = f"visual-plan:{character_id}:{purpose.value.lower()}"
+        request = getattr(self.model, "_request", None)
+        if not callable(request):
+            raise RuntimeError("loaded model does not expose a plain-text request path for visual prompt compilation")
+        text = self._clean_output(
+            request(
+                messages,
+                conversation_id=session_id,
+                json_object=False,
+            )
+        )
+
+        if has_reference_image:
+            identity_policy = (
+                "Use the supplied reference image as the identity anchor. Preserve the same person, facial features, "
+                "hair color and style, eye color, age impression, and defining visual traits. Do not redesign, replace, "
+                "or substitute the character."
+            )
+            text = f"{text}\n\n{identity_policy}"
+
+        if len(text) > 8000:
+            text = text[:8000].rstrip()
+        return text
 
 
 def build_image_providers(settings) -> dict[str, ImageGenerationProvider]:

@@ -13,11 +13,12 @@
       <div>
         <p class="eyebrow">Character Memory</p>
         <h1>TTS Provider Lab</h1>
-        <p class="subtle">统一试听 Sherpa VITS、Kokoro 中文模型与 CosyVoice SFT。这里只做音质/延迟评估，不会改变正式聊天的默认 TTS。</p>
+        <p class="subtle">统一试听 Sherpa VITS、Kokoro 中文模型与 CosyVoice SFT。正式聊天默认 TTS 请在 Settings Center 中配置。</p>
       </div>
       <div class="service-links">
         <a class="secondary-link" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Chat :8000</a>
         <a class="secondary-link" href="http://127.0.0.1:8002/dev" target="_blank" rel="noreferrer">Dev :8002</a>
+        <a class="secondary-link" href="http://127.0.0.1:8003/settings" target="_blank" rel="noreferrer">Settings :8003</a>
         <button id="refreshProviders" class="secondary">刷新 Provider</button>
       </div>
     </header>
@@ -65,7 +66,7 @@
 
     <section class="card wide">
       <div class="card-title-row"><h2>运行边界</h2><span class="pill">experimental</span></div>
-      <p class="subtle">Sherpa 复用 Media Runtime :8001；Kokoro 在当前 Python 3.12 环境中按需加载；CosyVoice 由于依赖栈不同，使用独立 sidecar :9012。首次 Kokoro 推理可能需要下载模型。</p>
+      <p class="subtle">Sherpa 复用 Media Runtime :8001；Kokoro 使用预下载的本地模型；CosyVoice 使用独立 sidecar :9012。Media Runtime 是聊天页面稳定的 TTS 入口，并根据 Settings 中的正式 Provider 选择转发。</p>
     </section>
   </main>
   <script src="/static/tts_lab.js"></script>

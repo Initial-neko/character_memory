@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Character Memory TTS Provider Lab</title>
+  <link rel="stylesheet" href="/static/dev.css" />
+  <link rel="stylesheet" href="/static/tts_lab.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Character Memory</p>
+        <h1>TTS Provider Lab</h1>
+        <p class="subtle">统一试听 Sherpa VITS、Kokoro 中文模型与 CosyVoice SFT。这里只做音质/延迟评估，不会改变正式聊天的默认 TTS。</p>
+      </div>
+      <div class="service-links">
+        <a class="secondary-link" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Chat :8000</a>
+        <a class="secondary-link" href="http://127.0.0.1:8002/dev" target="_blank" rel="noreferrer">Dev :8002</a>
+        <button id="refreshProviders" class="secondary">刷新 Provider</button>
+      </div>
+    </header>
+
+    <section class="grid status-grid" id="providerStatusGrid" aria-label="TTS provider status"></section>
+
+    <section class="card wide">
+      <div class="card-title-row">
+        <div>
+          <h2>试听文本</h2>
+          <p class="subtle">建议用同一句中文逐个对比音色、咬字、停顿与长句稳定性。</p>
+        </div>
+        <div class="actions"><button id="compareReady">生成全部可用 Provider</button></div>
+      </div>
+      <textarea id="ttsLabText" rows="6">刚才其实想了很久，不过后来觉得，有些事情可能没有想象中那么复杂。嗯，今天应该还挺顺利的。</textarea>
+      <div class="tts-lab-controls">
+        <label>Provider
+          <select id="ttsLabProvider"></select>
+        </label>
+        <label>Voice
+          <select id="ttsLabVoice"></select>
+        </label>
+        <label>Speed
+          <input id="ttsLabSpeed" type="number" min="0.5" max="2" step="0.05" value="1.0" />
+        </label>
+        <button id="generateTtsLab">Generate</button>
+      </div>
+      <div id="singleResult" class="tts-lab-single">
+        <audio id="ttsLabAudio" controls></audio>
+        <pre id="ttsLabResult" class="result">等待试听...</pre>
+      </div>
+    </section>
+
+    <section class="card wide">
+      <div class="card-title-row">
+        <div>
+          <h2>A/B Comparison</h2>
+          <p class="subtle">每个已就绪 Provider 使用其默认 voice 生成同一文本。生成是串行的，避免多个大模型同时抢显存。</p>
+        </div>
+      </div>
+      <div id="comparisonGrid" class="tts-comparison-grid">
+        <div class="subtle">点击“生成全部可用 Provider”开始。</div>
+      </div>
+    </section>
+
+    <section class="card wide">
+      <div class="card-title-row"><h2>运行边界</h2><span class="pill">experimental</span></div>
+      <p class="subtle">Sherpa 复用 Media Runtime :8001；Kokoro 在当前 Python 3.12 环境中按需加载；CosyVoice 由于依赖栈不同，使用独立 sidecar :9012。首次 Kokoro 推理可能需要下载模型。</p>
+    </section>
+  </main>
+  <script src="/static/tts_lab.js"></script>
+</body>
+</html>

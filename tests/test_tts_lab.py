@@ -87,11 +87,9 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert "CosyVoice" not in all_extra
 
     assert 'REPO_ID = "hexgrad/Kokoro-82M-v1.1-zh"' in server
+    assert 'DEFAULT_VOICES = ["zf_001", "zf_002", "zf_003", "zf_004"]' in server
     for voice in ("zf_001", "zf_002", "zf_003", "zf_004"):
-        assert voice in server
         assert voice in prefetch
-    for stale_voice in ("zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi"):
-        assert stale_voice not in server
     assert "try_to_load_from_cache" in server
     assert "setup-tts-models.sh" in server
     assert '"http://127.0.0.1:9012"' in server

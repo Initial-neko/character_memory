@@ -78,7 +78,9 @@ Person LLM 可以输出内部 action：
 - `SELFIE`
 - `SCENE`
 
-并且只允许 direct `USER_MESSAGE` 触发角色自主 ImageGen。
+Direct `USER_MESSAGE` 与 Group 中各成员的 `USER_MESSAGE` reaction 都可以自主产生 `GENERATE_IMAGE`。是否画、画什么、以及 `visual_intent` 都由对应 Character 自己决定，不需要用户先打开生图工具或手写 Prompt。
+
+同一 Character 单轮仍最多产生 1 个 `GENERATE_IMAGE`；不同群成员如果各自确实想画，可以分别产生自己的生成任务。
 
 ### SELFIE
 
@@ -90,7 +92,7 @@ Reference 是身份一致性工具，不意味着把头像像素复制粘贴进�
 
 ### SCENE
 
-语义：人物想分享一个场景、环境、氛围或配图。
+语义：人物想分享一个场景、环境、氛围、设计稿或其它视觉表达。
 
 **SCENE 不要求人物必须出镜。**
 
@@ -99,11 +101,12 @@ Reference 是身份一致性工具，不意味着把头像像素复制粘贴进�
 - 窗外的雨夜；
 - 房间桌面；
 - 她现在看到的街道；
-- 想象中的某个场景。
+- 想象中的某个场景；
+- 根据群聊任务要求给出的界面稿、角色草图或概念设计。
 
 当前自主 SCENE 不会为了“保持角色身份”机械附带 avatar reference。
 
-如果未来要区分 `ENVIRONMENT / POV / CHARACTER_SCENE`，应先用真实需求证明 `SCENE` 语义不够，而不是提前扩 enum。
+如果未来真实需求证明设计稿需要独立画幅、reference 或 provider 策略，再扩 `DESIGN`；当前不为分类完整性提前增加 enum。
 
 ## 5. Async execution
 
@@ -122,14 +125,15 @@ main reaction returns / SSE text
             ↓
      MediaAsset + IMAGE Event
             ↓
-         direct SSE
+      direct/group SSE
 ```
 
 因此：
 
 - 图片慢，不阻塞已经成立的文字表达；
 - Provider 故障只记录 visual error，不回滚文字/Mental State；
-- Provider 生成期间用户又发了新事实时，可以通过 `still_current` 丢弃 stale image。
+- Provider 生成期间用户又发了新事实时，可以通过 `still_current` / group user watermark 丢弃 stale image；
+- Group 生成完成后，图片以发起 `GENERATE_IMAGE` 的 Character 身份写入 `conversation_events` 并推送到当前群聊。
 
 成功图片 Event metadata 包含 generation purpose/provider/model/source event 等 provenance。
 
@@ -178,19 +182,17 @@ data URL image draft
 
 ## 7. Direct and Group tool UX
 
-显式 AI 生图工具可以从聊天页面触发。
+显式 AI 生图工具和 Character 自主 ImageGen 是两条不同路径。
 
 ### Direct
 
-当前 Character 自然提供 Persona/reference context。
+当前 Character 自然提供 Persona/reference context；Character 自己也可以在 reaction 中选择 `GENERATE_IMAGE`。
 
 ### Group
 
-工具需要先选一个 Character 作为视觉参考人物，因为一个 Group 没有唯一 Persona/avatar。
+显式工具仍需要先选一个 Character 作为视觉参考人物，因为一个 Group 没有唯一 Persona/avatar。该路径生成的是**用户控制的 draft**，最终用户确认后再作为 group image message 发送。
 
-生成结果本身仍是**用户生成的 draft**，最终用户确认后作为 group image message 发送；它不等于某个群成员自主产生的 `GENERATE_IMAGE`。
-
-当前没有开放“多个群成员各自在同一 group turn 自主 ImageGen”，避免 2~4 个成员同时消耗 Provider 成本和制造不清晰的 room ordering。
+自主路径则不同：群成员在自己的 PersonReaction 中决定是否输出 `GENERATE_IMAGE`，系统复用和单聊相同的 Prompt Planner / Provider / MediaStorage，并在生成完成后把 IMAGE Event 归属到该 Character。用户不需要自己写 Prompt，也不需要额外点击“生成”。
 
 ## 8. Providers
 
@@ -279,7 +281,7 @@ bash scripts/sync-all.sh
 ## 12. Current boundaries
 
 - Wake/Proactive 不自动生成图片。
-- 群成员自主 ImageGen 尚未开启。
-- 不做自动无限重画/自动选最佳图。
+- Group 自主 ImageGen 仅来自各成员自己的 reaction；系统不替人物强制画图。
+- 每个 Character 单轮最多 1 个自主生成任务；不做自动无限重画/自动选最佳图。
 - 不把 Prompt planner 重新复杂化为大 JSON schema。
 - 生成图的长期语义仍应通过正常 Event/Memory provenance 进入人物历史，而不是把二进制本身当 Memory。

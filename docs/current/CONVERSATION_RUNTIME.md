@@ -1,20 +1,27 @@
 # Conversation Runtime
 
-本文汇总当前 Direct / Group Chat 的事实存储、异步反应、SSE、搜索和 Mention contract。历史 P0.15/P0.16 文档已归档，不再作为当前入口。
+本文汇总当前 Direct / Group Chat 的事实存储、异步反应、SSE、Visual Capture、搜索和 Mention contract。历史 P0.x 文档已归档，不再作为当前入口。
 
 ## 1. User message first, reaction later
 
-WebUI 当前发送用户消息时使用：
+正式 WebUI 发送用户消息时使用异步 accept path：
 
 ```text
 POST /v1/chat/messages
 POST /v1/groups/{conversation_id}/messages
 ```
 
+带 Camera/Screen 关键帧时使用：
+
+```text
+POST /v1/visual/direct/messages
+POST /v1/visual/groups/{conversation_id}/messages
+```
+
 服务端先：
 
-1. 校验文本/Sticker/Image；
-2. 保存媒体（如有）；
+1. 校验文本/Sticker/Image/Visual Capture；
+2. 保存需要长期持久化的媒体；
 3. 持久化用户 Event；
 4. enqueue reaction；
 5. HTTP 202 返回。
@@ -23,7 +30,7 @@ POST /v1/groups/{conversation_id}/messages
 
 Character reaction 由 `ReactionScheduler` 异步处理，通过 SSE 推给前端。
 
-旧同步接口仍可能服务 CLI/兼容测试，但不是正式 WebUI 主路径。
+Visual Capture 是例外中的“transient payload”：Camera/Screen frame bytes 不作为普通聊天附件持久化，只把必要 metadata 写进 Event，并把 image data URLs 传给本轮模型 Vision context。
 
 ## 2. Burst window
 
@@ -59,9 +66,9 @@ Superseded cycle 不应：
 - 写旧 Mental State；
 - 写旧 Memory/Intent；
 - 写过时 Character Message；
-- 消耗掉尚未处理的 image/mention signal。
+- 消耗掉尚未处理的 image/mention/visual signal。
 
-这是为了避免“用户已经补充一句话，角色几秒后还把上一版理解硬发出来”。
+自主 ImageGen 也有 stale guard。Direct 使用现有 `still_current` 语义；Group 使用最新 user event watermark。图片生成期间房间已经进入更新用户事实时，旧图片不会硬插回新 turn。
 
 ## 4. SSE
 
@@ -104,11 +111,9 @@ SSE hub 是 ephemeral transport，不是 durable source of truth。
 
 1. durable chat history 先由 history API 对齐；
 2. fresh stream 不重放很久以前的 typing/member events；
-3. 服务端会额外发送当前 Scheduler 的 authoritative `reaction_status` snapshot。
+3. 服务端额外发送当前 Scheduler 的 authoritative `reaction_status` snapshot。
 
-这样用户切换人物/群聊/Tab 时，即使错过了旧 `idle` event，也不会让前端本地的“正在输入中…”永久残留。
-
-真正的 EventSource 网络自动重连则继续使用 `Last-Event-ID` 尽量补 transient gap。
+真正的 EventSource 网络自动重连继续使用 `Last-Event-ID` 尽量补 transient gap。
 
 ## 5. Direct chat
 
@@ -117,6 +122,8 @@ Direct Event 存在 core `events` 表中，以 `character_id` 区分人物，并
 同一人物 turn 通过 ChatService lock 串行，避免同一个 Character 的 derived state 交叉提交。
 
 不同 Character/Conversation 的 Provider 调用可以 overlap。
+
+Direct Character 如果 reaction 中产生 `GENERATE_IMAGE`，主 reaction 先完成；Visual Runtime 在后台生成并追加 IMAGE Event/SSE。
 
 ## 6. Group chat
 
@@ -155,13 +162,44 @@ B failure -> member-local error/silence
 C continues
 ```
 
-不会因为 B 的一次冒失把后面成员全部吞掉。
+不会因为 B 的一次失败把后面成员全部吞掉。
 
 如果这一轮所有成员都失败，才提升为 group-level reaction error，避免把系统性故障伪装成“大家都沉默”。
 
+### Group autonomous ImageGen
+
+Group 中每个 Character 都可以在自己的用户消息 reaction 中独立决定是否输出：
+
+```json
+{
+  "type": "GENERATE_IMAGE",
+  "image_purpose": "SELFIE",
+  "visual_intent": "..."
+}
+```
+
+它不是“群聊另建一套生图系统”。当前复用：
+
+- `VisualPromptPlanner`
+- Image Provider abstraction
+- MediaStorage
+- `SELFIE / SCENE`
+- avatar reference
+- stale-result guard
+
+生成完成后，以对应 Character 身份写入：
+
+```text
+conversation_events
+```
+
+并通过已有 `group_character_event` SSE 推送。
+
+主文本/状态先提交，ImageGen 是 secondary asynchronous event；Provider 失败不会回滚主 reaction。
+
 ### Conversation Archive
 
-群聊支持 Codex 风格的归档/恢复。归档是 **soft hide**，不是删除事实。
+群聊支持 soft archive/restore。归档不是删除事实。
 
 SQLite `conversations` 保存：
 
@@ -170,39 +208,16 @@ archived_at
 archived_at_epoch
 ```
 
-默认：
-
-```text
-GET /v1/groups
-```
-
-只返回 `archived_at IS NULL` 的活跃群聊。
-
-归档列表：
-
-```text
-GET /v1/groups?archived=true
-```
-
-状态变更：
-
-```text
-POST /v1/groups/{conversation_id}/archive
-POST /v1/groups/{conversation_id}/restore
-```
+默认 `GET /v1/groups` 只返回活跃群聊，`GET /v1/groups?archived=true` 返回归档列表。
 
 归档不会删除：
 
 - `conversation_events`
 - `conversation_runtime_traces`
-- Character 已经形成的 Memory
+- Character 已形成的 Memory
 - MediaAsset / 本地媒体文件
 
-归档后的 history/trace 仍可读取，因此数据仍然可恢复、可审计；但普通列表、普通 message search、群聊发送以及新的 group SSE 连接都会把该群视为非活跃，直到 Restore。
-
-Archive 与 group reaction 使用同一 per-group lock。若归档动作撞上正在提交的群成员反应，会等待当前临界区安全结束，不通过删除/取消事实来制造半提交状态。
-
-当前 Direct Chat 仍是 Character-centric persistent timeline，并没有正式的多 Thread Registry，因此本 contract 暂时只用于 Group Conversation。不要把“隐藏 Character”与“归档 Conversation”混为一件事。
+Archive 与 group reaction 使用同一 per-group lock，避免形成半提交状态。
 
 ## 7. Group Mentions
 
@@ -225,13 +240,11 @@ Durable metadata 保存 Character ID：
 
 多个 Mention 按出现顺序领先，其余成员再按普通 room order 判断。
 
-Mention signal 参与同一 burst/supersession 生命周期，不会因为旧 generation 被 supersede 就提前丢失。
+## 8. User media and Visual Capture
 
-## 8. User media in conversations
+### Durable image attachment
 
-文件选择、Clipboard paste、AI generated draft 最终都复用统一 image-send contract。
-
-用户图片：
+文件选择、Clipboard paste、AI generated draft 最终都复用统一 image-send contract：
 
 ```text
 browser data URL
@@ -247,16 +260,68 @@ current turn can use Vision
 
 Base64 不进入 Event/Trace 数据库。
 
-AI 生成工具默认只把结果放进前端 draft；用户最终按发送后，才和普通粘贴图片一样成为聊天事实。
+显式 AI 生图工具默认只把结果放进前端 draft；用户最终按发送后，才和普通粘贴图片一样成为聊天事实。
 
-## 9. Message search
+### Transient Camera / Display Capture
+
+Visual Capture：
+
+```text
+Camera / Display stream
+  ↓ browser keyframe sampling
+1..5 selected frames
+  ↓
+visual message route
+  ↓
+Event stores metadata only
+  ↓
+frame data URLs passed to this reaction
+```
+
+限制：
+
+- 最多 5 帧；
+- 单帧 `<= 2 MiB`；
+- 总计 `<= 6 MiB`；
+- JPEG / PNG / WebP；
+- Direct / Group 都支持。
+
+Event metadata 只保存类似：
+
+```text
+frame_count
+sources
+captured_at_ms
+```
+
+frame bytes 不作为长期聊天附件。
+
+详见 [`VISUAL_CAPTURE.md`](VISUAL_CAPTURE.md)。
+
+## 9. Voice transcript gate
+
+Browser Voice 的 ASR transcript 在创建聊天事实前先做最小有效性过滤：
+
+```text
+trim 后空字符串        -> reject
+纯符号/标点             -> reject
+任意汉字                 -> accept
+ASCII Latin/digit >= 2  -> accept
+其它                     -> reject
+```
+
+无效 transcript 不会发送 chat message，也不会因为当前通话开启了 Camera/Screen 而上传 Visual Capture frame；UI 回到 listening。
+
+这个 gate 只是防明显垃圾 ASR，不是 NLP 语义判定器。
+
+## 10. Message search
 
 Search 只查真实 durable chat facts：
 
 - Direct：`events` 中 USER/CHARACTER message；
 - Group：活跃 `conversations` 的 `conversation_events`。
 
-归档 Group 默认不进入普通 message search；恢复后自动重新进入搜索范围。底层 Event 没有被删除。
+归档 Group 默认不进入普通 message search；恢复后自动重新进入搜索范围。底层 Event 没有删除。
 
 不搜索：
 
@@ -266,16 +331,25 @@ Search 只查真实 durable chat facts：
 - Intent
 - Diary
 
-当前两种模式：
+Baseline 使用参数化 SQLite `LIKE`。数据量真正证明 full scan 不够时，再考虑 FTS5，不提前改变 API contract。
 
-- current conversation
-- global direct + group
+## 11. Timestamp UX
 
-Baseline 仍使用参数化 SQLite `LIKE`，用户输入中的 `%/_` 等会按 literal 处理。数据量真正证明 full scan 不够时，再考虑 FTS5，不提前改变 API contract。
+Direct / Group 聊天消息共享：
 
-搜索结果带 deep-history navigation 信息，前端复用现有 history pagination/window，不建立第二套历史数据模型。
+```text
+web/time_format.js
+```
 
-## 10. Typing indicator semantics
+当前消息时间显示：
+
+```text
+MM-DD HH:mm:ss
+```
+
+日期 separator 保持原有逻辑，不因为消息 timestamp 增加月日而删除。
+
+## 12. Typing indicator semantics
 
 “正在输入中”是 reaction runtime 的 UI 状态，不是人物真的在逐字键盘输入。
 
@@ -289,7 +363,7 @@ Baseline 仍使用参数化 SQLite `LIKE`，用户输入中的 `%/_` 等会按 l
 
 它不应该因为页面切换而永久残留；fresh SSE status snapshot 负责重新校正。
 
-## 11. Failure model
+## 13. Failure model
 
 优先级：
 
@@ -297,6 +371,7 @@ Baseline 仍使用参数化 SQLite `LIKE`，用户输入中的 `%/_` 等会按 l
 Durable user fact
   > outward reply
   > optional memory/intent metadata
+  > optional slow visual output
   > ephemeral UI status
 ```
 
@@ -307,9 +382,10 @@ Durable user fact
 - outward action 自己 malformed 时仍需要 repair/failure；
 - 一个 group member 失败不应该结束整个 room turn；
 - ImageGen 等慢工具失败不应该反向撤销文本回复；
-- SSE 丢一个 transient UI event 不应该破坏 durable history。
+- SSE 丢一个 transient UI event 不应该破坏 durable history；
+- Camera/Screen frame bytes 丢失不等于 durable User Event 被删除。
 
-## 12. Scaling boundary
+## 14. Scaling boundary
 
 当前 Scheduler/SSE hub 是进程内对象。
 

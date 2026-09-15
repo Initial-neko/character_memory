@@ -36,8 +36,8 @@ search_safe_search: "strict"
 # web_search_enabled: false
 # web_fetch_enabled: false
 
-# P0.19 direct-character image generation. Chat exposes a guided AI image tool,
-# while Dev Console provides the provider-oriented diagnostics surface.
+# Character autonomous ImageGen and the guided chat image tool share this provider config.
+# Dev Console provides the provider-oriented diagnostics surface.
 image_generation_provider: "agnes"   # agnes | msimg
 image_generation_timeout_seconds: 180
 agnes_base_url: "https://apihub.agnes-ai.com/v1"

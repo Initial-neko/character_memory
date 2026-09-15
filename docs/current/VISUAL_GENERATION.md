@@ -1,19 +1,22 @@
 # Visual Generation
 
-本文描述当前图片生成能力。它与“用户上传图片给 Vision 看”是两个不同方向。
+本文描述当前图片生成能力。它与“用户上传/采集图片给 Vision 看”是两个不同方向。
 
-## 1. Two visual paths
+## 1. Visual Capture vs Visual Generation
 
 ```text
-Existing image -> Vision -> Person understands image
+Visual Capture / Vision = 看
+Existing image / Camera / Screen
+  -> Person understands image
 
-Instruction / character intent
+Visual Generation = 画
+Instruction / Character intent
   -> Prompt compiler
   -> Image provider
   -> new image
 ```
 
-不要把 Vision model routing 和 ImageGen provider 混成一个概念。
+不要把 Vision model routing、Camera/Screen Capture 和 ImageGen provider 混成一个概念。实时视觉输入见 [`VISUAL_CAPTURE.md`](VISUAL_CAPTURE.md)。
 
 ## 2. Visual purposes
 
@@ -73,14 +76,14 @@ Person LLM 可以输出内部 action：
 }
 ```
 
-当前只支持：
+当前自主链路只支持：
 
 - `SELFIE`
 - `SCENE`
 
 Direct `USER_MESSAGE` 与 Group 中各成员的 `USER_MESSAGE` reaction 都可以自主产生 `GENERATE_IMAGE`。是否画、画什么、以及 `visual_intent` 都由对应 Character 自己决定，不需要用户先打开生图工具或手写 Prompt。
 
-同一 Character 单轮仍最多产生 1 个 `GENERATE_IMAGE`；不同群成员如果各自确实想画，可以分别产生自己的生成任务。
+同一 Character 单轮最多产生 1 个 `GENERATE_IMAGE`；不同群成员如果各自确实想画，可以分别产生自己的生成任务。
 
 ### SELFIE
 
@@ -108,36 +111,64 @@ Reference 是身份一致性工具，不意味着把头像像素复制粘贴进�
 
 如果未来真实需求证明设计稿需要独立画幅、reference 或 provider 策略，再扩 `DESIGN`；当前不为分类完整性提前增加 enum。
 
-## 5. Async execution
+## 5. Direct and Group execution
 
-角色主 Reaction 的文字/状态先提交，ImageGen 在独立 visual worker 中执行：
+### Direct
+
+Direct autonomous ImageGen 使用现有 Visual Runtime：
 
 ```text
 PersonReaction
 ├─ MESSAGE -> normal transaction
 └─ GENERATE_IMAGE -> internal tool intent
 
-main reaction returns / SSE text
+main reaction commits / SSE text
             ↓
-      Visual Runtime worker
+      visual worker
             ↓
         provider.generate
             ↓
      MediaAsset + IMAGE Event
             ↓
-      direct/group SSE
+         direct SSE
 ```
 
-因此：
+### Group
+
+Group 不建立第二套 ImageGen system。
+
+当前 group adapter 复用：
+
+- `VisualPromptPlanner`
+- configured Image Provider
+- MediaStorage
+- `SELFIE / SCENE`
+- avatar reference semantics
+- stale-result guard
+
+Group Character 主 reaction 先提交。生成完成后，图片以发起 `GENERATE_IMAGE` 的 Character 身份写入：
+
+```text
+conversation_events
+```
+
+并通过已有 group SSE 推送。
+
+如果图片生成期间 room 已经收到更新的用户事实，旧结果会按 group user watermark 判 stale，不插回更新 turn。
+
+## 6. Failure boundary
+
+自主 ImageGen 是 secondary asynchronous output：
 
 - 图片慢，不阻塞已经成立的文字表达；
 - Provider 故障只记录 visual error，不回滚文字/Mental State；
-- Provider 生成期间用户又发了新事实时，可以通过 `still_current` / group user watermark 丢弃 stale image；
-- Group 生成完成后，图片以发起 `GENERATE_IMAGE` 的 Character 身份写入 `conversation_events` 并推送到当前群聊。
+- newer user fact 可以使旧生成结果 stale；
+- 每个 Character 单轮最多 1 个自主生成任务；
+- Wake/Proactive 当前不自动花费 ImageGen 配额。
 
 成功图片 Event metadata 包含 generation purpose/provider/model/source event 等 provenance。
 
-## 6. Explicit user image tool
+## 7. Explicit user image tool
 
 用户有时不是在问“角色愿不愿意发自拍”，而只是明确需要一个绘图工具。因此正式提供：
 
@@ -155,8 +186,6 @@ POST /v1/characters/{character_id}/images/generate
 ```
 
 系统结合 Character Persona/状态做 AI prompt rewrite，返回最终 prompt，不调用图片 Provider。
-
-适合复制到外部图片工具继续生成。
 
 ### Generate
 
@@ -180,7 +209,7 @@ data URL image draft
 
 这与 Ctrl+V 粘贴图片的最终 send path 相同。
 
-## 7. Direct and Group tool UX
+## 8. Direct and Group tool UX
 
 显式 AI 生图工具和 Character 自主 ImageGen 是两条不同路径。
 
@@ -190,11 +219,11 @@ data URL image draft
 
 ### Group
 
-显式工具仍需要先选一个 Character 作为视觉参考人物，因为一个 Group 没有唯一 Persona/avatar。该路径生成的是**用户控制的 draft**，最终用户确认后再作为 group image message 发送。
+显式工具需要先选一个 Character 作为视觉参考人物，因为一个 Group 没有唯一 Persona/avatar。该路径生成的是**用户控制的 draft**，最终用户确认后再作为 group image message 发送。
 
-自主路径则不同：群成员在自己的 PersonReaction 中决定是否输出 `GENERATE_IMAGE`，系统复用和单聊相同的 Prompt Planner / Provider / MediaStorage，并在生成完成后把 IMAGE Event 归属到该 Character。用户不需要自己写 Prompt，也不需要额外点击“生成”。
+自主路径则由群成员在各自 PersonReaction 中决定是否生成，用户不需要自己写 Prompt，也不需要额外点击“生成”。
 
-## 8. Providers
+## 9. Providers
 
 ### Agnes
 
@@ -214,28 +243,15 @@ data URL image draft
 
 `GET /v1/visual/providers` 的 `available` 对 msimg 主要描述本地 dependency/runtime 是否可用，不是每次都执行远程生成 API 探测。
 
-## 9. Dev Console
+## 10. Dev Console
 
 `:8002/dev` 的 ImageGen card 使用真实 Character Runtime visual endpoints，不是 mock。
 
-支持：
+支持 Character、Provider、Purpose、instruction、avatar reference、AI rewrite、generate、prompt preview、provider/model/duration、Media ID、图片预览和将候选设为当前 avatar。
 
-- Character
-- Provider
-- Purpose
-- instruction
-- use avatar reference
-- AI rewrite
-- generate
-- polished prompt
-- provider/model/duration
-- Media ID（Dev persistence）
-- generated image preview
-- 将候选设为当前 avatar
+Dev 的生成结果可以持久化为测试 MediaAsset；正式 chat tool 默认先保持 draft。
 
-Dev 的生成结果可以持久化为测试 MediaAsset，便于后续 avatar/资源检查；正式 chat tool 默认先保持 draft。
-
-## 10. Avatar generation
+## 11. Avatar generation
 
 正式路由：
 
@@ -248,27 +264,27 @@ Generate 只创建候选，不应无提示自动替换当前头像。
 
 `from-chat` 可以从合法 MediaAsset 或 Character Image 设置当前 avatar，并把内容复制到 avatar storage，使当前头像不依赖源媒体文件未来是否仍存在。
 
-## 11. Configuration
+## 12. Configuration
 
-`config.yaml` / env：
+Non-sensitive ImageGen configuration stays in `config.yaml`：
 
 ```yaml
 image_generation_provider: "agnes"
 image_generation_timeout_seconds: 180
-agnes_api_key: ""
 agnes_base_url: "https://apihub.agnes-ai.com/v1"
 agnes_image_model: "agnes-image-2.1-flash"
-msimg_api_key: ""
 msimg_models: "qwen"
 ```
 
-Env overrides：
+Secrets belong in `.env` / Settings Center：
 
-```text
-AGNES_API_KEY
-MSIMG_API_KEY
-MODELSCOPE_API_TOKEN
+```dotenv
+AGNES_API_KEY=...
+MSIMG_API_KEY=...
+# MODELSCOPE_API_TOKEN=...   # optional alternative supported by msimg path
 ```
+
+Legacy `agnes_api_key` / `msimg_api_key` fields may still be migrated for backward compatibility, but new config examples should not put plaintext keys in YAML. See [`SETTINGS_CENTER.md`](SETTINGS_CENTER.md).
 
 完整开发环境使用：
 
@@ -276,12 +292,13 @@ MODELSCOPE_API_TOKEN
 bash scripts/sync-all.sh
 ```
 
-不要单独运行 `uv sync --extra image-generation` 来维护完整 dev venv；uv exact sync 会把没有包含在这次 extras 集合中的其它开发依赖移除。
+不要单独运行局部 `uv sync --extra image-generation` 来维护完整 dev venv；uv exact sync 会把没有包含在本次 extras 集合中的其它开发依赖移除。
 
-## 12. Current boundaries
+## 13. Current boundaries
 
 - Wake/Proactive 不自动生成图片。
 - Group 自主 ImageGen 仅来自各成员自己的 reaction；系统不替人物强制画图。
 - 每个 Character 单轮最多 1 个自主生成任务；不做自动无限重画/自动选最佳图。
 - 不把 Prompt planner 重新复杂化为大 JSON schema。
-- 生成图的长期语义仍应通过正常 Event/Memory provenance 进入人物历史，而不是把二进制本身当 Memory。
+- 不把 Visual Capture frame 当成 ImageGen reference 的默认长期资产；Capture 是当前 turn 的感知输入。
+- 生成图的长期语义通过正常 Event/Memory provenance 进入人物历史，而不是把二进制本身当 Memory。

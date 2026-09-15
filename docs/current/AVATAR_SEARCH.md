@@ -11,7 +11,7 @@ Current avatar can come from:
 3. an existing chat/generated MediaAsset;
 4. a Character Image Catalog asset.
 
-Search and generation are different capabilities:
+Search and generation are different capabilities：
 
 ```text
 Avatar Search
@@ -57,7 +57,7 @@ Persona, Mental State and recent dialogue can be used inside the local/server-si
 
 The external search provider only receives short generated search queries.
 
-Planner instructions must not copy:
+Planner instructions must not copy：
 
 - user names/private identifiers；
 - relationship secrets；
@@ -68,9 +68,10 @@ Avatar search intent is ephemeral tool context. It does not automatically become
 
 ## 4. Search configuration
 
+Non-sensitive settings stay in `config.yaml`：
+
 ```yaml
 search_provider: "searchapi"
-search_api_key: ""
 search_country: "jp"
 search_language: "zh-cn"
 search_safe_search: "strict"
@@ -78,27 +79,28 @@ avatar_dir: ""
 avatar_max_bytes: 8388608
 ```
 
-`config.yaml` is git-ignored and is the normal local configuration location.
+Search credentials belong in `.env` or the Settings Center, not in new `config.yaml` examples：
 
-SearchAPI.io env override：
-
-```text
-SEARCHAPI_API_KEY
+```dotenv
+SEARCHAPI_API_KEY=...
+BRAVE_SEARCH_API_KEY=...
 ```
 
-Brave alternative：
+Effective secret precedence is documented in [`SETTINGS_CENTER.md`](SETTINGS_CENTER.md)：
+
+```text
+system environment > .env > legacy config.yaml secret
+```
+
+`search_api_key` in an old local config is only a backward-compatibility migration source. Settings Center migrates it to the provider-specific environment name and removes the plaintext field.
+
+Brave alternative non-secret config：
 
 ```yaml
 search_provider: "brave"
 search_country: "ALL"
 search_language: "zh"
 search_safe_search: "strict"
-```
-
-Env：
-
-```text
-BRAVE_SEARCH_API_KEY
 ```
 
 ## 5. Provider abstraction
@@ -150,3 +152,4 @@ This means：
 - Search Provider is not exposed as arbitrary Character web browsing.
 - Generated avatar does not auto-commit over current avatar.
 - Current avatar reference can help SELFIE/AVATAR identity consistency, but SCENE generation does not need to force the person into every image.
+- Camera/Screen Visual Capture is not an avatar source; it is transient Vision context for a current turn.

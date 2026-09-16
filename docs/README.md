@@ -30,6 +30,7 @@ docs/
 - [`current/ARCHITECTURE.md`](current/ARCHITECTURE.md) — 当前五服务开发栈、存储、Provider、并发和多模态边界。
 - [`current/DESIGN.md`](current/DESIGN.md) — Persistent AI Person 的产品原则。
 - [`current/CODEBASE_LAYOUT.md`](current/CODEBASE_LAYOUT.md) — 源码目录和模块职责导航。
+- [`current/TECH_DEBT.md`](current/TECH_DEBT.md) — V1 真实技术债、已处理项与明确延后项。
 - [`current/PERSON_RUNTIME.md`](current/PERSON_RUNTIME.md) — PersonReaction、Action、Mental State、Direct/Group 自主 ImageGen。
 - [`current/CONVERSATION_RUNTIME.md`](current/CONVERSATION_RUNTIME.md) — Direct/Group、异步接受、SSE、supersession、Search/Mention/Archive。
 - [`current/MEMORY.md`](current/MEMORY.md) — Event/Memory/Recall/Admission baseline。

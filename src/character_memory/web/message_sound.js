@@ -2,19 +2,41 @@
   const CM = window.CM;
   if (!CM) return;
 
-  const handled = new Set();
-  const handledOrder = [];
-  const MAX_HANDLED = 1024;
+  const conversations = new Map();
+  let activeConversationKey = null;
+  let baselineReady = false;
   let audioContext = null;
 
-  function remember(key) {
-    if (!key || handled.has(key)) return false;
-    handled.add(key);
-    handledOrder.push(key);
-    while (handledOrder.length > MAX_HANDLED) {
-      handled.delete(handledOrder.shift());
-    }
-    return true;
+  function conversationKey() {
+    return CM.isGroupConversation()
+      ? `group:${CM.state.conversation.groupId || "unknown"}`
+      : `direct:${CM.state.characterId || "unknown"}`;
+  }
+
+  function stateFor(key) {
+    if (!conversations.has(key)) conversations.set(key, {seen:new Set(), maxNumericId:Number.NEGATIVE_INFINITY});
+    return conversations.get(key);
+  }
+
+  function recordMessageId(state, rawId) {
+    const id = String(rawId || "").trim();
+    if (!id || state.seen.has(id)) return {fresh:false, newer:false};
+    state.seen.add(id);
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId)) return {fresh:true, newer:true};
+    const newer = numericId > state.maxNumericId;
+    if (numericId > state.maxNumericId) state.maxNumericId = numericId;
+    return {fresh:true, newer};
+  }
+
+  function seedCurrentConversation() {
+    const key = conversationKey();
+    const state = stateFor(key);
+    activeConversationKey = key;
+    baselineReady = true;
+    CM.dom.chat?.querySelectorAll?.(".message-row.assistant[data-message-id]").forEach(row => {
+      recordMessageId(state, row.dataset.messageId);
+    });
   }
 
   function ensureAudioContext() {
@@ -65,17 +87,34 @@
     } catch (_) {}
   }
 
-  function notify({scope, conversationId, message} = {}) {
-    if (!message || message.role !== "assistant" || message.id == null) return false;
-    const key = `${scope || "unknown"}:${conversationId || "unknown"}:${message.id}`;
-    if (!remember(key)) return false;
-    if (CM.features.voice?.state?.active) return false;
+  function inspectAssistantRow(row) {
+    if (!(row instanceof Element) || !row.matches(".message-row.assistant[data-message-id]")) return;
+    const key = conversationKey();
+    if (!baselineReady || key !== activeConversationKey) return;
+    const state = stateFor(key);
+    const {fresh, newer} = recordMessageId(state, row.dataset.messageId);
+    if (!fresh || !newer) return;
+    if (CM.features.voice?.state?.active) return;
     playSoftDrop();
-    return true;
   }
+
+  const observer = new MutationObserver(mutations => {
+    if (!baselineReady || conversationKey() !== activeConversationKey) return;
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        inspectAssistantRow(node);
+        node.querySelectorAll?.(".message-row.assistant[data-message-id]").forEach(inspectAssistantRow);
+      }
+    }
+  });
+
+  if (CM.dom.chat) observer.observe(CM.dom.chat, {childList:true, subtree:true});
+  CM.on("historyLoaded", seedCurrentConversation);
+  CM.on("conversationChanged", seedCurrentConversation);
 
   document.addEventListener("pointerdown", primeAudio, {once:true, capture:true});
   document.addEventListener("keydown", primeAudio, {once:true, capture:true});
 
-  CM.registerFeature("messageSound", {notify, prime:primeAudio});
+  CM.registerFeature("messageSound", {prime:primeAudio, seed:seedCurrentConversation});
 })();

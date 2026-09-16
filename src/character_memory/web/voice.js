@@ -11,6 +11,7 @@
     active: false,
     minimized: false,
     phase: "idle",
+    capturePhase: "idle",
     target: null,
     currentSpeakerId: null,
     stream: null,
@@ -19,13 +20,16 @@
     processor: null,
     eventSource: null,
     visualSession: null,
+    currentAudio: null,
     chunks: [],
     preRoll: [],
     speechStartedAt: 0,
     lastVoiceAt: 0,
     hotFrames: 0,
     queue: [],
+    pendingTurns: [],
     playing: false,
+    ttsTail: Promise.resolve(),
     turnStartedAt: 0,
     lastMetrics: {},
     speakerId: 0,
@@ -176,6 +180,10 @@
     const label = text || phase;
     if (dom.status) dom.status.textContent = label;
     if (dom.dockStatus) dom.dockStatus.textContent = label;
+  }
+
+  function setCapturePhase(phase) {
+    voice.capturePhase = phase;
   }
 
   function updateVisualUi(snapshot = null) {
@@ -349,11 +357,9 @@
   function validateAsrTranscript(raw) {
     const text = String(raw || "").trim();
     if (!text) return {valid:false, text:"", reason:"empty"};
-
     const meaningful = text.replace(/[\s\p{P}\p{S}]/gu, "");
     if (!meaningful) return {valid:false, text, reason:"punctuation_only"};
     if (/\p{Script=Han}/u.test(text)) return {valid:true, text, reason:"valid"};
-
     const latinOrDigitCount = (text.match(/[A-Za-z0-9]/g) || []).length;
     if (latinOrDigitCount >= 2) return {valid:true, text, reason:"valid"};
     return {valid:false, text, reason:"too_short"};
@@ -374,7 +380,9 @@
       voice.lastMetrics.llm = performance.now() - voice.turnStartedAt - Number(voice.lastMetrics.asr || 0);
       formatMetrics();
     }
-    voice.queue.push({text, characterId, messageId:data.id});
+    voice.queue.push({text, characterId, messageId:data.id, audioPromise:null, audioUrl:null});
+    setCapturePhase("listening");
+    if (voice.playing) prefetchNext();
     playQueue();
   }
 
@@ -410,9 +418,14 @@
     source.addEventListener("reaction_complete", () => {
       if (!voice.active) return;
       if (!voice.playing && voice.queue.length === 0 && voice.phase === "waiting") {
-        voice.currentSpeakerId = null;
-        renderCallIdentity();
-        setPhase("listening", "正在听…");
+        if (voice.pendingTurns.length) {
+          flushPendingTurns();
+        } else {
+          voice.currentSpeakerId = null;
+          renderCallIdentity();
+          setCapturePhase("listening");
+          setPhase("listening", "正在听…");
+        }
       }
     });
 
@@ -420,6 +433,7 @@
       if (!voice.active) return;
       let message = "角色响应失败";
       try { message = JSON.parse(event.data || "{}").message || message; } catch (_) {}
+      setCapturePhase("listening");
       setPhase("error", message);
       setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
     });
@@ -461,6 +475,53 @@
     return result;
   }
 
+  async function dispatchRecognizedTurn(turn) {
+    if (!voice.active) return;
+    const text = String(turn.text || "").trim();
+    if (!text) return;
+    setCapturePhase("paused");
+    voice.turnStartedAt = performance.now();
+    voice.lastMetrics = {asr:Number(turn.asrMs || 0)};
+    formatMetrics();
+    if (dom.transcript) {
+      dom.transcript.textContent = `你：${text}${turn.visualFrames?.length ? ` · 附 ${turn.visualFrames.length} 个视觉关键帧` : ""}`;
+    }
+    setPhase("waiting", "正在想…");
+    try {
+      const sent = await sendTranscript(text, turn.visualFrames || []);
+      appendCallLog("user", text, sent.message?.id ?? sent.event_id ?? null);
+    } catch (error) {
+      setCapturePhase("listening");
+      setPhase("error", `语音失败：${error.message}`);
+      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+    }
+  }
+
+  function mergedPendingTurn() {
+    const turns = voice.pendingTurns.splice(0);
+    if (!turns.length) return null;
+    const seenFrames = new Set();
+    const visualFrames = [];
+    for (const turn of turns) {
+      for (const frame of turn.visualFrames || []) {
+        if (seenFrames.has(frame)) continue;
+        seenFrames.add(frame);
+        visualFrames.push(frame);
+      }
+    }
+    return {
+      text:turns.map(turn => String(turn.text || "").trim()).filter(Boolean).join("\n"),
+      visualFrames:visualFrames.slice(-4),
+      asrMs:turns.reduce((sum, turn) => sum + Number(turn.asrMs || 0), 0),
+    };
+  }
+
+  async function flushPendingTurns() {
+    if (!voice.active || voice.playing || voice.queue.length || !voice.pendingTurns.length) return;
+    const turn = mergedPendingTurn();
+    if (turn) await dispatchRecognizedTurn(turn);
+  }
+
   async function finishSpeech() {
     if (!voice.active || !voice.chunks.length) return;
     const speechEndedAt = performance.now();
@@ -473,7 +534,8 @@
     voice.chunks = [];
     voice.preRoll = [];
     voice.hotFrames = 0;
-    setPhase("transcribing", "识别中…");
+    setCapturePhase("transcribing");
+    if (!voice.playing) setPhase("transcribing", "识别中…");
     const sourceRate = voice.audioContext.sampleRate;
     const raw = concatChunks(chunks);
     const pcm = downsample(raw, sourceRate, 16000);
@@ -487,27 +549,35 @@
       });
       if (!response.ok) throw new Error(await response.text());
       const result = await response.json();
-      voice.lastMetrics = {asr: performance.now() - asrStarted};
+      const asrMs = performance.now() - asrStarted;
+      voice.lastMetrics.asr = asrMs;
       formatMetrics();
 
       const validation = validateAsrTranscript(result.text);
       if (!validation.valid) {
-        voice.turnStartedAt = 0;
-        if (dom.transcript) dom.transcript.textContent = "没有识别到有效内容";
-        setPhase("listening", "正在听…");
+        setCapturePhase(voice.playing ? "listening" : "listening");
+        if (dom.transcript && !voice.playing) dom.transcript.textContent = "没有识别到有效内容";
+        if (!voice.playing) setPhase("listening", "正在听…");
         console.debug("[voice] ignored invalid ASR transcript", validation.reason, validation.text);
         return;
       }
 
-      const text = validation.text;
-      voice.turnStartedAt = performance.now();
-      if (dom.transcript) dom.transcript.textContent = `你：${text}${visualFrames.length ? ` · 附 ${visualFrames.length} 个视觉关键帧` : ""}`;
-      setPhase("waiting", "正在想…");
-      const sent = await sendTranscript(text, visualFrames);
-      appendCallLog("user", text, sent.message?.id ?? sent.event_id ?? null);
+      const turn = {text:validation.text, visualFrames, asrMs};
+      if (voice.playing || voice.queue.length) {
+        voice.pendingTurns.push(turn);
+        setCapturePhase("listening");
+        if (dom.transcript) dom.transcript.textContent = `你：${validation.text} · 已听到，等待对方说完…`;
+        return;
+      }
+      await dispatchRecognizedTurn(turn);
     } catch (error) {
-      setPhase("error", `语音失败：${error.message}`);
-      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      setCapturePhase("listening");
+      if (!voice.playing) {
+        setPhase("error", `语音失败：${error.message}`);
+        setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      } else {
+        console.warn("[voice] ASR failed during playback", error);
+      }
     }
   }
 
@@ -527,54 +597,99 @@
     return URL.createObjectURL(blob);
   }
 
+  function scheduleSynthesis(item) {
+    if (item.audioPromise) return item.audioPromise;
+    const run = () => synthesize(item);
+    item.audioPromise = voice.ttsTail.then(run, run).then(url => {
+      if (!voice.active) {
+        URL.revokeObjectURL(url);
+        throw new Error("voice call ended");
+      }
+      item.audioUrl = url;
+      return url;
+    });
+    voice.ttsTail = item.audioPromise.catch(() => null);
+    return item.audioPromise;
+  }
+
+  function prefetchNext() {
+    if (!voice.active || !voice.playing || !voice.queue.length) return;
+    const next = voice.queue[0];
+    scheduleSynthesis(next).catch(error => {
+      if (voice.active) console.warn("[voice] TTS prefetch failed", error);
+    });
+  }
+
+  async function playAudio(url) {
+    await new Promise((resolve, reject) => {
+      const audio = new Audio(url);
+      voice.currentAudio = audio;
+      audio.onended = resolve;
+      audio.onerror = reject;
+      audio.play().catch(reject);
+    });
+  }
+
   async function playQueue() {
     if (!voice.active || voice.playing) return;
     voice.playing = true;
+    let failed = null;
     try {
       while (voice.active && voice.queue.length) {
         const item = voice.queue.shift();
         voice.currentSpeakerId = item.characterId;
         renderCallIdentity();
+        setCapturePhase("listening");
         setPhase("speaking", `${speakerName(item.characterId)} 正在说…`);
-        const url = await synthesize(item);
+        const url = await scheduleSynthesis(item);
+        prefetchNext();
         try {
-          await new Promise((resolve, reject) => {
-            const audio = new Audio(url);
-            audio.onended = resolve;
-            audio.onerror = reject;
-            audio.play().catch(reject);
-          });
+          await playAudio(url);
         } finally {
-          URL.revokeObjectURL(url);
+          voice.currentAudio = null;
+          if (item.audioUrl) {
+            URL.revokeObjectURL(item.audioUrl);
+            item.audioUrl = null;
+          }
         }
       }
-      if (voice.active) {
-        voice.currentSpeakerId = null;
-        renderCallIdentity();
-        voice.lastMetrics.total = voice.turnStartedAt ? performance.now() - voice.turnStartedAt + Number(voice.lastMetrics.asr || 0) : null;
-        formatMetrics();
-        setPhase("listening", "正在听…");
-      }
     } catch (error) {
+      failed = error;
       if (voice.active) {
         voice.currentSpeakerId = null;
         renderCallIdentity();
+        setCapturePhase("listening");
         setPhase("error", `TTS 失败：${error.message}`);
-        setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
       }
     } finally {
       voice.playing = false;
     }
+
+    if (!voice.active) return;
+    voice.currentSpeakerId = null;
+    renderCallIdentity();
+    if (failed) {
+      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      return;
+    }
+    voice.lastMetrics.total = voice.turnStartedAt ? performance.now() - voice.turnStartedAt + Number(voice.lastMetrics.asr || 0) : null;
+    formatMetrics();
+    if (voice.pendingTurns.length) {
+      await flushPendingTurns();
+    } else {
+      setCapturePhase("listening");
+      setPhase("listening", "正在听…");
+    }
   }
 
   function audioFrame(event) {
-    if (!voice.active || !["listening", "recording"].includes(voice.phase)) return;
+    if (!voice.active || !["listening", "recording"].includes(voice.capturePhase)) return;
     const input = event.inputBuffer.getChannelData(0);
     const chunk = new Float32Array(input);
     const level = rms(chunk);
     const now = performance.now();
 
-    if (voice.phase === "listening") {
+    if (voice.capturePhase === "listening") {
       voice.preRoll.push(chunk);
       while (voice.preRoll.length > 6) voice.preRoll.shift();
       if (level >= voice.threshold) voice.hotFrames += 1;
@@ -584,7 +699,8 @@
         voice.preRoll = [];
         voice.speechStartedAt = now;
         voice.lastVoiceAt = now;
-        setPhase("recording", "正在听你说…");
+        setCapturePhase("recording");
+        if (!voice.playing) setPhase("recording", "正在听你说…");
       }
       return;
     }
@@ -628,15 +744,20 @@
       voice.sourceNode = source;
       voice.processor = processor;
       voice.queue = [];
+      voice.pendingTurns = [];
       voice.playing = false;
+      voice.ttsTail = Promise.resolve();
+      voice.currentAudio = null;
       voice.currentSpeakerId = null;
       voice.lastMetrics = {};
       voice.preRoll = [];
       voice.chunks = [];
+      voice.hotFrames = 0;
+      setCapturePhase("listening");
       ensureVisualSession();
       openVoiceEvents();
 
-      if (dom.transcript) dom.transcript.textContent = "直接说话即可；停顿后会自动发送。摄像头/屏幕开启后只会抽取少量关键帧。";
+      if (dom.transcript) dom.transcript.textContent = "直接说话即可；AI 说话时也会继续听，但不会打断当前语音。摄像头/屏幕开启后只会抽取少量关键帧。";
       resetCallLog();
       renderCallIdentity();
       formatMetrics();
@@ -657,6 +778,16 @@
     voice.minimized = false;
     voice.eventSource?.close?.();
     voice.eventSource = null;
+    if (voice.currentAudio) {
+      try {
+        voice.currentAudio.pause();
+        voice.currentAudio.currentTime = 0;
+      } catch (_) {}
+    }
+    voice.currentAudio = null;
+    for (const item of voice.queue) {
+      if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
+    }
     voice.processor?.disconnect?.();
     voice.sourceNode?.disconnect?.();
     voice.stream?.getTracks?.().forEach(track => track.stop());
@@ -668,9 +799,13 @@
     voice.sourceNode = null;
     voice.processor = null;
     voice.queue = [];
+    voice.pendingTurns = [];
     voice.chunks = [];
     voice.preRoll = [];
+    voice.hotFrames = 0;
     voice.playing = false;
+    voice.ttsTail = Promise.resolve();
+    setCapturePhase("idle");
     voice.currentSpeakerId = null;
     voice.target = null;
     updateVisualUi({active:false, source:null, candidateCount:0});

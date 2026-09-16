@@ -30,24 +30,7 @@ Install Tailscale on the PC and phone, and sign both devices into the same tailn
 
 Tailscale Serve requires the tailnet HTTPS/MagicDNS capability. If HTTPS has not been enabled for the tailnet yet, follow the prompt from the Tailscale CLI/admin console and enable HTTPS certificates.
 
-## 3. Start Character Memory with the mobile origin allowed
-
-The browser page is served from `https://<node>.<tailnet>.ts.net`, while Media Runtime is on HTTPS port `8443`. Because a different port is a different browser origin, Media Runtime must allow the exact chat origin through CORS.
-
-In Git Bash, before starting/restarting the stack:
-
-```bash
-export CHARACTER_MEDIA_CORS_ORIGINS="http://127.0.0.1:8000,http://localhost:8000,https://<node>.<tailnet>.ts.net"
-uv run character-stack --no-browser
-```
-
-Replace `<node>.<tailnet>.ts.net` with the HTTPS hostname shown by Tailscale Serve.
-
-If the stack was already running before this environment variable was set, restart it so Media Runtime receives the new CORS configuration.
-
-Do not use a broad `*.ts.net` CORS rule. V1 deliberately allows the exact Character Memory origin only.
-
-## 4. Configure Tailscale Serve
+## 3. Configure Tailscale Serve and obtain the hostname
 
 Run from Git Bash on the PC:
 
@@ -63,7 +46,30 @@ tailscale serve --https=8443 --bg 8001
 tailscale serve status
 ```
 
+The status output provides the HTTPS hostname, for example:
+
+```text
+https://<node>.<tailnet>.ts.net
+```
+
 `--bg` keeps the Serve configuration active after the terminal exits. To remove these mappings later, use the matching `tailscale serve ... off` commands or manage the Serve configuration explicitly. Do not switch either port to Funnel.
+
+## 4. Start or restart Character Memory with the exact mobile origin
+
+The browser page is served from `https://<node>.<tailnet>.ts.net`, while Media Runtime is on HTTPS port `8443`. Because a different port is a different browser origin, Media Runtime must allow the exact chat origin through CORS.
+
+In Git Bash, after obtaining the hostname from step 3:
+
+```bash
+export CHARACTER_MEDIA_CORS_ORIGINS="http://127.0.0.1:8000,http://localhost:8000,https://<node>.<tailnet>.ts.net"
+uv run character-stack --no-browser
+```
+
+Replace `<node>.<tailnet>.ts.net` with the hostname shown by `tailscale serve status`.
+
+If the stack was already running before this environment variable was set, restart it so Media Runtime receives the new CORS configuration.
+
+Do not use a broad `*.ts.net` CORS rule. V1 deliberately allows the exact Character Memory origin only.
 
 ## 5. Open on the phone
 

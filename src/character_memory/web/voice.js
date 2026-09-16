@@ -555,7 +555,7 @@
 
       const validation = validateAsrTranscript(result.text);
       if (!validation.valid) {
-        setCapturePhase(voice.playing ? "listening" : "listening");
+        setCapturePhase("listening");
         if (dom.transcript && !voice.playing) dom.transcript.textContent = "没有识别到有效内容";
         if (!voice.playing) setPhase("listening", "正在听…");
         console.debug("[voice] ignored invalid ASR transcript", validation.reason, validation.text);
@@ -779,9 +779,11 @@
     voice.eventSource?.close?.();
     voice.eventSource = null;
     if (voice.currentAudio) {
+      const audio = voice.currentAudio;
       try {
-        voice.currentAudio.pause();
-        voice.currentAudio.currentTime = 0;
+        audio.pause();
+        audio.currentTime = 0;
+        audio.onended?.();
       } catch (_) {}
     }
     voice.currentAudio = null;

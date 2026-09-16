@@ -27,10 +27,13 @@ def test_voice_reuses_existing_async_chat_and_sse_contracts_for_direct_and_group
     assert '/v1/tts' in script
 
 
-def test_voice_call_remains_half_duplex_without_webrtc():
+def test_voice_call_keeps_capture_live_during_playback_without_barge_in_or_webrtc():
     script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
-    assert '["listening", "recording"].includes(voice.phase)' in script
+    assert '["listening", "recording"].includes(voice.capturePhase)' in script
+    assert 'setCapturePhase("listening")' in script
     assert 'setPhase("speaking"' in script
+    assert 'voice.currentAudio.pause()' in script
+    assert 'voice.currentAudio.pause()' not in script.split('function audioFrame', 1)[1].split('async function startCall', 1)[0]
     assert 'RTCPeerConnection' not in script
     assert 'getDisplayMedia' not in script
     assert 'requestSubmit' not in script
@@ -57,12 +60,13 @@ def test_voice_call_can_minimize_without_stopping_capture():
     assert 'visualSession' not in minimize_body
 
 
-def test_voice_group_tts_uses_current_character_speaker_and_avatar():
+def test_voice_group_tts_uses_current_character_speaker_avatar_and_prefetch_slot():
     script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
-    assert 'voice.queue.push({text, characterId, messageId:data.id})' in script
+    assert 'voice.queue.push({text, characterId, messageId:data.id, audioPromise:null, audioUrl:null})' in script
     assert 'voice.currentSpeakerId = item.characterId' in script
     assert 'const speakerId = stableSpeakerId(item.characterId)' in script
     assert 'speaker_id:speakerId' in script
+    assert 'function prefetchNext()' in script
     assert 'profile?.avatar_url' in script
     assert 'voice-call-avatar-image' in script
 
@@ -84,7 +88,7 @@ def test_voice_keeps_live_call_text_visible_and_direct_chat_sync_is_scoped():
     assert 'CM.features.groups?.reconcileLatest?.(target.conversationId)' in script
 
 
-def test_voice_asr_gate_rejects_empty_punctuation_and_low_information_before_send():
+def test_voice_asr_gate_rejects_empty_punctuation_and_low_information_before_queue_or_send():
     script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
     assert 'function validateAsrTranscript(raw)' in script
     assert 'reason:"empty"' in script
@@ -97,12 +101,24 @@ def test_voice_asr_gate_rejects_empty_punctuation_and_low_information_before_sen
 
     finish_speech = script.split('async function finishSpeech()', 1)[1].split('async function synthesize', 1)[0]
     assert 'const validation = validateAsrTranscript(result.text);' in finish_speech
-    invalid_block = finish_speech.split('if (!validation.valid) {', 1)[1].split('const text = validation.text;', 1)[0]
-    assert 'dom.transcript.textContent = "没有识别到有效内容"' in invalid_block
+    invalid_block = finish_speech.split('if (!validation.valid) {', 1)[1].split('const turn = {text:validation.text, visualFrames, asrMs};', 1)[0]
+    assert '没有识别到有效内容' in invalid_block
     assert 'setPhase("listening", "正在听…")' in invalid_block
     assert 'return;' in invalid_block
     assert 'sendTranscript' not in invalid_block
-    assert finish_speech.index('const validation = validateAsrTranscript(result.text);') < finish_speech.index('await sendTranscript(text, visualFrames)')
+    assert finish_speech.index('const validation = validateAsrTranscript(result.text);') < finish_speech.index('const turn = {text:validation.text, visualFrames, asrMs};')
+
+
+def test_voice_buffers_valid_asr_during_tts_and_submits_after_queue_drain():
+    script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
+    finish_speech = script.split('async function finishSpeech()', 1)[1].split('async function synthesize', 1)[0]
+    play_queue = script.split('async function playQueue()', 1)[1].split('function audioFrame', 1)[0]
+
+    assert 'if (voice.playing || voice.queue.length)' in finish_speech
+    assert 'voice.pendingTurns.push(turn)' in finish_speech
+    assert '已听到，等待对方说完' in finish_speech
+    assert 'await flushPendingTurns();' in play_queue
+    assert 'await playAudio(url);' in play_queue
 
 
 def test_voice_css_has_explicit_contrast_and_dock_styles():

@@ -7,19 +7,52 @@ import subprocess
 import sys
 import time
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 import webbrowser
 
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+LOCAL_MEDIA_ORIGINS = ("http://127.0.0.1:8000", "http://localhost:8000")
 
 
 def _healthy(url: str, timeout: float = 0.8) -> bool:
     try:
         with urlopen(url, timeout=timeout) as response:
             return 200 <= int(response.status) < 300
+    except (OSError, URLError):
+        return False
+
+
+def _normalize_mobile_origin(value: str | None) -> str | None:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        return None
+    parsed = urlsplit(raw)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("mobile origin must be an absolute HTTPS origin")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        raise ValueError("mobile origin must not contain credentials, path, query, or fragment")
+    return f"https://{parsed.netloc}"
+
+
+def _merge_cors_origins(current: str | None, mobile_origin: str | None) -> str:
+    values: list[str] = []
+    for item in [*LOCAL_MEDIA_ORIGINS, *(str(current or "").split(",")), mobile_origin or ""]:
+        value = str(item or "").strip().rstrip("/")
+        if value and value not in values:
+            values.append(value)
+    return ",".join(values)
+
+
+def _cors_allows_origin(url: str, origin: str, timeout: float = 0.8) -> bool:
+    try:
+        request = Request(url, headers={"Origin": origin})
+        with urlopen(request, timeout=timeout) as response:
+            allowed = str(response.headers.get("Access-Control-Allow-Origin") or "").strip()
+            return 200 <= int(response.status) < 300 and allowed == origin
     except (OSError, URLError):
         return False
 
@@ -93,13 +126,28 @@ def main() -> None:
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--open", choices=("dev", "chat", "settings", "tts"), default="dev")
+    parser.add_argument(
+        "--mobile-origin",
+        default=None,
+        help="exact HTTPS browser origin allowed to call Media Runtime, e.g. https://node.tailnet.ts.net",
+    )
     args = parser.parse_args()
+
+    try:
+        mobile_origin = _normalize_mobile_origin(args.mobile_origin)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     base_env = os.environ.copy()
     base_env["CHARACTER_MEMORY_CONFIG"] = args.config
     base_env["CHARACTER_CONFIG_PATH"] = args.config
     base_env.setdefault("CHARACTER_DEV_CHARACTER_BASE_URL", "http://127.0.0.1:8000")
     base_env.setdefault("CHARACTER_DEV_MEDIA_BASE_URL", "http://127.0.0.1:8001")
+    if mobile_origin:
+        base_env["CHARACTER_MEDIA_CORS_ORIGINS"] = _merge_cors_origins(
+            base_env.get("CHARACTER_MEDIA_CORS_ORIGINS"),
+            mobile_origin,
+        )
 
     python = sys.executable
     specs = [
@@ -143,6 +191,11 @@ def main() -> None:
     try:
         for name, health_url, command, env in specs:
             if _healthy(health_url):
+                if name == "Media Runtime" and mobile_origin and not _cors_allows_origin(health_url, mobile_origin):
+                    raise SystemExit(
+                        "Media Runtime is already running without the requested mobile CORS origin. "
+                        "Stop the existing Character Memory stack and run mobile-start.sh again."
+                    )
                 print(f"stack: {name} already running ({health_url})", flush=True)
                 continue
             owned.append((name, _spawn(name, command, env)))
@@ -171,6 +224,10 @@ def main() -> None:
         print("  Dev:      http://127.0.0.1:8002/dev", flush=True)
         print("  Settings: http://127.0.0.1:8003/settings", flush=True)
         print("  TTS Lab:  http://127.0.0.1:9002/tts", flush=True)
+        if mobile_origin:
+            print(f"  Mobile:   {mobile_origin}", flush=True)
+            print(f"  Media HTTPS: {mobile_origin}:8443/health", flush=True)
+            print("  Verify:   bash scripts/mobile-check.sh", flush=True)
         print("Press Ctrl+C to stop processes started by this launcher.\n", flush=True)
 
         targets = {

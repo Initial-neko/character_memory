@@ -71,10 +71,13 @@ def create_media_app(runtime: MediaRuntime | None = None):
         return {"ok": True, **status}
 
     @app.post("/v1/asr")
-    async def transcribe(
+    def transcribe(
         payload: bytes = Body(..., media_type="application/octet-stream"),
         content_type: str | None = Header(default=None, alias="Content-Type"),
     ):
+        # Keep provider inference in FastAPI's worker threadpool. An async handler
+        # that calls the blocking local recognizer directly would stall the event
+        # loop and prevent TTS requests from overlapping ASR during voice playback.
         normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
         if normalized_type not in {"audio/wav", "audio/x-wav", "application/octet-stream"}:
             raise HTTPException(status_code=415, detail="Voice V0 accepts audio/wav PCM16")

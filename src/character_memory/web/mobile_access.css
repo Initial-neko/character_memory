@@ -1,0 +1,16 @@
+@media (max-width: 820px) {
+  .desktop-only-control { display: none !important; }
+  .topbar { gap: 8px; padding-inline: 10px; }
+  .character-heading { flex: 1 1 auto; min-width: 0; }
+  .topbar-actions { flex: 0 0 auto; gap: 6px; }
+  .topbar .ghost-button { min-width: 42px; min-height: 42px; padding: 8px 10px; }
+  .search-label { display: none; }
+  .header-avatar { width: 34px; height: 34px; }
+  .topbar h1 { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .composer-wrap { padding: 14px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .composer { padding-left: 10px; gap: 7px; }
+  .composer textarea { min-width: 0; font-size: 16px; }
+  .composer button { height: 42px; }
+  .composer-hint { display: none; }
+  .chat { padding-bottom: calc(126px + env(safe-area-inset-bottom)); }
+}

@@ -76,10 +76,12 @@ https://<node>.<tailnet>.ts.net
 The chat frontend automatically resolves Media Runtime as follows:
 
 ```text
-local HTTP page                  -> http://127.0.0.1:8001
-secure remote HTTPS page         -> https://same-hostname:8443
-explicit localStorage override   -> override wins
+local/non-Tailscale page          -> http://127.0.0.1:8001
+HTTPS *.ts.net Serve page         -> https://same-hostname:8443
+explicit localStorage override    -> override wins
 ```
+
+The automatic `:8443` mapping is intentionally scoped to HTTPS `*.ts.net` pages. Other reverse-proxy/custom-domain deployments must set the existing override explicitly instead of inheriting a Tailscale assumption.
 
 The existing key remains the escape hatch for non-standard deployments:
 
@@ -99,7 +101,7 @@ Expected to work over the private HTTPS path:
 - TTS playback and voice calls;
 - camera capture when the mobile browser exposes `getUserMedia`.
 
-Display/screen sharing is browser/platform-dependent on mobile and is not a V1 compatibility promise.
+Display/screen sharing is browser/platform-dependent on mobile and is not a V1 compatibility promise. The UI hides that control when `getDisplayMedia` is unavailable.
 
 ## 7. Security rationale
 

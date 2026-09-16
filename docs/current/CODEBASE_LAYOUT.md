@@ -95,7 +95,7 @@ avatars.py                  avatar local persistence
 avatar_intent.py            AI avatar-search planning
 images.py                   character image catalog
 stickers.py                 built-in/global/legacy sticker catalog + import
-sticker_import_cli.py       legacy character-local sticker import CLI
+sticker_import_cli.py       global sticker import CLI + deprecated --character compatibility
 search.py                   external avatar image search providers
 visual_generation.py        ImageGen providers + prompt compiler
 visual_runtime.py           direct autonomous generated-image execution

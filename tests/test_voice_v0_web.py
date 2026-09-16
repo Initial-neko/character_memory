@@ -32,8 +32,10 @@ def test_voice_call_keeps_capture_live_during_playback_without_barge_in_or_webrt
     assert '["listening", "recording"].includes(voice.capturePhase)' in script
     assert 'setCapturePhase("listening")' in script
     assert 'setPhase("speaking"' in script
-    assert 'voice.currentAudio.pause()' in script
-    assert 'voice.currentAudio.pause()' not in script.split('function audioFrame', 1)[1].split('async function startCall', 1)[0]
+    stop_body = script.split('async function stopCall()', 1)[1].split('dom.button?.addEventListener', 1)[0]
+    assert 'audio.pause()' in stop_body
+    assert 'audio.onended?.()' in stop_body
+    assert 'audio.pause()' not in script.split('function audioFrame', 1)[1].split('async function startCall', 1)[0]
     assert 'RTCPeerConnection' not in script
     assert 'getDisplayMedia' not in script
     assert 'requestSubmit' not in script

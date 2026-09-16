@@ -12,8 +12,6 @@ Mobile access uses **Tailscale + Tailscale Serve** only.
 - Media Runtime stays on `127.0.0.1:8001`.
 - Dev Console `:8002`, Settings Center `:8003`, TTS Provider/Lab `:9002`, and optional CosyVoice `:9012` remain PC-local in V1.
 
-The mobile-facing topology is:
-
 ```text
 Phone browser
     |
@@ -24,21 +22,106 @@ Tailscale Serve on PC
     `-- https://<node>.<tailnet>.ts.net:8443 -> 127.0.0.1:8001
 ```
 
-## 2. One-time Tailscale setup
+## 2. One-time prerequisite
 
-Install Tailscale on the PC and phone, and sign both devices into the same tailnet.
+Install Tailscale on the PC and phone and sign both devices into the same tailnet.
 
-Tailscale Serve requires the tailnet HTTPS/MagicDNS capability. If HTTPS has not been enabled for the tailnet yet, follow the prompt from the Tailscale CLI/admin console and enable HTTPS certificates.
+Tailscale Serve requires the tailnet HTTPS/MagicDNS capability. If HTTPS has not been enabled yet, follow the Tailscale prompt/admin-console flow to enable HTTPS certificates.
 
-## 3. Configure Tailscale Serve and obtain the hostname
+## 3. Normal startup
 
-Run from Git Bash on the PC:
+The normal mobile startup path is now one command from Git Bash:
+
+```bash
+bash scripts/mobile-start.sh
+```
+
+The script:
+
+1. finds `tailscale` / `tailscale.exe`;
+2. checks `tailscale status --json` and requires `BackendState=Running`;
+3. reads the local node `*.ts.net` DNS name;
+4. configures private Tailscale Serve mappings through `scripts/tailscale-serve.sh`;
+5. starts `character-stack` with the exact mobile HTTPS origin through `--mobile-origin`;
+6. prints the phone URL and the validation command.
+
+The stack remains foreground-managed exactly like the normal `character-stack` command. `Ctrl+C` stops processes started by that launcher.
+
+Example output URL:
+
+```text
+https://<node>.<tailnet>.ts.net
+```
+
+Open that URL on the phone while Tailscale is connected.
+
+### Config override
+
+Arguments after `mobile-start.sh` are passed to `character-stack`, so a non-default config remains possible:
+
+```bash
+bash scripts/mobile-start.sh --config config.yaml
+```
+
+## 4. Explicit stack parameter
+
+The script is the preferred path, but the stack also has an explicit startup parameter:
+
+```bash
+uv run character-stack \
+  --no-browser \
+  --mobile-origin "https://<node>.<tailnet>.ts.net"
+```
+
+`--mobile-origin`:
+
+- requires an absolute HTTPS origin on the default HTTPS port `443`;
+- merges the exact origin into `CHARACTER_MEDIA_CORS_ORIGINS` while preserving the local chat origins;
+- does not bind Media Runtime to a public interface;
+- refuses to silently reuse an already-running Media Runtime when that process does not return the requested CORS origin.
+
+If an old stack is already running without the mobile CORS origin, stop that stack and run `mobile-start.sh` again. The launcher deliberately does not kill arbitrary Python processes.
+
+## 5. Validation
+
+After the stack reports ready, run in another Git Bash terminal:
+
+```bash
+bash scripts/mobile-check.sh
+```
+
+This is a read-only diagnostic script. It does not start, stop, reset, or reconfigure services.
+
+It checks:
+
+- Tailscale backend is connected;
+- local `*.ts.net` HTTPS hostname exists;
+- an online Android/iOS peer is visible when Tailscale reports one;
+- Serve contains the `:8000` and `:8001` backends;
+- local Character Runtime `/health`;
+- local Media Runtime `/health`;
+- Media Runtime returns `Access-Control-Allow-Origin` for the exact mobile origin;
+- remote Character HTTPS `/health`;
+- remote Media HTTPS `:8443/health`.
+
+A healthy setup ends with:
+
+```text
+Mobile access validation: PASS
+Phone URL: https://<node>.<tailnet>.ts.net
+```
+
+The mobile-peer check is informational: a sleeping/offline phone may produce a warning while the server-side configuration itself is still valid.
+
+## 6. Low-level Serve helper
+
+`mobile-start.sh` uses:
 
 ```bash
 bash scripts/tailscale-serve.sh
 ```
 
-Equivalent commands are:
+Equivalent Serve commands are:
 
 ```bash
 tailscale serve --https=443 --bg 8000
@@ -46,83 +129,68 @@ tailscale serve --https=8443 --bg 8001
 tailscale serve status
 ```
 
-The status output provides the HTTPS hostname, for example:
+`--bg` makes the Serve configuration persist in the background. The helper does **not** run `serve reset` and does **not** enable Funnel, so unrelated Serve configuration is not intentionally cleared and nothing is made public.
+
+## 7. Browser routing behavior
+
+The same Web application serves PC and mobile clients.
 
 ```text
-https://<node>.<tailnet>.ts.net
-```
-
-`--bg` keeps the Serve configuration active after the terminal exits. To remove these mappings later, use the matching `tailscale serve ... off` commands or manage the Serve configuration explicitly. Do not switch either port to Funnel.
-
-## 4. Start or restart Character Memory with the exact mobile origin
-
-The browser page is served from `https://<node>.<tailnet>.ts.net`, while Media Runtime is on HTTPS port `8443`. Because a different port is a different browser origin, Media Runtime must allow the exact chat origin through CORS.
-
-In Git Bash, after obtaining the hostname from step 3:
-
-```bash
-export CHARACTER_MEDIA_CORS_ORIGINS="http://127.0.0.1:8000,http://localhost:8000,https://<node>.<tailnet>.ts.net"
-uv run character-stack --no-browser
-```
-
-Replace `<node>.<tailnet>.ts.net` with the hostname shown by `tailscale serve status`.
-
-If the stack was already running before this environment variable was set, restart it so Media Runtime receives the new CORS configuration.
-
-Do not use a broad `*.ts.net` CORS rule. V1 deliberately allows the exact Character Memory origin only.
-
-## 5. Open on the phone
-
-With Tailscale connected on the phone, open:
-
-```text
-https://<node>.<tailnet>.ts.net
-```
-
-The chat frontend automatically resolves Media Runtime as follows:
-
-```text
-local/non-Tailscale page          -> http://127.0.0.1:8001
-HTTPS *.ts.net Serve page         -> https://same-hostname:8443
+local/non-Tailscale page          -> Media http://127.0.0.1:8001
+HTTPS *.ts.net Serve page         -> Media https://same-hostname:8443
 explicit localStorage override    -> override wins
 ```
 
-The automatic `:8443` mapping is intentionally scoped to HTTPS `*.ts.net` pages. Other reverse-proxy/custom-domain deployments must set the existing override explicitly instead of inheriting a Tailscale assumption.
-
-The existing key remains the escape hatch for non-standard deployments:
+The existing override key remains:
 
 ```text
 character-memory:media-base-url
 ```
 
-## 6. Expected V1 mobile capabilities
+Automatic `:8443` routing is intentionally limited to HTTPS `*.ts.net` pages. Other reverse-proxy/custom-domain deployments must configure the override explicitly.
 
-Expected to work over the private HTTPS path:
+## 8. Expected V1 mobile capabilities
+
+Expected over the private HTTPS path:
 
 - direct chat and group chat;
 - SSE realtime Character messages;
 - stickers and generated images;
-- incoming message cue sound after browser audio has been unlocked by user interaction;
+- incoming message cue sound after browser audio is unlocked by user interaction;
 - dictation ASR;
 - TTS playback and voice calls;
 - camera capture when the mobile browser exposes `getUserMedia`.
 
 Display/screen sharing is browser/platform-dependent on mobile and is not a V1 compatibility promise. The UI hides that control when `getDisplayMedia` is unavailable.
 
-## 7. Security rationale
+Settings Center remains PC-local. A remote `*.ts.net` page hides the Settings link rather than pointing the phone at its own `127.0.0.1:8003`.
 
-Tailscale encrypts node-to-node traffic, while Serve adds browser-visible HTTPS. This matters because microphone/camera APIs require a secure browser context on mobile.
+## 9. Security rationale
 
-The backend services continue to listen on localhost only. Tailscale Serve is the only mobile-facing entrypoint, and access-control rules in the tailnet remain effective.
+Tailscale encrypts node-to-node traffic and Serve gives the browser a valid HTTPS secure context. This allows browser microphone/camera APIs without changing Character or Media Runtime to listen on `0.0.0.0`.
 
-## 8. Troubleshooting
+The only mobile-facing entrypoints are the private tailnet Serve endpoints. Funnel and router port-forwarding remain out of scope.
 
-If chat works but ASR/TTS fails:
+## 10. Targeted troubleshooting
 
-1. Open `tailscale serve status` and confirm both `443 -> 8000` and `8443 -> 8001` exist.
-2. Confirm the phone URL is HTTPS, not a raw `http://100.x.x.x` address.
-3. Confirm `CHARACTER_MEDIA_CORS_ORIGINS` contains the exact HTTPS chat origin, without `:8443`.
-4. Restart Media Runtime after changing CORS.
-5. On the PC, verify `http://127.0.0.1:8001/health` is healthy.
+Start with:
 
-If microphone/camera permission is unavailable, first confirm the page is loaded from the HTTPS `*.ts.net` hostname and that the browser has OS-level microphone/camera permission.
+```bash
+bash scripts/mobile-check.sh
+```
+
+If it reports a Serve failure:
+
+```bash
+tailscale serve status
+```
+
+If local Media is healthy but the CORS check fails, stop the old stack and restart with:
+
+```bash
+bash scripts/mobile-start.sh
+```
+
+If remote HTTPS checks fail while local checks pass, inspect Tailscale HTTPS/Serve rather than changing Character Memory bind addresses.
+
+If microphone/camera permission is unavailable, confirm the phone page is the HTTPS `*.ts.net` URL and that the mobile OS/browser has microphone/camera permission.

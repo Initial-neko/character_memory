@@ -25,6 +25,13 @@ def test_tailscale_media_resolution_is_narrow_and_override_compatible() -> None:
     assert 'navigator.mediaDevices?.getDisplayMedia' in script
 
 
+def test_remote_tailscale_page_hides_pc_only_settings_link() -> None:
+    script = (WEB / "mobile_access.js").read_text(encoding="utf-8")
+    index = (WEB / "index.html").read_text(encoding="utf-8")
+    assert 'id="settingsLink"' in index
+    assert 'if (tailscalePage) document.getElementById("settingsLink")?.classList.add("hidden")' in script
+
+
 def test_existing_voice_clients_share_the_same_media_override_key() -> None:
     voice = (WEB / "voice.js").read_text(encoding="utf-8")
     dictation = (WEB / "dictation.js").read_text(encoding="utf-8")

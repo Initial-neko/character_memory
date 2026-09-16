@@ -6,7 +6,7 @@ Sticker 当前是 **application/global resource**，不是“每个 Character �
 
 ```text
 current ownership   = global application resource
-legacy compatibility = persona-local manifests / old character-scoped routes & CLI
+legacy compatibility = persona-local manifests / old character-scoped routes
 ```
 
 V1 保留兼容，不为了清理历史语义去破坏现有资源。
@@ -215,7 +215,7 @@ STICKER action
 
 ### Global imported
 
-当前正式用户扩展资源。Web import 写到 `sticker_dir`，所有人物/群聊共享。
+当前正式用户扩展资源。Web import 和 CLI import 都写到 `sticker_dir`，所有人物/群聊共享。
 
 ### Legacy character-local
 
@@ -223,44 +223,28 @@ STICKER action
 
 这是兼容层，不是新资源应该继续采用的 ownership 模式。
 
-## 9. Legacy CLI semantic debt
+## 9. CLI import compatibility
 
-当前仍存在：
-
-```text
-sticker_import_cli.py
-```
-
-它的帮助文本仍是：
+`sticker_import_cli.py` 当前已经与 global ownership 对齐：
 
 ```text
-Import a tagged sticker ZIP into one character.
+archive ZIP
+  -> resolve_sticker_dir(settings)
+  -> global manifest/assets
+  -> load_global_sticker_catalog(...)
 ```
 
-并且要求：
+历史 `--character` 参数仍接受，避免已有本地脚本直接失效，但它只做 character id 兼容校验，并打印 deprecated 提示；**不会改变 storage ownership**。
+
+因此当前事实源保持一致：
 
 ```text
---character
+Web import  -> global
+CLI import  -> global
+Runtime     -> default + global + legacy read compatibility
 ```
 
-这个 CLI 仍使用旧 character-local 语义，与当前 Web/global ownership 不完全一致。
-
-V1 处理原则：
-
-- 保留，避免破坏已有本地脚本；
-- 明确标记为 legacy compatibility；
-- 不把它当正式 Sticker ownership 事实源；
-- 不在本轮纯文档 PR 中修改行为。
-
-后续大版本可以二选一：
-
-```text
-改成 global import CLI
-or
-删除 legacy CLI
-```
-
-不要为了“统一”在 V1 零碎改变 storage contract。
+legacy persona-local manifests 继续只读兼容，不再作为新 CLI 导入目标。
 
 ## 10. Relationship to ImageGen
 
@@ -278,7 +262,8 @@ Sticker 与 ImageGen 是不同资源路径：
 
 - built-in/global/legacy catalog merge；
 - `/v1/stickers` 返回 global scope；
-- legacy `character_id` 不改变 Web import ownership；
+- legacy `character_id` 不改变 Web/CLI import ownership；
+- CLI `--character` compatibility 不写回 persona-local library；
 - asset path validation；
 - ZIP size/file-count/path traversal 限制；
 - metadata-present 和 AI-auto-tag 两类 import；

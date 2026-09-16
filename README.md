@@ -4,7 +4,7 @@
 
 项目当前仍以 **Prove the Person** 为核心：验证一个人物能否在长期互动中保持可辨识的人格、拥有可追溯经历、选择性记忆、持续心理状态与自主表达，并让今天的行为能够被过去解释。
 
-语音、头像、图片生成、群聊等能力已经进入仓库，但它们都是人物表达与交互的渠道，不改变这条核心产品判断：
+语音、视觉采集、头像、图片生成、群聊等能力都是同一个人物的感知/表达渠道，不建立第二套人格：
 
 > 不优化“人物有多喜欢用户”，而优化“人物现在为什么会这样做”。
 
@@ -17,11 +17,13 @@
 - `actions=[]` 是合法沉默；辅助 Memory/Intent 字段允许安全容错，主 outward action contract 仍严格。
 - Direct Chat + Group Chat；群聊共享事实只保存一次，成员按因果顺序逐个判断。
 - 异步消息接受：用户消息先持久化并立即返回 202，人物反应通过 SSE 渐进推送。
-- Message Search、Group Mentions、Unread、Intent Preview。
-- 用户图片输入 + Vision；本地 Sticker / Image Catalog。
-- ImageGen：角色自主 `SELFIE / SCENE`，以及用户显式“AI 生成图片”工具；生成后可像粘贴图片一样先进入草稿再手动发送。
+- Message Search、Group Mentions、Unread、Intent Preview、Group Archive/Restore。
+- 用户图片输入 + Vision；浏览器 Camera / Display Capture 会选择关键帧作为本轮 transient Vision context，不把帧二进制长期写进聊天事实。
+- ImageGen：Direct 与 Group 中 Character 都可以自主选择 `SELFIE / SCENE`；同时保留用户显式“AI 生成图片”草稿工具。
 - Avatar Search / Avatar Generate / 从聊天图片设头像。
-- 独立 Media Runtime：本地 ASR（SenseVoice）+ TTS（VITS）。
+- Media Runtime：SenseVoice ASR；正式 Browser TTS 固定走 `:8001/v1/tts`，按配置使用 Kokoro 或 Sherpa。
+- TTS Provider Runtime + Lab：`:9002` 承载 Kokoro/Sherpa/CosyVoice provider audition，其中 Kokoro 也是 V1 正式默认 TTS provider。
+- Settings Center：`config.yaml` 管非敏感配置，`.env` 管 Secret；修改后统一重启 stack 生效。
 - Dev Console：统一测试 LLM、ASR/TTS、ImageGen、资源与运行状态。
 - pytest、Browser Smoke、JSONL Eval regression。
 
@@ -29,27 +31,29 @@
 
 ```text
 Browser
-├─ Chat UI ------------------------------┐
-└─ Dev Console :8002                     │
-                                         │
-Character Runtime :8000                  │
-├─ FastAPI routes                        │
-├─ async message accept + SSE            │
-├─ ReactionScheduler                     │
-├─ PersonRuntime                         │
-│  ├─ Persona / Relationship Time        │
-│  ├─ Memory Recall / Mental State       │
-│  ├─ Cloud LLM / Vision                 │
-│  └─ MESSAGE / STICKER / IMAGE / ...    │
-├─ Visual Runtime / Image Providers      │
-└─ SQLite + local media metadata/files   │
-                                         │
-Media Runtime :8001 <--------------------┘
-├─ local ASR
-└─ local TTS
+├─ Chat UI ------------------------------------------------------┐
+├─ Dev Console :8002                                            │
+├─ Settings Center :8003                                        │
+└─ TTS Provider Lab :9002                                       │
+                                                                │
+Character Runtime :8000                                         │
+├─ Direct / Group HTTP + SSE                                    │
+├─ ReactionScheduler / PersonRuntime                            │
+├─ Persona / Memory / Mental State / Intent                     │
+├─ Vision / Visual Capture context                              │
+├─ ImageGen / autonomous visual                                 │
+└─ SQLite + local media metadata/files                          │
+                                                                │
+Media Runtime :8001 <-------------------------------------------┘
+├─ SenseVoice ASR
+├─ Sherpa VITS fallback
+└─ formal /v1/tts router
+      └─ Kokoro -> TTS Provider Runtime :9002/v1/tts
+
+Optional CosyVoice sidecar :9012
 ```
 
-Character Runtime 与 Media Runtime 是独立进程。Voice 只是同一个 Persistent Person 的另一条输入/输出渠道，不存在第二套“语音人物”。
+这些服务是独立进程。Voice、Vision、Camera/Screen Share 与 ImageGen 都复用同一个 Persistent Person，不存在第二套“语音人物”或“视觉人物”。
 
 ## 开发环境
 
@@ -64,14 +68,28 @@ Character Runtime 与 Media Runtime 是独立进程。Voice 只是同一个 Pers
 ```bash
 git clone https://github.com/Initial-neko/character_memory.git
 cd character_memory
-bash scripts/sync-all.sh
+bash scripts/setup-media-models.sh
 uv run character-memory init
 ```
 
-配置本地 `config.yaml`，API Key 建议通过环境变量注入，例如：
+`setup-media-models.sh` 会复用 `scripts/sync-all.sh`，同时准备 Sherpa ASR/TTS 与 Kokoro 模型/voice 文件。只需要重新同步 Python 开发依赖时可运行：
+
+```bash
+bash scripts/sync-all.sh
+```
+
+配置约定：
+
+```text
+config.yaml   非敏感运行配置
+.env          API Key / Token
+```
+
+Secret 优先通过 Settings Center 管理，也可以在系统环境变量中覆盖，例如：
 
 ```bash
 export OPENCODE_GO_API_KEY="..."
+export SEARCHAPI_API_KEY="..."
 export AGNES_API_KEY="..."
 export MSIMG_API_KEY="..."       # 或 MODELSCOPE_API_TOKEN
 ```
@@ -89,29 +107,28 @@ uv run character-stack
 - Character Runtime: `http://127.0.0.1:8000`
 - Media Runtime: `http://127.0.0.1:8001`
 - Dev Console: `http://127.0.0.1:8002/dev`
+- Settings Center: `http://127.0.0.1:8003/settings`
+- TTS Provider Runtime + Lab: `http://127.0.0.1:9002/tts`
 
-`character-stack` 会复用已经健康运行的服务。修改 Runtime 代码后如果发现行为仍像旧版本，请先结束旧进程，再重新启动，避免复用旧 `:8000`。
+可选 CosyVoice sidecar 独立运行在 `:9012`，未运行时不应阻止主 stack 启动。
+
+`character-stack` 会复用已经健康运行的服务。修改 Runtime 代码后如果行为仍像旧版本，请先结束旧进程再重新启动，避免复用旧服务。
 
 可选：
 
 ```bash
 uv run character-stack --open chat
+uv run character-stack --open settings
+uv run character-stack --open tts
 uv run character-stack --no-browser
 ```
 
 ## 常用测试
 
 ```bash
-# Python contract / integration tests
 uv run pytest -q
-
-# 完整开发依赖重新同步
 bash scripts/sync-all.sh
-
-# Media 本地 benchmark
 uv run python scripts/benchmark_media.py --wav path/to/test.wav --iterations 20
-
-# Relationship eval
 uv run character-memory eval evals/p0_relationship.jsonl
 ```
 
@@ -146,9 +163,13 @@ Browser Smoke 在 CI 的独立 job 中安装 Playwright/Chromium，不放入默�
 - [Person Runtime](docs/current/PERSON_RUNTIME.md)
 - [Conversation Runtime](docs/current/CONVERSATION_RUNTIME.md)
 - [Memory](docs/current/MEMORY.md)
+- [Visual Capture](docs/current/VISUAL_CAPTURE.md)
 - [Visual Generation](docs/current/VISUAL_GENERATION.md)
+- [Stickers](docs/current/STICKERS.md)
 - [Media Runtime](docs/current/MEDIA_RUNTIME.md)
 - [Dev Console](docs/current/DEV_CONSOLE.md)
+- [Settings Center](docs/current/SETTINGS_CENTER.md)
+- [TTS Provider Lab](docs/current/TTS_PROVIDER_LAB.md)
 - [Avatar Search](docs/current/AVATAR_SEARCH.md)
 - [Evals](docs/current/EVALS.md)
 
@@ -160,6 +181,7 @@ Browser Smoke 在 CI 的独立 job 中安装 Playwright/Chromium，不放入默�
 2. **人物可以沉默。** 用户输入不意味着必须回复。
 3. **辅助认知失败不应轻易吞掉有效主回复。** 但 outward action 本身仍需要明确合法。
 4. **群聊事实只保存一次。** 不把同一房间消息复制成多个彼此独立的“事实”。
-5. **慢能力隔离。** ASR/TTS、ImageGen 等不能因为失败而破坏已经成立的文本主链路。
-6. **先测量再复杂化。** 不因为“以后可能需要”提前引入 Redis、Celery、向量数据库、LangGraph 或大型前端框架。
-7. **历史文档不是当前 contract。** 当前 HEAD 与 `docs/current/` 优先。
+5. **多模态仍是同一个人。** Voice/Vision/Capture/ImageGen 都不得绕过 PersonRuntime 另建人格状态。
+6. **慢能力隔离。** ASR/TTS、ImageGen 等不能因为失败而破坏已经成立的文本主链路。
+7. **先测量再复杂化。** 不因为“以后可能需要”提前引入 Redis、Celery、向量数据库、LangGraph 或大型前端框架。
+8. **历史文档不是当前 contract。** 当前 HEAD 与 `docs/current/` 优先。

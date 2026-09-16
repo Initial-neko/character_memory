@@ -29,7 +29,7 @@ Event
 result = person_runtime.handle(event)
 ```
 
-用户消息、TIME_TICK、Intent 等仍复用同一个 Person Runtime，不建立彼此独立的人格状态。
+用户消息、Group shared fact、TIME_TICK、Intent 等仍复用同一个 Person Runtime，不建立彼此独立的人格状态。
 
 ## 2. PersonReaction contract
 
@@ -130,7 +130,7 @@ WebUI 可以展示轻量 `已读 · 没有回复`，但不会伪造一条 Charac
 }
 ```
 
-有效可见 Action 会按顺序分别形成 Character Message，并共享同一个 `source_event_id`。
+有效可见 Action 会按顺序分别形成 Character Message，并共享同一个 source fact。
 
 最多 3 个是产品护栏，不要求模型为了“自然”机械拆句。普通一条 MESSAGE 仍是默认情况。
 
@@ -139,6 +139,8 @@ WebUI 可以展示轻量 `已读 · 没有回复`，但不会伪造一条 Charac
 ### Sticker
 
 Runtime 每轮只允许模型选择当前 Available Stickers 中真实存在的 ID。未知资源会被丢弃并进入 Trace。
+
+Sticker 当前是 application/global resource：运行时可以合并内置 pack、全局导入 pack 和 legacy character-local manifest。具体 ownership 见 [`STICKERS.md`](STICKERS.md)。
 
 ### Existing Image
 
@@ -156,19 +158,25 @@ Runtime 每轮只允许模型选择当前 Available Stickers 中真实存在的 
 }
 ```
 
-当前只接受：
+当前自主链路只接受：
 
 - `SELFIE`
 - `SCENE`
 
 执行策略：
 
-- 只对 direct `USER_MESSAGE` 开放角色自主生成；
+- Direct `USER_MESSAGE` reaction 可以自主生成；
+- Group 中每个 Character 的 `USER_MESSAGE` reaction 也可以独立自主生成；
+- 同一 Character 单轮最多 1 个 `GENERATE_IMAGE`；
 - `SELFIE` 在 Provider 支持 reference 时使用当前头像作为 identity anchor；
-- `SCENE` 不要求人物本人出镜；
-- 生成运行在异步 Visual Runtime 中；
-- 文本/状态已经提交后，即使图片 Provider 失败，也不能反向让主回复失败；
-- 生成过程中出现更新的用户 Event 时，旧图片结果可以被判定 stale 并丢弃。
+- `SCENE` 不要求人物本人出镜，也不为了身份一致性机械附带 avatar reference；
+- 生成运行在异步 visual worker 中；
+- 主文本/状态已经提交后，即使图片 Provider 失败，也不能反向让主 reply 失败；
+- 生成过程中出现更新的用户事实时，旧图片结果可以被判定 stale 并丢弃。
+
+Direct 最终追加普通 `events` IMAGE；Group 则把结果以发起生成的 Character 身份写入 `conversation_events`，并走现有 group SSE。
+
+Group 没有第二套 ImageGen system。它复用同一个 `VisualPromptPlanner`、Provider abstraction、MediaStorage、`SELFIE / SCENE` 和 stale-result 语义，只在 shared-room persistence/SSE 上有 adapter glue。
 
 ## 7. Mental State
 
@@ -231,9 +239,24 @@ otherwise -> write
 - 用于 direct character，不 wake group chat
 - 不是 durable distributed job queue
 
-Wake/Intent 不自动获得 ImageGen 权限；目前自主生成图片限定在 direct user turn，避免后台无配额地产生图像成本。
+Wake/Intent 当前不自动获得自主 ImageGen 权限。自主生成图像只发生在用户消息 reaction 中，避免后台无配额地消耗图片 Provider。
 
-## 11. Transaction / failure boundary
+## 11. Multimodal input is still one Person
+
+普通图片附件、Camera、Screen Share、Voice ASR 都只是进入同一个 PersonRuntime 的不同输入渠道：
+
+```text
+text ------------------┐
+image attachment ------┤
+Camera/Display frames -┤ -> same PersonRuntime
+ASR transcript --------┘
+```
+
+Visual Capture 的 frame bytes 只作为当前 Vision context，不变成长期人物状态。Event 只保存必要的 capture metadata。
+
+Voice ASR 在浏览器端有 transcript validity gate：空白、纯标点/符号、过短的单个 ASCII 字符不会创建聊天事实；汉字或至少两个 ASCII 字母/数字才被接受。
+
+## 12. Transaction / failure boundary
 
 Source Event 已经是事实后，Derived state 应尽量原子提交。
 
@@ -247,7 +270,7 @@ Source Event 已经是事实后，Derived state 应尽量原子提交。
 
 可选慢工具（例如 ImageGen）应在主事务之外运行，并通过正常 Media/Event 协议追加结果。
 
-## 12. Safe Thought / Trace
+## 13. Safe Thought / Trace
 
 普通 UI 的“想法”只展示：
 

@@ -35,6 +35,30 @@ jobs:
       - name: Run tests
         run: uv run pytest -q
 
+  windows-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install core and media dependencies
+        run: uv sync --extra api --extra dev --extra media
+
+      - name: Run Windows-sensitive smoke tests
+        run: uv run pytest -q tests/test_cross_platform_scripts.py tests/test_media_bootstrap.py tests/test_sticker_import_cli.py
+
   browser-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15

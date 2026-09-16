@@ -31,11 +31,17 @@ def _normalize_mobile_origin(value: str | None) -> str | None:
     if not raw:
         return None
     parsed = urlsplit(raw)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("mobile origin contains an invalid port") from exc
     if parsed.scheme != "https" or not parsed.hostname:
         raise ValueError("mobile origin must be an absolute HTTPS origin")
+    if port not in {None, 443}:
+        raise ValueError("mobile origin must use the default HTTPS port 443")
     if parsed.path not in {"", "/"} or parsed.query or parsed.fragment or parsed.username or parsed.password:
         raise ValueError("mobile origin must not contain credentials, path, query, or fragment")
-    return f"https://{parsed.netloc}"
+    return f"https://{parsed.hostname}"
 
 
 def _merge_cors_origins(current: str | None, mobile_origin: str | None) -> str:
@@ -129,7 +135,7 @@ def main() -> None:
     parser.add_argument(
         "--mobile-origin",
         default=None,
-        help="exact HTTPS browser origin allowed to call Media Runtime, e.g. https://node.tailnet.ts.net",
+        help="exact HTTPS browser origin on port 443 allowed to call Media Runtime",
     )
     args = parser.parse_args()
 

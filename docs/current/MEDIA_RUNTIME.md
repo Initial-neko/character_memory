@@ -258,20 +258,97 @@ POST /v1/tts
 
 Character chat 仍通过普通 async conversation path 和 SSE。Voice 前端不绕过 PersonRuntime。
 
-## 9. Voice interaction model
+`/v1/asr` 是同步 FastAPI route，因为本地 SenseVoice inference 本身是阻塞调用。这样 FastAPI 会把 ASR inference 放入 worker threadpool，而不是占住 event loop；因此 TTS request 可以与 ASR request 重叠进行。
 
-当前 Voice 是简化 call/dictation experience，不宣称 full duplex。
+## 9. Voice interaction model — Pipeline V1.1
 
-基本边界：
+当前 Voice 仍然**不是 full-duplex Voice Agent**，也没有 barge-in；但 microphone capture 已与 TTS playback 状态解耦。
 
-- browser-side simple VAD / recording；
-- ASR → transcript validity gate；
-- 有效 transcript → normal chat message；
-- 等待 Character Runtime reaction；
-- Character text → formal `/v1/tts`；
-- 播放期间避免机械重复提交 microphone turn。
+### 9.1 TTS pipeline
 
-ASR validity gate：
+每一个 Character 的一次可朗读 MESSAGE 仍然是一个完整 TTS unit，不按句子拆碎：
+
+```text
+Character A complete MESSAGE
+  -> synthesize A
+  -> play A
+
+while A is playing:
+  -> pre-synthesize only next queued MESSAGE B
+
+A playback ends
+  -> play already synthesized B
+  -> pre-synthesize C
+```
+
+约束：
+
+- TTS inference concurrency = 1；
+- audio playback concurrency = 1；
+- 当前音频播放可以与下一条 TTS inference 重叠；
+- 不允许多个 Character 声音重叠播放；
+- 当前不做 sentence/chunk streaming TTS。
+
+这消除了旧实现中 `synthesize A -> play A -> synthesize B -> play B` 的人物之间空档，同时保持完整 MESSAGE 的语气连续性。
+
+### 9.2 ASR stays live during TTS
+
+Browser microphone 使用：
+
+```text
+echoCancellation=true
+noiseSuppression=true
+autoGainControl=true
+```
+
+TTS playback 期间，VAD / microphone capture / ASR 仍可继续运行。
+
+如果用户在 AI 正在说话时讲话：
+
+```text
+AI TTS continues playing
+  +
+user speech -> VAD -> ASR -> transcript validity gate
+  -> pending user turn
+```
+
+**用户说话不会停止或打断当前 TTS。**
+
+有效 transcript 在播放期间只进入 `pendingTurns`；等当前 TTS playback queue 完全清空后，才通过正常 chat API 提交给同一个 PersonRuntime。连续捕获到多个 pending utterance 时，当前 V1.1 会把文本按顺序合并为下一次 user turn，并把 transient Visual Capture frames 去重后最多保留 4 帧。
+
+因此逻辑顺序保持：
+
+```text
+Character finishes current spoken turn
+  ↓
+pending user speech is submitted
+  ↓
+normal async chat / PersonRuntime
+  ↓
+next Character reaction
+```
+
+而不是在 Character 仍播放旧回答时启动下一次 PersonRuntime reaction。
+
+### 9.3 Capture state vs UI state
+
+Voice 前端维护两类状态：
+
+```text
+phase
+  = UI / conversation state
+  listening | waiting | speaking | error | ...
+
+capturePhase
+  = microphone VAD state
+  idle | listening | recording | transcribing | paused
+```
+
+这样 `phase=speaking` 时仍可保持 `capturePhase=listening`，避免旧实现因为进入 `speaking` 就丢弃 microphone frames。
+
+在 transcript 已正式提交、Character Runtime 正在处理下一轮时，capture 会暂时 `paused`；当前 V1.1 的目标是“AI 播放时仍听得到用户”，不是允许无限并发用户 turn。
+
+### 9.4 Transcript validity gate
 
 ```text
 empty / punctuation-only   -> reject
@@ -287,6 +364,8 @@ otherwise                  -> reject
 - 主 LLM / Vision 保持 cloud-only。
 - ASR/TTS 可 CPU 运行；GPU 是 benchmark 证明有收益后的 accelerator，不是默认假设。
 - `tts_device: cuda` 只在当前 Torch build 真正暴露 CUDA 时有效。
+- ASR 与 TTS 可以请求级重叠；不要把这扩张成无限并发 media inference。
+- Browser Voice 自己把 TTS inference 串行为 1，并只预取下一条。
 - ASR/TTS combined VRAM hard target 仍以轻量为目标；不为了“有 GPU”强制常驻所有模型。
 - 模型 lazy load 是合理策略；不要因为 health probe 就强制加载全部本地模型。
 - CI 不下载真实模型、不要求 GPU。
@@ -310,6 +389,14 @@ uv run python scripts/benchmark_media.py \
 - cold vs warm load
 - process RAM / optional VRAM
 
+Voice Pipeline V1.1 额外关注：
+
+- A playback 剩余时间是否足以覆盖 B synthesis；
+- A -> B 实际 playback gap；
+- TTS playback 期间 ASR latency；
+- speaker playback 被 microphone 回采后的 AEC 效果；
+- ASR + Kokoro CPU overlap 时的 realtime factor / CPU saturation。
+
 Kokoro/Sherpa/CosyVoice 的音质横向试听应在 `:9002/tts` 做；正式 Browser latency 则应通过 `:8001/v1/tts` 验证路由后的真实路径。
 
 ## 12. Test layers
@@ -322,10 +409,13 @@ Kokoro/Sherpa/CosyVoice 的音质横向试听应在 `:9002/tts` 做；正式 Bro
 - fake ASR/TTS provider
 - formal TTS routing contract
 - HTTP contracts
+- ASR worker-thread route boundary
 - lazy dependency boundary
 - bootstrap/native runtime safety
 - main server / media server separation
 - frontend Voice transcript gate
+- TTS next-message prefetch / serialized inference contract
+- playback-period pending ASR contract
 - Settings/TTS configuration wiring
 
 ### Local real-model test
@@ -338,6 +428,8 @@ Kokoro/Sherpa/CosyVoice 的音质横向试听应在 `:9002/tts` 做；正式 Bro
 - DLL/device
 - CPU/GPU resource
 - Kokoro formal routing
+- speaker/microphone echo cancellation during real TTS playback
+- no audible gap between prefetched group replies when synthesis finishes in time
 
 ### Dev Console / TTS Lab
 
@@ -348,12 +440,13 @@ Kokoro/Sherpa/CosyVoice 的音质横向试听应在 `:9002/tts` 做；正式 Bro
 当前仍未把以下能力作为稳定 contract：
 
 - WebRTC full duplex
-- barge-in
+- barge-in / user speech interrupting TTS
 - streaming ASR partials
 - streaming TTS chunks
+- sentence-level TTS pipeline
 - voice cloning
 - emotion/prosody control
-- group call
+- group call transport
 - character-initiated call
 - persistent raw audio
 

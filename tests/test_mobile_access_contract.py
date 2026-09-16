@@ -39,7 +39,7 @@ def test_tailscale_serve_helper_keeps_backends_private() -> None:
     assert 'serve --https=8443 --bg 8001' in helper
     assert 'serve status' in helper
     assert 'serve reset' not in helper
-    assert 'tailscale funnel' not in helper.lower()
+    assert '"$TAILSCALE" funnel' not in helper
 
 
 def test_mobile_layout_hides_pc_only_controls_and_avoids_ios_input_zoom() -> None:

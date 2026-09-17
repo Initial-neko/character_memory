@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -114,6 +115,22 @@ def test_scheduler_status_snapshot_reports_authoritative_idle_or_typing_state():
     finally:
         scheduler.close()
         hub.close()
+
+
+def test_sse_event_ids_do_not_restart_below_an_old_browser_cursor():
+    old_hub = ConversationEventHub()
+    old_id = old_hub.publish("direct:rin:restart", "character_event", {"content": "before"})
+    old_hub.close()
+
+    # Model a new server process. Epoch-based channel IDs must advance beyond the
+    # Last-Event-ID retained by the browser from the previous process.
+    time.sleep(0.001)
+    new_hub = ConversationEventHub()
+    new_id = new_hub.publish("direct:rin:restart", "character_event", {"content": "after"})
+    try:
+        assert new_id > old_id
+    finally:
+        new_hub.close()
 
 
 def test_async_sse_stream_sends_fresh_status_snapshot_before_live_events():

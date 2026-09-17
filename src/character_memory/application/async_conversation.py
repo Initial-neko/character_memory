@@ -29,7 +29,10 @@ def group_channel(conversation_id: str) -> str:
 @dataclass
 class _HubChannel:
     condition: threading.Condition = field(default_factory=threading.Condition)
-    next_id: int = 1
+    # SSE Last-Event-ID survives a browser reconnect across a server restart.
+    # Starting each process/channel from an epoch-based sequence prevents an old
+    # high cursor from suppressing the new process's events 1, 2, 3, ... .
+    next_id: int = field(default_factory=time.time_ns)
     events: deque = field(default_factory=lambda: deque(maxlen=256))
 
 

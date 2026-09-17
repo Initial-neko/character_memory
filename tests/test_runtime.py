@@ -188,16 +188,20 @@ class FailingCandidateEmbedding(DeterministicEmbedding):
         return super().embed(text)
 
 
-def test_derived_state_is_not_half_written_if_candidate_embedding_fails(tmp_path):
+def test_candidate_embedding_failure_does_not_swallow_valid_reply(tmp_path):
     store = SQLiteStore(tmp_path / "x.db")
     emb = FailingCandidateEmbedding()
     runtime = PersonRuntime(store, VectorRecall(store, emb), emb, FakeModel(), "persona")
 
-    with pytest.raises(RuntimeError, match="candidate embedding failed"):
-        runtime.handle(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=datetime.now(timezone.utc), content="到家了"))
+    result = runtime.handle(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=datetime.now(timezone.utc), content="到家了"))
 
     events = store.list_events("rin")
-    assert [event.event_type for event in events] == [EventType.USER_MESSAGE]
-    assert store.get_mental_state("rin") == ""
+    assert [event.event_type for event in events] == [EventType.USER_MESSAGE, EventType.CHARACTER_MESSAGE, EventType.ACTION]
+    assert [event.content for event in events if event.event_type == EventType.CHARACTER_MESSAGE] == ["知道了"]
+    assert store.get_mental_state("rin") == "有点在意"
     assert store.list_memories("rin") == []
-    assert store.list_runtime_trace_sources("rin") == set()
+    assert result.created_memory_ids == []
+    trace = store.get_runtime_trace(result.event.id)
+    assert trace is not None
+    assert trace["memory_decisions"][0]["decision"] == "SKIP_EMBEDDING_ERROR"
+    assert trace["memory_decisions"][0]["error"] == "candidate embedding failed"

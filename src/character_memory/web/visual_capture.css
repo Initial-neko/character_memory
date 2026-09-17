@@ -23,5 +23,10 @@
 @media (max-width: 760px) {
   .visual-dev-stage { grid-template-columns: 1fr; }
   .visual-dev-preview { min-height: 180px; }
-  .voice-visual-preview { max-height: 120px; }
+  .voice-visual-controls { margin: 0 0 8px; gap: 8px; }
+  .voice-visual-button { min-height: 42px; padding: 9px 13px; font-size: 13px; }
+  .voice-visual-panel,
+  .voice-visual-panel.hidden { display: block; width: min(100%, 520px); margin: 0 auto 10px; background: #090c12; }
+  .voice-visual-preview { min-height: 180px; max-height: 34vh; aspect-ratio: 4 / 3; object-fit: cover; background: radial-gradient(circle at center, #1d2330 0, #0a0d13 68%); }
+  .voice-visual-status { min-height: 30px; padding: 7px 10px; text-align: center; font-size: 11px; }
 }

@@ -29,7 +29,7 @@
     <main class="chat-shell">
       <header class="topbar">
         <div class="character-heading"><div id="headerAvatar" class="header-avatar">R</div><div><h1 id="characterName">Rin</h1><p id="characterIdentity">Persistent AI Person</p></div></div>
-        <div class="topbar-actions"><span id="nowText" class="now"></span><button id="voiceCallButton" class="ghost-button voice-call-button" type="button" title="语音通话">📞</button><button id="conversationSearchButton" class="ghost-button search-button" type="button" title="搜索聊天（可切换当前/全局）">🔎 <span class="search-label">搜索</span></button><a id="settingsLink" class="ghost-button desktop-only-control" href="http://127.0.0.1:8003/settings" target="_blank" rel="noreferrer" title="Settings Center">⚙ Settings</a><button id="runtimeButton" class="ghost-button desktop-only-control" type="button">Runtime</button></div>
+        <div class="topbar-actions"><span id="nowText" class="now"></span><button id="voiceCallButton" class="ghost-button voice-call-button" type="button" title="语音/视频通话">📞</button><button id="conversationSearchButton" class="ghost-button search-button" type="button" title="搜索聊天（可切换当前/全局）">🔎 <span class="search-label">搜索</span></button><a id="settingsLink" class="ghost-button desktop-only-control" href="http://127.0.0.1:8003/settings" target="_blank" rel="noreferrer" title="Settings Center">⚙ Settings</a><button id="runtimeButton" class="ghost-button desktop-only-control" type="button">Runtime</button></div>
       </header>
       <section id="chat" class="chat" aria-live="polite"></section>
       <div class="composer-wrap">
@@ -42,22 +42,22 @@
   <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
   <aside id="drawer" class="drawer" aria-hidden="true"><header class="drawer-header"><div><h2 id="drawerTitle">详情</h2><p id="drawerSubtitle"></p></div><button id="drawerClose" class="icon-button" type="button" aria-label="关闭">×</button></header><div id="drawerBody" class="drawer-body"></div></aside>
 
-  <div id="voiceCallOverlay" class="voice-call-overlay hidden" role="dialog" aria-modal="true" aria-label="语音通话">
+  <div id="voiceCallOverlay" class="voice-call-overlay hidden" role="dialog" aria-modal="true" aria-label="语音/视频通话">
     <div class="voice-call-card">
       <section class="voice-call-identity">
         <div id="voiceCallAvatar" class="voice-call-avatar">R</div>
         <h2 id="voiceCallName">Rin</h2>
-        <div id="voiceCallContext" class="voice-call-context">单聊语音</div>
+        <div id="voiceCallContext" class="voice-call-context">单聊通话</div>
         <div id="voiceCallStatus" class="voice-call-status">正在连接…</div>
         <div id="voiceCallMetrics" class="voice-call-metrics"></div>
-        <div class="voice-visual-controls" aria-label="视觉共享">
-          <button id="voiceCameraButton" class="voice-visual-button" type="button" title="打开前置摄像头">📷 摄像头</button>
+        <div class="voice-visual-controls" aria-label="视频与视觉共享">
+          <button id="voiceCameraButton" class="voice-visual-button" type="button" title="开启前置摄像头视频">📷 开启视频</button>
           <button id="voiceScreenButton" class="voice-visual-button" type="button" title="选择标签页、窗口或整个屏幕">🖥 屏幕</button>
-          <button id="voiceVisualStopButton" class="voice-visual-button stop hidden" type="button">关闭视觉</button>
+          <button id="voiceVisualStopButton" class="voice-visual-button stop hidden" type="button">关闭视频</button>
         </div>
         <div id="voiceVisualPanel" class="voice-visual-panel hidden">
           <video id="voiceVisualPreview" class="voice-visual-preview" muted autoplay playsinline></video>
-          <div id="voiceVisualStatus" class="voice-visual-status">视觉未开启</div>
+          <div id="voiceVisualStatus" class="voice-visual-status">视频未开启 · 点击“开启视频”使用前置摄像头</div>
         </div>
         <div class="voice-call-actions">
           <button id="voiceMinimizeButton" class="voice-minimize" type="button">收起</button>

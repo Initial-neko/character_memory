@@ -81,14 +81,21 @@ def create_media_app(runtime: MediaRuntime | None = None):
         if selected != "kokoro":
             return {**local_tts, **base}
 
-        # Do not call :9002/health here: its Sherpa audition provider checks this
-        # Media Runtime and would create a health-check cycle. The provider page is
-        # a cheap process/readiness boundary; actual synthesis still owns model
-        # validation and returns a precise provider error if assets are unavailable.
+        # Query only the selected provider. Calling :9002/health would also ask
+        # its Sherpa adapter to call this Media Runtime and create a health cycle.
         try:
-            response = provider_client.get(f"{tts_lab_base}/tts", timeout=2.0)
+            response = provider_client.get(f"{tts_lab_base}/v1/providers/kokoro", timeout=3.0)
             response.raise_for_status()
-            return {**base, "ready": True, "loaded": None, "reason": None}
+            provider = dict((response.json() or {}).get("provider") or {})
+            return {
+                **base,
+                **provider,
+                "provider": "kokoro",
+                "voice": settings.tts_voice,
+                "speed": settings.tts_speed,
+                "device": provider.get("device") or settings.tts_device,
+                "restart_required_for_config_changes": True,
+            }
         except Exception as exc:
             return {
                 **base,
@@ -100,7 +107,14 @@ def create_media_app(runtime: MediaRuntime | None = None):
     @app.get("/health")
     def health():
         status = media.status()
-        status["tts_selected"] = selected_tts_status(status)
+        runtime_tts = dict(status.get("tts") or {})
+        selected_tts = selected_tts_status(status)
+        # `tts` remains the browser-facing contract and now reflects the route
+        # that /v1/tts will actually use. Keep the underlying Sherpa runtime
+        # separately so the TTS Lab can still inspect/audition it.
+        status["tts_runtime"] = runtime_tts
+        status["tts"] = selected_tts
+        status["tts_selected"] = selected_tts
         return {"ok": True, **status}
 
     @app.post("/v1/asr")

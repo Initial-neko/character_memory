@@ -89,8 +89,7 @@ class _ProviderStatusResponse:
 
 
 class _ProviderClient:
-    def __init__(self, *args, **kwargs):
-        self.closed = False
+    def __init__(self):
         self.get_calls = []
 
     def get(self, url, **kwargs):
@@ -110,9 +109,6 @@ class _ProviderClient:
 
     def post(self, *args, **kwargs):
         raise AssertionError("health test must not synthesize")
-
-    def close(self):
-        self.closed = True
 
 
 def make_wav(duration_ms: int = 200, sample_rate: int = 16000) -> bytes:
@@ -214,9 +210,9 @@ def test_configured_kokoro_health_uses_selected_provider_not_local_sherpa(monkey
             tts_device="cpu",
         ),
     )
-    monkeypatch.setattr(media_server.httpx, "Client", _ProviderClient)
+    provider_client = _ProviderClient()
 
-    with TestClient(media_server.create_media_app()) as client:
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
         health = client.get("/health")
 
     assert health.status_code == 200
@@ -227,6 +223,9 @@ def test_configured_kokoro_health_uses_selected_provider_not_local_sherpa(monkey
     assert payload["tts"]["ready"] is True
     assert payload["tts"]["model"] == "fake-kokoro"
     assert payload["tts_selected"] == payload["tts"]
+    assert provider_client.get_calls == [
+        ("http://127.0.0.1:9002/v1/providers/kokoro", {"timeout": 0.4})
+    ]
 
 
 def test_asr_endpoint_rejects_wrong_media_type():

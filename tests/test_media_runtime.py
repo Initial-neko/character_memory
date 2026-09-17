@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import character_memory.media_server as media_server
 from character_memory.media_runtime import (
     MediaRuntime,
     SherpaSenseVoiceProvider,
@@ -46,8 +47,9 @@ class FakeAsr(SpeechRecognitionProvider):
 
 
 class FakeTts(TextToSpeechProvider):
-    def __init__(self):
+    def __init__(self, *, ready: bool = True):
         self.calls = []
+        self.ready = ready
 
     def synthesize(self, text: str, *, speaker_id: int = 0, speed: float = 1.0) -> SynthesisResult:
         self.calls.append((text, speaker_id, speed))
@@ -63,7 +65,50 @@ class FakeTts(TextToSpeechProvider):
         )
 
     def status(self) -> dict:
-        return {"ready": True, "loaded": True, "provider": "fake-tts", "device": "cpu"}
+        return {
+            "ready": self.ready,
+            "loaded": self.ready,
+            "provider": "fake-tts",
+            "model": "fake",
+            "device": "cpu",
+            "reason": None if self.ready else "fake local tts unavailable",
+        }
+
+
+class _ProviderStatusResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+class _ProviderClient:
+    def __init__(self):
+        self.get_calls = []
+
+    def get(self, url, **kwargs):
+        self.get_calls.append((url, kwargs))
+        return _ProviderStatusResponse(
+            {
+                "provider": {
+                    "id": "kokoro",
+                    "ready": True,
+                    "loaded": False,
+                    "model": "fake-kokoro",
+                    "device": "cpu",
+                    "reason": None,
+                }
+            }
+        )
+
+    def post(self, *args, **kwargs):
+        raise AssertionError("health test must not synthesize")
 
 
 def make_wav(duration_ms: int = 200, sample_rate: int = 16000) -> bytes:
@@ -130,6 +175,8 @@ def test_media_http_contract_with_fake_providers():
     assert health.status_code == 200
     assert health.json()["asr"]["provider"] == "fake-asr"
     assert health.json()["tts"]["provider"] == "fake-tts"
+    assert health.json()["tts_runtime"]["provider"] == "fake-tts"
+    assert health.json()["tts_selected"]["ready"] is True
 
     asr_response = client.post("/v1/asr", content=make_wav(), headers={"Content-Type": "audio/wav"})
     assert asr_response.status_code == 200
@@ -145,6 +192,40 @@ def test_media_http_contract_with_fake_providers():
 
     metrics = client.get("/v1/metrics/recent").json()["metrics"]
     assert [item["kind"] for item in metrics] == ["asr", "tts"]
+
+
+def test_configured_kokoro_health_uses_selected_provider_not_local_sherpa(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(
+            tts_provider="kokoro",
+            tts_voice="zf_001",
+            tts_speed=1.0,
+            tts_device="cpu",
+        ),
+    )
+    provider_client = _ProviderClient()
+
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        health = client.get("/health")
+
+    assert health.status_code == 200
+    payload = health.json()
+    assert payload["tts_runtime"]["ready"] is False
+    assert payload["tts_runtime"]["provider"] == "fake-tts"
+    assert payload["tts"]["provider"] == "kokoro"
+    assert payload["tts"]["ready"] is True
+    assert payload["tts"]["model"] == "fake-kokoro"
+    assert payload["tts_selected"] == payload["tts"]
+    assert provider_client.get_calls == [
+        ("http://127.0.0.1:9002/v1/providers/kokoro", {"timeout": 0.4})
+    ]
 
 
 def test_asr_endpoint_rejects_wrong_media_type():

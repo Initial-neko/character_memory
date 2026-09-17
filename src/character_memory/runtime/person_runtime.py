@@ -107,7 +107,22 @@ class PersonRuntime:
                 decisions.append(decision)
                 continue
 
-            embedding = self.embeddings.embed(content)
+            try:
+                embedding = self.embeddings.embed(content)
+            except Exception as exc:
+                # Memory is optional derived cognition. A transient embedding
+                # failure must not discard an otherwise valid outward reaction.
+                decision["decision"] = "SKIP_EMBEDDING_ERROR"
+                decision["error"] = str(exc)
+                decisions.append(decision)
+                logger.warning(
+                    "runtime.memory embedding_failed character=%s content_chars=%d error=%s",
+                    character_id,
+                    len(content),
+                    exc,
+                )
+                continue
+
             normalized = content.casefold()
             duplicate_id = None
             duplicate_similarity = None

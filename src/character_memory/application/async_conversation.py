@@ -29,7 +29,10 @@ def group_channel(conversation_id: str) -> str:
 @dataclass
 class _HubChannel:
     condition: threading.Condition = field(default_factory=threading.Condition)
-    next_id: int = 1
+    # SSE Last-Event-ID survives a browser reconnect across a server restart.
+    # Starting each process/channel from an epoch-based sequence prevents an old
+    # high cursor from suppressing the new process's events 1, 2, 3, ... .
+    next_id: int = field(default_factory=time.time_ns)
     events: deque = field(default_factory=lambda: deque(maxlen=256))
 
 
@@ -168,23 +171,48 @@ class ReactionScheduler:
         state = self._state(key)
         now = time.monotonic()
         should_start = False
+        queued_watermark = 0
+        incoming_id = int(event.id)
         urls = [str(value).strip() for value in (image_data_urls or []) if str(value).strip()]
         with state.condition:
-            state.latest_event = event
+            # Persistence order is authoritative. Request threads may reach this
+            # method out of order, so the in-memory watermark must never move
+            # backwards after a newer durable event has already been observed.
+            if incoming_id <= state.processed_id:
+                logger.info(
+                    "scheduler.enqueue ignored_processed channel=%s incoming=%s processed=%s",
+                    key,
+                    incoming_id,
+                    state.processed_id,
+                )
+                return
+
+            current_id = int(state.latest_event.id) if state.latest_event is not None else state.processed_id
+            if incoming_id > current_id:
+                state.latest_event = event
+            else:
+                logger.info(
+                    "scheduler.enqueue kept_newer channel=%s incoming=%s current=%s",
+                    key,
+                    incoming_id,
+                    current_id,
+                )
+
             if urls:
-                state.image_urls[int(event.id)] = list(dict.fromkeys(urls))
+                state.image_urls[incoming_id] = list(dict.fromkeys(urls))
             metadata = getattr(event, "metadata", {}) or {}
             raw_mentions = metadata.get("mentions") if isinstance(metadata, dict) else None
             if isinstance(raw_mentions, list) and raw_mentions:
-                state.mention_by_event[int(event.id)] = [str(value) for value in raw_mentions if str(value).strip()]
+                state.mention_by_event[incoming_id] = [str(value) for value in raw_mentions if str(value).strip()]
             if state.pending_since is None:
                 state.pending_since = now
             state.last_submit_at = now
-            if not state.active:
+            queued_watermark = int(state.latest_event.id) if state.latest_event is not None else incoming_id
+            if not state.active and queued_watermark > state.processed_id:
                 state.active = True
                 should_start = True
             state.condition.notify_all()
-        self.hub.publish(key, "reaction_status", {"state": "queued", "watermark": int(event.id)})
+        self.hub.publish(key, "reaction_status", {"state": "queued", "watermark": queued_watermark})
         if should_start:
             threading.Thread(target=target, args=(key, state), daemon=True, name=f"reaction-{key[:32]}").start()
 

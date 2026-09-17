@@ -18,7 +18,7 @@ class TtsRequest(BaseModel):
     voice: str | None = Field(default=None, max_length=128)
 
 
-def create_media_app(runtime: MediaRuntime | None = None):
+def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_client=None):
     try:
         from fastapi import Body, FastAPI, Header, HTTPException, Query
         from fastapi.middleware.cors import CORSMiddleware
@@ -33,7 +33,8 @@ def create_media_app(runtime: MediaRuntime | None = None):
     config_path = os.getenv("CHARACTER_CONFIG_PATH", os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml"))
     settings = load_settings(config_path)
     tts_lab_base = os.getenv("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002").rstrip("/")
-    provider_client = httpx.Client(timeout=180.0)
+    owns_provider_client = provider_http_client is None
+    provider_client = provider_http_client or httpx.Client(timeout=180.0)
 
     app = FastAPI(title="Character Memory Media Runtime", version="0.2")
     app.state.media_runtime = media
@@ -56,18 +57,68 @@ def create_media_app(runtime: MediaRuntime | None = None):
 
     @app.on_event("shutdown")
     def shutdown():
-        provider_client.close()
+        if owns_provider_client:
+            provider_client.close()
+
+    def selected_tts_status(runtime_status: dict) -> dict:
+        local_tts = dict(runtime_status.get("tts") or {})
+        if not configured_routing:
+            return {
+                **local_tts,
+                "route": "injected-runtime",
+                "voice": None,
+                "speed": None,
+                "restart_required_for_config_changes": False,
+            }
+
+        selected = str(settings.tts_provider or "sherpa").strip().lower()
+        base = {
+            "provider": selected,
+            "voice": settings.tts_voice,
+            "speed": settings.tts_speed,
+            "device": settings.tts_device,
+            "restart_required_for_config_changes": True,
+        }
+        if selected != "kokoro":
+            return {**local_tts, **base}
+
+        # Query only the selected provider. Calling :9002/health would also ask
+        # its Sherpa adapter to call this Media Runtime and create a health cycle.
+        # Keep this probe shorter than the stack's normal 0.8s liveness timeout:
+        # an independently running Media process must still answer /health quickly
+        # while the TTS provider process is being started or restarted.
+        try:
+            response = provider_client.get(f"{tts_lab_base}/v1/providers/kokoro", timeout=0.4)
+            response.raise_for_status()
+            provider = dict((response.json() or {}).get("provider") or {})
+            return {
+                **base,
+                **provider,
+                "provider": "kokoro",
+                "voice": settings.tts_voice,
+                "speed": settings.tts_speed,
+                "device": provider.get("device") or settings.tts_device,
+                "restart_required_for_config_changes": True,
+            }
+        except Exception as exc:
+            return {
+                **base,
+                "ready": False,
+                "loaded": False,
+                "reason": f"Kokoro Provider Runtime unavailable at {tts_lab_base}: {exc}",
+            }
 
     @app.get("/health")
     def health():
         status = media.status()
-        status["tts_selected"] = {
-            "provider": settings.tts_provider if configured_routing else "injected-runtime",
-            "voice": settings.tts_voice if configured_routing else None,
-            "speed": settings.tts_speed if configured_routing else None,
-            "device": settings.tts_device if configured_routing else None,
-            "restart_required_for_config_changes": configured_routing,
-        }
+        runtime_tts = dict(status.get("tts") or {})
+        selected_tts = selected_tts_status(status)
+        # `tts` remains the browser-facing contract and now reflects the route
+        # that /v1/tts will actually use. Keep the underlying Sherpa runtime
+        # separately so the TTS Lab can still inspect/audition it.
+        status["tts_runtime"] = runtime_tts
+        status["tts"] = selected_tts
+        status["tts_selected"] = selected_tts
         return {"ok": True, **status}
 
     @app.post("/v1/asr")

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from character_memory.application.async_conversation import ConversationEventHub, ReactionScheduler
+from character_memory.application.async_conversation import ConversationEventHub, ReactionScheduler, direct_channel
 from character_memory.application.chat_service import build_user_event
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService, SupersededGroupReaction
@@ -72,6 +72,55 @@ def test_group_watermark_uses_persisted_arrival_order_not_event_time(tmp_path):
     scheduler.close()
     hub.close()
     store.close()
+
+
+def test_scheduler_enqueue_never_regresses_latest_persisted_watermark():
+    hub = ConversationEventHub()
+    scheduler = ReactionScheduler(lambda: None, lambda: [], hub)
+    key = direct_channel("rin", "conv")
+    state = scheduler._state(key)
+    with state.condition:
+        state.active = True
+
+    newer = SimpleNamespace(id=2, metadata={})
+    older = SimpleNamespace(id=1, metadata={})
+    scheduler.enqueue_direct("rin", "conv", newer)
+    scheduler.enqueue_direct("rin", "conv", older)
+
+    with state.condition:
+        assert state.latest_event.id == 2
+        assert state.processed_id == 0
+    channel = hub._channel(key)
+    with channel.condition:
+        queued = [item for item in channel.events if item[1] == "reaction_status"]
+    assert [item[2]["watermark"] for item in queued] == [2, 2]
+
+    scheduler.close()
+    hub.close()
+
+
+def test_scheduler_does_not_restart_work_for_already_processed_stale_enqueue():
+    hub = ConversationEventHub()
+    scheduler = ReactionScheduler(lambda: None, lambda: [], hub)
+    key = direct_channel("rin", "conv")
+    state = scheduler._state(key)
+    with state.condition:
+        state.latest_event = SimpleNamespace(id=2, metadata={})
+        state.processed_id = 2
+        state.active = False
+
+    scheduler.enqueue_direct("rin", "conv", SimpleNamespace(id=1, metadata={}))
+
+    with state.condition:
+        assert state.latest_event.id == 2
+        assert state.processed_id == 2
+        assert state.active is False
+    channel = hub._channel(key)
+    with channel.condition:
+        assert list(channel.events) == []
+
+    scheduler.close()
+    hub.close()
 
 
 def test_group_supersession_after_first_member_keeps_committed_fact_and_stops_later_member(tmp_path):

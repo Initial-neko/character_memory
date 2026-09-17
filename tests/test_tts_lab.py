@@ -3,7 +3,7 @@ from urllib.parse import unquote
 
 from fastapi.testclient import TestClient
 
-from character_memory.tts_lab import LabSynthesisResult, TtsLabRuntime, create_tts_lab_app
+from character_memory.tts_lab import LabSynthesisResult, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
 
 
 class FakeTtsProvider:
@@ -37,6 +37,25 @@ class FakeTtsProvider:
         )
 
 
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _FakeClient:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def get(self, *args, **kwargs):
+        return _FakeResponse(self.payload)
+
+
 def test_tts_lab_provider_status_and_synthesis_contract():
     runtime = TtsLabRuntime({"fake": FakeTtsProvider()})
     app = create_tts_lab_app(runtime)
@@ -44,6 +63,11 @@ def test_tts_lab_provider_status_and_synthesis_contract():
         providers = client.get("/v1/providers")
         assert providers.status_code == 200
         assert providers.json()["providers"][0]["id"] == "fake"
+
+        provider = client.get("/v1/providers/fake")
+        assert provider.status_code == 200
+        assert provider.json()["provider"]["id"] == "fake"
+        assert provider.json()["provider"]["ready"] is True
 
         response = client.post(
             "/v1/tts",
@@ -67,6 +91,30 @@ def test_tts_lab_unknown_provider_is_a_client_error():
         )
         assert response.status_code == 400
         assert "Unknown TTS provider" in response.text
+
+        status = client.get("/v1/providers/missing")
+        assert status.status_code == 404
+        assert "Unknown TTS provider" in status.text
+
+
+def test_sherpa_lab_status_reads_underlying_runtime_when_formal_tts_is_other_provider():
+    client = _FakeClient(
+        {
+            "tts": {"ready": True, "provider": "kokoro", "model": "kokoro"},
+            "tts_runtime": {
+                "ready": False,
+                "loaded": False,
+                "provider": "sherpa-vits",
+                "model": "sherpa.onnx",
+                "device": "cpu",
+                "reason": "missing sherpa assets",
+            },
+        }
+    )
+    status = SherpaMediaProvider(client=client).status()
+    assert status["ready"] is False
+    assert status["model"] == "sherpa.onnx"
+    assert status["reason"] == "missing sherpa assets"
 
 
 def test_tts_lab_static_provider_inventory_and_dependency_isolation():

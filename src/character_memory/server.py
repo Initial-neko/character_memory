@@ -4,6 +4,7 @@ from character_memory.api import create_api
 from character_memory.async_web import attach_async_routes
 from character_memory.avatar_web import attach_avatar_routes
 from character_memory.group_autonomous_visual import install_group_autonomous_visual
+from character_memory.group_members_web import attach_group_member_routes
 from character_memory.group_web import attach_group_routes
 from character_memory.history_web import attach_history_routes
 from character_memory.search_web import attach_search_routes
@@ -18,6 +19,7 @@ attach_history_routes(app)
 attach_avatar_routes(app)
 attach_visual_routes(app)
 attach_group_routes(app, config_path)
+attach_group_member_routes(app)
 attach_search_routes(app)
 attach_async_routes(app)
 install_group_autonomous_visual(app)

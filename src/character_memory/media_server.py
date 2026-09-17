@@ -63,10 +63,9 @@ def create_media_app(runtime: MediaRuntime | None = None):
         if not configured_routing:
             return {
                 **local_tts,
-                "provider": "injected-runtime",
+                "route": "injected-runtime",
                 "voice": None,
                 "speed": None,
-                "device": local_tts.get("device"),
                 "restart_required_for_config_changes": False,
             }
 

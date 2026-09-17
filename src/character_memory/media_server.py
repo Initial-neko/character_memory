@@ -58,16 +58,49 @@ def create_media_app(runtime: MediaRuntime | None = None):
     def shutdown():
         provider_client.close()
 
+    def selected_tts_status(runtime_status: dict) -> dict:
+        local_tts = dict(runtime_status.get("tts") or {})
+        if not configured_routing:
+            return {
+                **local_tts,
+                "provider": "injected-runtime",
+                "voice": None,
+                "speed": None,
+                "device": local_tts.get("device"),
+                "restart_required_for_config_changes": False,
+            }
+
+        selected = str(settings.tts_provider or "sherpa").strip().lower()
+        base = {
+            "provider": selected,
+            "voice": settings.tts_voice,
+            "speed": settings.tts_speed,
+            "device": settings.tts_device,
+            "restart_required_for_config_changes": True,
+        }
+        if selected != "kokoro":
+            return {**local_tts, **base}
+
+        # Do not call :9002/health here: its Sherpa audition provider checks this
+        # Media Runtime and would create a health-check cycle. The provider page is
+        # a cheap process/readiness boundary; actual synthesis still owns model
+        # validation and returns a precise provider error if assets are unavailable.
+        try:
+            response = provider_client.get(f"{tts_lab_base}/tts", timeout=2.0)
+            response.raise_for_status()
+            return {**base, "ready": True, "loaded": None, "reason": None}
+        except Exception as exc:
+            return {
+                **base,
+                "ready": False,
+                "loaded": False,
+                "reason": f"Kokoro Provider Runtime unavailable at {tts_lab_base}: {exc}",
+            }
+
     @app.get("/health")
     def health():
         status = media.status()
-        status["tts_selected"] = {
-            "provider": settings.tts_provider if configured_routing else "injected-runtime",
-            "voice": settings.tts_voice if configured_routing else None,
-            "speed": settings.tts_speed if configured_routing else None,
-            "device": settings.tts_device if configured_routing else None,
-            "restart_required_for_config_changes": configured_routing,
-        }
+        status["tts_selected"] = selected_tts_status(status)
         return {"ok": True, **status}
 
     @app.post("/v1/asr")

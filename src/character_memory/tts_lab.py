@@ -52,7 +52,9 @@ class SherpaMediaProvider:
             response = self.client.get(f"{self.base_url}/health", timeout=3.0)
             response.raise_for_status()
             health = response.json()
-            tts = health.get("tts") or {}
+            # Browser-facing `tts` reports the configured formal route. The Lab
+            # needs the underlying local Sherpa runtime when auditioning Sherpa.
+            tts = health.get("tts_runtime") or health.get("tts") or {}
             return {
                 "id": "sherpa",
                 "label": "Sherpa VITS (current baseline)",
@@ -347,6 +349,12 @@ class TtsLabRuntime:
     def statuses(self) -> list[dict]:
         return [provider.status() for provider in self.providers.values()]
 
+    def provider_status(self, provider_id: str) -> dict:
+        provider = self.providers.get(str(provider_id).strip().lower())
+        if provider is None:
+            raise ValueError(f"Unknown TTS provider: {provider_id}")
+        return provider.status()
+
     def synthesize(self, provider_id: str, text: str, *, voice: str, speed: float) -> LabSynthesisResult:
         provider = self.providers.get(provider_id)
         if provider is None:
@@ -390,6 +398,13 @@ def create_tts_lab_app(runtime: TtsLabRuntime | None = None):
     @app.get("/v1/providers")
     def providers():
         return {"providers": lab.statuses()}
+
+    @app.get("/v1/providers/{provider_id}")
+    def provider(provider_id: str):
+        try:
+            return {"provider": lab.provider_status(provider_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/v1/tts")
     def synthesize(req: TtsLabRequest):

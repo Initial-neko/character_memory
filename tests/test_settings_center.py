@@ -157,6 +157,7 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert 'settings.tts_provider' in media
     assert '"provider": "kokoro"' in media
     assert '"provider": "qwen3"' in media
-    assert '"http://127.0.0.1:9013/v1/tts"' in media
+    assert '"http://127.0.0.1:9013"' in media
+    assert 'f"{qwen3_base}/v1/tts"' in media
     assert 'http://127.0.0.1:8003/settings' in chat
     assert 'http://127.0.0.1:8003/settings' in lab

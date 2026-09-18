@@ -11,7 +11,7 @@ fi
 
 VENV="${QWEN3_TTS_VENV:-$ROOT/.venv-qwen3-tts}"
 MODEL="${QWEN3_TTS_MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice}"
-TORCH_INDEX="${QWEN3_TTS_TORCH_INDEX:-https://download.pytorch.org/whl/cu128}"
+TORCH_BACKEND="${QWEN3_TTS_TORCH_BACKEND:-cu128}"
 TORCH_VERSION="${QWEN3_TTS_TORCH_VERSION:-2.9.1}"
 PREFETCH=0
 CPU_ONLY=0
@@ -56,16 +56,15 @@ else
 
   echo "Installing pinned CUDA PyTorch:"
   echo "  torch=$TORCH_VERSION / torchaudio=$TORCH_VERSION"
-  echo "  index=$TORCH_INDEX"
-  # qwen-tts 0.1.1 depends on torchaudio. If the later qwen install resolves
-  # only against default PyPI, torchaudio may drag torch back to a CPU wheel.
-  # Pin the CUDA pair first, then keep the CUDA index at higher priority while
-  # resolving all remaining Qwen dependencies.
+  echo "  backend=$TORCH_BACKEND"
+  # uv has a dedicated PyTorch backend resolver. Use the base package version
+  # and let uv select the platform-correct CUDA wheel instead of encoding the
+  # +cu128 local-version suffix ourselves.
   uv pip uninstall --python "$PY" torch torchaudio >/dev/null 2>&1 || true
-  uv pip install     --python "$PY"     "torch==${TORCH_VERSION}+cu128"     "torchaudio==${TORCH_VERSION}+cu128"     --index-url "$TORCH_INDEX"
+  uv pip install --python "$PY" "torch==$TORCH_VERSION" "torchaudio==$TORCH_VERSION" --torch-backend "$TORCH_BACKEND"
 
   echo "Installing isolated Qwen3-TTS dependencies without losing CUDA Torch..."
-  uv pip install     --python "$PY"     -r scripts/qwen3-tts-requirements.txt     --extra-index-url "$TORCH_INDEX"
+  uv pip install --python "$PY" -r scripts/qwen3-tts-requirements.txt --torch-backend "$TORCH_BACKEND"
 fi
 
 echo

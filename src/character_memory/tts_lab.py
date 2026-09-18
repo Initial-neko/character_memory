@@ -268,6 +268,88 @@ class KokoroProvider:
         )
 
 
+class Qwen3SidecarProvider:
+    DEFAULT_VOICES = [
+        "Vivian",
+        "Serena",
+        "Uncle_Fu",
+        "Dylan",
+        "Eric",
+        "Ryan",
+        "Aiden",
+        "Ono_Anna",
+        "Sohee",
+    ]
+
+    def __init__(self, base_url: str = "http://127.0.0.1:9013", client: httpx.Client | None = None):
+        self.base_url = base_url.rstrip("/")
+        self.client = client or httpx.Client(timeout=180.0)
+        self._owns_client = client is None
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
+
+    def status(self) -> dict:
+        fallback = {
+            "id": "qwen3",
+            "label": "Qwen3-TTS 0.6B",
+            "ready": False,
+            "loaded": False,
+            "voices": list(self.DEFAULT_VOICES),
+            "default_voice": self.DEFAULT_VOICES[0],
+            "supports_speed": False,
+            "reason": f"Qwen3-TTS sidecar is not running at {self.base_url}",
+        }
+        try:
+            response = self.client.get(f"{self.base_url}/health", timeout=3.0)
+            response.raise_for_status()
+            data = response.json()
+            voices = data.get("voices") or list(self.DEFAULT_VOICES)
+            return {
+                **fallback,
+                "ready": bool(data.get("ready", True)),
+                "loaded": bool(data.get("loaded")),
+                "voices": voices,
+                "default_voice": data.get("default_voice") or voices[0],
+                "model": data.get("model"),
+                "device": data.get("device"),
+                "reason": data.get("reason"),
+                "note": data.get("note"),
+            }
+        except Exception:
+            return fallback
+
+    def synthesize(self, text: str, *, voice: str, speed: float) -> LabSynthesisResult:
+        started = time.perf_counter()
+        response = self.client.post(
+            f"{self.base_url}/v1/tts",
+            json={
+                "text": text,
+                "voice": voice or self.DEFAULT_VOICES[0],
+                "language": "Chinese",
+                "speed": speed,
+            },
+            timeout=180.0,
+        )
+        if response.is_error:
+            raise RuntimeError(response.text)
+        total_ms = (time.perf_counter() - started) * 1000.0
+        inference_ms = float(response.headers.get("x-tts-inference-ms") or total_ms)
+        audio_ms = float(response.headers.get("x-tts-audio-ms") or 0.0)
+        sample_rate = int(response.headers.get("x-tts-sample-rate") or 0)
+        return LabSynthesisResult(
+            audio=response.content,
+            sample_rate=sample_rate,
+            provider="qwen3",
+            voice=response.headers.get("x-tts-voice", voice or self.DEFAULT_VOICES[0]),
+            model=response.headers.get("x-tts-model", "Qwen3-TTS-12Hz-0.6B-CustomVoice"),
+            device=response.headers.get("x-tts-device", "unknown"),
+            inference_ms=round(inference_ms, 1),
+            audio_ms=round(audio_ms, 1),
+        )
+
+
 class CosyVoiceSidecarProvider:
     def __init__(self, base_url: str = "http://127.0.0.1:9012", client: httpx.Client | None = None):
         self.base_url = base_url.rstrip("/")
@@ -337,6 +419,7 @@ class TtsLabRuntime:
         self.providers = providers or {
             "sherpa": SherpaMediaProvider(os.getenv("CHARACTER_TTS_LAB_MEDIA_BASE", "http://127.0.0.1:8001")),
             "kokoro": KokoroProvider(os.getenv("CHARACTER_TTS_KOKORO_DEVICE", "cpu")),
+            "qwen3": Qwen3SidecarProvider(os.getenv("CHARACTER_TTS_QWEN3_BASE", "http://127.0.0.1:9013")),
             "cosyvoice": CosyVoiceSidecarProvider(os.getenv("CHARACTER_TTS_COSYVOICE_BASE", "http://127.0.0.1:9012")),
         }
 

@@ -111,6 +111,61 @@ class _ProviderClient:
         raise AssertionError("health test must not synthesize")
 
 
+
+class _QwenProviderResponse:
+    def __init__(self, payload=None, *, status_code=200, content=b"", headers=None):
+        self._payload = payload
+        self.status_code = status_code
+        self.content = content
+        self.headers = headers or {}
+        self.text = "" if payload is None else str(payload)
+
+    @property
+    def is_error(self):
+        return self.status_code >= 400
+
+    def raise_for_status(self):
+        if self.is_error:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+class _QwenProviderClient:
+    def __init__(self):
+        self.get_calls = []
+        self.post_calls = []
+
+    def get(self, url, **kwargs):
+        self.get_calls.append((url, kwargs))
+        return _QwenProviderResponse(
+            {
+                "ok": True,
+                "id": "qwen3",
+                "ready": True,
+                "loaded": False,
+                "model": "fake-qwen3",
+                "device": "cuda:0",
+                "dtype": "float16",
+                "reason": None,
+            }
+        )
+
+    def post(self, url, **kwargs):
+        self.post_calls.append((url, kwargs))
+        return _QwenProviderResponse(
+            content=b"RIFFfake",
+            headers={
+                "x-tts-voice": "Vivian",
+                "x-tts-device": "cuda:0",
+                "x-tts-inference-ms": "123.4",
+                "x-tts-audio-ms": "1000",
+                "x-tts-sample-rate": "24000",
+                "x-tts-rtf": "0.1234",
+            },
+        )
+
 def make_wav(duration_ms: int = 200, sample_rate: int = 16000) -> bytes:
     count = int(sample_rate * duration_ms / 1000)
     t = np.arange(count, dtype=np.float32) / sample_rate
@@ -227,6 +282,81 @@ def test_configured_kokoro_health_uses_selected_provider_not_local_sherpa(monkey
         ("http://127.0.0.1:9002/v1/providers/kokoro", {"timeout": 0.4})
     ]
 
+
+
+def test_configured_qwen3_health_uses_isolated_sidecar(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(
+            tts_provider="qwen3",
+            tts_voice="Vivian",
+            tts_speed=1.0,
+            tts_device="cuda",
+        ),
+    )
+    provider_client = _QwenProviderClient()
+
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        health = client.get("/health")
+
+    assert health.status_code == 200
+    payload = health.json()
+    assert payload["tts_runtime"]["ready"] is False
+    assert payload["tts"]["provider"] == "qwen3"
+    assert payload["tts"]["ready"] is True
+    assert payload["tts"]["model"] == "fake-qwen3"
+    assert payload["tts"]["device"] == "cuda:0"
+    assert provider_client.get_calls == [
+        ("http://127.0.0.1:9013/health", {"timeout": 0.4})
+    ]
+
+
+def test_configured_qwen3_tts_routes_through_media_runtime(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(
+            tts_provider="qwen3",
+            tts_voice="Vivian",
+            tts_speed=1.0,
+            tts_device="cuda",
+        ),
+    )
+    provider_client = _QwenProviderClient()
+
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        response = client.post("/v1/tts", json={"text": "你好"})
+
+    assert response.status_code == 200
+    assert response.content == b"RIFFfake"
+    assert response.headers["x-media-provider"] == "qwen3"
+    assert response.headers["x-media-voice"] == "Vivian"
+    assert response.headers["x-media-device"] == "cuda:0"
+    assert response.headers["x-media-rtf"] == "0.1234"
+    assert provider_client.post_calls == [
+        (
+            "http://127.0.0.1:9013/v1/tts",
+            {
+                "json": {
+                    "text": "你好",
+                    "voice": "Vivian",
+                    "language": "Chinese",
+                    "speed": 1.0,
+                }
+            },
+        )
+    ]
 
 def test_asr_endpoint_rejects_wrong_media_type():
     pytest.importorskip("fastapi")

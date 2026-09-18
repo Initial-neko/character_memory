@@ -1,0 +1,8 @@
+# Isolated experimental environment only. Do not add these heavy dependencies
+# to Character Memory's default/core environment until Qwen3-TTS is accepted.
+torch==2.9.1
+torchaudio==2.9.1
+qwen-tts==0.1.1
+fastapi==0.141.1
+uvicorn==0.52.4
+huggingface-hub>=0.30,<2

@@ -3,8 +3,10 @@ __pycache__/
 *.pyc
 .venv/
 .venv-cosyvoice/
+.venv-qwen3-tts/
 .external/
 data/*.db
+data/qwen3-tts-benchmark/
 models/
 config.yaml
 config.yaml.bak.*

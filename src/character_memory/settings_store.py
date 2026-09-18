@@ -64,6 +64,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "type": "select",
                 "options": [
                     {"value": "kokoro", "label": "Kokoro 82M v1.1 zh"},
+                    {"value": "qwen3", "label": "Qwen3-TTS 0.6B"},
                     {"value": "sherpa", "label": "Sherpa VITS"},
                 ],
             },
@@ -76,6 +77,15 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                     {"value": "zf_002", "label": "Kokoro zf_002"},
                     {"value": "zf_003", "label": "Kokoro zf_003"},
                     {"value": "zf_004", "label": "Kokoro zf_004"},
+                    {"value": "Vivian", "label": "Qwen3 Vivian"},
+                    {"value": "Serena", "label": "Qwen3 Serena"},
+                    {"value": "Uncle_Fu", "label": "Qwen3 Uncle_Fu"},
+                    {"value": "Dylan", "label": "Qwen3 Dylan"},
+                    {"value": "Eric", "label": "Qwen3 Eric"},
+                    {"value": "Ryan", "label": "Qwen3 Ryan"},
+                    {"value": "Aiden", "label": "Qwen3 Aiden"},
+                    {"value": "Ono_Anna", "label": "Qwen3 Ono_Anna"},
+                    {"value": "Sohee", "label": "Qwen3 Sohee"},
                     {"value": "0", "label": "Sherpa speaker 0"},
                     {"value": "2", "label": "Sherpa speaker 2"},
                     {"value": "5", "label": "Sherpa speaker 5"},
@@ -84,7 +94,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
             {"name": "tts_speed", "label": "TTS Speed", "type": "number", "min": 0.5, "max": 2, "step": 0.05},
             {
                 "name": "tts_device",
-                "label": "Kokoro Device",
+                "label": "TTS Device",
                 "type": "select",
                 "options": [
                     {"value": "cpu", "label": "CPU"},

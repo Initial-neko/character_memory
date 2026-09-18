@@ -63,6 +63,16 @@ def _cors_allows_origin(url: str, origin: str, timeout: float = 0.8) -> bool:
         return False
 
 
+def _configured_tts_provider(config_path: str) -> str:
+    try:
+        path = Path(config_path)
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        value = str((data or {}).get("tts_provider", "kokoro") or "kokoro").strip().lower()
+        return value if value in {"kokoro", "sherpa", "qwen3"} else "kokoro"
+    except (OSError, yaml.YAMLError):
+        return "kokoro"
+
+
 def _configured_tts_device(config_path: str) -> str:
     try:
         path = Path(config_path)
@@ -98,6 +108,7 @@ def _media_env(base: dict[str, str]) -> dict[str, str]:
     env.setdefault("CHARACTER_MEDIA_HOST", "127.0.0.1")
     env.setdefault("CHARACTER_MEDIA_PORT", "8001")
     env.setdefault("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002")
+    env.setdefault("CHARACTER_QWEN3_TTS_BASE", "http://127.0.0.1:9013")
     return env
 
 
@@ -156,6 +167,7 @@ def main() -> None:
         )
 
     python = sys.executable
+    tts_provider = _configured_tts_provider(args.config)
     specs = [
         (
             "Character Runtime",
@@ -192,6 +204,37 @@ def main() -> None:
             _tts_lab_env(base_env, args.config),
         ),
     ]
+
+    if tts_provider == "qwen3":
+        qwen_venv = Path(os.getenv("QWEN3_TTS_VENV", ROOT / ".venv-qwen3-tts"))
+        qwen_python = qwen_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if not qwen_python.is_file():
+            raise SystemExit(
+                f"Qwen3-TTS is selected but its isolated environment is missing: {qwen_python}. "
+                "Run: bash scripts/setup-qwen3-tts.sh"
+            )
+        qwen_env = dict(base_env)
+        qwen_env["PYTHONPATH"] = str(ROOT / "src")
+        qwen_env.setdefault("HF_HOME", str((ROOT / "models" / "huggingface").resolve()))
+        qwen_device = "cuda:0" if _configured_tts_device(args.config) == "cuda" else "cpu"
+        qwen_dtype = "float16" if qwen_device.startswith("cuda") else "float32"
+        specs.insert(
+            1,
+            (
+                "Qwen3-TTS Runtime",
+                "http://127.0.0.1:9013/health",
+                [
+                    str(qwen_python),
+                    "-m",
+                    "character_memory.qwen3_tts_experiment",
+                    "--device",
+                    qwen_device,
+                    "--dtype",
+                    qwen_dtype,
+                ],
+                qwen_env,
+            ),
+        )
 
     owned: list[tuple[str, subprocess.Popen]] = []
     try:

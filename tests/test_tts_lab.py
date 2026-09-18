@@ -3,7 +3,7 @@ from urllib.parse import unquote
 
 from fastapi.testclient import TestClient
 
-from character_memory.tts_lab import LabSynthesisResult, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
+from character_memory.tts_lab import LabSynthesisResult, Qwen3SidecarProvider, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
 
 
 class FakeTtsProvider:
@@ -56,6 +56,58 @@ class _FakeClient:
         return _FakeResponse(self.payload)
 
 
+
+class _FakeQwenResponse:
+    def __init__(self, payload=None, *, content=b"", headers=None, status_code=200):
+        self._payload = payload
+        self.content = content
+        self.headers = headers or {}
+        self.status_code = status_code
+        self.text = ""
+
+    @property
+    def is_error(self):
+        return self.status_code >= 400
+
+    def raise_for_status(self):
+        if self.is_error:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+class _FakeQwenClient:
+    def __init__(self):
+        self.posts = []
+
+    def get(self, *args, **kwargs):
+        return _FakeQwenResponse(
+            {
+                "ready": True,
+                "loaded": True,
+                "voices": ["Vivian", "Serena"],
+                "default_voice": "Vivian",
+                "model": "fake-qwen3",
+                "device": "cuda:0",
+                "reason": None,
+            }
+        )
+
+    def post(self, url, **kwargs):
+        self.posts.append((url, kwargs))
+        return _FakeQwenResponse(
+            content=b"RIFFqwen",
+            headers={
+                "x-tts-voice": "Vivian",
+                "x-tts-model": "fake-qwen3",
+                "x-tts-device": "cuda:0",
+                "x-tts-inference-ms": "88.8",
+                "x-tts-audio-ms": "800",
+                "x-tts-sample-rate": "24000",
+            },
+        )
+
 def test_tts_lab_provider_status_and_synthesis_contract():
     runtime = TtsLabRuntime({"fake": FakeTtsProvider()})
     app = create_tts_lab_app(runtime)
@@ -81,6 +133,38 @@ def test_tts_lab_provider_status_and_synthesis_contract():
         assert response.headers["x-tts-sample-rate"] == "24000"
         assert response.headers["x-tts-inference-ms"] == "12.3"
 
+
+
+def test_qwen3_sidecar_provider_status_and_synthesis():
+    client = _FakeQwenClient()
+    provider = Qwen3SidecarProvider(client=client)
+
+    status = provider.status()
+    assert status["ready"] is True
+    assert status["loaded"] is True
+    assert status["default_voice"] == "Vivian"
+    assert status["device"] == "cuda:0"
+
+    result = provider.synthesize("你好", voice="Vivian", speed=1.0)
+    assert result.audio == b"RIFFqwen"
+    assert result.provider == "qwen3"
+    assert result.voice == "Vivian"
+    assert result.device == "cuda:0"
+    assert result.inference_ms == 88.8
+    assert client.posts == [
+        (
+            "http://127.0.0.1:9013/v1/tts",
+            {
+                "json": {
+                    "text": "你好",
+                    "voice": "Vivian",
+                    "language": "Chinese",
+                    "speed": 1.0,
+                },
+                "timeout": 180.0,
+            },
+        )
+    ]
 
 def test_tts_lab_unknown_provider_is_a_client_error():
     app = create_tts_lab_app(TtsLabRuntime({"fake": FakeTtsProvider()}))
@@ -142,6 +226,8 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert "try_to_load_from_cache" in server
     assert "setup-tts-models.sh" in server
     assert '"http://127.0.0.1:9012"' in server
+    assert '"http://127.0.0.1:9013"' in server
+    assert '"qwen3": Qwen3SidecarProvider' in server
     assert 'port = int(os.getenv("CHARACTER_TTS_LAB_PORT", "9002"))' in server
 
     assert "bash scripts/sync-all.sh" in setup_media

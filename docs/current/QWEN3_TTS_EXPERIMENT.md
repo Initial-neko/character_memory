@@ -1,4 +1,4 @@
-# Qwen3-TTS experimental runtime
+# Qwen3-TTS isolated runtime
 
 This experiment measures whether Qwen3-TTS is worth integrating into Character Memory before it touches the formal Media Runtime path.
 
@@ -95,3 +95,10 @@ Do not integrate Qwen3-TTS into the formal TTS route until the target machine an
 3. What are warm P50/P95 inference latency and RTF for normal 15-30 character Chinese replies?
 4. Does SDPA already meet latency requirements, or is FlashAttention worth the deployment complexity?
 5. Is the audible improvement over the lightweight TTS route large enough to justify several GB of GPU residency?
+
+
+## Formal integration
+
+Set `tts_provider: "qwen3"` and choose a Qwen3 voice such as `Vivian` in Settings Center. When the full stack starts, Character Memory launches the isolated `.venv-qwen3-tts` runtime on `:9013` automatically, and browser/chat TTS continues to call Media Runtime `:8001/v1/tts`.
+
+The sidecar remains dependency-isolated: Torch/CUDA packages stay out of the core project environment.

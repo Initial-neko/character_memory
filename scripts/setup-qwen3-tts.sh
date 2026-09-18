@@ -100,6 +100,6 @@ if [[ "$PREFETCH" == "1" ]]; then
 fi
 
 echo
-echo "Qwen3-TTS experiment is ready."
+echo "Qwen3-TTS provider runtime is ready."
 echo "Start:     bash scripts/start-qwen3-tts.sh --device cuda:0 --dtype float16"
 echo "Benchmark: bash scripts/benchmark-qwen3-tts.sh --repeats 10"

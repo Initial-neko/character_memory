@@ -118,6 +118,7 @@ def _tts_lab_env(base: dict[str, str], config_path: str) -> dict[str, str]:
     env.setdefault("CHARACTER_TTS_LAB_PORT", "9002")
     env.setdefault("CHARACTER_TTS_LAB_MEDIA_BASE", "http://127.0.0.1:8001")
     env.setdefault("CHARACTER_TTS_COSYVOICE_BASE", "http://127.0.0.1:9012")
+    env.setdefault("CHARACTER_TTS_QWEN3_BASE", "http://127.0.0.1:9013")
     env.setdefault("CHARACTER_TTS_KOKORO_DEVICE", _configured_tts_device(config_path))
     return env
 

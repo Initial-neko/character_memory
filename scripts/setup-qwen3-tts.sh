@@ -12,6 +12,7 @@ fi
 VENV="${QWEN3_TTS_VENV:-$ROOT/.venv-qwen3-tts}"
 MODEL="${QWEN3_TTS_MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice}"
 TORCH_INDEX="${QWEN3_TTS_TORCH_INDEX:-https://download.pytorch.org/whl/cu128}"
+TORCH_VERSION="${QWEN3_TTS_TORCH_VERSION:-2.9.1}"
 PREFETCH=0
 CPU_ONLY=0
 
@@ -42,23 +43,30 @@ fi
 
 if [[ "$CPU_ONLY" == "1" ]]; then
   echo "Installing CPU PyTorch for Qwen3-TTS..."
-  uv pip install --python "$PY" --upgrade torch torchaudio
+  uv pip uninstall --python "$PY" torch torchaudio >/dev/null 2>&1 || true
+  uv pip install --python "$PY" "torch==$TORCH_VERSION" "torchaudio==$TORCH_VERSION"
+  echo "Installing isolated Qwen3-TTS dependencies..."
+  uv pip install --python "$PY" -r scripts/qwen3-tts-requirements.txt
 else
   if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "[FAIL] NVIDIA GPU/driver not detected (nvidia-smi missing)." >&2
     echo "Use --cpu only when CPU inference is intentionally required." >&2
     exit 1
   fi
-  echo "Installing CUDA PyTorch first:"
-  echo "  $TORCH_INDEX"
-  # qwen-tts 0.1.1 depends on torchaudio. Installing it from default PyPI
-  # first can pull a CPU-only torch build, so make the CUDA wheel authoritative.
-  uv pip uninstall --python "$PY" torch torchaudio >/dev/null 2>&1 || true
-  uv pip install --python "$PY" torch torchaudio --index-url "$TORCH_INDEX"
-fi
 
-echo "Installing isolated Qwen3-TTS dependencies..."
-uv pip install --python "$PY" -r scripts/qwen3-tts-requirements.txt
+  echo "Installing pinned CUDA PyTorch:"
+  echo "  torch=$TORCH_VERSION / torchaudio=$TORCH_VERSION"
+  echo "  index=$TORCH_INDEX"
+  # qwen-tts 0.1.1 depends on torchaudio. If the later qwen install resolves
+  # only against default PyPI, torchaudio may drag torch back to a CPU wheel.
+  # Pin the CUDA pair first, then keep the CUDA index at higher priority while
+  # resolving all remaining Qwen dependencies.
+  uv pip uninstall --python "$PY" torch torchaudio >/dev/null 2>&1 || true
+  uv pip install     --python "$PY"     "torch==${TORCH_VERSION}+cu128"     "torchaudio==${TORCH_VERSION}+cu128"     --index-url "$TORCH_INDEX"
+
+  echo "Installing isolated Qwen3-TTS dependencies without losing CUDA Torch..."
+  uv pip install     --python "$PY"     -r scripts/qwen3-tts-requirements.txt     --extra-index-url "$TORCH_INDEX"
+fi
 
 echo
 echo "Environment check:"
@@ -78,8 +86,8 @@ if torch.cuda.is_available():
     print("  vram_gb:", round(props.total_memory / (1024 ** 3), 2))
 elif expect_cuda:
     raise SystemExit(
-        "[FAIL] NVIDIA GPU was requested but this environment still has no CUDA-enabled PyTorch. "
-        "Check the NVIDIA driver, torch wheel index, or set QWEN3_TTS_TORCH_INDEX to a compatible official PyTorch CUDA index."
+        "[FAIL] NVIDIA GPU was requested but CUDA PyTorch is still unavailable. "
+        "Do not continue to benchmark; delete .venv-qwen3-tts and rerun setup."
     )
 else:
     print("  CPU-only mode explicitly selected.")
@@ -94,5 +102,5 @@ fi
 
 echo
 echo "Qwen3-TTS experiment is ready."
-echo "Start:     bash scripts/start-qwen3-tts.sh"
+echo "Start:     bash scripts/start-qwen3-tts.sh --device cuda:0 --dtype float16"
 echo "Benchmark: bash scripts/benchmark-qwen3-tts.sh --repeats 10"

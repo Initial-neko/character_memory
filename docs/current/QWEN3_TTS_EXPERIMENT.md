@@ -1,6 +1,6 @@
 # Qwen3-TTS isolated runtime
 
-This experiment measures whether Qwen3-TTS is worth integrating into Character Memory before it touches the formal Media Runtime path.
+Qwen3-TTS is a formal Character Memory TTS provider, while its Torch/CUDA runtime stays isolated in a dedicated sidecar.
 
 ## Scope
 
@@ -8,12 +8,12 @@ This experiment measures whether Qwen3-TTS is worth integrating into Character M
 - isolated Python 3.12 environment: .venv-qwen3-tts
 - default model: Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
 - default attention: SDPA
-- default CUDA dtype: FP16; auto resolves to FP16 on CUDA and FP32 on CPU
+- default dtype: auto; CUDA prefers BF16 when supported and otherwise falls back to FP32; CPU uses FP32
 - explicit model load endpoint and lazy first-request loading
 - latency, RTF and VRAM benchmark
 - optional Base-model voice-clone mode
 
-It is not wired into config.yaml, Media Runtime, browser voice calls, or the normal Character Memory stack yet.
+It is wired into config.yaml, Media Runtime, browser voice calls, Settings Center and the normal Character Memory stack.
 
 ## Install
 
@@ -45,11 +45,9 @@ Omit --preload when you want the first /v1/load call to measure cold model loadi
 
 Useful overrides:
 
-    QWEN3_TTS_DEVICE=cuda:0 QWEN3_TTS_DTYPE=float16 QWEN3_TTS_ATTN=sdpa bash scripts/start-qwen3-tts.sh
+    QWEN3_TTS_DEVICE=cuda:0 QWEN3_TTS_DTYPE=auto QWEN3_TTS_ATTN=sdpa bash scripts/start-qwen3-tts.sh
 
-For newer GPUs with good BF16 support:
-
-    QWEN3_TTS_DTYPE=bfloat16 bash scripts/start-qwen3-tts.sh
+For CUDA GPUs with BF16 support, `auto` resolves to `bfloat16`, matching the upstream Qwen3-TTS inference examples. Explicit FP16 is not the formal default because it can trigger unstable generation on some GPUs.
 
 FlashAttention 2 is deliberately not installed by the setup script. Establish a clean SDPA baseline first.
 
@@ -88,7 +86,7 @@ If QWEN3_TTS_REF_TEXT is omitted, the sidecar builds an x-vector-only clone prom
 
 ## Acceptance questions
 
-Do not integrate Qwen3-TTS into the formal TTS route until the target machine answers these questions with real data:
+For production acceptance, answer these questions with real data:
 
 1. Does the 0.6B model fit without OOM while the intended application workload is present?
 2. What is resident VRAM after load?

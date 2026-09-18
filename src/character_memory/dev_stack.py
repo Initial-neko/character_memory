@@ -218,7 +218,7 @@ def main() -> None:
         qwen_env["PYTHONPATH"] = str(ROOT / "src")
         qwen_env.setdefault("HF_HOME", str((ROOT / "models" / "huggingface").resolve()))
         qwen_device = "cuda:0" if _configured_tts_device(args.config) == "cuda" else "cpu"
-        qwen_dtype = "float16" if qwen_device.startswith("cuda") else "float32"
+        qwen_dtype = "auto"
         specs.insert(
             1,
             (

@@ -149,7 +149,11 @@ class Qwen3TtsRuntime:
     def _resolve_dtype(self, torch, device: str):
         requested = self.dtype_requested
         if requested == "auto":
-            requested = "float16" if device.startswith("cuda") else "float32"
+            if device.startswith("cuda"):
+                bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+                requested = "bfloat16" if bf16_supported else "float32"
+            else:
+                requested = "float32"
         aliases = {
             "fp16": "float16",
             "float16": "float16",
@@ -318,7 +322,7 @@ class Qwen3TtsRuntime:
                     if oom_type and isinstance(exc, oom_type):
                         torch.cuda.empty_cache()
                         raise RuntimeError(
-                            "Qwen3-TTS CUDA OOM. Try the 0.6B model, float16, SDPA, or free GPU memory."
+                            "Qwen3-TTS CUDA OOM. Try the 0.6B model, BF16/SDPA, or free GPU memory."
                         ) from exc
                 raise
 

@@ -73,11 +73,12 @@ def float_audio_to_wav(samples: np.ndarray, sample_rate: int) -> bytes:
 
 
 class Qwen3TtsRuntime:
-    """Isolated experimental Qwen3-TTS runtime.
+    """Isolated Qwen3-TTS runtime used by the formal TTS provider route.
 
     Heavy Torch/Qwen imports happen only inside this sidecar process and only
     when the model is explicitly loaded or the first synthesis request arrives.
-    This module is intentionally not wired into Media Runtime yet.
+    Media Runtime talks to this process over HTTP so Torch/CUDA stays isolated
+    from Character Memory's core Python environment.
     """
 
     def __init__(
@@ -241,7 +242,7 @@ class Qwen3TtsRuntime:
         allocated, reserved, _peak = self._cuda_memory(peak=False)
         return {
             "id": "qwen3",
-            "label": "Qwen3-TTS 0.6B experimental",
+            "label": "Qwen3-TTS 0.6B",
             "ready": bool(dependencies_ready or self._model_loader is not None),
             "loaded": self._model is not None,
             "mode": self.mode,
@@ -259,7 +260,7 @@ class Qwen3TtsRuntime:
             "cuda_allocated_mb": allocated,
             "cuda_reserved_mb": reserved,
             "reason": reason,
-            "note": "Experimental sidecar only; not connected to formal Media Runtime routing.",
+            "note": "Formal Qwen3 provider sidecar; Media Runtime routes to this process over HTTP.",
         }
 
     def synthesize(self, request: Qwen3TtsRequest) -> Qwen3TtsResult:

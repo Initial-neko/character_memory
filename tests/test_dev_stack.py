@@ -17,6 +17,10 @@ def test_stack_entrypoint_and_runtime_ports_are_declared():
     assert '"character_memory.dev_server"' in script
     assert '"character_memory.settings_server"' in script
     assert '"character_memory.tts_lab"' in script
+    assert '"Qwen3-TTS Runtime"' in script
+    assert '"http://127.0.0.1:9013/health"' in script
+    assert '".venv-qwen3-tts"' in script
+    assert '"character_memory.qwen3_tts_experiment"' in script
     assert 'choices=("dev", "chat", "settings", "tts")' in script
 
 

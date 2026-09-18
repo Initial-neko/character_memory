@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from types import SimpleNamespace
 import wave
 
 import numpy as np
@@ -95,6 +96,30 @@ def test_qwen3_sidecar_http_contract_without_loading_real_model():
         assert response.headers["x-tts-cuda-peak-mb"] == "2600.0"
         assert response.content == b"RIFFfake-qwen3-wav"
 
+
+
+def test_qwen3_auto_dtype_prefers_bfloat16_on_supported_cuda():
+    runtime = __import__("character_memory.qwen3_tts_experiment", fromlist=["Qwen3TtsRuntime"]).Qwen3TtsRuntime()
+    fake_torch = SimpleNamespace(
+        cuda=SimpleNamespace(is_bf16_supported=lambda: True),
+        bfloat16=object(),
+        float16=object(),
+        float32=object(),
+    )
+    name, _dtype = runtime._resolve_dtype(fake_torch, "cuda:0")
+    assert name == "bfloat16"
+
+
+def test_qwen3_auto_dtype_avoids_float16_when_bfloat16_is_unavailable():
+    runtime = __import__("character_memory.qwen3_tts_experiment", fromlist=["Qwen3TtsRuntime"]).Qwen3TtsRuntime()
+    fake_torch = SimpleNamespace(
+        cuda=SimpleNamespace(is_bf16_supported=lambda: False),
+        bfloat16=object(),
+        float16=object(),
+        float32=object(),
+    )
+    name, _dtype = runtime._resolve_dtype(fake_torch, "cuda:0")
+    assert name == "float32"
 
 def test_qwen3_float_audio_encoder_returns_pcm16_mono_wav():
     payload = float_audio_to_wav(np.asarray([-1.0, -0.5, 0.0, 0.5, 1.0], dtype=np.float32), 24000)

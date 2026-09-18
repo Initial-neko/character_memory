@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from character_memory.qwen3_tts_experiment import (
     Qwen3TtsRequest,
     Qwen3TtsResult,
+    Qwen3TtsRuntime,
     create_qwen3_tts_app,
     float_audio_to_wav,
 )
@@ -99,7 +100,7 @@ def test_qwen3_sidecar_http_contract_without_loading_real_model():
 
 
 def test_qwen3_auto_dtype_prefers_bfloat16_on_supported_cuda():
-    runtime = __import__("character_memory.qwen3_tts_experiment", fromlist=["Qwen3TtsRuntime"]).Qwen3TtsRuntime()
+    runtime = Qwen3TtsRuntime()
     fake_torch = SimpleNamespace(
         cuda=SimpleNamespace(is_bf16_supported=lambda: True),
         bfloat16=object(),
@@ -111,7 +112,7 @@ def test_qwen3_auto_dtype_prefers_bfloat16_on_supported_cuda():
 
 
 def test_qwen3_auto_dtype_avoids_float16_when_bfloat16_is_unavailable():
-    runtime = __import__("character_memory.qwen3_tts_experiment", fromlist=["Qwen3TtsRuntime"]).Qwen3TtsRuntime()
+    runtime = Qwen3TtsRuntime()
     fake_torch = SimpleNamespace(
         cuda=SimpleNamespace(is_bf16_supported=lambda: False),
         bfloat16=object(),

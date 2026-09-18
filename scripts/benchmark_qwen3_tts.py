@@ -87,7 +87,15 @@ def main() -> None:
         load_started = time.perf_counter()
         loaded_response = client.post(f"{base}/v1/load")
         load_client_ms = (time.perf_counter() - load_started) * 1000.0
-        loaded_response.raise_for_status()
+        if loaded_response.is_error:
+            try:
+                detail = loaded_response.json().get("detail", loaded_response.text)
+            except Exception:
+                detail = loaded_response.text
+            raise SystemExit(
+                f"Qwen3-TTS model load failed: HTTP {loaded_response.status_code}\n"
+                f"detail: {detail}"
+            )
         loaded = loaded_response.json()
         print(f"load:    {loaded.get('load_ms')} ms model / {load_client_ms:.1f} ms HTTP")
         print(f"load VRAM peak: {loaded.get('load_cuda_peak_mb')} MB")

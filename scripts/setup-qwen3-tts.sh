@@ -42,41 +42,41 @@ else
 fi
 
 if [[ "$CPU_ONLY" == "1" ]]; then
-  echo "Installing CPU PyTorch for Qwen3-TTS..."
-  uv pip uninstall --python "$PY" torch torchaudio >/dev/null 2>&1 || true
-  uv pip install --python "$PY" "torch==$TORCH_VERSION" "torchaudio==$TORCH_VERSION"
-  echo "Installing isolated Qwen3-TTS dependencies..."
-  uv pip install --python "$PY" -r scripts/qwen3-tts-requirements.txt
+  TORCH_BACKEND="cpu"
 else
   if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "[FAIL] NVIDIA GPU/driver not detected (nvidia-smi missing)." >&2
     echo "Use --cpu only when CPU inference is intentionally required." >&2
     exit 1
   fi
-
-  echo "Installing pinned CUDA PyTorch:"
-  echo "  torch=$TORCH_VERSION / torchaudio=$TORCH_VERSION"
-  echo "  backend=$TORCH_BACKEND"
-  # uv has a dedicated PyTorch backend resolver. Use the base package version
-  # and let uv select the platform-correct CUDA wheel instead of encoding the
-  # +cu128 local-version suffix ourselves.
-  uv pip uninstall --python "$PY" torch torchaudio >/dev/null 2>&1 || true
-  uv pip install --python "$PY" "torch==$TORCH_VERSION" "torchaudio==$TORCH_VERSION" --torch-backend "$TORCH_BACKEND"
-
-  echo "Installing isolated Qwen3-TTS dependencies without losing CUDA Torch..."
-  uv pip install --python "$PY" -r scripts/qwen3-tts-requirements.txt --torch-backend "$TORCH_BACKEND"
 fi
+
+echo "Installing the complete isolated Qwen3-TTS environment:"
+echo "  torch=$TORCH_VERSION / torchaudio=$TORCH_VERSION"
+echo "  backend=$TORCH_BACKEND"
+# Remove any mismatched binary pair from earlier attempts, then resolve the
+# complete environment in one pass. The requirements file pins torch and
+# torchaudio to the same release, which is required by TorchAudio's binary ABI.
+uv pip uninstall --python "$PY" torch torchaudio >/dev/null 2>&1 || true
+uv pip install --python "$PY" -r scripts/qwen3-tts-requirements.txt --torch-backend "$TORCH_BACKEND"
 
 echo
 echo "Environment check:"
 QWEN3_TTS_EXPECT_CUDA="$((1 - CPU_ONLY))" "$PY" - <<'PY'
 import os
 import torch
+import torchaudio
 import qwen_tts
 
 expect_cuda = os.getenv("QWEN3_TTS_EXPECT_CUDA") == "1"
+torch_base = torch.__version__.split("+", 1)[0]
+audio_base = torchaudio.__version__.split("+", 1)[0]
+if torch_base != audio_base:
+    raise SystemExit(f"[FAIL] torch/torchaudio ABI mismatch: {torch.__version__} vs {torchaudio.__version__}")
+
 print("  qwen_tts: OK")
 print("  torch:", torch.__version__)
+print("  torchaudio:", torchaudio.__version__)
 print("  torch_cuda:", torch.version.cuda)
 print("  cuda_available:", torch.cuda.is_available())
 if torch.cuda.is_available():

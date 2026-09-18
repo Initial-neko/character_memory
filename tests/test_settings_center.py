@@ -72,18 +72,20 @@ def test_settings_save_preserves_comments_unknown_keys_and_creates_backup(tmp_pa
     )
     store = SettingsStore(str(config), str(tmp_path / ".env"))
 
-    result = store.save_values({"tts_provider": "kokoro", "tts_voice": "zf_003"})
+    result = store.save_values({"tts_provider": "qwen3", "tts_voice": "Vivian", "tts_device": "cuda"})
 
     assert result["changed"] is True
     assert Path(result["backup"]).is_file()
     text = config.read_text(encoding="utf-8")
     assert "# user comment" in text
     assert 'custom_extension_key: "keep-me"' in text
-    assert 'tts_provider: "kokoro"' in text
-    assert 'tts_voice: "zf_003"' in text
+    assert 'tts_provider: "qwen3"' in text
+    assert 'tts_voice: "Vivian"' in text
+    assert 'tts_device: "cuda"' in text
     settings = load_settings(str(config))
-    assert settings.tts_provider == "kokoro"
-    assert settings.tts_voice == "zf_003"
+    assert settings.tts_provider == "qwen3"
+    assert settings.tts_voice == "Vivian"
+    assert settings.tts_device == "cuda"
 
 
 def test_system_environment_overrides_dotenv(tmp_path: Path, monkeypatch):
@@ -154,5 +156,7 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert '"character_memory.settings_server"' in stack
     assert 'settings.tts_provider' in media
     assert '"provider": "kokoro"' in media
+    assert '"provider": "qwen3"' in media
+    assert '"http://127.0.0.1:9013/v1/tts"' in media
     assert 'http://127.0.0.1:8003/settings' in chat
     assert 'http://127.0.0.1:8003/settings' in lab

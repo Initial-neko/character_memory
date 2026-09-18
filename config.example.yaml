@@ -16,12 +16,13 @@ embedding_model: "BAAI/bge-small-zh-v1.5"
 # embedding_base_url: "https://your-provider/v1"
 # embedding_model: "your-embedding-model"
 
-# Formal chat TTS. Provider Lab :9002 is still the audition/benchmark surface.
-# setup-media-models.sh prepares Kokoro model/voice files before runtime.
-tts_provider: "kokoro"       # kokoro | sherpa
-tts_voice: "zf_001"          # Kokoro zf_001..zf_004; Sherpa 0 / 2 / 5
-tts_speed: 1.0
-tts_device: "cpu"            # cpu | cuda (Kokoro)
+# Formal chat TTS. Provider Lab :9002 remains available for audition/benchmark.
+# Qwen3-TTS runs in its isolated .venv-qwen3-tts sidecar on :9013 so Torch/CUDA
+# dependencies never enter the core Character Memory environment.
+tts_provider: "kokoro"       # kokoro | qwen3 | sherpa
+tts_voice: "zf_001"          # Qwen3: Vivian/Serena/...; Kokoro: zf_001..zf_004; Sherpa: 0/2/5
+tts_speed: 1.0               # Qwen3 currently ignores speed
+tts_device: "cpu"            # qwen3: cuda recommended; kokoro/sherpa may use cpu
 
 # Image search provider for avatar candidates. Keys live in .env.
 search_provider: "searchapi"

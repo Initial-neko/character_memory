@@ -104,13 +104,15 @@ The Voice section therefore behaves as follows:
 - only providers with `ready=true` are selectable;
 - unhealthy/unavailable providers remain visible but disabled, with the provider reason shown in the UI;
 - the Voice dropdown is rebuilt from the selected healthy provider's reported `voices`;
-- switching Provider automatically selects that provider's `default_voice`;
-- save performs the same health/voice validation again on the server, so stale browser state cannot persist an unhealthy provider;
+- switching Provider automatically selects that provider's `default_voice` and reconciles the Device control with the running provider (`cuda`/`cpu`/cloud);
+- save performs the same health/voice validation again on the server; when Provider changes, stale incompatible Voice/Device values are normalized to the healthy provider defaults instead of failing the save;
 - changing unrelated settings is still allowed when the currently configured TTS happens to be unavailable.
 
 Formal voice selection is now consistently persisted in `tts_voice`. For GSV, the sidecar reports the voice identity associated with its configured reference (currently `murasame`); Settings writes that reported voice into `tts_voice`, and Media Runtime sends the same value during synthesis.
 
-`tts_device` is used by local providers where supported. Edge reports `cloud`, so the Device control is disabled while Edge is selected.
+`tts_device` is used by local providers where supported. Edge reports `cloud`, so the Device control switches to `Cloud (Provider managed)` and is disabled while Edge is selected.
+
+The Voice section also exposes a **测试当前 TTS** action. It calls Settings Center `POST /v1/tts-preview`, which rechecks provider health and then proxies the selected Provider/Voice/Speed to `:9002/v1/tts`. This is an audition only; it does not persist configuration.
 
 ### Health-checkable local providers without eager GPU model load
 

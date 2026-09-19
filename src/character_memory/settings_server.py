@@ -23,10 +23,17 @@ class SecretUpdate(BaseModel):
     value: str = Field(min_length=1, max_length=20000)
 
 
+class TtsPreviewRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=32)
+    voice: str = Field(default="", max_length=128)
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    text: str = Field(default="你好，这是当前语音配置的试听。", min_length=1, max_length=500)
+
+
 def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStore | None = None, runtime_http_client=None):
     try:
         from fastapi import FastAPI, HTTPException
-        from fastapi.responses import FileResponse
+        from fastapi.responses import FileResponse, Response
         from fastapi.staticfiles import StaticFiles
     except ImportError as exc:
         raise RuntimeError("Settings Center requires the api extra") from exc
@@ -153,31 +160,52 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
         }
         return snapshot
 
-    def validated_tts_values(values: dict[str, Any]) -> dict[str, Any]:
-        normalized = dict(values)
-        if not ({"tts_provider", "tts_voice"} & set(normalized)):
-            return normalized
-
-        current = settings_store.snapshot()["values"]
-        provider_id = str(normalized.get("tts_provider", current.get("tts_provider", "")) or "").strip().lower()
-        voice = str(normalized.get("tts_voice", current.get("tts_voice", "")) or "").strip()
+    def _healthy_provider(provider_id: str) -> dict[str, Any]:
         inventory = tts_inventory()
         provider = next((item for item in inventory["providers"] if item["id"] == provider_id), None)
         if provider is None or not provider.get("ready"):
             reason = (provider or {}).get("reason") or inventory.get("error") or "provider health check failed"
             raise ValueError(f"TTS provider {provider_id!r} is not selectable because its health check did not pass: {reason}")
+        return provider
+
+    @staticmethod
+    def _runtime_device_value(provider: dict[str, Any]) -> str | None:
+        value = str(provider.get("device") or "").strip().lower()
+        if value.startswith("cuda"):
+            return "cuda"
+        if value.startswith("cpu"):
+            return "cpu"
+        return None
+
+    def validated_tts_values(values: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(values)
+        if not ({"tts_provider", "tts_voice", "tts_device"} & set(normalized)):
+            return normalized
+
+        current = settings_store.snapshot()["values"]
+        current_provider = str(current.get("tts_provider") or "").strip().lower()
+        provider_id = str(normalized.get("tts_provider", current_provider) or "").strip().lower()
+        provider_changed = "tts_provider" in normalized and provider_id != current_provider
+        provider = _healthy_provider(provider_id)
 
         voices = list(provider.get("voices") or [])
         default_voice = str(provider.get("default_voice") or (voices[0] if voices else "")).strip()
-        if "tts_provider" in normalized and "tts_voice" not in normalized:
-            if voice not in voices:
-                voice = default_voice
+        voice = str(normalized.get("tts_voice", current.get("tts_voice", "")) or "").strip()
+        if provider_changed and (not voice or (voices and voice not in voices)):
+            voice = default_voice
             normalized["tts_voice"] = voice
-        if voice and voices and voice not in voices:
+        elif voice and voices and voice not in voices:
             raise ValueError(
                 f"TTS voice {voice!r} is not available for healthy provider {provider_id!r}. "
                 f"Available: {', '.join(voices)}"
             )
+        elif provider_changed and "tts_voice" not in normalized:
+            normalized["tts_voice"] = voice or default_voice
+
+        runtime_device = _runtime_device_value(provider)
+        if provider_changed and runtime_device:
+            normalized["tts_device"] = runtime_device
+
         return normalized
 
     @app.on_event("shutdown")
@@ -217,6 +245,41 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"保存配置失败：{exc}") from exc
+
+    @app.post("/v1/tts-preview")
+    def tts_preview(req: TtsPreviewRequest):
+        provider_id = str(req.provider or "").strip().lower()
+        try:
+            provider = _healthy_provider(provider_id)
+            voices = list(provider.get("voices") or [])
+            voice = str(req.voice or provider.get("default_voice") or "").strip()
+            if voices and voice not in voices:
+                voice = str(provider.get("default_voice") or voices[0]).strip()
+            response = client.post(
+                runtime_urls["tts_lab"] + "/v1/tts",
+                json={
+                    "provider": provider_id,
+                    "text": req.text,
+                    "voice": voice,
+                    "speed": float(req.speed),
+                },
+                timeout=180.0,
+            )
+            response.raise_for_status()
+            media_type = (response.headers.get("content-type") or "audio/wav").split(";", 1)[0]
+            return Response(
+                content=response.content,
+                media_type=media_type,
+                headers={
+                    "X-TTS-Provider": provider_id,
+                    "X-TTS-Voice": response.headers.get("x-tts-voice", voice),
+                    "X-TTS-Device": response.headers.get("x-tts-device", str(provider.get("device") or "")),
+                },
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"TTS preview failed: {exc}") from exc
 
     @app.put("/v1/settings/secrets/{name}")
     def put_secret(name: str, req: SecretUpdate):

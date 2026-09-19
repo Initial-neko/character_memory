@@ -50,6 +50,10 @@ code, .mono { font-family: "SFMono-Regular", Consolas, monospace; }
 .field input, .field select { width: 100%; min-height: 38px; border: 1px solid #d7dbe2; border-radius: 8px; padding: 8px 10px; background: #fff; color: #171a21; }
 .field input[type="checkbox"] { width: 18px; min-height: 18px; accent-color: #171a21; }
 .checkbox-row { min-height: 38px; display: flex; align-items: center; gap: 8px; }
+.tts-health-status { margin-top: 2px; font-size: 11px; line-height: 1.45; }
+.tts-preview-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid #eef0f3; display: grid; grid-template-columns: auto minmax(220px,1fr); gap: 10px 12px; align-items: center; }
+.tts-preview-row audio { width: 100%; min-width: 0; height: 38px; }
+.tts-preview-status { grid-column: 1 / -1; font-size: 12px; }
 
 .secrets-card { margin-top: 14px; padding: 18px; }
 .secret-list { display: grid; gap: 10px; }
@@ -70,6 +74,8 @@ code, .mono { font-family: "SFMono-Regular", Consolas, monospace; }
   .service-links { justify-content: flex-start; }
   .runtime-grid, .settings-grid { grid-template-columns: 1fr; }
   .field-grid { grid-template-columns: 1fr; }
+  .tts-preview-row { grid-template-columns: 1fr; }
+  .tts-preview-status { grid-column: 1; }
   .secret-row { grid-template-columns: 1fr; }
   .toolbar { align-items: flex-start; flex-direction: column; }
 }

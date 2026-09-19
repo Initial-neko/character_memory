@@ -115,37 +115,94 @@
       providerWrap.appendChild(status);
     }
 
+    const voiceCard = provider.closest(".settings-section");
+    let previewRow = voiceCard?.querySelector(".tts-preview-row");
+    let previewButton = previewRow?.querySelector("button");
+    let previewAudio = previewRow?.querySelector("audio");
+    let previewStatus = previewRow?.querySelector(".tts-preview-status");
+    if (!previewRow && voiceCard) {
+      previewRow = document.createElement("div");
+      previewRow.className = "tts-preview-row";
+
+      previewButton = document.createElement("button");
+      previewButton.type = "button";
+      previewButton.className = "secondary";
+      previewButton.textContent = "测试当前 TTS";
+
+      previewAudio = document.createElement("audio");
+      previewAudio.controls = true;
+      previewAudio.preload = "none";
+
+      previewStatus = document.createElement("span");
+      previewStatus.className = "subtle tts-preview-status";
+      previewStatus.textContent = "使用当前 Provider / Voice 生成一句试听。";
+
+      previewRow.append(previewButton, previewAudio, previewStatus);
+      voiceCard.appendChild(previewRow);
+    }
+
+    function runtimeDevice(item) {
+      const value = String(item?.device || "").trim().toLowerCase();
+      if (value.startsWith("cuda")) return "cuda";
+      if (value.startsWith("cpu")) return "cpu";
+      return null;
+    }
+
     function renderSelectedProvider(options = {}) {
-      const preferDefaultVoice = Boolean(options.preferDefaultVoice);
+      const providerChanged = Boolean(options.providerChanged);
       const item = ttsProviderStatus(provider.value);
-      const currentVoice = preferDefaultVoice ? "" : voice.value;
-      voice.innerHTML = "";
-      const voices = item?.voices?.length ? item.voices : [];
+      const previousVoice = voice.value;
       const configuredVoice = String(snapshot.values?.tts_voice || "");
+      const voices = item?.voices?.length ? item.voices.map(String) : [];
+      const defaultVoice = String(item?.default_voice || voices[0] || "");
+
+      voice.innerHTML = "";
       for (const value of voices) {
         const option = document.createElement("option");
-        option.value = String(value);
-        option.textContent = String(value);
+        option.value = value;
+        option.textContent = value;
         option.disabled = !item?.ready;
         voice.appendChild(option);
       }
-      const configuredVoiceInvalid = !preferDefaultVoice && configuredVoice && !voices.includes(configuredVoice);
-      if (configuredVoiceInvalid) {
-        const option = document.createElement("option");
-        option.value = configuredVoice;
-        option.textContent = configuredVoice + " · 当前配置不可用";
-        option.disabled = true;
-        voice.insertBefore(option, voice.firstChild);
-      }
-      const fallback = String(item?.default_voice || configuredVoice || "");
-      if (configuredVoiceInvalid) voice.value = configuredVoice;
-      else if (currentVoice && voices.includes(currentVoice)) voice.value = currentVoice;
-      else if (fallback && voices.includes(fallback)) voice.value = fallback;
-      else if (voices.length) voice.value = voices[0];
+
+      let selectedVoice = "";
+      if (providerChanged) selectedVoice = defaultVoice;
+      else if (configuredVoice && voices.includes(configuredVoice)) selectedVoice = configuredVoice;
+      else if (previousVoice && voices.includes(previousVoice)) selectedVoice = previousVoice;
+      else selectedVoice = defaultVoice;
+      if (selectedVoice) voice.value = selectedVoice;
+
+      const correctedVoice = Boolean(
+        item?.ready &&
+        configuredVoice &&
+        !voices.includes(configuredVoice) &&
+        selectedVoice &&
+        selectedVoice !== configuredVoice
+      );
 
       voice.disabled = !item?.ready || voices.length === 0;
-      if (speed) speed.disabled = !item?.ready || item?.supports_speed === false;
-      if (device) device.disabled = !item?.ready || String(item?.device || "").toLowerCase() === "cloud";
+      if (speed) {
+        speed.disabled = !item?.ready || item?.supports_speed === false;
+        if (providerChanged && item?.supports_speed === false) speed.value = "1";
+      }
+      if (device) {
+        const detected = runtimeDevice(item);
+        const cloud = String(item?.device || "").trim().toLowerCase() === "cloud";
+        let cloudOption = device.querySelector('option[value="cloud"]');
+        if (cloud && !cloudOption) {
+          cloudOption = document.createElement("option");
+          cloudOption.value = "cloud";
+          cloudOption.textContent = "Cloud (Provider managed)";
+          device.appendChild(cloudOption);
+        } else if (!cloud && cloudOption) {
+          cloudOption.remove();
+        }
+        device.disabled = !item?.ready || cloud;
+        if (cloud) device.value = "cloud";
+        else if (detected) device.value = detected;
+        device.title = cloud ? "该 Provider 使用云端服务，不使用本地 CPU/CUDA 设置。" : "";
+      }
+      if (previewButton) previewButton.disabled = !item?.ready || !selectedVoice;
 
       if (status) {
         if (!item) {
@@ -155,14 +212,58 @@
         } else if (item.ready) {
           const loaded = item.loaded ? "loaded" : "ready";
           status.textContent = "✓ " + loaded + " · " + (item.device || "device unknown") + " · " + (item.model || item.id)
-            + (configuredVoiceInvalid ? " · 当前 Voice 不在健康清单，请重新选择" : "");
+            + (correctedVoice ? " · Voice 已自动切换为 " + selectedVoice + "（保存后写入配置）" : "");
         } else {
           status.textContent = "✗ unavailable · " + (item.reason || "health check failed");
         }
       }
     }
 
-    provider.addEventListener("change", () => renderSelectedProvider({preferDefaultVoice: true}));
+    provider.addEventListener("change", () => renderSelectedProvider({providerChanged: true}));
+
+    previewButton?.addEventListener("click", async () => {
+      const item = ttsProviderStatus(provider.value);
+      if (!item?.ready) return showNotice("当前 TTS Provider 未通过健康检查，不能试听。", true);
+      previewButton.disabled = true;
+      if (previewStatus) previewStatus.textContent = "正在生成试听...";
+      try {
+        const response = await fetch("/v1/tts-preview", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            provider: provider.value,
+            voice: voice.value,
+            speed: Number(speed?.value || 1),
+            text: "你好，这是当前语音配置的试听。",
+          }),
+        });
+        if (!response.ok) {
+          let detail = response.status + " " + response.statusText;
+          try {
+            const payload = await response.json();
+            detail = payload?.detail || detail;
+          } catch (_) {}
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+        const blob = await response.blob();
+        if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+        state.previewUrl = URL.createObjectURL(blob);
+        previewAudio.src = state.previewUrl;
+        await previewAudio.play().catch(() => {});
+        if (previewStatus) {
+          const p = response.headers.get("x-tts-provider") || provider.value;
+          const v = decodeURIComponent(response.headers.get("x-tts-voice") || voice.value);
+          const d = response.headers.get("x-tts-device") || item.device || "";
+          previewStatus.textContent = "✓ " + p + " · " + v + (d ? " · " + d : "");
+        }
+      } catch (error) {
+        if (previewStatus) previewStatus.textContent = "试听失败：" + error.message;
+        showNotice("TTS 试听失败：" + error.message, true);
+      } finally {
+        previewButton.disabled = !ttsProviderStatus(provider.value)?.ready;
+      }
+    });
+
     renderSelectedProvider();
   }
 

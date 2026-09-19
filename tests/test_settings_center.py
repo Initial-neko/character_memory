@@ -25,10 +25,12 @@ def _clear_secret_env(monkeypatch):
 
 
 class _RuntimeResponse:
-    def __init__(self, payload, status_code=200):
-        self._payload = payload
+    def __init__(self, payload=None, status_code=200, *, content=b"", headers=None):
+        self._payload = payload or {}
         self.status_code = status_code
         self.text = ""
+        self.content = content
+        self.headers = headers or {}
 
     @property
     def is_success(self):
@@ -95,6 +97,7 @@ class _SettingsRuntimeClient:
             },
         ]
         self.providers = {item["id"]: item for item in items}
+        self.post_calls = []
 
     def get(self, url, **kwargs):
         marker = "/v1/providers/"
@@ -105,6 +108,17 @@ class _SettingsRuntimeClient:
                 return _RuntimeResponse({"detail": "missing"}, status_code=404)
             return _RuntimeResponse({"provider": item})
         return _RuntimeResponse({"ok": True})
+
+    def post(self, url, **kwargs):
+        self.post_calls.append((url, kwargs))
+        return _RuntimeResponse(
+            content=b"RIFFpreview",
+            headers={
+                "content-type": "audio/wav",
+                "x-tts-voice": "murasame",
+                "x-tts-device": "cuda:0",
+            },
+        )
 
 
 def test_legacy_secrets_move_to_env_without_plaintext_backup(tmp_path: Path, monkeypatch):
@@ -309,6 +323,90 @@ def test_one_provider_health_failure_does_not_hide_other_healthy_providers(tmp_p
     assert "edge probe timeout" in snapshot["tts"]["error"]
 
 
+def test_provider_change_normalizes_stale_voice_and_device(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        'tts_provider: "kokoro"\n'
+        'tts_voice: "zf_002"\n'
+        'tts_device: "cpu"\n',
+        encoding="utf-8",
+    )
+    runtime = _SettingsRuntimeClient()
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=runtime,
+    )
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/v1/settings",
+            json={
+                "values": {
+                    "tts_provider": "gsv",
+                    "tts_voice": "zf_002",
+                    "tts_device": "cpu",
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    values = response.json()["settings"]["values"]
+    assert values["tts_provider"] == "gsv"
+    assert values["tts_voice"] == "murasame"
+    assert values["tts_device"] == "cuda"
+
+
+def test_settings_tts_preview_calls_selected_healthy_provider(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        'tts_provider: "gsv"\n'
+        'tts_voice: "murasame"\n'
+        'tts_device: "cuda"\n',
+        encoding="utf-8",
+    )
+    runtime = _SettingsRuntimeClient()
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=runtime,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/tts-preview",
+            json={
+                "provider": "gsv",
+                "voice": "murasame",
+                "speed": 1.0,
+                "text": "你好，这是试听。",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.content == b"RIFFpreview"
+    assert response.headers["content-type"].startswith("audio/wav")
+    assert response.headers["x-tts-provider"] == "gsv"
+    assert response.headers["x-tts-voice"] == "murasame"
+    assert response.headers["x-tts-device"] == "cuda:0"
+    assert runtime.post_calls == [
+        (
+            "http://127.0.0.1:9002/v1/tts",
+            {
+                "json": {
+                    "provider": "gsv",
+                    "text": "你好，这是试听。",
+                    "voice": "murasame",
+                    "speed": 1.0,
+                },
+                "timeout": 180.0,
+            },
+        )
+    ]
+
+
 def test_settings_rejects_unhealthy_provider_and_autoselects_healthy_default_voice(tmp_path: Path, monkeypatch):
     _clear_secret_env(monkeypatch)
     config = tmp_path / "config.yaml"
@@ -379,6 +477,9 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert "health check did not pass" in settings_server
     assert "tts-health-status" in settings_js
     assert "option.disabled" in settings_js
+    assert 'device.value = detected' in settings_js
+    assert '/v1/tts-preview' in settings_js
+    assert 'Cloud (Provider managed)' in settings_js
     assert "zh-CN-XiaoxiaoNeural" in settings_store
     assert 'http://127.0.0.1:8003/settings' in chat
     assert 'http://127.0.0.1:8003/settings' in lab

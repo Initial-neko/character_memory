@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -20,12 +21,42 @@ ROOT = Path(__file__).resolve().parents[2]
 LOCAL_MEDIA_ORIGINS = ("http://127.0.0.1:8000", "http://localhost:8000")
 
 
-def _healthy(url: str, timeout: float = 0.8) -> bool:
+def _probe(url: str, timeout: float = 0.8) -> tuple[bool, str | None]:
+    """Return ``(process is listening, why it cannot serve)``.
+
+    HTTP 200 is not enough to call a sidecar ready. GSV-TTS-Lite answers
+    ``/health`` with 200 and ``ready: false`` when its model assets are not
+    configured -- it is up, it just cannot synthesise. Without this the stack
+    prints "GSV-TTS-Lite Runtime ready" and then every speech request fails.
+
+    Only an explicit ``"ready": false`` in a JSON body counts as not-ready, and
+    the check is ``is False`` rather than falsy so that ``ready: 0``, a missing
+    field, and a non-JSON body (TTS Lab's ``/tts`` serves HTML) all keep the
+    older "it is listening" meaning.
+    """
     try:
         with urlopen(url, timeout=timeout) as response:
-            return 200 <= int(response.status) < 300
+            if not 200 <= int(response.status) < 300:
+                return False, None
+            content_type = str(response.headers.get("Content-Type", "") or "")
+            if not content_type.split(";", 1)[0].strip().lower() == "application/json":
+                return True, None
+            try:
+                body = json.loads(response.read().decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                return True, None
     except (OSError, URLError):
-        return False
+        return False, None
+
+    if not isinstance(body, dict) or body.get("ready") is not False:
+        return True, None
+    reason = str(body.get("reason") or "").strip()
+    return True, reason or "not ready"
+
+
+def _healthy(url: str, timeout: float = 0.8) -> bool:
+    listening, reason = _probe(url, timeout=timeout)
+    return listening and reason is None
 
 
 def _normalize_mobile_origin(value: str | None) -> str | None:
@@ -239,6 +270,9 @@ def main() -> None:
         gsv_env["GSV_TTS_DEVICE"] = tts_device
         gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" and not missing_gsv else "0"
         gsv_env.setdefault("GSV_TTS_VOICE", str(base_env.get("GSV_TTS_VOICE", "") or "").strip() or "murasame")
+        # Absolute on purpose: the sidecar globs this for per-persona voice
+        # manifests, and a relative value would follow the child's cwd.
+        gsv_env.setdefault("GSV_TTS_PERSONA_ROOT", str(ROOT / "personas"))
         specs.insert(
             1,
             (
@@ -265,7 +299,10 @@ def main() -> None:
     owned: list[tuple[str, subprocess.Popen]] = []
     try:
         for name, health_url, command, env in specs:
-            if _healthy(health_url):
+            # Listening is enough to mean "already running" here: a sidecar that
+            # is up but not ready must not be respawned, or it fights the running
+            # process for its port and the stack dies on startup.
+            if _probe(health_url)[0]:
                 if name == "Media Runtime" and mobile_origin and not _cors_allows_origin(health_url, mobile_origin):
                     raise SystemExit(
                         "Media Runtime is already running without the requested mobile CORS origin. "
@@ -279,9 +316,18 @@ def main() -> None:
         pending = {name: health_url for name, health_url, _command, _env in specs}
         while pending and time.time() < deadline:
             for name, url in list(pending.items()):
-                if _healthy(url):
+                listening, reason = _probe(url)
+                if not listening:
+                    continue
+                # An unready sidecar is popped rather than left pending: it is
+                # running and will stay unready until someone configures it, so
+                # waiting only converts a clear message into a 25s timeout that
+                # aborts the whole stack.
+                if reason is None:
                     print(f"stack: {name} ready -> {url}", flush=True)
-                    pending.pop(name, None)
+                else:
+                    print(f"stack: {name} up but not ready -> {url} ({reason})", flush=True)
+                pending.pop(name, None)
             if pending:
                 for name, process in owned:
                     code = process.poll()

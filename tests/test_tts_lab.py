@@ -1,4 +1,6 @@
 from pathlib import Path
+import shutil
+import subprocess
 from urllib.parse import unquote
 
 from fastapi.testclient import TestClient
@@ -498,3 +500,102 @@ def test_tts_lab_web_ui_exposes_provider_voice_and_ab_controls():
     assert 'fetch("/v1/voice-design/polish"' in script
     assert 'fetch("/v1/voice-design/generate"' in script
     assert "decodeURIComponent" in script
+
+
+# --- Voice Design -> character freeze contract -------------------------------
+#
+# VoiceDesign is not reproducible: the same text+instruct yields different audio
+# every time. So the freeze must persist the exact bytes the user auditioned,
+# addressed by the opaque artifact token returned from generate. These tests pin
+# the wiring that keeps the stored transcript honest.
+
+GUARD_MESSAGE = "测试文本或 Instruct 已修改，请重新生成后再固化。"
+
+
+def _freeze_request_block(script: str) -> str:
+    """Return the fetch options of the freeze call, up to its error handling."""
+    after_url = script.split('"/v1/voice-design/freeze"', 1)[1]
+    return after_url.split("if (!response.ok)", 1)[0]
+
+
+def test_voice_design_output_column_exposes_character_picker_and_freeze_controls():
+    html = Path("src/character_memory/web/tts_lab.html").read_text(encoding="utf-8")
+
+    assert 'id="voiceDesignCharacter"' in html
+    assert 'id="freezeVoiceDesign" disabled' in html
+    assert 'id="voiceDesignFreezeStatus"' in html
+    assert "固化到该角色" in html
+    # The panel keeps its experimental marker; freezing must not promote it to
+    # a realtime provider.
+    css = Path("src/character_memory/web/tts_lab.css").read_text(encoding="utf-8")
+    assert ".voice-design-card" in css
+    assert "dashed" in css
+
+
+def test_voice_design_freeze_reuses_the_existing_character_endpoint():
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+
+    # Characters come from the same route app.js uses, not a new one.
+    assert 'fetch("/v1/characters")' in script
+    assert '$("voiceDesignCharacter")' in script
+
+
+def test_voice_design_generate_stores_the_artifact_token_from_the_response_header():
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+
+    assert "X-Voice-Design-Artifact" in script
+    assert "voiceDesignArtifact" in script
+
+
+def test_voice_design_freeze_posts_only_character_and_artifact_ids():
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+    block = _freeze_request_block(script)
+
+    assert '"/v1/voice-design/freeze"' in script
+    assert "character_id" in block
+    assert "artifact_id" in block
+    # The transcript is already recorded server-side with the artifact; resending
+    # caller-supplied text would let the stored transcript drift from the audio.
+    assert "text" not in block
+    assert "instruct" not in block
+
+
+def test_voice_design_freeze_status_surfaces_result_and_activation_state():
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+
+    assert '$("voiceDesignFreezeStatus")' in script
+    assert "ref_audio" in script
+    assert "voice_id" in script
+    assert "activated" in script
+    assert "reason" in script
+
+
+def test_voice_design_freeze_result_survives_the_gate_re_render():
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+    body = script.split("async function freezeVoiceDesign(", 1)[1].split("\n  $(", 1)[0]
+
+    # Re-arming the gate after a freeze must not clobber the outcome the user
+    # is reading, so the displayed result is tracked explicitly.
+    assert "voiceDesignFreezeResult" in script
+    assert "voiceDesignFreezeResult = true" in body
+
+
+def test_voice_design_freeze_button_is_gated_on_matching_snapshot_and_input_events():
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+
+    assert GUARD_MESSAGE in script
+    assert "voiceDesignSnapshot" in script
+    # The guard re-evaluates on every edit, not only at generate time.
+    for element in ("voiceDesignInstruct", "voiceDesignText"):
+        assert f'$("{element}").addEventListener("input"' in script
+    for element in ("voiceDesignLanguage", "voiceDesignCharacter"):
+        assert f'$("{element}").addEventListener("change"' in script
+
+
+def test_tts_lab_script_is_valid_javascript_when_node_is_available():
+    node = shutil.which("node")
+    if not node:
+        return
+    path = Path("src/character_memory/web/tts_lab.js")
+    checked = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stderr

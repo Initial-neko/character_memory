@@ -201,8 +201,17 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         try:
             if configured_routing:
                 configured_voice = str(settings.tts_voice or "0")
-                voice_value = explicit_voice or configured_voice
-                speaker_id = int(voice_value) if voice_value.isdigit() else 0
+                # `voice` carries a character id (`"momo"`), not a speaker number, so a
+                # non-numeric voice must fall through to the browser's per-character
+                # speaker hash instead of collapsing every character onto speaker 0.
+                if explicit_voice.isdigit():
+                    speaker_id = int(explicit_voice)
+                elif req.speaker_id is not None:
+                    speaker_id = req.speaker_id
+                elif configured_voice.isdigit():
+                    speaker_id = int(configured_voice)
+                else:
+                    speaker_id = 0
                 speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
             else:
                 speaker_id = int(req.speaker_id or 0)

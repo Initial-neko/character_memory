@@ -588,7 +588,7 @@
     const response = await fetch(`${mediaBase()}/v1/tts`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({text:item.text, speaker_id:speakerId, speed:1.0}),
+      body: JSON.stringify({text:item.text, voice:item.characterId, speaker_id:speakerId}),
     });
     if (!response.ok) throw new Error(await response.text());
     const blob = await response.blob();

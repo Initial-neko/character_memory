@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import io
+import json
+import shutil
+import subprocess
 import sys
 from types import SimpleNamespace
 import wave
@@ -484,6 +487,7 @@ def test_configured_gsv_tts_routes_wav_through_media_runtime(monkeypatch):
     provider_client = _GsvProviderClient()
     with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
         response = client.post("/v1/tts", json={"text": "你好"})
+        voiced = client.post("/v1/tts", json={"text": "你好", "voice": "haru", "speaker_id": 2})
 
     assert response.status_code == 200
     assert response.content == b"RIFFgsv-wav"
@@ -492,9 +496,88 @@ def test_configured_gsv_tts_routes_wav_through_media_runtime(monkeypatch):
     assert response.headers["x-media-voice"] == "murasame"
     assert response.headers["x-media-device"] == "cuda:0"
     assert response.headers["x-media-sample-rate"] == "32000"
+    # The provider branch forwards the browser's per-character voice unchanged;
+    # `speaker_id` is a Sherpa-only concept and must not leak into :9002.
+    assert voiced.status_code == 200
+    assert voiced.content == b"RIFFgsv-wav"
     assert provider_client.post_calls == [
-        ("http://127.0.0.1:9002/v1/tts", {"json": {"provider": "gsv", "text": "你好", "voice": "murasame", "speed": 1.0}})
+        ("http://127.0.0.1:9002/v1/tts", {"json": {"provider": "gsv", "text": "你好", "voice": "murasame", "speed": 1.0}}),
+        ("http://127.0.0.1:9002/v1/tts", {"json": {"provider": "gsv", "text": "你好", "voice": "haru", "speed": 1.0}}),
     ]
+
+
+def _configured_sherpa_runtime(monkeypatch, *, tts_voice: str, tts_speed: float) -> MediaRuntime:
+    """Configure media-server routing onto the local Sherpa branch, with a fake synthesizer."""
+    runtime = MediaRuntime(FakeAsr(), FakeTts())
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(
+            tts_provider="sherpa",
+            tts_voice=tts_voice,
+            tts_speed=tts_speed,
+            tts_device="cpu",
+        ),
+    )
+    return runtime
+
+
+def test_configured_sherpa_tts_keeps_browser_speaker_id_for_character_voice(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    # `voice` now carries a character id, not a digit. The browser's per-character
+    # speaker hash must survive, otherwise every character collapses to speaker 0.
+    runtime = _configured_sherpa_runtime(monkeypatch, tts_voice="3", tts_speed=1.0)
+    with TestClient(media_server.create_media_app(provider_http_client=_ProviderClient())) as client:
+        response = client.post("/v1/tts", json={"text": "x", "voice": "momo", "speaker_id": 2})
+
+    assert response.status_code == 200
+    assert response.headers["x-media-voice"] == "2"
+    assert runtime.tts.calls == [("x", 2, 1.0)]
+
+
+def test_configured_sherpa_tts_falls_back_to_configured_voice_digit_when_no_speaker_id(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = _configured_sherpa_runtime(monkeypatch, tts_voice="3", tts_speed=1.0)
+    with TestClient(media_server.create_media_app(provider_http_client=_ProviderClient())) as client:
+        response = client.post("/v1/tts", json={"text": "x", "voice": "momo"})
+
+    assert response.status_code == 200
+    assert response.headers["x-media-voice"] == "3"
+    assert runtime.tts.calls == [("x", 3, 1.0)]
+
+
+def test_configured_sherpa_tts_prefers_numeric_voice_over_speaker_id(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = _configured_sherpa_runtime(monkeypatch, tts_voice="3", tts_speed=1.0)
+    with TestClient(media_server.create_media_app(provider_http_client=_ProviderClient())) as client:
+        response = client.post("/v1/tts", json={"text": "x", "voice": "7", "speaker_id": 2})
+
+    assert response.status_code == 200
+    assert response.headers["x-media-voice"] == "7"
+    assert runtime.tts.calls == [("x", 7, 1.0)]
+
+
+def test_configured_sherpa_tts_lets_settings_speed_govern_when_request_omits_speed(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    # The browser no longer pins speed, so settings.tts_speed is authoritative again.
+    # Asserted on its own so this test tracks the speed rule rather than the speaker
+    # rule: it was the browser-side payload (see the voice.js harness test below) that
+    # used to defeat the server's rule by always sending speed=1.0.
+    runtime = _configured_sherpa_runtime(monkeypatch, tts_voice="3", tts_speed=1.25)
+    with TestClient(media_server.create_media_app(provider_http_client=_ProviderClient())) as client:
+        response = client.post("/v1/tts", json={"text": "x", "voice": "momo", "speaker_id": 2})
+
+    assert response.status_code == 200
+    assert runtime.tts.calls[0][2] == pytest.approx(1.25)
 
 
 def test_formal_tts_selection_hot_reloads_config_without_recreating_media_app(monkeypatch):
@@ -722,3 +805,209 @@ def test_media_provider_model_dependencies_are_lazy():
     # CI and normal text-chat installs must not import sherpa-onnx at module import time.
     top_level_prefix = source.split("class SherpaSenseVoiceProvider", 1)[0]
     assert "import sherpa_onnx" not in top_level_prefix
+
+
+# Runs the real src/character_memory/web/voice.js in a stubbed browser realm (node's `vm`),
+# drives one assistant turn through the live voice-call flow, and reports the TTS request
+# the browser actually issued. Behavioural on purpose: it exercises the shipped script
+# instead of grepping its source text.
+VOICE_CALL_HARNESS = r"""
+const fs = require("fs");
+const vm = require("vm");
+
+const source = fs.readFileSync(process.argv[2], "utf8");
+const CHARACTER_ID = "haru";
+
+const ttsCalls = [];
+const otherCalls = [];
+const sources = [];
+const alerts = [];
+const silent = () => {};
+const consoleStub = {debug: silent, warn: silent, log: silent, error: silent, info: silent};
+
+function makeElement() {
+  const classes = new Set();
+  return {
+    classList: {
+      add: (...names) => names.forEach(name => classes.add(name)),
+      remove: (...names) => names.forEach(name => classes.delete(name)),
+      toggle: (name, on) => {
+        if (on === undefined) { classes.has(name) ? classes.delete(name) : classes.add(name); }
+        else if (on) { classes.add(name); } else { classes.delete(name); }
+      },
+      contains: name => classes.has(name),
+    },
+    style: {},
+    children: [],
+    textContent: "",
+    innerHTML: "",
+    title: "",
+    disabled: false,
+    scrollTop: 0,
+    scrollHeight: 0,
+    addEventListener: silent,
+    appendChild(child) { this.children.push(child); return child; },
+    append(...items) { this.children.push(...items); },
+    remove: silent,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+}
+
+const elements = new Map();
+const document = {
+  getElementById(id) {
+    if (!elements.has(id)) elements.set(id, makeElement());
+    return elements.get(id);
+  },
+  createElement: () => makeElement(),
+};
+
+class FakeAudio {
+  constructor(url) { this.url = url; this.onended = null; this.onerror = null; }
+  play() {
+    return Promise.resolve().then(() => { setTimeout(() => { if (this.onended) this.onended(); }, 0); });
+  }
+  pause() {}
+}
+
+class FakeEventSource {
+  constructor(url) { this.url = url; this.handlers = {}; this.closed = false; sources.push(this); }
+  addEventListener(type, handler) {
+    if (!this.handlers[type]) this.handlers[type] = [];
+    this.handlers[type].push(handler);
+  }
+  close() { this.closed = true; }
+  emit(type, payload) {
+    for (const handler of this.handlers[type] || []) handler({data: JSON.stringify(payload)});
+  }
+}
+
+async function fetchStub(url, options = {}) {
+  const target = String(url);
+  if (target.endsWith("/health")) {
+    return {ok: true, status: 200, json: async () => ({asr: {ready: true}, tts: {ready: true}}), text: async () => ""};
+  }
+  if (target.includes("/v1/tts")) {
+    ttsCalls.push({url: target, body: JSON.parse(options.body)});
+    return {ok: true, status: 200, blob: async () => ({fake: "audio"}), text: async () => ""};
+  }
+  otherCalls.push(target);
+  return {ok: true, status: 200, json: async () => ({}), text: async () => ""};
+}
+
+const CM = {
+  state: {characters: [{id: CHARACTER_ID, name: "Haru"}], characterId: CHARACTER_ID, conversation: {}},
+  dom: {},
+  on: silent,
+  registerFeature(name, api) { CM.features[name] = api; },
+  isGroupConversation: () => false,
+  currentProfile: () => ({id: CHARACTER_ID, name: "Haru"}),
+  conversationIdFor: id => `direct:${id}`,
+  features: {},
+};
+
+const windowStub = {
+  CM,
+  VisualCapture: {
+    createSession: () => ({
+      getState: () => ({active: false, source: null, candidateCount: 0}),
+      startCamera: async () => {},
+      startDisplay: async () => {},
+      stop: silent,
+    }),
+  },
+  AudioContext: class {
+    constructor() { this.destination = {}; }
+    createMediaStreamSource() { return {connect: silent, disconnect: silent}; }
+    createScriptProcessor() { return {connect: silent, disconnect: silent, onaudioprocess: null}; }
+    close() { return Promise.resolve(); }
+  },
+  addEventListener: silent,
+};
+
+const sandbox = {
+  window: windowStub,
+  document,
+  navigator: {mediaDevices: {getUserMedia: async () => ({getTracks: () => []})}},
+  localStorage: {getItem: () => null, setItem: silent, removeItem: silent},
+  fetch: fetchStub,
+  EventSource: FakeEventSource,
+  Audio: FakeAudio,
+  URL: {createObjectURL: () => "blob:fake", revokeObjectURL: silent},
+  URLSearchParams,
+  performance: {now: () => Date.now()},
+  alert: message => alerts.push(String(message)),
+  console: consoleStub,
+  setTimeout,
+  clearTimeout,
+  queueMicrotask,
+};
+
+vm.runInContext(source, vm.createContext(sandbox), {filename: "voice.js"});
+
+async function main() {
+  const feature = CM.features.voice;
+  if (!feature) throw new Error("voice.js did not register the voice feature");
+
+  await feature.start();
+  const stream = sources[0];
+  if (!stream) throw new Error("voice call did not open an event stream");
+
+  stream.emit("character_event", {
+    id: "m1",
+    character_id: CHARACTER_ID,
+    content: "你好",
+    metadata: {action: "MESSAGE"},
+  });
+
+  for (let attempt = 0; attempt < 200 && ttsCalls.length === 0; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  feature.stop();
+  process.stdout.write(JSON.stringify({
+    speakerId: feature.stableSpeakerId(CHARACTER_ID),
+    ttsCalls,
+    otherCalls,
+    alerts,
+  }));
+}
+
+main().catch(error => {
+  process.stderr.write(String((error && error.stack) || error));
+  process.exit(1);
+});
+"""
+
+
+def test_browser_voice_call_sends_character_voice_provider_neutral_and_leaves_speed_to_settings(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to exercise voice.js behaviourally")
+
+    harness = tmp_path / "voice_call_harness.cjs"
+    harness.write_text(VOICE_CALL_HARNESS, encoding="utf-8")
+    script = Path("src/character_memory/web/voice.js").resolve()
+    completed = subprocess.run(
+        [node, str(harness), str(script)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads(completed.stdout)
+    assert payload["alerts"] == []
+    assert payload["otherCalls"] == []
+    assert len(payload["ttsCalls"]) == 1
+
+    body = payload["ttsCalls"][0]["body"]
+    assert body["text"] == "你好"
+    # The per-character speaker hash still travels with the request.
+    assert payload["speakerId"] != 0, "haru must not hash to the collapsed speaker id"
+    assert body["speaker_id"] == payload["speakerId"]
+    # The character id travels alongside it so the registry can resolve a voice.
+    assert body["voice"] == "haru"
+    # Speed stays absent: settings.tts_speed is the documented authority.
+    assert "speed" not in body

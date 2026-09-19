@@ -43,6 +43,7 @@ Optional environment variables:
     GSV_TTS_LANGUAGE
     GSV_TTS_PROMPT_LANGUAGE
     GSV_TTS_PRELOAD
+    GSV_TTS_SEED
 
 Defaults:
 
@@ -53,6 +54,7 @@ Defaults:
     language = zh
     prompt_language = auto
     preload = 1 when scripts/start-gsv-tts.sh is used
+    seed = 1234
 
 ## Start
 
@@ -108,6 +110,57 @@ Response is audio/wav and exposes the same measurement header family used by the
     X-TTS-Cuda-Allocated-MB
     X-TTS-Cuda-Reserved-MB
     X-TTS-Cuda-Peak-MB
+    X-TTS-Seed
+
+## Determinism
+
+GSV-TTS-Lite draws every random number from PyTorch's **global** RNG and accepts no
+`generator=` anywhere — token sampling (Gumbel-max, `GPT_SoVITS/GPT/utils.py:5-9`) and
+decoder noise (`GPT_SoVITS/SoVITS/models.py:404`) both. The sidecar therefore calls
+`torch.manual_seed()` immediately before `infer_batched`.
+
+**It must run inside the sidecar's `RLock`.** Seeding outside the lock lets another
+thread consume the RNG state between the seed and the inference, which silently
+restores the non-determinism it was meant to remove. `tests/test_gsv_tts_experiment.py`
+pins this ordering, not just the seed's existence.
+
+`GSV_TTS_SEED` (default `1234`) sets the runtime default. `"none"`, `"off"`, `"random"`
+and `"-1"` disable seeding and restore the old behaviour. A request may carry its own
+`seed`; `null` means "use the runtime default".
+
+Measured on the real HTTP path, same 25-character text, same process, 5× `POST :9014/v1/tts`:
+
+| | duration | waveform |
+|---|---|---|
+| before | 25–88 % spread | 5/5 distinct |
+| after (`seed=1234`) | **6720.0 ms, 5/5** | 4/5 byte-identical |
+
+Run 1 differs from runs 2–5 only by first-inference cuDNN kernel warm-up float noise:
+corr 0.999986, SNR 45.7 dB, max abs diff 0.96 % FS — inaudible. Expect one slightly
+different waveform after a fresh model load, then exact repeats.
+
+### Seed choice is not a fidelity lever
+
+A two-text sample suggested seed 0 was best (0.7989) and 1234 worst (0.7342). **Five
+fresh texts did not reproduce it** — all three seeds landed within 0.007. Pooled over
+n=7, via Eres2Net speaker similarity:
+
+| seed | mean | min | max |
+|---|---|---|---|
+| 0 | 0.7552 | 0.6509 | 0.8306 |
+| 99999 | 0.7445 | 0.5796 | 0.8359 |
+| 1234 | 0.7333 | 0.6787 | 0.8193 |
+
+Between-seed spread is 0.0218; between-sentence spread is 0.2563 — **~12× larger**. What
+is said dominates identity, not the seed. Do not build a "scan seeds, keep the best
+score" flow: that sells a measurement that does not replicate. The seed's job is
+**reproducibility**. Choose its value by pacing (the same short line ranges 1276–11520 ms
+across seeds — some seeds stretch three characters into 11.5 s) and by ear.
+
+`temperature`/`top_k`/`top_p`/`repetition_penalty`/`noise_scale` are deliberately **not**
+exposed per request. They are the other end of the same lever as the seed; making them
+per-request would hand every caller a knob that destroys the reproducibility just gained.
+If timbre ever needs tuning, pin per-voice values in the voice profile instead.
 
 ## V1 inference policy
 

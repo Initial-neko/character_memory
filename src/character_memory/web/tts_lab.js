@@ -1,6 +1,18 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = {providers: [], voiceDesignUrl: null};
+  const state = {
+    providers: [],
+    voiceDesignUrl: null,
+    // VoiceDesign is not reproducible, so the freeze step needs the opaque
+    // artifact token that addresses the exact audio the user auditioned, plus
+    // the inputs that produced it so the stored transcript cannot drift.
+    voiceDesignArtifact: null,
+    voiceDesignSnapshot: null,
+    // True while voiceDesignFreezeStatus shows a freeze outcome, so re-arming
+    // the gate does not wipe the result the user is reading.
+    voiceDesignFreezeResult: false,
+    characters: [],
+  };
 
   function pretty(value) {
     return JSON.stringify(value, null, 2);
@@ -265,6 +277,8 @@
       const data = await response.json();
       $("voiceDesignInstruct").value = data.instruct || "";
       $("voiceDesignPolishStatus").textContent = String(data.total_ms || 0) + " ms · " + (data.model || "standard LLM");
+      // Programmatic value changes do not fire "input"; re-check the freeze gate.
+      renderFreezeState();
     } catch (error) {
       $("voiceDesignPolishStatus").textContent = "润色失败：" + error.message;
     } finally {
@@ -299,7 +313,11 @@
       if (state.voiceDesignUrl) URL.revokeObjectURL(state.voiceDesignUrl);
       state.voiceDesignUrl = URL.createObjectURL(blob);
       $("voiceDesignAudio").src = state.voiceDesignUrl;
+      state.voiceDesignArtifact = decodedHeader(response.headers, "X-Voice-Design-Artifact") || null;
+      state.voiceDesignSnapshot = voiceDesignInputs();
+      state.voiceDesignFreezeResult = false;
       $("voiceDesignResult").textContent = pretty({
+        artifact_id: state.voiceDesignArtifact,
         model: decodedHeader(response.headers, "x-voice-design-model"),
         device: response.headers.get("x-voice-design-device"),
         inference_ms: Number(response.headers.get("x-voice-design-inference-ms") || 0),
@@ -312,10 +330,126 @@
     } catch (error) {
       $("voiceDesignResult").textContent = "ERROR: " + error.message;
     } finally {
+      renderFreezeState();
       const status = await fetch("/v1/voice-design/status").then(r => r.ok ? r.json() : null).catch(() => null);
       button.disabled = !status?.voice_design?.ready;
     }
   }
+
+  function voiceDesignInputs() {
+    return {
+      text: $("voiceDesignText").value.trim(),
+      language: $("voiceDesignLanguage").value,
+      instruct: $("voiceDesignInstruct").value.trim(),
+      characterId: $("voiceDesignCharacter").value,
+    };
+  }
+
+  function voiceDesignSnapshotMatches() {
+    const snapshot = state.voiceDesignSnapshot;
+    if (!snapshot) return false;
+    const current = voiceDesignInputs();
+    return (
+      current.text === snapshot.text
+      && current.instruct === snapshot.instruct
+      && current.language === snapshot.language
+      && current.characterId === snapshot.characterId
+    );
+  }
+
+  // The stored transcript must describe the audio that was actually saved, so
+  // freezing stays disabled until the live inputs still match the snapshot taken
+  // at generate time. Re-evaluated on every input/change event, not only on generate.
+  function renderFreezeState() {
+    const button = $("freezeVoiceDesign");
+    const status = $("voiceDesignFreezeStatus");
+    if (!state.voiceDesignArtifact || !state.voiceDesignSnapshot) {
+      button.disabled = true;
+      return;
+    }
+    if (!voiceDesignSnapshotMatches()) {
+      button.disabled = true;
+      state.voiceDesignFreezeResult = false;
+      status.textContent = "测试文本或 Instruct 已修改，请重新生成后再固化。";
+      return;
+    }
+    const characterId = $("voiceDesignCharacter").value;
+    if (!characterId) {
+      button.disabled = true;
+      state.voiceDesignFreezeResult = false;
+      status.textContent = "请先选择要固化的角色。";
+      return;
+    }
+    button.disabled = false;
+    if (!state.voiceDesignFreezeResult) {
+      status.textContent = `试听音频已就绪（artifact: ${state.voiceDesignArtifact}），可固化到 ${characterId}。`;
+    }
+  }
+
+  async function loadCharacters() {
+    const select = $("voiceDesignCharacter");
+    try {
+      // Same route the chat app uses for its character list.
+      const response = await fetch("/v1/characters");
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      state.characters = data.characters || [];
+    } catch (error) {
+      state.characters = [];
+      select.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = `角色列表不可用：${error.message}`;
+      select.appendChild(option);
+      renderFreezeState();
+      return;
+    }
+    const previous = select.value;
+    select.innerHTML = "";
+    for (const character of state.characters) {
+      const option = document.createElement("option");
+      option.value = character.id;
+      option.textContent = character.name || character.id;
+      select.appendChild(option);
+    }
+    if (state.characters.some((item) => item.id === previous)) select.value = previous;
+    renderFreezeState();
+  }
+
+  async function freezeVoiceDesign() {
+    const button = $("freezeVoiceDesign");
+    const characterId = $("voiceDesignCharacter").value;
+    if (!state.voiceDesignArtifact || !voiceDesignSnapshotMatches() || !characterId) return;
+    button.disabled = true;
+    $("voiceDesignFreezeStatus").textContent = "固化中...";
+    try {
+      const response = await fetch("/v1/voice-design/freeze", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          character_id: characterId,
+          artifact_id: state.voiceDesignArtifact,
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      const activated = Boolean(data.activated);
+      state.voiceDesignFreezeResult = true;
+      $("voiceDesignFreezeStatus").textContent = [
+        `已固化到 ${data.character_id || characterId}。`,
+        `voice_id: ${data.voice_id || ""}`,
+        `ref_audio: ${data.ref_audio || ""}`,
+        activated
+          ? "已生效：GSV sidecar 已加载该声线，可以立即使用。"
+          : `暂未生效，重启 GSV sidecar 后生效。原因：${data.reason || "GSV sidecar 未运行或未接受该声线"}`,
+      ].join("\n");
+    } catch (error) {
+      $("voiceDesignFreezeStatus").textContent = "固化失败：" + error.message;
+    } finally {
+      renderFreezeState();
+    }
+  }
+
   $("refreshProviders").addEventListener("click", loadProviders);
   $("ttsLabProvider").addEventListener("change", renderVoiceSelect);
   $("generateTtsLab").addEventListener("click", generateSingle);
@@ -323,6 +457,11 @@
   $("refreshVoiceDesign").addEventListener("click", loadVoiceDesignStatus);
   $("polishVoiceDesign").addEventListener("click", polishVoiceDesign);
   $("generateVoiceDesign").addEventListener("click", generateVoiceDesign);
+  $("freezeVoiceDesign").addEventListener("click", freezeVoiceDesign);
+  $("voiceDesignInstruct").addEventListener("input", renderFreezeState);
+  $("voiceDesignText").addEventListener("input", renderFreezeState);
+  $("voiceDesignLanguage").addEventListener("change", renderFreezeState);
+  $("voiceDesignCharacter").addEventListener("change", renderFreezeState);
   window.addEventListener("beforeunload", () => {
     document.querySelectorAll("audio[data-object-url]").forEach((audio) => {
       if (audio.dataset.objectUrl) URL.revokeObjectURL(audio.dataset.objectUrl);
@@ -331,4 +470,5 @@
   });
   loadProviders();
   loadVoiceDesignStatus();
+  loadCharacters();
 })();

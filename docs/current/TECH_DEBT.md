@@ -45,6 +45,40 @@ setup scripts -> respect committed lock
 
 `web/dictation.js` 当前使用 `AudioContext.createScriptProcessor()`。该 API 已是历史接口；V1 尚能工作，不应无测试地直接替换。后续应评估 `AudioWorklet`，并保持现有 16 kHz WAV / draft-only dictation contract。
 
+### Duplicated sidecar infrastructure
+
+`float_audio_to_wav()` exists in three copies — `gsv_tts_experiment.py:84`,
+`qwen3_tts_experiment.py:62`, `media_runtime.py:110`. The new VoiceDesign sidecar
+imports the Qwen3 one rather than adding a fourth, but the other two remain.
+
+The two TTS sidecars also now duplicate `_resolve_device` / `_resolve_dtype` /
+`_cuda_memory` / `_reset_cuda_peak` / `_sync_cuda` (`qwen3_voice_design_experiment.py`
+vs `gsv_tts_experiment.py`). They run in **different virtualenvs**, but both import the
+same `character_memory` source tree, so a shared `tts_sidecar_support.py` would work.
+
+They have already drifted: VoiceDesign's `load()` clears the CUDA cache, resets peak
+stats and syncs before loading; GSV's `load()` does none of that (only `unload()` and
+the `configure()` reset path call `empty_cache`). Neither difference is a bug today —
+but that is exactly how two copies become two behaviours.
+
+### `test_dev_stack.py` asserts on source strings
+
+`tests/test_dev_stack.py` reads `dev_stack.py` as text and asserts substrings like
+`'"http://127.0.0.1:9002/tts"' in script`. These pass when the behaviour is broken and
+fail on cosmetic reformatting. `tests/test_dev_stack_health.py` was added as the
+behavioural counterpart for the probe logic; the launch/spawn assertions still need it.
+
+### `.pytest-tmp/` is not gitignored
+
+Throwaway harnesses under `.pytest-tmp/` (seed audition, VoiceDesign spikes) show up as
+untracked noise. Either ignore the directory or move one-off scripts somewhere explicit.
+
+### GSV unload swallows every exception
+
+`settings_server.py:135-140` wraps `POST :9014/v1/unload` in a bare `except Exception:
+pass`, and nothing covers it. A failed unload therefore looks identical to a successful
+one, and the user is told the card was released when it was not.
+
 ### Large edge modules
 
 以下文件已经偏大，但“文件大”本身不是拆分理由：

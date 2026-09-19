@@ -1,8 +1,8 @@
 # Qwen3-TTS isolated runtime
 
-Qwen3-TTS is a formal Character Memory TTS provider, while its Torch/CUDA runtime stays isolated in a dedicated sidecar.
+Qwen3-TTS is **not** a formal realtime Character Memory TTS provider. Its Torch/CUDA runtime stays isolated in a dedicated sidecar for experiments and future voice-design tooling.
 
-Current product position: keep the existing 0.6B CustomVoice / optional Base clone path available for audition and experiments. Qwen3-TTS VoiceDesign is **deferred** for now and is not part of the current TTS Lab or formal chat acceptance scope.
+Current product position: keep the existing 0.6B CustomVoice / optional Base clone code only as experimental infrastructure. Qwen3-TTS is excluded from Settings, formal `tts_provider`, Media Runtime chat routing, the normal `character-stack`, and the TTS Provider Lab inventory. VoiceDesign remains deferred.
 
 ## Scope
 
@@ -16,7 +16,7 @@ Current product position: keep the existing 0.6B CustomVoice / optional Base clo
 - optional Base-model voice-clone mode
 - current CustomVoice request contract already supports `instruct`, but the TTS Lab UI does not expose a voice-style prompt field yet
 
-It is wired into config.yaml, Media Runtime, browser voice calls, Settings Center and the normal Character Memory stack.
+It is deliberately **not** wired into formal chat configuration or the normal Character Memory stack.
 
 ## Install
 
@@ -114,7 +114,7 @@ Therefore the current boundary is:
 
 If this is revisited later, AI prompt polishing should reuse Character Memory's standard LLM configuration (`OPENCODE_GO_API_KEY`, `base_url`, `chat_model`) rather than introduce a second API key or LLM configuration.
 
-This deferral does **not** remove the existing Qwen3 provider. The current 0.6B CustomVoice and optional Base clone modes remain available exactly as implemented.
+This deferral keeps the existing 0.6B CustomVoice and optional Base clone **experimental runtime code/scripts**, but they are not registered as realtime providers in Settings, Media Runtime, the normal stack, or the Provider Lab inventory.
 
 ## Acceptance questions
 
@@ -127,8 +127,8 @@ For production acceptance, answer these questions with real data:
 5. Is the audible improvement over the lightweight TTS route large enough to justify several GB of GPU residency?
 
 
-## Formal integration
+## Current integration boundary
 
-Set `tts_provider: "qwen3"` and choose a Qwen3 voice such as `Vivian` in Settings Center. When the full stack starts, Character Memory launches the isolated `.venv-qwen3-tts` runtime on `:9013` automatically, and browser/chat TTS continues to call Media Runtime `:8001/v1/tts`.
+The sidecar code and setup/start scripts remain available for explicit experiments, but normal Character Memory startup does not launch Qwen3-TTS and formal chat cannot select it.
 
-The sidecar remains dependency-isolated: Torch/CUDA packages stay out of the core project environment.
+If VoiceDesign work is resumed later, build a dedicated tool/workflow around the isolated runtime instead of reintroducing it as a realtime chat provider.

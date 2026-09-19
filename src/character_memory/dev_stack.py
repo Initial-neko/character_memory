@@ -67,10 +67,16 @@ def _configured_tts_provider(config_path: str) -> str:
     try:
         path = Path(config_path)
         data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
-        value = str((data or {}).get("tts_provider", "kokoro") or "kokoro").strip().lower()
-        return value if value in {"kokoro", "sherpa", "qwen3", "edge", "gsv"} else "kokoro"
-    except (OSError, yaml.YAMLError):
-        return "kokoro"
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"Unable to read TTS provider from {config_path}: {exc}") from exc
+    value = str((data or {}).get("tts_provider", "kokoro") or "kokoro").strip().lower()
+    if value not in {"kokoro", "sherpa", "edge", "gsv"}:
+        raise ValueError(
+            f"Unsupported formal TTS provider: {value}. "
+            "Allowed realtime providers: kokoro, sherpa, edge, gsv. "
+            "Qwen3-TTS is reserved for future voice-design tooling."
+        )
+    return value
 
 
 def _configured_tts_device(config_path: str) -> str:
@@ -108,7 +114,6 @@ def _media_env(base: dict[str, str]) -> dict[str, str]:
     env.setdefault("CHARACTER_MEDIA_HOST", "127.0.0.1")
     env.setdefault("CHARACTER_MEDIA_PORT", "8001")
     env.setdefault("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002")
-    env.setdefault("CHARACTER_QWEN3_TTS_BASE", "http://127.0.0.1:9013")
     return env
 
 
@@ -118,7 +123,6 @@ def _tts_lab_env(base: dict[str, str], config_path: str) -> dict[str, str]:
     env.setdefault("CHARACTER_TTS_LAB_PORT", "9002")
     env.setdefault("CHARACTER_TTS_LAB_MEDIA_BASE", "http://127.0.0.1:8001")
     env.setdefault("CHARACTER_TTS_COSYVOICE_BASE", "http://127.0.0.1:9012")
-    env.setdefault("CHARACTER_TTS_QWEN3_BASE", "http://127.0.0.1:9013")
     env.setdefault("CHARACTER_TTS_GSV_BASE", "http://127.0.0.1:9014")
     env.setdefault("CHARACTER_TTS_KOKORO_DEVICE", _configured_tts_device(config_path))
     return env
@@ -169,7 +173,10 @@ def main() -> None:
         )
 
     python = sys.executable
-    tts_provider = _configured_tts_provider(args.config)
+    try:
+        tts_provider = _configured_tts_provider(args.config)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     tts_device = _configured_tts_device(args.config)
     media_env = _media_env(base_env)
     media_env["CHARACTER_MEDIA_TTS_DEVICE"] = tts_device
@@ -209,36 +216,6 @@ def main() -> None:
             _tts_lab_env(base_env, args.config),
         ),
     ]
-
-    qwen_venv = Path(os.getenv("QWEN3_TTS_VENV", ROOT / ".venv-qwen3-tts"))
-    qwen_python = qwen_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if qwen_python.is_file():
-        qwen_env = dict(base_env)
-        qwen_env["PYTHONPATH"] = str(ROOT / "src")
-        qwen_env.setdefault("HF_HOME", str((ROOT / "models" / "huggingface").resolve()))
-        qwen_device = "cuda:0" if tts_device == "cuda" else "cpu"
-        specs.insert(
-            1,
-            (
-                "Qwen3-TTS Runtime",
-                "http://127.0.0.1:9013/health",
-                [
-                    str(qwen_python),
-                    "-m",
-                    "character_memory.qwen3_tts_experiment",
-                    "--device",
-                    qwen_device,
-                    "--dtype",
-                    "auto",
-                ],
-                qwen_env,
-            ),
-        )
-    elif tts_provider == "qwen3":
-        raise SystemExit(
-            f"Qwen3-TTS is selected but its isolated environment is missing: {qwen_python}. "
-            "Run: bash scripts/setup-qwen3-tts.sh"
-        )
 
     gsv_root = Path(os.getenv("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
     gsv_venv = Path(os.getenv("GSV_TTS_VENV", gsv_root / ".venv"))

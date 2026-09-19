@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field
 from character_memory.settings_store import SettingsStore
 
 
+FORMAL_TTS_PROVIDER_IDS = ("kokoro", "sherpa", "edge", "gsv")
+
+
 class SettingsPatch(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
@@ -44,15 +47,16 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
     client = runtime_http_client or httpx.Client(timeout=3.0)
 
     def tts_inventory() -> dict[str, Any]:
-        try:
-            response = client.get(runtime_urls["tts_lab"] + "/v1/providers", timeout=3.0)
-            response.raise_for_status()
-            payload = response.json() or {}
-            providers: list[dict[str, Any]] = []
-            for raw in payload.get("providers") or []:
-                provider_id = str(raw.get("id") or "").strip().lower()
-                if provider_id not in {"kokoro", "sherpa", "qwen3", "edge", "gsv"}:
-                    continue
+        providers: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for provider_id in FORMAL_TTS_PROVIDER_IDS:
+            try:
+                response = client.get(
+                    runtime_urls["tts_lab"] + f"/v1/providers/{provider_id}",
+                    timeout=1.0,
+                )
+                response.raise_for_status()
+                raw = dict((response.json() or {}).get("provider") or {})
                 voices = [str(value) for value in (raw.get("voices") or []) if str(value).strip()]
                 default_voice = str(raw.get("default_voice") or (voices[0] if voices else "")).strip()
                 providers.append(
@@ -70,9 +74,25 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                         "note": raw.get("note"),
                     }
                 )
-            return {"ok": True, "providers": providers, "error": None}
-        except Exception as exc:
-            return {"ok": False, "providers": [], "error": str(exc)}
+            except Exception as exc:
+                message = f"{provider_id}: {exc}"
+                errors.append(message)
+                providers.append(
+                    {
+                        "id": provider_id,
+                        "label": provider_id,
+                        "ready": False,
+                        "loaded": False,
+                        "voices": [],
+                        "default_voice": "",
+                        "supports_speed": False,
+                        "model": None,
+                        "device": None,
+                        "reason": f"health check failed: {exc}",
+                        "note": None,
+                    }
+                )
+        return {"ok": not errors, "providers": providers, "error": "; ".join(errors) if errors else None}
 
     def settings_snapshot() -> dict[str, Any]:
         snapshot = settings_store.snapshot()
@@ -89,7 +109,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
             provider_options = [
                 {
                     "value": item["id"],
-                    "label": item["label"],
+                    "label": item["label"] if item["ready"] else f"{item['label']} · unavailable",
                     "disabled": not item["ready"],
                     "ready": item["ready"],
                 }

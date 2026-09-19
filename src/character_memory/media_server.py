@@ -9,7 +9,7 @@ from character_memory.config import load_settings
 from character_memory.media_runtime import MediaRuntime, build_media_runtime_from_env
 
 
-KNOWN_TTS_PROVIDERS = {"sherpa", "qwen3", "kokoro", "edge", "gsv"}
+KNOWN_TTS_PROVIDERS = {"sherpa", "kokoro", "edge", "gsv"}
 
 
 class TtsRequest(BaseModel):
@@ -36,7 +36,6 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
     config_path = os.getenv("CHARACTER_CONFIG_PATH", os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml"))
     settings = load_settings(config_path)
     tts_lab_base = os.getenv("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002").rstrip("/")
-    qwen3_base = os.getenv("CHARACTER_QWEN3_TTS_BASE", "http://127.0.0.1:9013").rstrip("/")
     owns_provider_client = provider_http_client is None
     provider_client = provider_http_client or httpx.Client(timeout=180.0)
 
@@ -83,28 +82,6 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
             "device": settings.tts_device,
             "restart_required_for_config_changes": True,
         }
-        if selected == "qwen3":
-            try:
-                response = provider_client.get(f"{qwen3_base}/health", timeout=0.4)
-                response.raise_for_status()
-                provider = dict(response.json() or {})
-                return {
-                    **base,
-                    **provider,
-                    "provider": "qwen3",
-                    "voice": settings.tts_voice,
-                    "speed": settings.tts_speed,
-                    "device": provider.get("device") or settings.tts_device,
-                    "restart_required_for_config_changes": True,
-                }
-            except Exception as exc:
-                return {
-                    **base,
-                    "ready": False,
-                    "loaded": False,
-                    "reason": f"Qwen3-TTS Runtime unavailable at {qwen3_base}: {exc}",
-                }
-
         if selected not in KNOWN_TTS_PROVIDERS:
             return {**base, "ready": False, "loaded": False, "reason": f"Unknown TTS provider: {selected}"}
 
@@ -179,39 +156,6 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
 
         if configured_routing and selected not in KNOWN_TTS_PROVIDERS:
             raise HTTPException(status_code=400, detail=f"Unknown TTS provider: {selected}")
-
-        if configured_routing and selected == "qwen3":
-            voice = explicit_voice or str(settings.tts_voice or "Vivian")
-            try:
-                response = provider_client.post(
-                    f"{qwen3_base}/v1/tts",
-                    json={
-                        "text": req.text,
-                        "voice": voice,
-                        "language": "Chinese",
-                        "speed": float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed),
-                    },
-                )
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Qwen3-TTS Runtime unavailable at {qwen3_base}: {exc}",
-                ) from exc
-            if response.is_error:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-            return Response(
-                content=response.content,
-                media_type="audio/wav",
-                headers={
-                    "X-Media-Provider": "qwen3",
-                    "X-Media-Voice": response.headers.get("x-tts-voice", voice),
-                    "X-Media-Device": response.headers.get("x-tts-device", settings.tts_device),
-                    "X-Media-Inference-Ms": response.headers.get("x-tts-inference-ms", "0"),
-                    "X-Media-Audio-Ms": response.headers.get("x-tts-audio-ms", "0"),
-                    "X-Media-Sample-Rate": response.headers.get("x-tts-sample-rate", "24000"),
-                    "X-Media-RTF": response.headers.get("x-tts-rtf", ""),
-                },
-            )
 
         if configured_routing and selected in {"kokoro", "edge", "gsv"}:
             # :9002 is both the audition UI and the provider service in V1.

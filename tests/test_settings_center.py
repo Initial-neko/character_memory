@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from character_memory.config import load_settings
@@ -42,7 +44,7 @@ class _RuntimeResponse:
 
 class _SettingsRuntimeClient:
     def __init__(self, providers=None):
-        self.providers = providers or [
+        items = providers or [
             {
                 "id": "kokoro",
                 "label": "Kokoro 82M v1.1 zh",
@@ -56,6 +58,30 @@ class _SettingsRuntimeClient:
                 "reason": None,
             },
             {
+                "id": "sherpa",
+                "label": "Sherpa VITS",
+                "ready": True,
+                "loaded": False,
+                "voices": ["0", "2", "5"],
+                "default_voice": "0",
+                "supports_speed": True,
+                "device": "cpu",
+                "model": "sherpa",
+                "reason": None,
+            },
+            {
+                "id": "edge",
+                "label": "Microsoft Edge TTS (online)",
+                "ready": False,
+                "loaded": False,
+                "voices": ["zh-CN-XiaoxiaoNeural"],
+                "default_voice": "zh-CN-XiaoxiaoNeural",
+                "supports_speed": True,
+                "device": "cloud",
+                "model": "edge",
+                "reason": "edge_tts unavailable",
+            },
+            {
                 "id": "gsv",
                 "label": "GSV-TTS-Lite",
                 "ready": True,
@@ -67,23 +93,17 @@ class _SettingsRuntimeClient:
                 "model": "gsv",
                 "reason": None,
             },
-            {
-                "id": "qwen3",
-                "label": "Qwen3-TTS 0.6B",
-                "ready": False,
-                "loaded": False,
-                "voices": ["Vivian"],
-                "default_voice": "Vivian",
-                "supports_speed": False,
-                "device": "cuda:0",
-                "model": "qwen3",
-                "reason": "sidecar unavailable",
-            },
         ]
+        self.providers = {item["id"]: item for item in items}
 
     def get(self, url, **kwargs):
-        if url.endswith("/v1/providers"):
-            return _RuntimeResponse({"providers": self.providers})
+        marker = "/v1/providers/"
+        if marker in url:
+            provider_id = url.rsplit(marker, 1)[1]
+            item = self.providers.get(provider_id)
+            if item is None:
+                return _RuntimeResponse({"detail": "missing"}, status_code=404)
+            return _RuntimeResponse({"provider": item})
         return _RuntimeResponse({"ok": True})
 
 
@@ -137,20 +157,30 @@ def test_settings_save_preserves_comments_unknown_keys_and_creates_backup(tmp_pa
     )
     store = SettingsStore(str(config), str(tmp_path / ".env"))
 
-    result = store.save_values({"tts_provider": "qwen3", "tts_voice": "Vivian", "tts_device": "cuda"})
+    result = store.save_values({"tts_provider": "gsv", "tts_voice": "murasame", "tts_device": "cuda"})
 
     assert result["changed"] is True
     assert Path(result["backup"]).is_file()
     text = config.read_text(encoding="utf-8")
     assert "# user comment" in text
     assert 'custom_extension_key: "keep-me"' in text
-    assert 'tts_provider: "qwen3"' in text
-    assert 'tts_voice: "Vivian"' in text
+    assert 'tts_provider: "gsv"' in text
+    assert 'tts_voice: "murasame"' in text
     assert 'tts_device: "cuda"' in text
     settings = load_settings(str(config))
-    assert settings.tts_provider == "qwen3"
-    assert settings.tts_voice == "Vivian"
+    assert settings.tts_provider == "gsv"
+    assert settings.tts_voice == "murasame"
     assert settings.tts_device == "cuda"
+
+
+def test_qwen3_is_not_a_formal_tts_provider(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "kokoro"\ntts_voice: "zf_001"\n', encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    with pytest.raises(ValueError):
+        store.save_values({"tts_provider": "qwen3"})
 
 
 def test_gsv_is_an_accepted_tts_provider(tmp_path: Path, monkeypatch):
@@ -242,9 +272,41 @@ def test_settings_tts_options_are_health_gated_and_provider_aware(tmp_path: Path
 
         options = {item["value"]: item for item in provider_field["options"]}
         assert options["kokoro"]["disabled"] is False
+        assert options["sherpa"]["disabled"] is False
         assert options["gsv"]["disabled"] is False
-        assert options["qwen3"]["disabled"] is True
+        assert options["edge"]["disabled"] is True
+        assert "qwen3" not in options
         assert [item["value"] for item in voice_field["options"]] == ["zf_001", "zf_002", "zf_003", "zf_004"]
+
+
+def test_one_provider_health_failure_does_not_hide_other_healthy_providers(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "kokoro"\ntts_voice: "zf_001"\n', encoding="utf-8")
+
+    class PartialFailureClient(_SettingsRuntimeClient):
+        def get(self, url, **kwargs):
+            if url.endswith("/v1/providers/edge"):
+                raise RuntimeError("edge probe timeout")
+            return super().get(url, **kwargs)
+
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=PartialFailureClient(),
+    )
+
+    with TestClient(app) as client:
+        snapshot = client.get("/v1/settings").json()
+
+    voice_section = next(section for section in snapshot["schema"] if section["id"] == "voice")
+    provider_field = next(field for field in voice_section["fields"] if field["name"] == "tts_provider")
+    options = {item["value"]: item for item in provider_field["options"]}
+    assert options["kokoro"]["disabled"] is False
+    assert options["sherpa"]["disabled"] is False
+    assert options["gsv"]["disabled"] is False
+    assert options["edge"]["disabled"] is True
+    assert "edge probe timeout" in snapshot["tts"]["error"]
 
 
 def test_settings_rejects_unhealthy_provider_and_autoselects_healthy_default_voice(tmp_path: Path, monkeypatch):
@@ -259,7 +321,7 @@ def test_settings_rejects_unhealthy_provider_and_autoselects_healthy_default_voi
     )
 
     with TestClient(app) as client:
-        rejected = client.patch("/v1/settings", json={"values": {"tts_provider": "qwen3"}})
+        rejected = client.patch("/v1/settings", json={"values": {"tts_provider": "edge"}})
         assert rejected.status_code == 400
         assert "health check did not pass" in rejected.text
 
@@ -307,16 +369,16 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert '"character_memory.settings_server"' in stack
     assert 'settings.tts_provider' in media
     assert 'selected in {"kokoro", "edge", "gsv"}' in media
-    assert '"provider": "qwen3"' in media
+    assert '"qwen3"' not in media
     assert '"edge"' in media
     assert '{"value": "edge", "label": "Microsoft Edge TTS (online)"}' in settings_store
     assert '{"value": "gsv", "label": "GSV-TTS-Lite (local)"}' in settings_store
-    assert '/v1/providers' in settings_server
+    assert '"Qwen3-TTS 0.6B"' not in settings_store
+    assert 'FORMAL_TTS_PROVIDER_IDS = ("kokoro", "sherpa", "edge", "gsv")' in settings_server
+    assert '/v1/providers/{provider_id}' in settings_server
     assert "health check did not pass" in settings_server
     assert "tts-health-status" in settings_js
     assert "option.disabled" in settings_js
     assert "zh-CN-XiaoxiaoNeural" in settings_store
-    assert '"http://127.0.0.1:9013"' in media
-    assert 'f"{qwen3_base}/v1/tts"' in media
     assert 'http://127.0.0.1:8003/settings' in chat
     assert 'http://127.0.0.1:8003/settings' in lab

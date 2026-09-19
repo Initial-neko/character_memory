@@ -458,11 +458,11 @@ def test_unknown_tts_provider_is_rejected_not_silently_downgraded(monkeypatch):
     assert runtime.tts.calls == []
 
 
-def test_configured_qwen3_health_uses_isolated_sidecar(monkeypatch):
+def test_qwen3_is_rejected_as_formal_chat_provider(monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    runtime = MediaRuntime(FakeAsr(), FakeTts())
     monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
     monkeypatch.setattr(
         media_server,
@@ -474,63 +474,16 @@ def test_configured_qwen3_health_uses_isolated_sidecar(monkeypatch):
             tts_device="cuda",
         ),
     )
-    provider_client = _QwenProviderClient()
-
-    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+    with TestClient(media_server.create_media_app(provider_http_client=_ProviderClient())) as client:
+        response = client.post("/v1/tts", json={"text": "你好"})
         health = client.get("/health")
 
+    assert response.status_code == 400
+    assert "Unknown TTS provider: qwen3" in response.text
     assert health.status_code == 200
-    payload = health.json()
-    assert payload["tts_runtime"]["ready"] is False
-    assert payload["tts"]["provider"] == "qwen3"
-    assert payload["tts"]["ready"] is True
-    assert payload["tts"]["model"] == "fake-qwen3"
-    assert payload["tts"]["device"] == "cuda:0"
-    assert provider_client.get_calls == [
-        ("http://127.0.0.1:9013/health", {"timeout": 0.4})
-    ]
+    assert health.json()["tts"]["ready"] is False
+    assert "Unknown TTS provider: qwen3" in health.json()["tts"]["reason"]
 
-
-def test_configured_qwen3_tts_routes_through_media_runtime(monkeypatch):
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
-    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
-    monkeypatch.setattr(
-        media_server,
-        "load_settings",
-        lambda _path: SimpleNamespace(
-            tts_provider="qwen3",
-            tts_voice="Vivian",
-            tts_speed=1.0,
-            tts_device="cuda",
-        ),
-    )
-    provider_client = _QwenProviderClient()
-
-    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
-        response = client.post("/v1/tts", json={"text": "你好"})
-
-    assert response.status_code == 200
-    assert response.content == b"RIFFfake"
-    assert response.headers["x-media-provider"] == "qwen3"
-    assert response.headers["x-media-voice"] == "Vivian"
-    assert response.headers["x-media-device"] == "cuda:0"
-    assert response.headers["x-media-rtf"] == "0.1234"
-    assert provider_client.post_calls == [
-        (
-            "http://127.0.0.1:9013/v1/tts",
-            {
-                "json": {
-                    "text": "你好",
-                    "voice": "Vivian",
-                    "language": "Chinese",
-                    "speed": 1.0,
-                }
-            },
-        )
-    ]
 
 def test_asr_endpoint_rejects_wrong_media_type():
     pytest.importorskip("fastapi")

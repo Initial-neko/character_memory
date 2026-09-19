@@ -28,9 +28,9 @@ class Settings(BaseModel):
     embedding_api_key: str = ""
     embedding_base_url: str = ""
 
-    # Formal chat TTS selection. Kokoro is now the default after local audition;
-    # the Provider Lab remains available for A/B testing other providers.
-    tts_provider: str = Field(default="kokoro", pattern=r"^(kokoro|sherpa|qwen3|edge|gsv)$")
+    # Formal real-time chat TTS selection. Qwen3-TTS is intentionally excluded from
+    # this enum; it remains an experimental/future voice-design tool, not a realtime provider.
+    tts_provider: str = Field(default="kokoro", pattern=r"^(kokoro|sherpa|edge|gsv)$")
     tts_voice: str = "zf_001"
     tts_speed: float = Field(default=1.0, ge=0.5, le=2.0)
     tts_device: str = Field(default="cpu", pattern=r"^(cpu|cuda)$")

@@ -59,7 +59,7 @@ docs/
 :9002 TTS Provider Runtime + Lab
 ```
 
-可选 sidecar：CosyVoice `:9012`、Qwen3-TTS `:9013`、GSV-TTS-Lite `:9014`。Qwen3/GSV 仅在对应 Provider 被选择或单独实验时需要；Qwen3 VoiceDesign 当前不属于运行栈。
+可选/实验 sidecar：CosyVoice `:9012`、GSV-TTS-Lite `:9014`；Qwen3-TTS `:9013` 仅保留手动实验/未来 VoiceDesign 用途，不由正常 `character-stack` 启动，也不是正式聊天 Provider。
 
 ## Research
 

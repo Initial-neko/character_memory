@@ -26,8 +26,7 @@ Media Runtime :8001/v1/tts
   ├─ sherpa -> local VITS
   ├─ kokoro -> :9002/v1/tts -> Kokoro
   ├─ edge -> :9002/v1/tts -> Microsoft Edge online TTS
-  ├─ gsv -> :9002/v1/tts -> :9014 GSV-TTS-Lite
-  └─ qwen3 -> :9013/v1/tts -> Qwen3-TTS
+  └─ gsv -> :9002/v1/tts -> :9014 GSV-TTS-Lite
 Browser playback
 ```
 
@@ -40,7 +39,7 @@ Dev Console               :8002
 Settings Center           :8003
 TTS Provider Runtime+Lab  :9002
 optional CosyVoice        :9012
-optional Qwen3-TTS         :9013
+experimental Qwen3-TTS     :9013 (manual only; not formal chat)
 optional GSV-TTS-Lite      :9014
 ```
 
@@ -188,7 +187,7 @@ POST :8001/v1/tts
 正式选择由 `config.yaml` / Settings Center 控制：
 
 ```yaml
-tts_provider: "kokoro"     # kokoro | qwen3 | edge | gsv | sherpa
+tts_provider: "kokoro"     # kokoro | edge | gsv | sherpa
 tts_voice: "zf_001"        # provider-specific; Settings only offers voices reported by the healthy provider
 tts_speed: 1.0
 tts_device: "cpu"          # local provider device where supported; Edge ignores it

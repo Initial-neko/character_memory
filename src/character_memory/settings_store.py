@@ -56,7 +56,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
         "id": "voice",
         "title": "Voice",
-        "description": "正式聊天 TTS。Provider/Voice 由当前健康检查动态约束；未通过健康检查的 Provider 不可选择。保存后重启 stack 生效。",
+        "description": "正式实时聊天 TTS。Provider/Voice 由当前健康检查动态约束；未通过健康检查的 Provider 不可选择。Qwen3-TTS 不属于正式 Provider。保存后重启 stack 生效。",
         "fields": [
             {
                 "name": "tts_provider",
@@ -64,7 +64,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "type": "select",
                 "options": [
                     {"value": "kokoro", "label": "Kokoro 82M v1.1 zh"},
-                    {"value": "qwen3", "label": "Qwen3-TTS 0.6B"},
                     {"value": "edge", "label": "Microsoft Edge TTS (online)"},
                     {"value": "gsv", "label": "GSV-TTS-Lite (local)"},
                     {"value": "sherpa", "label": "Sherpa VITS"},
@@ -79,15 +78,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                     {"value": "zf_002", "label": "Kokoro zf_002"},
                     {"value": "zf_003", "label": "Kokoro zf_003"},
                     {"value": "zf_004", "label": "Kokoro zf_004"},
-                    {"value": "Vivian", "label": "Qwen3 Vivian"},
-                    {"value": "Serena", "label": "Qwen3 Serena"},
-                    {"value": "Uncle_Fu", "label": "Qwen3 Uncle_Fu"},
-                    {"value": "Dylan", "label": "Qwen3 Dylan"},
-                    {"value": "Eric", "label": "Qwen3 Eric"},
-                    {"value": "Ryan", "label": "Qwen3 Ryan"},
-                    {"value": "Aiden", "label": "Qwen3 Aiden"},
-                    {"value": "Ono_Anna", "label": "Qwen3 Ono_Anna"},
-                    {"value": "Sohee", "label": "Qwen3 Sohee"},
                     {"value": "murasame", "label": "GSV Murasame"},
                     {"value": "zh-CN-XiaoxiaoNeural", "label": "Edge 晓晓 Xiaoxiao"},
                     {"value": "zh-CN-XiaoyiNeural", "label": "Edge 晓伊 Xiaoyi"},

@@ -97,7 +97,7 @@ TTS Provider Lab remains the audition/benchmark UI. Changing a dropdown in the l
 
 ### Health-gated TTS selection
 
-Settings Center does not trust a static provider list for TTS selection. On every settings refresh it asks `:9002/v1/providers` for the current provider inventory and health state.
+Settings Center does not trust a static provider list for TTS selection. On every settings refresh it probes only the formal realtime providers individually through `:9002/v1/providers/{provider_id}`: Kokoro, Sherpa, Edge and GSV. One failed/slow provider no longer invalidates the whole inventory.
 
 The Voice section therefore behaves as follows:
 
@@ -112,16 +112,11 @@ Formal voice selection is now consistently persisted in `tts_voice`. For GSV, th
 
 `tts_device` is used by local providers where supported. Edge reports `cloud`, so the Device control is disabled while Edge is selected.
 
-### Health-checkable sidecars without eager GPU model load
+### Health-checkable local providers without eager GPU model load
 
-To make an unselected local provider discoverable without occupying model VRAM, `character-stack` may start prepared Qwen3/GSV sidecar processes in a health-only/lazy state:
+GSV sidecar starts when its isolated environment and required asset environment variables exist. It preloads only when `tts_provider: gsv`; otherwise it can report readiness without loading the model. If selected GSV assets are missing, stack startup fails explicitly.
 
-- Qwen3 sidecar starts when its isolated environment exists, but does not load the model merely for health;
-- GSV sidecar starts when its isolated environment and required asset environment variables exist;
-- GSV preloads only when `tts_provider: gsv`; otherwise it reports readiness without loading the model;
-- if a selected provider's required environment/assets are missing, stack startup still fails explicitly.
-
-This allows Settings to offer only providers that are actually runnable while avoiding eager residency of every local TTS model.
+Qwen3-TTS is not part of the formal provider inventory and is not started by normal `character-stack`; it remains manual experimental/future VoiceDesign tooling.
 
 ## Startup
 

@@ -9,7 +9,7 @@ Provider Runtime
   -> 正式 Kokoro synthesis API
 
 Lab UI
-  -> Sherpa / Kokoro / Edge / Qwen3 / GSV / CosyVoice audition
+  -> Sherpa / Kokoro / Edge / GSV / CosyVoice audition
 ```
 
 如果未来两者生命周期、资源或部署需求明显分离，再在大版本拆开；当前不为了架构美观制造额外进程。
@@ -27,22 +27,21 @@ Qwen3-TTS sidecar         http://127.0.0.1:9013
 GSV-TTS-Lite sidecar      http://127.0.0.1:9014
 ```
 
-`:9002` 当前暴露六类 provider：
+`:9002` 当前暴露五类 provider：
 
 1. **Sherpa VITS** — 通过 Media Runtime `:8001` 代理，用于试听比较；已保留本地 speaker `0 / 2 / 5`。
 2. **Kokoro 82M v1.1 zh** — 运行在主 Python 3.12 环境；voice 为 `zf_001 / zf_002 / zf_003 / zf_004`。
 3. **Edge TTS** — Microsoft Edge 在线语音服务；主 Python 3.12 环境直接调用，无需 API Key，但 synthesis 必须联网。
-4. **Qwen3-TTS 0.6B** — 独立 CUDA sidecar，默认 `:9013`；当前保留 CustomVoice / 可选 Base clone，VoiceDesign 暂缓。
-5. **GSV-TTS-Lite** — 独立 Python 3.12/CUDA sidecar，默认 `:9014`；既可在 Lab 试听，也可通过 `tts_provider: gsv` 进入正式聊天路由。
-6. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
+4. **GSV-TTS-Lite** — 独立 Python 3.12/CUDA sidecar，默认 `:9014`；既可在 Lab 试听，也可通过 `tts_provider: gsv` 进入正式聊天路由。
+5. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
 
 ## Provider health as Settings input
 
-`:9002/v1/providers` is also the authoritative live inventory used by Settings Center for TTS selection.
+Settings Center probes only formal realtime providers through `:9002/v1/providers/{provider_id}`: Kokoro, Sherpa, Edge and GSV. It does not depend on the all-provider aggregate endpoint, so an unavailable experimental provider cannot hide healthy formal providers.
 
-A provider is selectable in Settings only when its status reports `ready=true`. The provider's health payload also supplies the Voice list, default voice, speed capability, device and failure reason. Settings revalidates this inventory again on save.
+A provider is selectable in Settings only when its own status reports `ready=true`. The health payload supplies the Voice list, default voice, speed capability, device and failure reason. Settings revalidates the selected provider again on save.
 
-For local sidecars, "ready" does not require the model to be loaded into VRAM. Qwen3 and GSV may run as lightweight health-checkable processes while unselected; GSV only preloads its model when it is the formal selected provider.
+For GSV, `ready` does not require the model to be loaded into VRAM. The sidecar may stay health-checkable while unselected and preload only when GSV is the formal selected provider.
 
 ## 2. Formal chat TTS vs Lab audition
 
@@ -209,25 +208,11 @@ CHARACTER_TTS_EDGE_PITCH=+0Hz
 CHARACTER_TTS_EDGE_PROXY=
 ```
 
-## 7. Qwen3-TTS current boundary
+## 7. Qwen3-TTS experiment boundary
 
-当前 `:9013` 使用已经集成的 Qwen3-TTS 0.6B 路径：
+Qwen3-TTS is not part of the Provider Lab inventory or formal realtime chat providers. Its isolated `:9013` code/scripts are retained only for explicit experiments and future VoiceDesign work. It is not started by the normal `character-stack`.
 
-- CustomVoice 固定 speaker；
-- 可选 0.6B Base voice clone；
-- sidecar request 已具备 `instruct` 字段，但当前 Lab UI 不暴露 Prompt/风格描述输入。
-
-暂不建设以下能力：
-
-- Qwen3-TTS VoiceDesign；
-- Prompt -> 新声线生成；
-- “AI 润色声线描述”按钮；
-- 自动把 Qwen3 生成音频固化成 GSV reference；
-- 新的 voice asset registry/workflow。
-
-原因是当前优先级是先稳定使用 GSV 正式聊天 TTS，同时控制本地 GPU/VRAM 占用。以后重新评估 VoiceDesign 时，AI 润色必须复用 Character Memory 标准 LLM 的 `OPENCODE_GO_API_KEY + base_url + chat_model`，不增加第二套 Key。
-
-详细 Qwen3 runtime 说明见 `docs/current/QWEN3_TTS_EXPERIMENT.md`。
+Detailed notes: `docs/current/QWEN3_TTS_EXPERIMENT.md`.
 
 ## 8. GSV-TTS-Lite sidecar
 

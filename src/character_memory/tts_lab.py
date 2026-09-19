@@ -50,7 +50,7 @@ class SherpaMediaProvider:
 
     def status(self) -> dict:
         try:
-            response = self.client.get(f"{self.base_url}/health", timeout=3.0)
+            response = self.client.get(f"{self.base_url}/health", timeout=0.5)
             response.raise_for_status()
             health = response.json()
             # Browser-facing `tts` reports the configured formal route. The Lab
@@ -376,7 +376,7 @@ class GsvSidecarProvider:
             "note": "Available in Lab and formal routing; start the :9014 sidecar with the validated GSV environment.",
         }
         try:
-            response = self.client.get(f"{self.base_url}/health", timeout=3.0)
+            response = self.client.get(f"{self.base_url}/health", timeout=0.5)
             response.raise_for_status()
             data = response.json()
             voices = data.get("voices") or list(self.DEFAULT_VOICES)
@@ -563,7 +563,7 @@ class CosyVoiceSidecarProvider:
             "reason": f"CosyVoice sidecar is not running at {self.base_url}",
         }
         try:
-            response = self.client.get(f"{self.base_url}/health", timeout=3.0)
+            response = self.client.get(f"{self.base_url}/health", timeout=0.5)
             response.raise_for_status()
             data = response.json()
             voices = data.get("voices") or ["中文女"]
@@ -610,7 +610,6 @@ class TtsLabRuntime:
         self.providers = providers or {
             "sherpa": SherpaMediaProvider(os.getenv("CHARACTER_TTS_LAB_MEDIA_BASE", "http://127.0.0.1:8001")),
             "kokoro": KokoroProvider(os.getenv("CHARACTER_TTS_KOKORO_DEVICE", "cpu")),
-            "qwen3": Qwen3SidecarProvider(os.getenv("CHARACTER_TTS_QWEN3_BASE", "http://127.0.0.1:9013")),
             "gsv": GsvSidecarProvider(os.getenv("CHARACTER_TTS_GSV_BASE", "http://127.0.0.1:9014")),
             "edge": EdgeTtsProvider(
                 volume=os.getenv("CHARACTER_TTS_EDGE_VOLUME", "+0%"),

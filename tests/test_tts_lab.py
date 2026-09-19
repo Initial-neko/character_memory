@@ -330,10 +330,9 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert "try_to_load_from_cache" in server
     assert "setup-tts-models.sh" in server
     assert '"http://127.0.0.1:9012"' in server
-    assert '"http://127.0.0.1:9013"' in server
     assert '"http://127.0.0.1:9014"' in server
     assert '"gsv": GsvSidecarProvider' in server
-    assert '"qwen3": Qwen3SidecarProvider' in server
+    assert '"qwen3": Qwen3SidecarProvider' not in server
     assert '"edge": EdgeTtsProvider' in server
     assert 'port = int(os.getenv("CHARACTER_TTS_LAB_PORT", "9002"))' in server
 
@@ -347,6 +346,15 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert "inference_sft" in sidecar
     assert "list_available_spks" in sidecar
     assert 'PORT = int(os.getenv("COSYVOICE_SIDECAR_PORT", "9012"))' in sidecar
+
+
+def test_qwen3_is_not_registered_in_default_tts_lab_inventory():
+    runtime = TtsLabRuntime()
+    try:
+        assert "qwen3" not in runtime.providers
+        assert {"sherpa", "kokoro", "edge", "gsv"}.issubset(runtime.providers)
+    finally:
+        runtime.close()
 
 
 def test_tts_lab_web_ui_exposes_provider_voice_and_ab_controls():

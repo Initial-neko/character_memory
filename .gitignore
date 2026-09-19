@@ -1,6 +1,8 @@
 __pycache__/
 .pytest_cache/
+.pytest-tmp/
 *.pyc
+*.egg-info/
 .venv/
 .venv-cosyvoice/
 .venv-qwen3-tts/
@@ -11,3 +13,13 @@ models/
 config.yaml
 config.yaml.bak.*
 .env
+
+# Frozen voice assets are local data. A VoiceDesign clip cannot be regenerated
+# from its prompt (the sidecar is unseeded), so the WAV is an asset, not build
+# output. voice.yaml is ignored alongside it on purpose: a committed profile
+# whose ref_audio is missing makes the GSV sidecar refuse to start, so the pair
+# has to be committed or ignored together.
+personas/*/voice/
+personas/*/voice.yaml
+# Characters created at runtime through the app are local data too.
+personas/character-*/

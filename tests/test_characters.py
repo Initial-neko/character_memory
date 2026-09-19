@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
@@ -38,7 +39,11 @@ def test_persona_files_are_discovered_from_personas_directory():
     profiles = discover_character_profiles(settings)
     ids = {profile["id"] for profile in profiles}
     assert {"rin", "momo", "haru", "rei"}.issubset(ids)
-    assert resolve_persona_path(settings, "momo").endswith("personas/momo/persona.yaml")
+    # Resolved paths are native (backslashes on Windows) because callers hand them
+    # straight to the filesystem; compare in posix form so the assertion is portable.
+    assert (
+        Path(resolve_persona_path(settings, "momo")).as_posix().endswith("personas/momo/persona.yaml")
+    )
 
 
 def test_chat_service_routes_character_to_its_persona_runtime(tmp_path):

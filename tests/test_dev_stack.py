@@ -57,6 +57,13 @@ def test_dev_stack_reserves_voice_design_base_without_starting_it():
     assert '"CHARACTER_TTS_QWEN3_VOICE_DESIGN_BASE"' in script
     assert '"http://127.0.0.1:9015"' in script
     assert '"Qwen3-TTS 1.7B VoiceDesign Runtime"' not in script
+    # VoiceDesign 1.7B reserves ~4.36 GB, which on an 8 GB card leaves less than
+    # GSV needs (~1.45 GB), so the two can never be resident together. Starting
+    # it here would break live chat, not just cost memory. Asserting on the
+    # display name alone would not catch a renamed spawn.
+    assert '"character_memory.qwen3_voice_design_experiment"' not in script
+    assert "QWEN3_VOICE_DESIGN_PRELOAD" not in script
+    assert "9015/health" not in script
 
 
 def test_dev_stack_declares_gsv_sidecar_startup():
@@ -83,3 +90,18 @@ def test_dev_stack_reads_project_dotenv_with_system_environment_override():
     script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
     assert 'parse_env_file' in script
     assert 'base_env = {**file_env, **os.environ}' in script
+
+
+def test_dev_stack_pins_the_gsv_persona_root_to_an_absolute_path():
+    """A relative persona root would break the moment the sidecar's cwd differs."""
+    script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
+    assert 'gsv_env.setdefault("GSV_TTS_PERSONA_ROOT", str(ROOT / "personas"))' in script
+
+
+def test_gsv_start_script_pins_the_persona_root_to_an_absolute_path():
+    script = Path("scripts/start-gsv-tts.sh").read_text(encoding="utf-8")
+    assert 'PERSONA_ROOT="$ROOT/personas"' in script
+    # Git Bash hands ROOT over as /c/Users/..., which native Python on Windows
+    # reads as C:\c\Users\... -- so the value must be converted before export.
+    assert 'cygpath -w "$PERSONA_ROOT"' in script
+    assert 'export GSV_TTS_PERSONA_ROOT="${GSV_TTS_PERSONA_ROOT:-$PERSONA_ROOT}"' in script

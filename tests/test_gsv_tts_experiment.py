@@ -3,18 +3,48 @@ from __future__ import annotations
 import io
 from pathlib import Path
 from types import SimpleNamespace
+import threading
 import wave
 
 import numpy as np
+import pytest
+import yaml
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from character_memory.gsv_tts_experiment import (
+    DEFAULT_SEED,
     GsvRuntimeConfigRequest,
     GsvTtsRequest,
     GsvTtsResult,
     GsvTtsRuntime,
+    _env_seed,
     create_gsv_tts_app,
 )
+from character_memory.voices import VoiceProfileError
+
+
+class RecordingTorch:
+    """Stand-in for the torch module. Only ``manual_seed`` is exercised."""
+
+    def __init__(self, on_seed=None):
+        self.seeds: list[int] = []
+        self._on_seed = on_seed
+
+    def manual_seed(self, value: int) -> None:
+        self.seeds.append(int(value))
+        if self._on_seed is not None:
+            self._on_seed(int(value))
+
+
+def _gsv_assets(tmp_path: Path) -> tuple[Path, Path, Path]:
+    gpt = tmp_path / "voice-e15.ckpt"
+    sovits = tmp_path / "voice-e8.pth"
+    ref = tmp_path / "reference.wav"
+    gpt.write_bytes(b"gpt")
+    sovits.write_bytes(b"sovits")
+    ref.write_bytes(b"wav")
+    return gpt, sovits, ref
 
 
 class FakeGsvRuntime:
@@ -260,3 +290,544 @@ def test_gsv_status_reports_missing_assets_without_importing_gsv():
     status = runtime.status()
     assert status["ready"] is False
     assert "Missing GSV configuration" in status["reason"]
+
+
+def test_gsv_seed_is_applied_under_the_lock_and_before_inference(tmp_path):
+    """Voice stability depends on this ordering, not just on the seed existing.
+
+    GSV-TTS-Lite reads PyTorch's *global* RNG and takes no ``generator=``, so a
+    seed set outside the lock can be consumed by a concurrent request before
+    ``infer_batched`` runs. That would silently reintroduce the drift the seed
+    is there to remove, and only under load -- the hardest case to notice.
+    """
+    gpt, sovits, ref = _gsv_assets(tmp_path)
+    holder: dict = {}
+    observed: dict = {}
+
+    def probe(value: int) -> None:
+        acquired: list[bool] = []
+        thread = threading.Thread(
+            target=lambda: acquired.append(holder["runtime"]._lock.acquire(blocking=False))
+        )
+        thread.start()
+        thread.join()
+        if acquired[0]:
+            holder["runtime"]._lock.release()
+        observed["seed"] = value
+        observed["lock_held"] = not acquired[0]
+
+    class FakeTts:
+        def __init__(self, **_kwargs):
+            self.tts_config = SimpleNamespace(device="cpu")
+
+        def load_gpt_model(self, _path):
+            pass
+
+        def load_sovits_model(self, _path):
+            pass
+
+        def cache_spk_audio(self, _path, **_kwargs):
+            pass
+
+        def cache_prompt_audio(self, **_kwargs):
+            pass
+
+        def infer_batched(self, **_kwargs):
+            # The seed must already be set by the time inference starts.
+            observed["seed_at_infer"] = observed.get("seed")
+            return (
+                SimpleNamespace(
+                    audio_data=np.asarray([0.0, 0.25], dtype=np.float32),
+                    samplerate=32000,
+                ),
+            )
+
+    runtime = GsvTtsRuntime(
+        gpt_model=str(gpt),
+        sovits_model=str(sovits),
+        ref_audio=str(ref),
+        ref_text="参考文本。",
+        device="cpu",
+        default_voice="murasame",
+        tts_factory=FakeTts,
+        torch_module=RecordingTorch(on_seed=probe),
+    )
+    holder["runtime"] = runtime
+
+    result = runtime.synthesize(GsvTtsRequest(text="你好"))
+
+    assert observed["seed"] == DEFAULT_SEED
+    assert observed["lock_held"] is True, "manual_seed ran outside the RLock"
+    assert observed["seed_at_infer"] == DEFAULT_SEED, "inference started before seeding"
+    assert result.seed == DEFAULT_SEED
+
+
+def test_gsv_request_seed_overrides_the_runtime_default(tmp_path):
+    gpt, sovits, ref = _gsv_assets(tmp_path)
+    torch = RecordingTorch()
+
+    class FakeTts:
+        def __init__(self, **_kwargs):
+            self.tts_config = SimpleNamespace(device="cpu")
+
+        def load_gpt_model(self, _path):
+            pass
+
+        def load_sovits_model(self, _path):
+            pass
+
+        def cache_spk_audio(self, _path, **_kwargs):
+            pass
+
+        def cache_prompt_audio(self, **_kwargs):
+            pass
+
+        def infer_batched(self, **_kwargs):
+            return (
+                SimpleNamespace(
+                    audio_data=np.asarray([0.0, 0.25], dtype=np.float32),
+                    samplerate=32000,
+                ),
+            )
+
+    runtime = GsvTtsRuntime(
+        gpt_model=str(gpt),
+        sovits_model=str(sovits),
+        ref_audio=str(ref),
+        ref_text="参考文本。",
+        device="cpu",
+        tts_factory=FakeTts,
+        torch_module=torch,
+    )
+
+    result = runtime.synthesize(GsvTtsRequest(text="你好", seed=7777))
+
+    assert torch.seeds == [7777]
+    assert result.seed == 7777
+
+
+def test_gsv_seed_none_keeps_the_unseeded_behaviour(tmp_path):
+    gpt, sovits, ref = _gsv_assets(tmp_path)
+    torch = RecordingTorch()
+
+    class FakeTts:
+        def __init__(self, **_kwargs):
+            self.tts_config = SimpleNamespace(device="cpu")
+
+        def load_gpt_model(self, _path):
+            pass
+
+        def load_sovits_model(self, _path):
+            pass
+
+        def cache_spk_audio(self, _path, **_kwargs):
+            pass
+
+        def cache_prompt_audio(self, **_kwargs):
+            pass
+
+        def infer_batched(self, **_kwargs):
+            return (
+                SimpleNamespace(
+                    audio_data=np.asarray([0.0, 0.25], dtype=np.float32),
+                    samplerate=32000,
+                ),
+            )
+
+    runtime = GsvTtsRuntime(
+        gpt_model=str(gpt),
+        sovits_model=str(sovits),
+        ref_audio=str(ref),
+        ref_text="参考文本。",
+        device="cpu",
+        seed=None,
+        tts_factory=FakeTts,
+        torch_module=torch,
+    )
+
+    result = runtime.synthesize(GsvTtsRequest(text="你好"))
+
+    assert torch.seeds == []
+    assert result.seed is None
+    assert runtime.status()["seed"] is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, DEFAULT_SEED),
+        ("", None),
+        ("  none ", None),
+        ("off", None),
+        ("random", None),
+        ("-1", None),
+        ("1234", 1234),
+        (" 7777 ", 7777),
+        ("0", 0),
+    ],
+)
+def test_gsv_env_seed_parsing(raw, expected):
+    assert _env_seed(raw) == expected
+
+
+def test_gsv_env_seed_rejects_garbage():
+    with pytest.raises(ValueError):
+        _env_seed("murasame")
+
+
+def test_gsv_reports_the_seed_it_used_over_http(tmp_path):
+    gpt, sovits, ref = _gsv_assets(tmp_path)
+
+    class FakeTts:
+        def __init__(self, **_kwargs):
+            self.tts_config = SimpleNamespace(device="cpu")
+
+        def load_gpt_model(self, _path):
+            pass
+
+        def load_sovits_model(self, _path):
+            pass
+
+        def cache_spk_audio(self, _path, **_kwargs):
+            pass
+
+        def cache_prompt_audio(self, **_kwargs):
+            pass
+
+        def infer_batched(self, **_kwargs):
+            return (
+                SimpleNamespace(
+                    audio_data=np.asarray([0.0, 0.25], dtype=np.float32),
+                    samplerate=32000,
+                ),
+            )
+
+    runtime = GsvTtsRuntime(
+        gpt_model=str(gpt),
+        sovits_model=str(sovits),
+        ref_audio=str(ref),
+        ref_text="参考文本。",
+        device="cpu",
+        tts_factory=FakeTts,
+        torch_module=RecordingTorch(),
+    )
+    with TestClient(create_gsv_tts_app(runtime)) as client:
+        seeded = client.post("/v1/tts", json={"text": "你好", "seed": 4242})
+        assert seeded.status_code == 200
+        assert seeded.headers["x-tts-seed"] == "4242"
+
+        default = client.post("/v1/tts", json={"text": "你好"})
+        assert default.headers["x-tts-seed"] == str(DEFAULT_SEED)
+
+        health = client.get("/health").json()
+        assert health["supports_seed"] is True
+        assert health["seed"] == DEFAULT_SEED
+
+
+# --- Per-persona voice registry -------------------------------------------------
+
+
+def _persona_root(tmp_path: Path) -> Path:
+    return tmp_path / "personas"
+
+
+def _write_persona(
+    root: Path,
+    character_id: str,
+    *,
+    ref_audio: str | None = None,
+    ref_text: str = "参考文本。",
+    gpt_model: str | None = None,
+    sovits_model: str | None = None,
+) -> Path:
+    """Write a real ``personas/<id>/`` tree on disk.
+
+    ``ref_audio`` is created as a sibling wav and referenced *relatively*, so the
+    test exercises the same path resolution the shipped personas use. Passing
+    ``ref_audio=None`` writes a persona without a ``voice.yaml``, which is the
+    normal case for most characters.
+    """
+    directory = root / character_id
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "persona.yaml").write_text(
+        f"id: {character_id}\nname: {character_id}\n", encoding="utf-8"
+    )
+    if ref_audio is None:
+        return directory
+    (directory / ref_audio).write_bytes(b"RIFFfake-voice-reference")
+    document: dict[str, object] = {"ref_audio": ref_audio, "ref_text": ref_text}
+    if gpt_model is not None:
+        document["gpt_model"] = gpt_model
+    if sovits_model is not None:
+        document["sovits_model"] = sovits_model
+    (directory / "voice.yaml").write_text(
+        yaml.safe_dump(document, allow_unicode=True), encoding="utf-8"
+    )
+    return directory
+
+
+def _recording_engine(calls: dict[str, list]):
+    """Fake GSV engine that records every call the runtime makes on it."""
+
+    class FakeTts:
+        def __init__(self, **kwargs):
+            calls.setdefault("init", []).append(kwargs)
+            self.tts_config = SimpleNamespace(device="cpu")
+
+        def load_gpt_model(self, path):
+            calls.setdefault("gpt", []).append(path)
+
+        def load_sovits_model(self, path):
+            calls.setdefault("sovits", []).append(path)
+
+        def cache_spk_audio(self, path, **kwargs):
+            calls.setdefault("cache_spk", []).append((path, kwargs))
+
+        def cache_prompt_audio(self, **kwargs):
+            calls.setdefault("cache_prompt", []).append(kwargs)
+
+        def infer_batched(self, **kwargs):
+            calls.setdefault("infer", []).append(kwargs)
+            return (
+                SimpleNamespace(
+                    audio_data=np.asarray([0.0, 0.25], dtype=np.float32),
+                    samplerate=32000,
+                ),
+            )
+
+    return FakeTts
+
+
+class _Rig:
+    """A runtime wired to a recording fake engine, plus its global asset paths."""
+
+    def __init__(self, tmp_path: Path, **overrides):
+        self.calls: dict[str, list] = {}
+        self.gpt = tmp_path / "voice-e15.ckpt"
+        self.sovits = tmp_path / "voice-e8.pth"
+        self.ref = tmp_path / "global-reference.wav"
+        self.gpt.write_bytes(b"gpt")
+        self.sovits.write_bytes(b"sovits")
+        self.ref.write_bytes(b"wav")
+        kwargs = {
+            "gpt_model": str(self.gpt),
+            "sovits_model": str(self.sovits),
+            "ref_audio": str(self.ref),
+            "ref_text": "全局参考文本。",
+            "device": "cpu",
+            "default_voice": "murasame",
+            "tts_factory": _recording_engine(self.calls),
+        }
+        kwargs.update(overrides)
+        self.runtime = GsvTtsRuntime(**kwargs)
+
+    @property
+    def last_infer(self) -> dict:
+        return self.calls["infer"][-1]
+
+    def synthesize(self, **request) -> tuple[GsvTtsResult, dict]:
+        """Synthesize one line and return the result plus the engine-call kwargs."""
+        result = self.runtime.synthesize(GsvTtsRequest(text="你好", **request))
+        return result, self.last_infer
+
+
+def test_gsv_synthesize_clones_the_requested_personas_reference_audio(tmp_path):
+    """A registered voice_id must reach GSV as *that persona's* reference clip.
+
+    Browser clients send ``voice: <character id>`` for every character, so this
+    is the only path that turns the registry into audible per-character voices.
+    """
+    personas = _persona_root(tmp_path)
+    momo = _write_persona(
+        personas, "momo", ref_audio="momo-ref.wav", ref_text="桃子的参考文本。"
+    )
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    result, infer = rig.synthesize(voice="momo")
+
+    expected = str((momo / "momo-ref.wav").resolve())
+    assert infer["spk_audio_paths"] == expected
+    assert infer["prompt_audio_paths"] == expected
+    assert infer["prompt_audio_texts"] == "桃子的参考文本。"
+    assert result.voice == "momo"
+
+
+def test_gsv_synthesize_falls_back_to_the_default_voice_for_unknown_ids(tmp_path):
+    """An unregistered id must degrade, not reject.
+
+    Most characters have no ``voice.yaml`` yet. Raising here would mute every
+    character that has not been given a voice instead of letting it speak in the
+    default voice.
+    """
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo")  # persona.yaml only, no voice yet
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    result, infer = rig.synthesize(voice="momo")
+
+    assert infer["spk_audio_paths"] == str(rig.ref)
+    assert infer["prompt_audio_texts"] == "全局参考文本。"
+    assert result.voice == "murasame"
+
+    with TestClient(create_gsv_tts_app(rig.runtime)) as client:
+        response = client.post("/v1/tts", json={"text": "你好", "voice": "does-not-exist"})
+
+    assert response.status_code == 200
+    # The header must name the voice actually used, not the one requested.
+    assert response.headers["x-tts-voice"] == "murasame"
+    assert rig.last_infer["spk_audio_paths"] == str(rig.ref)
+
+
+@pytest.mark.parametrize("payload", [{}, {"voice": ""}, {"voice": "   "}])
+def test_gsv_synthesize_uses_the_runtime_default_when_no_voice_is_requested(
+    tmp_path, payload
+):
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="桃子。")
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    with TestClient(create_gsv_tts_app(rig.runtime)) as client:
+        response = client.post("/v1/tts", json={"text": "你好", **payload})
+
+    assert response.status_code == 200
+    assert response.headers["x-tts-voice"] == "murasame"
+    assert rig.last_infer["spk_audio_paths"] == str(rig.ref)
+    assert rig.last_infer["prompt_audio_texts"] == "全局参考文本。"
+
+
+def test_gsv_voice_profile_overrides_models_only_when_it_pins_them(tmp_path):
+    """Unset profile models inherit the runtime globals; set ones win."""
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="桃子。")
+    _write_persona(
+        personas,
+        "rin",
+        ref_audio="rin.wav",
+        ref_text="凛。",
+        gpt_model="rin-gpt.ckpt",
+        sovits_model="rin-sovits.pth",
+    )
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    _, inherited = rig.synthesize(voice="momo")
+    assert inherited["gpt_model"] == str(rig.gpt)
+    assert inherited["sovits_model"] == str(rig.sovits)
+
+    _, pinned = rig.synthesize(voice="rin")
+    assert pinned["gpt_model"] == "rin-gpt.ckpt"
+    assert pinned["sovits_model"] == "rin-sovits.pth"
+
+
+def test_gsv_runtime_starts_with_an_empty_registry_when_persona_root_is_missing(tmp_path):
+    """A missing personas directory is not an error: the sidecar still serves."""
+    rig = _Rig(tmp_path, persona_root=tmp_path / "does-not-exist")
+
+    assert rig.runtime.status()["voices"] == ["murasame"]
+
+    result, infer = rig.synthesize(voice="momo")
+
+    assert infer["spk_audio_paths"] == str(rig.ref)
+    assert result.voice == "murasame"
+
+
+def test_gsv_runtime_refuses_to_start_on_a_broken_voice_profile(tmp_path):
+    """A ``voice.yaml`` that exists but is unusable is a config error, not a skip.
+
+    GSV cannot recover from an empty reference transcript at synthesis time
+    (``cache_prompt_audio`` raises), so the only place an operator can see the
+    mistake is at load. Swallowing it would surface as a failure per utterance.
+    """
+    personas = _persona_root(tmp_path)
+    broken = _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="   ")
+
+    with pytest.raises(VoiceProfileError) as excinfo:
+        _Rig(tmp_path, persona_root=personas)
+
+    assert str(broken / "voice.yaml") in str(excinfo.value)
+
+
+def test_gsv_runtime_skips_personas_that_have_no_voice_profile(tmp_path):
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo")  # no voice.yaml at all
+    _write_persona(personas, "rin", ref_audio="rin.wav", ref_text="凛。")
+
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    voices = rig.runtime.status()["voices"]
+    assert "rin" in voices
+    assert "momo" not in voices
+
+
+def test_gsv_status_lists_every_registered_voice_and_always_the_default(tmp_path):
+    """Settings Center builds its voice dropdown from this list (zero UI work)."""
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="桃子。")
+    _write_persona(personas, "rin", ref_audio="rin.wav", ref_text="凛。")
+
+    unregistered_default = _Rig(tmp_path, persona_root=personas)
+    assert unregistered_default.runtime.status()["voices"] == ["momo", "rin", "murasame"]
+    assert unregistered_default.runtime.status()["default_voice"] == "murasame"
+
+    registered_default = _Rig(tmp_path, persona_root=personas, default_voice="momo")
+    assert registered_default.runtime.status()["voices"].count("momo") == 1
+
+
+def test_gsv_voice_reload_adds_profiles_without_rebuilding_the_engine(tmp_path):
+    """Reload re-reads files; it must not touch VRAM.
+
+    Rebuilding the engine would unload the GPT/SoVITS weights and drop the warm
+    speaker cache -- minutes of GPU work -- for a change that only adds a
+    reference clip. New reference audio is cached lazily by ``infer_batched``.
+    """
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo")
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    with TestClient(create_gsv_tts_app(rig.runtime)) as client:
+        assert client.post("/v1/tts", json={"text": "你好"}).status_code == 200
+        assert len(rig.calls["init"]) == 1
+
+        _write_persona(personas, "rin", ref_audio="rin.wav", ref_text="凛。")
+        reloaded = client.post("/v1/voices/reload")
+
+        assert reloaded.status_code == 200
+        assert "rin" in reloaded.json()["voices"]
+        assert reloaded.json()["loaded"] is True
+
+        response = client.post("/v1/tts", json={"text": "你好", "voice": "rin"})
+
+    assert response.status_code == 200
+    assert response.headers["x-tts-voice"] == "rin"
+    assert rig.last_infer["spk_audio_paths"] == str(
+        (personas / "rin" / "rin.wav").resolve()
+    )
+    assert len(rig.calls["init"]) == 1, "reload rebuilt the engine"
+    assert len(rig.calls["gpt"]) == 1, "reload reloaded the GPT model"
+    assert len(rig.calls["sovits"]) == 1, "reload reloaded the SoVITS model"
+
+
+def test_gsv_configure_request_model_does_not_accept_a_voices_field():
+    """Manifests change only through /v1/voices/reload.
+
+    ``configure()`` unloads the engine for any tracked field that changes, so
+    accepting ``voices`` here would drop the warm models for a pure file change.
+    """
+    assert "voices" not in GsvRuntimeConfigRequest.model_fields
+    with pytest.raises(ValidationError):
+        GsvRuntimeConfigRequest.model_validate({"voices": ["momo"]})
+
+    with TestClient(create_gsv_tts_app(FakeGsvRuntime())) as client:
+        response = client.post("/v1/configure", json={"voices": ["momo"]})
+
+    assert response.status_code == 422
+
+
+def test_gsv_runtime_reads_the_persona_root_from_the_environment(tmp_path, monkeypatch):
+    """The stack and start script point the sidecar at an absolute personas dir."""
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="桃子。")
+    monkeypatch.setenv("GSV_TTS_PERSONA_ROOT", str(personas))
+
+    rig = _Rig(tmp_path)
+
+    assert "momo" in rig.runtime.status()["voices"]

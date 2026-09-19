@@ -103,6 +103,15 @@
           <pre id="voiceDesignStatus" class="result">等待 VoiceDesign sidecar...</pre>
           <audio id="voiceDesignAudio" controls></audio>
           <pre id="voiceDesignResult" class="result">尚未生成。</pre>
+          <div class="voice-design-freeze">
+            <p class="subtle">VoiceDesign 不可复现：固化保存的是上面这段试听的音频本身。修改测试文本、Instruct、语种或角色后需要重新生成。</p>
+            <label for="voiceDesignCharacter">固化到角色</label>
+            <select id="voiceDesignCharacter"></select>
+            <div class="actions">
+              <button id="freezeVoiceDesign" disabled>固化到该角色</button>
+            </div>
+            <pre id="voiceDesignFreezeStatus" class="result">尚未固化。</pre>
+          </div>
         </div>
       </div>
     </section>

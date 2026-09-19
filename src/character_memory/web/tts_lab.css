@@ -68,5 +68,9 @@
 .voice-design-options { display: grid; grid-template-columns: minmax(160px,1fr) minmax(160px,.7fr); gap: 12px; }
 .voice-design-output audio { width: 100%; }
 .voice-design-output .result { min-height: 120px; }
+.voice-design-freeze { display: grid; gap: 10px; border-top: 1px dashed #d7dbe3; padding-top: 12px; margin-top: 4px; }
+.voice-design-freeze label { display: grid; gap: 6px; }
+.voice-design-freeze select { width: 100%; }
+.voice-design-freeze .result { min-height: 76px; }
 @media (max-width: 900px) { .voice-design-grid { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .voice-design-options { grid-template-columns: 1fr; } }

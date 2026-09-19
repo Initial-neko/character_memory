@@ -14,12 +14,35 @@ from typing import Any, Callable
 from urllib.parse import quote
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from character_memory.voices import VoiceProfile, discover_voice_profiles
 
 
 DEFAULT_PORT = 9014
 DEFAULT_VOICE = "murasame"
+DEFAULT_PERSONA_ROOT = "personas"
 DEFAULT_SAMPLE_RATE = 32000
+# GSV-TTS-Lite takes no generator= argument and draws every random number --
+# token sampling and decoder noise -- from PyTorch's global RNG. Seeding it makes
+# a voice reproducible; without a seed the same line varies by up to ~88% in
+# duration between turns. See docs/current/GSV_TTS_EXPERIMENT.md.
+DEFAULT_SEED = 1234
+
+#: Values that switch GSV_TTS_SEED back to the old unseeded behaviour.
+_SEED_DISABLED = {"", "none", "off", "random", "-1"}
+
+
+def _env_seed(raw: str | None) -> int | None:
+    if raw is None:
+        return DEFAULT_SEED
+    value = str(raw).strip().lower()
+    if value in _SEED_DISABLED:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"GSV_TTS_SEED must be an integer or one of {sorted(_SEED_DISABLED)}: {raw!r}") from exc
 
 
 @dataclass(frozen=True)
@@ -35,6 +58,7 @@ class GsvTtsResult:
     cuda_allocated_mb: float | None = None
     cuda_reserved_mb: float | None = None
     cuda_peak_mb: float | None = None
+    seed: int | None = None
 
 
 class GsvTtsRequest(BaseModel):
@@ -42,9 +66,18 @@ class GsvTtsRequest(BaseModel):
     voice: str = Field(default=DEFAULT_VOICE, max_length=128)
     language: str = Field(default="zh", max_length=16)
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    # None = fall back to the runtime default (GSV_TTS_SEED, i.e. DEFAULT_SEED).
+    # Per-character voices will pin their own seed once the voice registry lands.
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
 
 class GsvRuntimeConfigRequest(BaseModel):
+    # Voice manifests change only through POST /v1/voices/reload. ``configure``
+    # unloads the engine whenever a tracked field changes, so accepting a
+    # ``voices`` field here would drop the warm GPT/SoVITS weights for what is
+    # purely a file change. Rejecting unknown fields keeps that door shut.
+    model_config = ConfigDict(extra="forbid")
+
     gpt_model: str | None = None
     sovits_model: str | None = None
     ref_audio: str | None = None
@@ -55,6 +88,20 @@ class GsvRuntimeConfigRequest(BaseModel):
     language: str | None = None
     prompt_language: str | None = None
     preload: bool = False
+
+
+def _persona_root(persona_root: str | Path | None) -> str:
+    """Resolve the personas directory, preferring the argument over the env.
+
+    A relative glob is resolved against the *cwd*, which the sidecar does not
+    control, so ``scripts/start-gsv-tts.sh`` and the stack both pin an absolute
+    path through ``GSV_TTS_PERSONA_ROOT``.
+    """
+    if persona_root is not None:
+        value = str(persona_root).strip()
+        if value:
+            return value
+    return (os.getenv("GSV_TTS_PERSONA_ROOT") or "").strip() or DEFAULT_PERSONA_ROOT
 
 
 def float_audio_to_wav(samples: np.ndarray, sample_rate: int) -> bytes:
@@ -91,7 +138,11 @@ class GsvTtsRuntime:
         default_language: str = "zh",
         prompt_language: str = "auto",
         preload: bool = False,
+        seed: int | None = DEFAULT_SEED,
         tts_factory: Callable[..., Any] | None = None,
+        torch_module: Any | None = None,
+        voices: dict[str, VoiceProfile] | None = None,
+        persona_root: str | Path | None = None,
     ):
         self.gpt_model = str(gpt_model or "").strip()
         self.sovits_model = str(sovits_model or "").strip()
@@ -103,12 +154,87 @@ class GsvTtsRuntime:
         self.default_language = str(default_language or "zh").strip() or "zh"
         self.prompt_language = str(prompt_language or "auto").strip() or "auto"
         self.preload = bool(preload)
+        self.seed = int(seed) if seed is not None else None
         self._tts_factory = tts_factory
         self._tts = None
-        self._torch = None
+        # Injected in tests (symmetric with tts_factory); load() imports the real
+        # torch when it is None.
+        self._torch = torch_module
+        self.persona_root = _persona_root(persona_root)
+        # An injected registry is authoritative: embedders and tests supply one
+        # rather than depending on whatever happens to be on disk.
+        self._voices: dict[str, VoiceProfile] = (
+            dict(voices) if voices is not None else self._load_voices()
+        )
         self._load_ms: float | None = None
         self._load_error: str | None = None
         self._lock = threading.RLock()
+
+    def _load_voices(self) -> dict[str, VoiceProfile]:
+        """Register ``<persona_root>/*/persona.yaml`` that declare a voice.
+
+        Same glob shape as ``config.discover_character_profiles`` so the sidecar
+        and the app agree on what a persona is. A missing root, or a persona with
+        no ``voice.yaml``, contributes nothing: voice assets must never stop the
+        sidecar from starting. A ``voice.yaml`` that exists but is unusable
+        raises :class:`VoiceProfileError` instead, because GSV cannot recover
+        from a bad reference clip at synthesis time.
+        """
+        root = Path(self.persona_root)
+        paths = sorted(root.glob("*/persona.yaml")) if root.exists() else []
+        return discover_voice_profiles(paths)
+
+    def reload_voices(self) -> dict:
+        """Re-read the persona voice manifests in place.
+
+        Deliberately does not touch the engine: the GPT/SoVITS weights and the
+        warm speaker cache stay resident, and a newly added reference clip is
+        encoded lazily by ``infer_batched`` on its first use.
+        """
+        with self._lock:
+            self._voices = self._load_voices()
+            return self.status()
+
+    def _voice_ids(self) -> list[str]:
+        """Registered ids, plus ``default_voice`` -- which need not be registered."""
+        voices = list(self._voices)
+        if self.default_voice not in voices:
+            voices.append(self.default_voice)
+        return voices
+
+    def _resolve_voice(
+        self, requested: str | None
+    ) -> tuple[str, str, str, str, str]:
+        """Map a request's voice name onto the reference audio to clone.
+
+        Returns ``(voice, ref_audio, ref_text, gpt_model, sovits_model)``.
+
+        A name that is not registered -- including every character that has no
+        ``voice.yaml`` -- degrades to ``default_voice`` and the runtime-global
+        reference audio. It must not raise: the browser sends
+        ``voice: <character id>`` for *every* character, so rejecting unknown
+        ids would mute every character that has not been given a voice yet. The
+        returned ``voice`` is the one actually used, so ``X-TTS-Voice`` and
+        ``GsvTtsResult.voice`` never report a profile that was not applied.
+        """
+        name = str(requested or self.default_voice).strip() or self.default_voice
+        profile = self._voices.get(name)
+        if profile is None:
+            return (
+                self.default_voice,
+                self.ref_audio,
+                self.ref_text,
+                self.gpt_model,
+                self.sovits_model,
+            )
+        # A profile only overrides the models it pins; unset means "inherit".
+        return (
+            profile.voice_id,
+            profile.ref_audio,
+            profile.ref_text,
+            profile.gpt_model or self.gpt_model,
+            profile.sovits_model or self.sovits_model,
+        )
 
     @property
     def model_label(self) -> str:
@@ -204,6 +330,28 @@ class GsvTtsRuntime:
         except Exception:
             pass
 
+    def resolve_seed(self, request: GsvTtsRequest) -> int | None:
+        return request.seed if request.seed is not None else self.seed
+
+    def _apply_seed(self, seed: int | None) -> int | None:
+        """Seed PyTorch's global RNG and return the seed actually applied.
+
+        MUST run inside ``self._lock`` and immediately before ``infer_batched``:
+        GSV-TTS-Lite reads the *global* RNG (``torch.empty_like().exponential_``
+        for token sampling in ``GPT_SoVITS/GPT/utils.py``, ``torch.randn_like``
+        for decoder noise in ``GPT_SoVITS/SoVITS/models.py``) and accepts no
+        ``generator=`` argument. Another thread drawing from the RNG in between
+        would silently un-stabilise this request.
+        """
+        if seed is None:
+            return None
+        torch = self._torch
+        if torch is None:
+            return None
+        value = int(seed)
+        torch.manual_seed(value)
+        return value
+
     def status(self) -> dict:
         deps_ready, deps_reason = self._dependency_status()
         assets_ready, assets_reason = self._asset_status()
@@ -216,10 +364,12 @@ class GsvTtsRuntime:
             "loaded": self._tts is not None,
             "model": self.model_label,
             "device": self._device(),
-            "voices": [self.default_voice],
+            "voices": self._voice_ids(),
             "default_voice": self.default_voice,
             "default_language": self.default_language,
+            "seed": self.seed,
             "supports_speed": True,
+            "supports_seed": True,
             "sample_rate": DEFAULT_SAMPLE_RATE,
             "load_ms": self._load_ms,
             "cuda_allocated_mb": allocated,
@@ -348,26 +498,29 @@ class GsvTtsRuntime:
         value = request.text.strip()
         if not value:
             raise ValueError("empty GSV-TTS text")
-        voice = str(request.voice or self.default_voice).strip() or self.default_voice
-        if voice != self.default_voice:
-            raise ValueError(f"Unknown GSV voice profile: {voice}")
 
         with self._lock:
+            # Resolved under the lock so a concurrent /v1/voices/reload cannot
+            # swap the registry between choosing a reference and using it.
+            voice, ref_audio, ref_text, gpt_model, sovits_model = self._resolve_voice(
+                request.voice
+            )
             self.load()
             self._reset_cuda_peak()
+            applied_seed = self._apply_seed(self.resolve_seed(request))
             started = time.perf_counter()
             try:
                 clips = self._tts.infer_batched(
-                    spk_audio_paths=self.ref_audio,
-                    prompt_audio_paths=self.ref_audio,
-                    prompt_audio_texts=self.ref_text,
+                    spk_audio_paths=ref_audio,
+                    prompt_audio_paths=ref_audio,
+                    prompt_audio_texts=ref_text,
                     texts=value,
                     text_languages=(request.language or self.default_language).strip() or self.default_language,
                     prompt_languages=self.prompt_language,
                     return_subtitles=False,
                     speed=float(request.speed),
-                    gpt_model=self.gpt_model,
-                    sovits_model=self.sovits_model,
+                    gpt_model=gpt_model,
+                    sovits_model=sovits_model,
                 )
                 self._sync_cuda()
             except Exception as exc:
@@ -398,6 +551,7 @@ class GsvTtsRuntime:
                 cuda_allocated_mb=allocated,
                 cuda_reserved_mb=reserved,
                 cuda_peak_mb=peak,
+                seed=applied_seed,
             )
 
 
@@ -419,6 +573,7 @@ def create_gsv_tts_app(runtime: GsvTtsRuntime | None = None):
         default_language=os.getenv("GSV_TTS_LANGUAGE", "zh"),
         prompt_language=os.getenv("GSV_TTS_PROMPT_LANGUAGE", "auto"),
         preload=os.getenv("GSV_TTS_PRELOAD", "0").strip().lower() in {"1", "true", "yes", "on"},
+        seed=_env_seed(os.getenv("GSV_TTS_SEED")),
     )
     app = FastAPI(title="Character Memory GSV-TTS-Lite Experiment", version="0.1")
     app.state.gsv_tts = engine
@@ -456,6 +611,16 @@ def create_gsv_tts_app(runtime: GsvTtsRuntime | None = None):
         except (RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    @app.post("/v1/voices/reload")
+    def reload_voices():
+        # An invalid voice.yaml is an operator error (VoiceProfileError is a
+        # ValueError), so it surfaces as 400 with the offending file named
+        # rather than silently leaving a stale registry in place.
+        try:
+            return engine.reload_voices()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/v1/tts")
     def synthesize(request: GsvTtsRequest):
         try:
@@ -476,6 +641,7 @@ def create_gsv_tts_app(runtime: GsvTtsRuntime | None = None):
                 "X-TTS-Audio-Ms": str(result.audio_ms),
                 "X-TTS-RTF": str(result.rtf),
                 "X-TTS-Sample-Rate": str(result.sample_rate),
+                "X-TTS-Seed": "" if result.seed is None else str(result.seed),
                 "X-TTS-Cuda-Allocated-MB": "" if result.cuda_allocated_mb is None else str(result.cuda_allocated_mb),
                 "X-TTS-Cuda-Reserved-MB": "" if result.cuda_reserved_mb is None else str(result.cuda_reserved_mb),
                 "X-TTS-Cuda-Peak-MB": "" if result.cuda_peak_mb is None else str(result.cuda_peak_mb),
@@ -499,6 +665,11 @@ def main() -> None:
     parser.add_argument("--language", default=os.getenv("GSV_TTS_LANGUAGE", "zh"))
     parser.add_argument("--prompt-language", default=os.getenv("GSV_TTS_PROMPT_LANGUAGE", "auto"))
     parser.add_argument(
+        "--seed",
+        default=os.getenv("GSV_TTS_SEED", str(DEFAULT_SEED)),
+        help="PyTorch RNG seed for reproducible voices; 'none' restores unseeded sampling.",
+    )
+    parser.add_argument(
         "--preload",
         action="store_true",
         default=os.getenv("GSV_TTS_PRELOAD", "0").strip().lower() in {"1", "true", "yes", "on"},
@@ -521,10 +692,11 @@ def main() -> None:
         default_language=args.language,
         prompt_language=args.prompt_language,
         preload=args.preload,
+        seed=_env_seed(args.seed),
     )
     print(
         f"gsv-tts: http://{args.host}:{args.port} model={runtime.model_label} "
-        f"device={args.device} preload={args.preload}",
+        f"device={args.device} preload={args.preload} seed={runtime.seed}",
         flush=True,
     )
     uvicorn.run(create_gsv_tts_app(runtime), host=args.host, port=args.port, reload=False, timeout_graceful_shutdown=2)

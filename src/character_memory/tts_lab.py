@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
+import secrets
 import threading
 import time
 from typing import Protocol
@@ -11,7 +15,8 @@ from urllib.parse import quote
 
 import httpx
 import numpy as np
-from pydantic import BaseModel, Field
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
 
 from character_memory.media_runtime import float_audio_to_wav
 
@@ -711,6 +716,79 @@ class Qwen3VoiceDesignSidecar:
         )
 
 
+VOICE_DESIGN_ARTIFACT_LIMIT = 8
+
+
+@dataclass(frozen=True)
+class VoiceDesignArtifact:
+    """One auditioned VoiceDesign output, kept byte-for-byte.
+
+    VoiceDesign is unseeded: repeating the same request produces a different
+    voice. The auditioned bytes are therefore the only copy of that voice, so
+    freezing persists these exact bytes instead of re-synthesizing from the
+    text and instruct.
+    """
+
+    audio: bytes
+    text: str
+    language: str
+    instruct: str
+    sample_rate: int
+    model: str
+
+
+class VoiceDesignArtifactStore:
+    """Bounded in-memory store of auditioned VoiceDesign outputs.
+
+    Tokens are opaque and server-chosen; the caller can only reference an
+    audition, never define one. The oldest audition is dropped past the limit,
+    which the freeze route reports as a 404 so the user regenerates.
+    """
+
+    def __init__(self, max_entries: int = VOICE_DESIGN_ARTIFACT_LIMIT):
+        self._max_entries = max(1, int(max_entries))
+        self._entries: dict[str, VoiceDesignArtifact] = {}
+        self._order: deque[str] = deque()
+        self._lock = threading.Lock()
+
+    def put(self, artifact: VoiceDesignArtifact) -> str:
+        token = secrets.token_urlsafe(16)
+        with self._lock:
+            self._entries[token] = artifact
+            self._order.append(token)
+            while len(self._order) > self._max_entries:
+                self._entries.pop(self._order.popleft(), None)
+        return token
+
+    def get(self, token: str) -> VoiceDesignArtifact | None:
+        with self._lock:
+            return self._entries.get(str(token or "").strip())
+
+
+class GsvVoiceReloader:
+    """Asks a running GSV sidecar to re-read persona voice profiles.
+
+    The reload route may be missing on older sidecars and the sidecar itself may
+    be down; freeze treats every failure as non-fatal because the profiles are
+    already on disk and GSV picks them up at its next start.
+    """
+
+    def __init__(self, base_url: str | None = None, client: httpx.Client | None = None):
+        self.base_url = (base_url or os.getenv("GSV_TTS_BASE_URL", "http://127.0.0.1:9014")).rstrip("/")
+        self.client = client or httpx.Client(timeout=10.0)
+        self._owns_client = client is None
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
+
+    def reload(self) -> None:
+        url = f"{self.base_url}/v1/voices/reload"
+        response = self.client.post(url, timeout=10.0)
+        if response.status_code >= 400:
+            raise RuntimeError(f"GSV voice reload failed with HTTP {response.status_code} at {url}")
+
+
 class TtsLabRuntime:
     def __init__(self, providers: dict[str, LabTtsProvider] | None = None):
         self.providers = providers or {
@@ -766,12 +844,27 @@ class VoiceDesignPolishRequest(BaseModel):
     language: str = Field(default="Chinese", min_length=1, max_length=32)
 
 
+class VoiceDesignFreezeRequest(BaseModel):
+    """Freeze references an audition by token only.
+
+    Accepting text/audio here would let the frozen ref_text drift from the audio
+    it describes, so extra fields are rejected outright.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    character_id: str = Field(min_length=1, max_length=128)
+    artifact_id: str = Field(min_length=1, max_length=128)
+
+
 def create_tts_lab_app(
     runtime: TtsLabRuntime | None = None,
     *,
     voice_design: Qwen3VoiceDesignSidecar | None = None,
     config_path: str = "config.yaml",
     model_factory=None,
+    voice_reloader: GsvVoiceReloader | None = None,
+    settings_factory=None,
 ):
     try:
         from fastapi import FastAPI, HTTPException
@@ -786,6 +879,20 @@ def create_tts_lab_app(
     )
     polish_model_holder: dict[str, object] = {}
     polish_model_lock = threading.Lock()
+    voice_reloader_tool = voice_reloader or GsvVoiceReloader()
+    voice_artifacts = VoiceDesignArtifactStore()
+
+    def get_settings():
+        if settings_factory is not None:
+            return settings_factory()
+        from character_memory.config import load_settings
+
+        return load_settings(config_path)
+
+    def get_character_profiles() -> list[dict[str, str]]:
+        from character_memory.config import discover_character_profiles
+
+        return discover_character_profiles(get_settings())
 
     def get_polish_model():
         model = polish_model_holder.get("model")
@@ -812,6 +919,7 @@ def create_tts_lab_app(
     def shutdown():
         lab.close()
         voice_design_tool.close()
+        voice_reloader_tool.close()
         model = polish_model_holder.get("model")
         if model is not None:
             close = getattr(model, "close", None)
@@ -837,6 +945,20 @@ def create_tts_lab_app(
             return {"provider": lab.provider_status(provider_id)}
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/v1/characters")
+    def characters():
+        # The Voice Design panel needs to name a target character for freezing.
+        # The browser talks to :9002 directly, so the Lab needs its own copy of
+        # the list rather than reaching across to :8001. ``persona_path`` is a
+        # local filesystem path and is deliberately dropped: characters are
+        # addressed by id, and the freeze route re-derives the directory itself.
+        return {
+            "characters": [
+                {"id": item["id"], "name": item.get("name") or item["id"]}
+                for item in get_character_profiles()
+            ]
+        }
 
     @app.post("/v1/tts")
     def synthesize(req: TtsLabRequest):
@@ -917,10 +1039,21 @@ def create_tts_lab_app(
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        artifact_token = voice_artifacts.put(
+            VoiceDesignArtifact(
+                audio=result.audio,
+                text=req.text,
+                language=req.language,
+                instruct=req.instruct,
+                sample_rate=result.sample_rate,
+                model=result.model,
+            )
+        )
         return Response(
             content=result.audio,
             media_type=result.media_type,
             headers={
+                "X-Voice-Design-Artifact": artifact_token,
                 "X-Voice-Design-Model": quote(result.model, safe="/:._-"),
                 "X-Voice-Design-Device": result.device,
                 "X-Voice-Design-Inference-Ms": str(result.inference_ms),
@@ -928,6 +1061,77 @@ def create_tts_lab_app(
                 "X-Voice-Design-Sample-Rate": str(result.sample_rate),
             },
         )
+
+    @app.post("/v1/voice-design/freeze")
+    def voice_design_freeze(req: VoiceDesignFreezeRequest):
+        profile = next(
+            (item for item in get_character_profiles() if item["id"] == req.character_id),
+            None,
+        )
+        if profile is None:
+            raise HTTPException(status_code=404, detail=f"Unknown character: {req.character_id}")
+
+        artifact = voice_artifacts.get(req.artifact_id)
+        if artifact is None:
+            raise HTTPException(
+                status_code=404,
+                detail="This auditioned voice is no longer available; generate it again before freezing.",
+            )
+
+        # The directory comes from the discovered profile, never from the
+        # client-supplied id, so a request cannot address a path outside the
+        # persona tree.
+        persona_dir = Path(profile["persona_path"]).parent
+        voice_dir = persona_dir / "voice"
+        voice_dir.mkdir(parents=True, exist_ok=True)
+
+        # Content-addressed: designs cannot be regenerated, so re-freezing must
+        # never overwrite the WAV an older profile still points at.
+        digest = hashlib.sha256(artifact.audio).hexdigest()[:16]
+        relative_audio = f"voice/{digest}.wav"
+        audio_path = voice_dir / f"{digest}.wav"
+        if not audio_path.exists():
+            audio_temp = audio_path.with_suffix(".wav.tmp")
+            audio_temp.write_bytes(artifact.audio)
+            audio_temp.replace(audio_path)
+
+        # voice.yaml lands last so a crash can never leave a profile pointing at
+        # a WAV that does not exist yet.
+        voice_config = persona_dir / "voice.yaml"
+        document = {
+            "voice_id": profile["id"],
+            "ref_audio": relative_audio,
+            "ref_text": artifact.text,
+            "gpt_model": None,
+            "sovits_model": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "instruct": artifact.instruct,
+            "model": artifact.model,
+        }
+        config_temp = voice_config.with_suffix(".yaml.tmp")
+        config_temp.write_text(
+            yaml.safe_dump(document, allow_unicode=True, sort_keys=False, width=120),
+            encoding="utf-8",
+        )
+        config_temp.replace(voice_config)
+
+        activated = True
+        reason = None
+        try:
+            voice_reloader_tool.reload()
+        except Exception as exc:
+            activated = False
+            reason = str(exc) or exc.__class__.__name__
+
+        return {
+            "ok": True,
+            "character_id": profile["id"],
+            "voice_id": profile["id"],
+            "ref_audio": relative_audio,
+            "ref_text": artifact.text,
+            "activated": activated,
+            "reason": reason,
+        }
 
     return app
 

@@ -24,7 +24,9 @@ Character Runtime :8000
   ↓ SSE character events
 Media Runtime :8001/v1/tts
   ├─ sherpa -> local VITS
-  └─ kokoro -> :9002/v1/tts -> Kokoro
+  ├─ kokoro -> :9002/v1/tts -> Kokoro
+  ├─ edge -> :9002/v1/tts -> Microsoft Edge online TTS
+  └─ qwen3 -> :9013/v1/tts -> Qwen3-TTS
 Browser playback
 ```
 
@@ -183,7 +185,7 @@ POST :8001/v1/tts
 正式选择由 `config.yaml` / Settings Center 控制：
 
 ```yaml
-tts_provider: "kokoro"     # kokoro | sherpa
+tts_provider: "kokoro"     # kokoro | qwen3 | edge | sherpa
 tts_voice: "zf_001"
 tts_speed: 1.0
 tts_device: "cpu"          # cpu | cuda for Kokoro
@@ -200,6 +202,10 @@ Browser
 ```
 
 正式 Browser 不需要知道 provider-specific URL，也不需要增加新的跨 origin TTS contract。
+
+### Edge TTS
+
+当 `tts_provider: edge`，`:8001` 通过 `:9002` 调用 Edge TTS。它是在线 Provider，无需 API Key，但 synthesis 依赖公网。默认 voice 为 `zh-CN-XiaoxiaoNeural`。Edge 原生 MP3 会以 `audio/mpeg` 原样返回，Browser 当前 Blob/Audio 播放链可直接处理，不做额外 WAV 转码。
 
 ### Sherpa
 

@@ -29,7 +29,8 @@ Optional CosyVoice        http://127.0.0.1:9012
 
 1. **Sherpa VITS** — 通过 Media Runtime `:8001` 代理，用于试听比较；已保留本地 speaker `0 / 2 / 5`。
 2. **Kokoro 82M v1.1 zh** — 运行在主 Python 3.12 环境；voice 为 `zf_001 / zf_002 / zf_003 / zf_004`。
-3. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
+3. **Edge TTS** — Microsoft Edge 在线语音服务；主 Python 3.12 环境直接调用，无需 API Key，但 synthesis 必须联网。
+4. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
 
 ## 2. Formal chat TTS vs Lab audition
 
@@ -162,7 +163,41 @@ Lab 通过 `:8001` 调用 Sherpa，不另外加载第二份 Sherpa runtime。
 
 正式选择 Sherpa 时，`tts_voice` 应使用数字 speaker id。
 
-## 6. CosyVoice sidecar
+## 6. Edge TTS
+
+Edge TTS 作为正式可选 Provider 运行在 `:9002`，不增加独立 sidecar：
+
+```text
+Browser
+  -> :8001/v1/tts
+  -> :9002/v1/tts {provider=edge}
+  -> Microsoft Edge online TTS
+  -> MP3 (audio/mpeg)
+```
+
+依赖固定为 `edge-tts==7.2.8`，并进入 canonical `all` extra。默认中文 voice：
+
+```text
+zh-CN-XiaoxiaoNeural
+zh-CN-XiaoyiNeural
+zh-CN-YunjianNeural
+zh-CN-YunxiNeural
+zh-CN-YunyangNeural
+```
+
+Edge TTS 不需要 API Key，但不是本地模型：断网、服务端限流或上游协议变化都可能导致 synthesis 失败。Health 只验证本地 client 是否安装，不主动访问上游，以免健康检查受公网延迟影响。
+
+Edge 原生返回 MP3；Provider Runtime 与 Media Runtime 保留 `audio/mpeg`，Browser 直接通过 Blob/Audio 播放，不额外转 WAV。
+
+`tts_speed` 会映射为 Edge rate：`1.0 -> +0%`、`1.2 -> +20%`、`0.8 -> -20%`。可选环境变量：
+
+```text
+CHARACTER_TTS_EDGE_VOLUME=+0%
+CHARACTER_TTS_EDGE_PITCH=+0Hz
+CHARACTER_TTS_EDGE_PROXY=
+```
+
+## 7. CosyVoice sidecar
 
 CosyVoice 当前不是主 stack 的强制组成，也没有完成一键环境自动化。
 
@@ -195,7 +230,7 @@ CosyVoice 不可用时：
 
 如果试听和资源测量证明 CosyVoice 值得长期保留，再设计 one-click setup/start。
 
-## 7. Current manual CosyVoice setup
+## 8. Current manual CosyVoice setup
 
 当前仍可采用独立环境，例如：
 
@@ -225,7 +260,7 @@ COSYVOICE_MODEL_DIR="$(pwd)/.external/CosyVoice/pretrained_models/CosyVoice-300M
 http://127.0.0.1:9012/health
 ```
 
-## 8. Audition workflow
+## 9. Audition workflow
 
 使用同一段文本比较 Provider，重点观察：
 
@@ -242,7 +277,7 @@ Lab 展示 provider、voice、inference latency、audio duration、sample rate�
 
 多 Provider 批量生成应避免同时让大型模型争抢 RAM/VRAM；当前串行比较是合理 baseline。
 
-## 9. Decision priority
+## 10. Decision priority
 
 当前产品优先级：
 
@@ -268,7 +303,7 @@ CosyVoice fixed-speaker SFT
 
 但 benchmark 顺序不等于正式默认值；当前正式默认已经是 Kokoro `zf_001`。
 
-## 10. Testing boundary
+## 11. Testing boundary
 
 CI 可以验证：
 

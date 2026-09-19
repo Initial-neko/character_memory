@@ -166,6 +166,33 @@ class _QwenProviderClient:
             },
         )
 
+
+class _EdgeProviderClient:
+    def __init__(self):
+        self.get_calls = []
+        self.post_calls = []
+
+    def get(self, url, **kwargs):
+        self.get_calls.append((url, kwargs))
+        return _QwenProviderResponse(
+            {"provider": {"id": "edge", "ready": True, "loaded": True, "model": "Microsoft Edge Read Aloud", "device": "cloud", "network_required": True, "reason": None}}
+        )
+
+    def post(self, url, **kwargs):
+        self.post_calls.append((url, kwargs))
+        return _QwenProviderResponse(
+            content=b"ID3edge-mp3",
+            headers={
+                "content-type": "audio/mpeg",
+                "x-tts-voice": "zh-CN-XiaoxiaoNeural",
+                "x-tts-device": "cloud",
+                "x-tts-inference-ms": "155.5",
+                "x-tts-audio-ms": "1200",
+                "x-tts-sample-rate": "24000",
+            },
+        )
+
+
 def make_wav(duration_ms: int = 200, sample_rate: int = 16000) -> bytes:
     count = int(sample_rate * duration_ms / 1000)
     t = np.arange(count, dtype=np.float32) / sample_rate
@@ -282,6 +309,57 @@ def test_configured_kokoro_health_uses_selected_provider_not_local_sherpa(monkey
         ("http://127.0.0.1:9002/v1/providers/kokoro", {"timeout": 0.4})
     ]
 
+
+
+
+def test_configured_edge_health_uses_provider_runtime(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(tts_provider="edge", tts_voice="zh-CN-XiaoxiaoNeural", tts_speed=1.0, tts_device="cpu"),
+    )
+    provider_client = _EdgeProviderClient()
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        health = client.get("/health")
+
+    assert health.status_code == 200
+    payload = health.json()
+    assert payload["tts_runtime"]["ready"] is False
+    assert payload["tts"]["provider"] == "edge"
+    assert payload["tts"]["ready"] is True
+    assert payload["tts"]["device"] == "cloud"
+    assert provider_client.get_calls == [("http://127.0.0.1:9002/v1/providers/edge", {"timeout": 0.4})]
+
+
+def test_configured_edge_tts_routes_mp3_through_media_runtime(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(tts_provider="edge", tts_voice="zh-CN-XiaoxiaoNeural", tts_speed=1.0, tts_device="cpu"),
+    )
+    provider_client = _EdgeProviderClient()
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        response = client.post("/v1/tts", json={"text": "你好"})
+
+    assert response.status_code == 200
+    assert response.content == b"ID3edge-mp3"
+    assert response.headers["content-type"].startswith("audio/mpeg")
+    assert response.headers["x-media-provider"] == "edge"
+    assert response.headers["x-media-voice"] == "zh-CN-XiaoxiaoNeural"
+    assert response.headers["x-media-device"] == "cloud"
+    assert provider_client.post_calls == [
+        ("http://127.0.0.1:9002/v1/tts", {"json": {"provider": "edge", "text": "你好", "voice": "zh-CN-XiaoxiaoNeural", "speed": 1.0}})
+    ]
 
 
 def test_configured_qwen3_health_uses_isolated_sidecar(monkeypatch):

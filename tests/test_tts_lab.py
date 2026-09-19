@@ -3,7 +3,7 @@ from urllib.parse import unquote
 
 from fastapi.testclient import TestClient
 
-from character_memory.tts_lab import LabSynthesisResult, Qwen3SidecarProvider, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
+from character_memory.tts_lab import EdgeTtsProvider, LabSynthesisResult, Qwen3SidecarProvider, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
 
 
 class FakeTtsProvider:
@@ -166,6 +166,42 @@ def test_qwen3_sidecar_provider_status_and_synthesis():
         )
     ]
 
+
+def test_edge_tts_provider_streams_mp3_without_network_dependency_in_test():
+    captured = {}
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, **kwargs):
+            captured["text"] = text
+            captured["voice"] = voice
+            captured["kwargs"] = kwargs
+
+        def stream_sync(self):
+            yield {"type": "audio", "data": b"a" * 3000}
+            yield {"type": "SentenceBoundary", "offset": 0, "duration": 1}
+            yield {"type": "audio", "data": b"b" * 3000}
+
+    fake_edge = type("FakeEdge", (), {"Communicate": FakeCommunicate})
+    provider = EdgeTtsProvider(edge_module=fake_edge)
+    status = provider.status()
+    assert status["ready"] is True
+    assert status["network_required"] is True
+    assert status["default_voice"] == "zh-CN-XiaoxiaoNeural"
+
+    result = provider.synthesize("你好", voice="zh-CN-XiaoxiaoNeural", speed=1.2)
+    assert result.audio == b"a" * 3000 + b"b" * 3000
+    assert result.media_type == "audio/mpeg"
+    assert result.sample_rate == 24000
+    assert result.audio_ms == 1000.0
+    assert result.provider == "edge"
+    assert result.device == "cloud"
+    assert captured["kwargs"]["rate"] == "+20%"
+    assert captured["kwargs"]["volume"] == "+0%"
+    assert captured["kwargs"]["pitch"] == "+0Hz"
+    assert captured["kwargs"]["connect_timeout"] == 10
+    assert captured["kwargs"]["receive_timeout"] == 30
+
+
 def test_tts_lab_unknown_provider_is_a_client_error():
     app = create_tts_lab_app(TtsLabRuntime({"fake": FakeTtsProvider()}))
     with TestClient(app) as client:
@@ -217,6 +253,9 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     all_extra = pyproject.split("all = [", 1)[1].split("\n]\n", 1)[0]
     assert '"kokoro>=0.9.4,<1"' in all_extra
     assert '"misaki[zh]>=0.9.4,<1"' in all_extra
+    assert 'tts-edge = [' in pyproject
+    assert '"edge-tts==7.2.8"' in pyproject
+    assert '"edge-tts==7.2.8"' in all_extra
     assert "CosyVoice" not in all_extra
 
     assert 'REPO_ID = "hexgrad/Kokoro-82M-v1.1-zh"' in server
@@ -228,6 +267,7 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert '"http://127.0.0.1:9012"' in server
     assert '"http://127.0.0.1:9013"' in server
     assert '"qwen3": Qwen3SidecarProvider' in server
+    assert '"edge": EdgeTtsProvider' in server
     assert 'port = int(os.getenv("CHARACTER_TTS_LAB_PORT", "9002"))' in server
 
     assert "bash scripts/sync-all.sh" in setup_media

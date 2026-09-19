@@ -102,25 +102,24 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                     "reason": f"Qwen3-TTS Runtime unavailable at {qwen3_base}: {exc}",
                 }
 
-        if selected != "kokoro":
+        if selected not in {"kokoro", "edge"}:
             return {**local_tts, **base}
 
         # Query only the selected provider. Calling :9002/health would also ask
         # its Sherpa adapter to call this Media Runtime and create a health cycle.
-        # Keep this probe shorter than the stack's normal 0.8s liveness timeout:
-        # an independently running Media process must still answer /health quickly
-        # while the TTS provider process is being started or restarted.
+        # Keep this probe shorter than the stack's normal 0.8s liveness timeout.
+        provider_id = selected
         try:
-            response = provider_client.get(f"{tts_lab_base}/v1/providers/kokoro", timeout=0.4)
+            response = provider_client.get(f"{tts_lab_base}/v1/providers/{provider_id}", timeout=0.4)
             response.raise_for_status()
             provider = dict((response.json() or {}).get("provider") or {})
             return {
                 **base,
                 **provider,
-                "provider": "kokoro",
+                "provider": provider_id,
                 "voice": settings.tts_voice,
                 "speed": settings.tts_speed,
-                "device": provider.get("device") or settings.tts_device,
+                "device": provider.get("device") or ("cloud" if provider_id == "edge" else settings.tts_device),
                 "restart_required_for_config_changes": True,
             }
         except Exception as exc:
@@ -128,7 +127,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 **base,
                 "ready": False,
                 "loaded": False,
-                "reason": f"Kokoro Provider Runtime unavailable at {tts_lab_base}: {exc}",
+                "reason": f"{provider_id} Provider Runtime unavailable at {tts_lab_base}: {exc}",
             }
 
     @app.get("/health")
@@ -205,38 +204,33 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 },
             )
 
-        if configured_routing and selected == "kokoro":
-            # :9002 is both the audition UI and the local provider service in V1.
-            # Media Runtime remains the stable browser-facing TTS endpoint, so the
-            # chat page does not need provider-specific URLs or CORS rules.
-            voice = explicit_voice or str(settings.tts_voice or "zf_001")
-            # Browser Voice V0 still carries legacy speed=1.0. Treat it as formal
-            # config unless a caller also supplies an explicit voice override.
+        if configured_routing and selected in {"kokoro", "edge"}:
+            # :9002 is both the audition UI and the provider service in V1.
+            # Media Runtime remains the stable browser-facing endpoint.
+            default_voice = "zh-CN-XiaoxiaoNeural" if selected == "edge" else "zf_001"
+            voice = explicit_voice or str(settings.tts_voice or default_voice)
             speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
             try:
                 response = provider_client.post(
                     f"{tts_lab_base}/v1/tts",
-                    json={
-                        "provider": "kokoro",
-                        "text": req.text,
-                        "voice": voice,
-                        "speed": speed,
-                    },
+                    json={"provider": selected, "text": req.text, "voice": voice, "speed": speed},
                 )
             except Exception as exc:
                 raise HTTPException(
                     status_code=503,
-                    detail=f"Kokoro Provider Runtime unavailable at {tts_lab_base}: {exc}",
+                    detail=f"{selected} Provider Runtime unavailable at {tts_lab_base}: {exc}",
                 ) from exc
             if response.is_error:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
+            fallback_media_type = "audio/mpeg" if selected == "edge" else "audio/wav"
+            media_type = (response.headers.get("content-type") or fallback_media_type).split(";", 1)[0]
             return Response(
                 content=response.content,
-                media_type="audio/wav",
+                media_type=media_type,
                 headers={
-                    "X-Media-Provider": "kokoro",
+                    "X-Media-Provider": selected,
                     "X-Media-Voice": response.headers.get("x-tts-voice", voice),
-                    "X-Media-Device": response.headers.get("x-tts-device", settings.tts_device),
+                    "X-Media-Device": response.headers.get("x-tts-device", "cloud" if selected == "edge" else settings.tts_device),
                     "X-Media-Inference-Ms": response.headers.get("x-tts-inference-ms", "0"),
                     "X-Media-Audio-Ms": response.headers.get("x-tts-audio-ms", "0"),
                     "X-Media-Sample-Rate": response.headers.get("x-tts-sample-rate", "24000"),

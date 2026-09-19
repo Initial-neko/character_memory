@@ -147,6 +147,7 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
     stack = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
     media = Path("src/character_memory/media_server.py").read_text(encoding="utf-8")
+    settings_store = Path("src/character_memory/settings_store.py").read_text(encoding="utf-8")
     chat = Path("src/character_memory/web/index.html").read_text(encoding="utf-8")
     lab = Path("src/character_memory/web/tts_lab.html").read_text(encoding="utf-8")
 
@@ -157,6 +158,9 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert 'settings.tts_provider' in media
     assert '"provider": "kokoro"' in media
     assert '"provider": "qwen3"' in media
+    assert '"edge"' in media
+    assert '{"value": "edge", "label": "Microsoft Edge TTS (online)"}' in settings_store
+    assert "zh-CN-XiaoxiaoNeural" in settings_store
     assert '"http://127.0.0.1:9013"' in media
     assert 'f"{qwen3_base}/v1/tts"' in media
     assert 'http://127.0.0.1:8003/settings' in chat

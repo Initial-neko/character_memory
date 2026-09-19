@@ -29,6 +29,7 @@ class LabSynthesisResult:
     device: str
     inference_ms: float
     audio_ms: float
+    media_type: str = "audio/wav"
 
 
 class LabTtsProvider(Protocol):
@@ -350,6 +351,122 @@ class Qwen3SidecarProvider:
         )
 
 
+class EdgeTtsProvider:
+    DEFAULT_VOICES = [
+        "zh-CN-XiaoxiaoNeural",
+        "zh-CN-XiaoyiNeural",
+        "zh-CN-YunjianNeural",
+        "zh-CN-YunxiNeural",
+        "zh-CN-YunyangNeural",
+    ]
+    SAMPLE_RATE = 24000
+    BITRATE_BPS = 48000
+    MODEL = "Microsoft Edge Read Aloud"
+
+    def __init__(
+        self,
+        *,
+        edge_module=None,
+        volume: str = "+0%",
+        pitch: str = "+0Hz",
+        proxy: str | None = None,
+        connect_timeout: int = 10,
+        receive_timeout: int = 30,
+    ):
+        self._edge_module = edge_module
+        self.volume = volume or "+0%"
+        self.pitch = pitch or "+0Hz"
+        self.proxy = proxy or None
+        self.connect_timeout = int(connect_timeout)
+        self.receive_timeout = int(receive_timeout)
+
+    def _installed(self) -> bool:
+        if self._edge_module is not None:
+            return True
+        try:
+            return importlib.util.find_spec("edge_tts") is not None
+        except (ImportError, ValueError):
+            return False
+
+    def _module(self):
+        if self._edge_module is not None:
+            return self._edge_module
+        if not self._installed():
+            raise RuntimeError("Edge TTS 未安装；执行 bash scripts/sync-all.sh 或 uv sync --extra tts-edge")
+        import edge_tts
+        return edge_tts
+
+    @staticmethod
+    def _rate(speed: float) -> str:
+        percent = int(round((float(speed) - 1.0) * 100.0))
+        return f"{percent:+d}%"
+
+    def status(self) -> dict:
+        installed = self._installed()
+        return {
+            "id": "edge",
+            "label": "Microsoft Edge TTS (online)",
+            "ready": installed,
+            "loaded": installed,
+            "voices": list(self.DEFAULT_VOICES),
+            "default_voice": self.DEFAULT_VOICES[0],
+            "supports_speed": True,
+            "model": self.MODEL,
+            "device": "cloud",
+            "reason": None if installed else "Install the tts-edge extra to enable Edge TTS.",
+            "network_required": True,
+            "note": "在线 Provider，无需 API Key；合成时必须能访问 Microsoft Edge TTS 服务。",
+        }
+
+    def synthesize(self, text: str, *, voice: str, speed: float) -> LabSynthesisResult:
+        value = str(text or "").strip()
+        if not value:
+            raise ValueError("empty TTS text")
+        selected_voice = str(voice or self.DEFAULT_VOICES[0]).strip()
+        if selected_voice not in self.DEFAULT_VOICES:
+            raise ValueError(f"Unknown Edge TTS voice: {selected_voice}")
+
+        edge_tts = self._module()
+        started = time.perf_counter()
+        try:
+            communicate = edge_tts.Communicate(
+                value,
+                selected_voice,
+                rate=self._rate(speed),
+                volume=self.volume,
+                pitch=self.pitch,
+                boundary="SentenceBoundary",
+                proxy=self.proxy,
+                connect_timeout=self.connect_timeout,
+                receive_timeout=self.receive_timeout,
+            )
+            chunks: list[bytes] = []
+            for chunk in communicate.stream_sync():
+                if chunk.get("type") == "audio":
+                    data = chunk.get("data") or b""
+                    if data:
+                        chunks.append(bytes(data))
+        except Exception as exc:
+            raise RuntimeError(f"Edge TTS synthesis failed: {exc}") from exc
+
+        if not chunks:
+            raise RuntimeError("Edge TTS returned no audio")
+        audio = b"".join(chunks)
+        inference_ms = (time.perf_counter() - started) * 1000.0
+        audio_ms = len(audio) * 8.0 * 1000.0 / self.BITRATE_BPS
+        return LabSynthesisResult(
+            audio=audio,
+            sample_rate=self.SAMPLE_RATE,
+            provider="edge",
+            voice=selected_voice,
+            model=self.MODEL,
+            device="cloud",
+            inference_ms=round(inference_ms, 1),
+            audio_ms=round(audio_ms, 1),
+            media_type="audio/mpeg",
+        )
+
+
 class CosyVoiceSidecarProvider:
     def __init__(self, base_url: str = "http://127.0.0.1:9012", client: httpx.Client | None = None):
         self.base_url = base_url.rstrip("/")
@@ -420,6 +537,11 @@ class TtsLabRuntime:
             "sherpa": SherpaMediaProvider(os.getenv("CHARACTER_TTS_LAB_MEDIA_BASE", "http://127.0.0.1:8001")),
             "kokoro": KokoroProvider(os.getenv("CHARACTER_TTS_KOKORO_DEVICE", "cpu")),
             "qwen3": Qwen3SidecarProvider(os.getenv("CHARACTER_TTS_QWEN3_BASE", "http://127.0.0.1:9013")),
+            "edge": EdgeTtsProvider(
+                volume=os.getenv("CHARACTER_TTS_EDGE_VOLUME", "+0%"),
+                pitch=os.getenv("CHARACTER_TTS_EDGE_PITCH", "+0Hz"),
+                proxy=os.getenv("CHARACTER_TTS_EDGE_PROXY") or None,
+            ),
             "cosyvoice": CosyVoiceSidecarProvider(os.getenv("CHARACTER_TTS_COSYVOICE_BASE", "http://127.0.0.1:9012")),
         }
 
@@ -499,8 +621,9 @@ def create_tts_lab_app(runtime: TtsLabRuntime | None = None):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return Response(
             content=result.audio,
-            media_type="audio/wav",
+            media_type=result.media_type,
             headers={
+                "X-TTS-Media-Type": result.media_type,
                 "X-TTS-Provider": result.provider,
                 "X-TTS-Voice": quote(result.voice, safe=""),
                 "X-TTS-Model": quote(result.model, safe="/:._-"),

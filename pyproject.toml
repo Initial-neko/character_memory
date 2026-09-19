@@ -33,6 +33,11 @@ tts-kokoro = [
   "misaki[zh]>=0.9.4,<1",
   "huggingface-hub>=0.30,<2",
 ]
+# Edge TTS is an online provider. Keep the Python client explicit and pinned;
+# unlike local providers it needs network access at synthesis time.
+tts-edge = [
+  "edge-tts==7.2.8",
+]
 # Agnes uses the core httpx dependency. msimg stays opt-in when selecting only
 # the image-generation extra, but it is also part of the canonical `all` dev
 # stack below so `uv sync --extra all` keeps Voice/API/ImageGen together.
@@ -49,6 +54,7 @@ all = [
   "kokoro>=0.9.4,<1",
   "misaki[zh]>=0.9.4,<1",
   "huggingface-hub>=0.30,<2",
+  "edge-tts==7.2.8",
   "msimg==0.0.4",
   "streamlit>=1.37,<2",
   "pytest==9.1.1",

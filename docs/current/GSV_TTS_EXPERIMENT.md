@@ -49,7 +49,7 @@ Defaults:
     host = 127.0.0.1
     port = 9014
     device = cuda
-    voice = gsv-default
+    voice = murasame
     language = zh
     prompt_language = auto
     preload = 1 when scripts/start-gsv-tts.sh is used
@@ -135,4 +135,4 @@ Formal GSV routing is intentionally minimal:
 - TTS Lab remains the place to audition GSV and other providers;
 - the formal route uses one configured GSV voice (default `murasame`).
 
-This phase still does **not** implement per-character voice profiles, a voice registry, Qwen3-to-reference asset generation, SSE/WebRTC/chunked TTS, or model/reference asset management. Those remain optional follow-up work after the provider proves useful in real chat.
+This phase still does **not** implement per-character voice profiles, a voice registry, Qwen3-to-reference asset generation, SSE/WebRTC/chunked TTS, or model/reference asset management. Qwen3 VoiceDesign is explicitly deferred for now because it is not required for GSV operation and would add GPU/VRAM pressure. Reference audio may continue to come from any practical source; no specific voice-generation model is a dependency of GSV.

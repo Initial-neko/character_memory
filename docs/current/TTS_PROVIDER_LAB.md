@@ -9,7 +9,7 @@ Provider Runtime
   -> 正式 Kokoro synthesis API
 
 Lab UI
-  -> Sherpa / Kokoro / CosyVoice audition
+  -> Sherpa / Kokoro / Edge / Qwen3 / GSV / CosyVoice audition
 ```
 
 如果未来两者生命周期、资源或部署需求明显分离，再在大版本拆开；当前不为了架构美观制造额外进程。
@@ -32,7 +32,7 @@ GSV-TTS-Lite sidecar      http://127.0.0.1:9014
 1. **Sherpa VITS** — 通过 Media Runtime `:8001` 代理，用于试听比较；已保留本地 speaker `0 / 2 / 5`。
 2. **Kokoro 82M v1.1 zh** — 运行在主 Python 3.12 环境；voice 为 `zf_001 / zf_002 / zf_003 / zf_004`。
 3. **Edge TTS** — Microsoft Edge 在线语音服务；主 Python 3.12 环境直接调用，无需 API Key，但 synthesis 必须联网。
-4. **Qwen3-TTS 0.6B** — 独立 CUDA sidecar，默认 `:9013`。
+4. **Qwen3-TTS 0.6B** — 独立 CUDA sidecar，默认 `:9013`；当前保留 CustomVoice / 可选 Base clone，VoiceDesign 暂缓。
 5. **GSV-TTS-Lite** — 独立 Python 3.12/CUDA sidecar，默认 `:9014`；既可在 Lab 试听，也可通过 `tts_provider: gsv` 进入正式聊天路由。
 6. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
 
@@ -201,7 +201,27 @@ CHARACTER_TTS_EDGE_PITCH=+0Hz
 CHARACTER_TTS_EDGE_PROXY=
 ```
 
-## 7. GSV-TTS-Lite sidecar
+## 7. Qwen3-TTS current boundary
+
+当前 `:9013` 使用已经集成的 Qwen3-TTS 0.6B 路径：
+
+- CustomVoice 固定 speaker；
+- 可选 0.6B Base voice clone；
+- sidecar request 已具备 `instruct` 字段，但当前 Lab UI 不暴露 Prompt/风格描述输入。
+
+暂不建设以下能力：
+
+- Qwen3-TTS VoiceDesign；
+- Prompt -> 新声线生成；
+- “AI 润色声线描述”按钮；
+- 自动把 Qwen3 生成音频固化成 GSV reference；
+- 新的 voice asset registry/workflow。
+
+原因是当前优先级是先稳定使用 GSV 正式聊天 TTS，同时控制本地 GPU/VRAM 占用。以后重新评估 VoiceDesign 时，AI 润色必须复用 Character Memory 标准 LLM 的 `OPENCODE_GO_API_KEY + base_url + chat_model`，不增加第二套 Key。
+
+详细 Qwen3 runtime 说明见 `docs/current/QWEN3_TTS_EXPERIMENT.md`。
+
+## 8. GSV-TTS-Lite sidecar
 
 GSV-TTS-Lite 保留 Lab 试听能力，同时已接入正式 Browser TTS：
 
@@ -242,7 +262,7 @@ uv run character-tts-lab
 
 详细 contract 见 `docs/current/GSV_TTS_EXPERIMENT.md`。当前正式接入只使用一个配置好的 GSV voice；多角色 voice registry 与 Qwen3 reference 生成流程留到后续。
 
-## 8. CosyVoice sidecar
+## 9. CosyVoice sidecar
 
 CosyVoice 当前不是主 stack 的强制组成，也没有完成一键环境自动化。
 
@@ -275,7 +295,7 @@ CosyVoice 不可用时：
 
 如果试听和资源测量证明 CosyVoice 值得长期保留，再设计 one-click setup/start。
 
-## 9. Current manual CosyVoice setup
+## 10. Current manual CosyVoice setup
 
 当前仍可采用独立环境，例如：
 
@@ -305,7 +325,7 @@ COSYVOICE_MODEL_DIR="$(pwd)/.external/CosyVoice/pretrained_models/CosyVoice-300M
 http://127.0.0.1:9012/health
 ```
 
-## 10. Audition workflow
+## 11. Audition workflow
 
 使用同一段文本比较 Provider，重点观察：
 
@@ -322,7 +342,7 @@ Lab 展示 provider、voice、inference latency、audio duration、sample rate�
 
 多 Provider 批量生成应避免同时让大型模型争抢 RAM/VRAM；当前串行比较是合理 baseline。
 
-## 11. Decision priority
+## 12. Decision priority
 
 当前产品优先级：
 
@@ -348,7 +368,7 @@ CosyVoice fixed-speaker SFT
 
 但 benchmark 顺序不等于正式默认值；当前正式默认已经是 Kokoro `zf_001`。
 
-## 12. Testing boundary
+## 13. Testing boundary
 
 CI 可以验证：
 

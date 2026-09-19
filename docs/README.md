@@ -41,8 +41,9 @@ docs/
 - [`current/MEDIA_RUNTIME.md`](current/MEDIA_RUNTIME.md) — SenseVoice ASR、正式 TTS 路由与 Windows runtime 边界。
 - [`current/DEV_CONSOLE.md`](current/DEV_CONSOLE.md) — `:8002/dev` 的统一开发测试入口。
 - [`current/SETTINGS_CENTER.md`](current/SETTINGS_CENTER.md) — `:8003/settings` 的配置、`.env` Secret、迁移与 backup contract。
-- [`current/TTS_PROVIDER_LAB.md`](current/TTS_PROVIDER_LAB.md) — `:9002` Provider Runtime + Lab，Kokoro/Sherpa/CosyVoice 边界。
-- [`current/GSV_TTS_EXPERIMENT.md`](current/GSV_TTS_EXPERIMENT.md) — `:9014` GSV-TTS-Lite Lab-only sidecar、环境变量与验收边界。
+- [`current/TTS_PROVIDER_LAB.md`](current/TTS_PROVIDER_LAB.md) — `:9002` Provider Runtime + Lab，多 TTS Provider 试听与当前边界。
+- [`current/QWEN3_TTS_EXPERIMENT.md`](current/QWEN3_TTS_EXPERIMENT.md) — `:9013` Qwen3-TTS 0.6B sidecar、CustomVoice/Base clone；VoiceDesign 当前暂缓。
+- [`current/GSV_TTS_EXPERIMENT.md`](current/GSV_TTS_EXPERIMENT.md) — `:9014` GSV-TTS-Lite sidecar、正式聊天路由、环境变量与当前边界。
 - [`current/AVATAR_SEARCH.md`](current/AVATAR_SEARCH.md) — Avatar Search 与隐私边界。
 - [`current/EVALS.md`](current/EVALS.md) — Eval 与 regression 方向。
 
@@ -58,7 +59,7 @@ docs/
 :9002 TTS Provider Runtime + Lab
 ```
 
-可选 sidecar：CosyVoice `:9012`、Qwen3-TTS `:9013`、GSV-TTS-Lite Lab experiment `:9014`；都不属于主 stack 的强制依赖。
+可选 sidecar：CosyVoice `:9012`、Qwen3-TTS `:9013`、GSV-TTS-Lite `:9014`。Qwen3/GSV 仅在对应 Provider 被选择或单独实验时需要；Qwen3 VoiceDesign 当前不属于运行栈。
 
 ## Research
 

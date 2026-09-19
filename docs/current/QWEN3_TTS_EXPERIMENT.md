@@ -2,6 +2,8 @@
 
 Qwen3-TTS is a formal Character Memory TTS provider, while its Torch/CUDA runtime stays isolated in a dedicated sidecar.
 
+Current product position: keep the existing 0.6B CustomVoice / optional Base clone path available for audition and experiments. Qwen3-TTS VoiceDesign is **deferred** for now and is not part of the current TTS Lab or formal chat acceptance scope.
+
 ## Scope
 
 - isolated sidecar on 127.0.0.1:9013
@@ -12,6 +14,7 @@ Qwen3-TTS is a formal Character Memory TTS provider, while its Torch/CUDA runtim
 - explicit model load endpoint and lazy first-request loading
 - latency, RTF and VRAM benchmark
 - optional Base-model voice-clone mode
+- current CustomVoice request contract already supports `instruct`, but the TTS Lab UI does not expose a voice-style prompt field yet
 
 It is wired into config.yaml, Media Runtime, browser voice calls, Settings Center and the normal Character Memory stack.
 
@@ -83,6 +86,35 @@ The same sidecar supports the Base checkpoint. Start it with a reference WAV:
     QWEN3_TTS_MODEL=Qwen/Qwen3-TTS-12Hz-0.6B-Base QWEN3_TTS_REF_AUDIO=/c/path/to/reference.wav QWEN3_TTS_REF_TEXT='参考音频对应的准确文本。' bash scripts/start-qwen3-tts.sh --preload
 
 If QWEN3_TTS_REF_TEXT is omitted, the sidecar builds an x-vector-only clone prompt. This is simpler but may reduce clone fidelity.
+
+## VoiceDesign status — deferred
+
+Qwen3-TTS VoiceDesign is intentionally **not being integrated now**.
+
+The intended future use case is attractive:
+
+```text
+natural-language voice description
+  -> optional Character Memory standard LLM polish
+  -> Qwen3-TTS VoiceDesign
+  -> audition WAV
+  -> optionally use the accepted WAV as a GSV reference
+```
+
+However, this is not a current requirement. The present machine/runtime budget is already tight enough that adding another larger GPU-resident TTS model would complicate validation and may exceed practical VRAM headroom alongside Character Memory, GSV and other local workloads.
+
+Therefore the current boundary is:
+
+- do not download or preload a VoiceDesign checkpoint as part of the normal stack;
+- do not add a VoiceDesign endpoint to `:9013`;
+- do not add Voice Design / Prompt-to-Voice controls to `:9002/tts`;
+- do not add the planned AI prompt-polish button yet;
+- do not make Qwen3-generated reference audio a dependency of GSV;
+- keep the idea documented so it can be revisited when GPU memory or model/runtime choices improve.
+
+If this is revisited later, AI prompt polishing should reuse Character Memory's standard LLM configuration (`OPENCODE_GO_API_KEY`, `base_url`, `chat_model`) rather than introduce a second API key or LLM configuration.
+
+This deferral does **not** remove the existing Qwen3 provider. The current 0.6B CustomVoice and optional Base clone modes remain available exactly as implemented.
 
 ## Acceptance questions
 

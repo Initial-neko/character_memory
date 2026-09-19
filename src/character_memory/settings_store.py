@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 from character_memory.config import Settings, load_settings
-from character_memory.envfile import delete_env_value, env_source, parse_env_file, upsert_env_value
+from character_memory.envfile import delete_env_value, effective_env_value, env_source, parse_env_file, upsert_env_value
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,21 @@ LEGACY_SECRET_FIELDS = {
     item.legacy_field for item in SECRET_SPECS if item.legacy_field is not None
 }
 
+GSV_RUNTIME_FIELDS = {
+    "GSV_TTS_GPT_MODEL",
+    "GSV_TTS_SOVITS_MODEL",
+    "GSV_TTS_REF_AUDIO",
+    "GSV_TTS_REF_TEXT",
+    "GSV_TTS_VOICE",
+}
+HOT_APPLY_FIELDS = {
+    "tts_provider",
+    "tts_voice",
+    "tts_speed",
+    "tts_device",
+    *GSV_RUNTIME_FIELDS,
+}
+
 
 SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
@@ -56,7 +71,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
         "id": "voice",
         "title": "Voice",
-        "description": "正式实时聊天 TTS。Provider/Voice 由当前健康检查动态约束；未通过健康检查的 Provider 不可选择。Qwen3-TTS 不属于正式 Provider。保存后重启 stack 生效。",
+        "description": "正式实时聊天 TTS。Provider/Voice 由当前健康检查动态约束；未通过健康检查的 Provider 不可选择。Qwen3-TTS 不属于正式 Provider。TTS 选择保存后热生效，无需重启整个 stack。",
         "fields": [
             {
                 "name": "tts_provider",
@@ -98,6 +113,48 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                     {"value": "cpu", "label": "CPU"},
                     {"value": "cuda", "label": "CUDA"},
                 ],
+            },
+        ],
+    },
+    {
+        "id": "gsv-runtime",
+        "title": "GSV-TTS-Lite Runtime",
+        "description": "GSV 本地资产配置，持久化到项目 .env，不写入 config.yaml。四个资产字段必须配置完整后 GSV 才会通过健康检查；保存后热配置 sidecar，无需重启整个 stack。",
+        "fields": [
+            {
+                "name": "GSV_TTS_GPT_MODEL",
+                "label": "GPT Model (.ckpt)",
+                "type": "text",
+                "storage": "env",
+                "placeholder": "C:/path/to/Murasame-e15.ckpt",
+            },
+            {
+                "name": "GSV_TTS_SOVITS_MODEL",
+                "label": "SoVITS Model (.pth)",
+                "type": "text",
+                "storage": "env",
+                "placeholder": "C:/path/to/Murasame_e8_s192.pth",
+            },
+            {
+                "name": "GSV_TTS_REF_AUDIO",
+                "label": "Reference Audio (.wav)",
+                "type": "text",
+                "storage": "env",
+                "placeholder": "C:/path/to/reference.wav",
+            },
+            {
+                "name": "GSV_TTS_REF_TEXT",
+                "label": "Reference Text",
+                "type": "text",
+                "storage": "env",
+                "placeholder": "与 reference.wav 完全一致的参考文本",
+            },
+            {
+                "name": "GSV_TTS_VOICE",
+                "label": "Voice Name",
+                "type": "text",
+                "storage": "env",
+                "placeholder": "murasame",
             },
         ],
     },
@@ -165,11 +222,19 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
     },
 ]
 
-EDITABLE_FIELDS = {
+CONFIG_EDITABLE_FIELDS = {
     field["name"]
     for section in SETTINGS_SCHEMA
     for field in section["fields"]
+    if field.get("storage") != "env"
 }
+ENV_EDITABLE_FIELDS = {
+    field["name"]
+    for section in SETTINGS_SCHEMA
+    for field in section["fields"]
+    if field.get("storage") == "env"
+}
+EDITABLE_FIELDS = CONFIG_EDITABLE_FIELDS | ENV_EDITABLE_FIELDS
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -322,28 +387,44 @@ class SettingsStore:
         if unknown:
             raise ValueError(f"unsupported setting fields: {', '.join(unknown)}")
 
-        # Validate against the complete effective model before writing anything.
-        current = load_settings(str(self.config_path)).model_dump()
-        candidate = dict(current)
-        candidate.update(values)
-        validated = Settings.model_validate(candidate)
-        normalized = {key: getattr(validated, key) for key in values}
+        config_updates = {key: value for key, value in values.items() if key in CONFIG_EDITABLE_FIELDS}
+        env_updates = {key: str(value or "").strip() for key, value in values.items() if key in ENV_EDITABLE_FIELDS}
+
+        normalized_config: dict[str, Any] = {}
+        if config_updates:
+            current = load_settings(str(self.config_path)).model_dump()
+            candidate = dict(current)
+            candidate.update(config_updates)
+            validated = Settings.model_validate(candidate)
+            normalized_config = {key: getattr(validated, key) for key in config_updates}
 
         original_text = self._config_text()
-        updated_text = _patch_flat_yaml(original_text, normalized)
-        if updated_text == original_text:
+        updated_text = _patch_flat_yaml(original_text, normalized_config) if normalized_config else original_text
+        config_changed = updated_text != original_text
+
+        env_before = parse_env_file(self.env_path)
+        changed_env = {
+            key: value
+            for key, value in env_updates.items()
+            if env_before.get(key, "") != value
+        }
+
+        if not config_changed and not changed_env:
             return {"changed": False, "backup": None, "updated": [], "restart_required": []}
 
-        backup = self._write_backup(original_text) if original_text else None
-        _atomic_write(self.config_path, updated_text)
-        updated = sorted(normalized)
+        backup = self._write_backup(original_text) if config_changed and original_text else None
+        if config_changed:
+            _atomic_write(self.config_path, updated_text)
+        for key, value in changed_env.items():
+            upsert_env_value(self.env_path, key, value)
+
+        updated = sorted([*normalized_config.keys(), *changed_env.keys()])
+        restart_required = sorted(field for field in updated if field not in HOT_APPLY_FIELDS)
         return {
             "changed": True,
             "backup": str(backup) if backup else None,
             "updated": updated,
-            # V1 favors correctness over partial hot reload. Every process reads
-            # config at startup, so all persisted changes are explicit restart work.
-            "restart_required": updated,
+            "restart_required": restart_required,
         }
 
     def save_secret(self, name: str, value: str) -> dict[str, Any]:
@@ -397,13 +478,16 @@ class SettingsStore:
 
     def snapshot(self) -> dict[str, Any]:
         settings = load_settings(str(self.config_path))
-        values = {name: getattr(settings, name) for name in EDITABLE_FIELDS}
+        values = {name: getattr(settings, name) for name in CONFIG_EDITABLE_FIELDS}
+        for name in ENV_EDITABLE_FIELDS:
+            fallback = "murasame" if name == "GSV_TTS_VOICE" else ""
+            values[name] = effective_env_value(name, self.env_path, fallback)
         return {
             "config_path": str(self.config_path),
             "env_path": str(self.env_path),
             "values": values,
             "schema": SETTINGS_SCHEMA,
             "secrets": self.secret_statuses(),
-            "restart_policy": "V1 saves persist immediately but running services must be restarted to consume changed config.",
+            "restart_policy": "TTS selection and GSV runtime settings hot-apply. Other runtime/storage changes may still require service restart.",
             "last_migration": self.last_migration,
         }

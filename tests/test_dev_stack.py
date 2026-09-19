@@ -68,11 +68,18 @@ def test_dev_stack_declares_gsv_sidecar_startup():
     assert '"CHARACTER_TTS_GSV_BASE"' in script
 
 
-def test_dev_stack_keeps_gsv_health_checkable_without_preloading():
+def test_dev_stack_keeps_gsv_health_checkable_without_requiring_runtime_assets():
     script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
     assert '"Qwen3-TTS Runtime"' not in script
-    assert 'gsv_available = gsv_python.is_file() and not missing_gsv' in script
-    assert 'gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" else "0"' in script
+    assert 'if gsv_python.is_file()' in script
+    assert 'gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" and not missing_gsv else "0"' in script
+    assert 'Settings Center can configure them without restarting the stack' in script
     assert 'gsv_env["GSV_TTS_DEVICE"] = tts_device' in script
     assert 'gsv_env.setdefault("GSV_TTS_VOICE"' in script
     assert 'media_env["CHARACTER_MEDIA_TTS_DEVICE"] = tts_device' in script
+
+
+def test_dev_stack_reads_project_dotenv_with_system_environment_override():
+    script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
+    assert 'parse_env_file' in script
+    assert 'base_env = {**file_env, **os.environ}' in script

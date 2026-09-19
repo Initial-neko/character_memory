@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 from dataclasses import dataclass
 import importlib.util
 import io
@@ -17,7 +18,7 @@ from pydantic import BaseModel, Field
 
 
 DEFAULT_PORT = 9014
-DEFAULT_VOICE = "gsv-default"
+DEFAULT_VOICE = "murasame"
 DEFAULT_SAMPLE_RATE = 32000
 
 
@@ -41,6 +42,19 @@ class GsvTtsRequest(BaseModel):
     voice: str = Field(default=DEFAULT_VOICE, max_length=128)
     language: str = Field(default="zh", max_length=16)
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
+class GsvRuntimeConfigRequest(BaseModel):
+    gpt_model: str | None = None
+    sovits_model: str | None = None
+    ref_audio: str | None = None
+    ref_text: str | None = None
+    device: str | None = None
+    models_dir: str | None = None
+    voice: str | None = None
+    language: str | None = None
+    prompt_language: str | None = None
+    preload: bool = False
 
 
 def float_audio_to_wav(samples: np.ndarray, sample_rate: int) -> bytes:
@@ -260,6 +274,76 @@ class GsvTtsRuntime:
                 self._load_error = str(exc)
                 raise RuntimeError(f"GSV-TTS-Lite load failed: {exc}") from exc
 
+    def unload(self) -> dict:
+        with self._lock:
+            engine = self._tts
+            self._tts = None
+            self._load_error = None
+            self._load_ms = None
+            if engine is not None:
+                del engine
+            gc.collect()
+            torch = self._torch
+            if torch is not None and self._device().startswith("cuda"):
+                try:
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+            return {**self.status(), "unloaded": True}
+
+    def configure(self, request: GsvRuntimeConfigRequest) -> dict:
+        updates = {
+            "gpt_model": request.gpt_model,
+            "sovits_model": request.sovits_model,
+            "ref_audio": request.ref_audio,
+            "ref_text": request.ref_text,
+            "device_requested": request.device,
+            "models_dir": request.models_dir,
+            "default_voice": request.voice,
+            "default_language": request.language,
+            "prompt_language": request.prompt_language,
+        }
+        changed: list[str] = []
+        with self._lock:
+            for attr, raw in updates.items():
+                if raw is None:
+                    continue
+                value = str(raw).strip()
+                if attr == "default_voice":
+                    value = value or DEFAULT_VOICE
+                elif attr == "default_language":
+                    value = value or "zh"
+                elif attr == "prompt_language":
+                    value = value or "auto"
+                elif attr == "device_requested":
+                    value = value or "cuda"
+                if getattr(self, attr) != value:
+                    setattr(self, attr, value)
+                    changed.append(attr)
+
+            if changed and self._tts is not None:
+                engine = self._tts
+                self._tts = None
+                self._load_error = None
+                self._load_ms = None
+                del engine
+                gc.collect()
+                torch = self._torch
+                if torch is not None:
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+            elif changed:
+                self._load_error = None
+                self._load_ms = None
+
+        status = self.status()
+        if request.preload and status.get("ready"):
+            status = self.load()
+        return {**status, "changed": changed}
+
     def synthesize(self, request: GsvTtsRequest) -> GsvTtsResult:
         value = request.text.strip()
         if not value:
@@ -355,6 +439,20 @@ def create_gsv_tts_app(runtime: GsvTtsRuntime | None = None):
     def load():
         try:
             return engine.load()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/v1/configure")
+    def configure(request: GsvRuntimeConfigRequest):
+        try:
+            return engine.configure(request)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/v1/unload")
+    def unload():
+        try:
+            return engine.unload()
         except (RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 

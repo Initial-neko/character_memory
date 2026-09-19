@@ -157,3 +157,37 @@ GET    /v1/runtime-status
 ```
 
 Secret mutation endpoints accept only the explicit allowlist in `settings_store.py`. Existing secret values are never returned by the API.
+
+
+## TTS hot-apply and GSV runtime persistence
+
+Formal TTS selection stays in `config.yaml`:
+
+```yaml
+tts_provider: gsv
+tts_voice: murasame
+tts_speed: 1.0
+tts_device: cuda
+```
+
+GSV model/reference assets are provider runtime configuration and are persisted separately in the project-local `.env`:
+
+```text
+GSV_TTS_GPT_MODEL
+GSV_TTS_SOVITS_MODEL
+GSV_TTS_REF_AUDIO
+GSV_TTS_REF_TEXT
+GSV_TTS_VOICE
+```
+
+Settings Center edits these values without replacing the rest of `.env`; `upsert_env_value` updates only the named key and preserves unrelated variables. The YAML editor likewise patches only changed top-level fields and preserves comments/unknown keys.
+
+TTS changes no longer require restarting the whole stack:
+
+- Media Runtime reloads `tts_provider / tts_voice / tts_speed / tts_device` from the config file for each TTS request and health response.
+- GSV sidecar exposes `POST /v1/configure`, `POST /v1/load`, and `POST /v1/unload`.
+- Saving GSV model/reference fields pushes the new values into the already-running `:9014` process.
+- Selecting GSV loads it immediately; switching away unloads GSV to release VRAM.
+- `character-stack` reads project `.env` on startup and starts the GSV sidecar whenever its isolated venv exists, even when the asset fields are still incomplete. Incomplete GSV configuration therefore disables GSV instead of preventing Settings Center from starting.
+
+Other non-TTS runtime/storage settings may still report `restart_required`; only those fields require process restart.

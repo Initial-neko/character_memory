@@ -138,3 +138,20 @@ Formal GSV routing is intentionally minimal:
 `GSV_TTS_VOICE` names the sidecar/reference voice exposed in health; it is not a second formal-chat voice selector. Settings reads that health inventory and persists the selected value into `tts_voice`.
 
 This phase still does **not** implement per-character voice profiles, a voice registry, Qwen3-to-reference asset generation, SSE/WebRTC/chunked TTS, or model/reference asset management. Qwen3 VoiceDesign is explicitly deferred for now because it is not required for GSV operation and would add GPU/VRAM pressure. Reference audio may continue to come from any practical source; no specific voice-generation model is a dependency of GSV.
+
+
+## Runtime configuration ownership
+
+`config.yaml` does not own GSV model assets. It only selects the formal TTS provider/voice/speed/device.
+
+The five GSV runtime values are persisted in the adjacent project `.env` through Settings Center:
+
+```text
+GSV_TTS_GPT_MODEL
+GSV_TTS_SOVITS_MODEL
+GSV_TTS_REF_AUDIO
+GSV_TTS_REF_TEXT
+GSV_TTS_VOICE
+```
+
+The sidecar can start with these fields missing and report `ready=false`. Settings Center may then configure the running sidecar through `POST /v1/configure`; no full-stack restart is required. Model/reference changes unload the old engine before loading the new one, while switching away from GSV uses `POST /v1/unload` to release GPU memory.

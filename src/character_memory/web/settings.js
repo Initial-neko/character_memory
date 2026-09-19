@@ -398,7 +398,12 @@
       renderSecrets(payload.settings);
       const result = payload.result || {};
       if (result.changed) {
-        showNotice(`配置已保存。Backup: ${result.backup || "首次创建，无旧文件"}\n需要重启 stack 才会由各 Runtime 重新加载。`);
+        const restart = result.restart_required || [];
+        if (restart.length) {
+          showNotice(`配置已保存。以下字段需要重启相关 Runtime 才完全生效：${restart.join(", ")}。`);
+        } else {
+          showNotice("配置已保存并已热生效，无需重启整个 stack。");
+        }
       } else {
         showNotice("配置没有变化。", false);
       }

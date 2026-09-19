@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
-from character_memory.settings_store import SettingsStore
+from character_memory.settings_store import GSV_RUNTIME_FIELDS, SettingsStore
 
 
 FORMAL_TTS_PROVIDER_IDS = ("kokoro", "sherpa", "edge", "gsv")
@@ -49,6 +49,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
         "media": os.getenv("CHARACTER_SETTINGS_MEDIA_BASE", "http://127.0.0.1:8001").rstrip("/"),
         "dev": os.getenv("CHARACTER_SETTINGS_DEV_BASE", "http://127.0.0.1:8002").rstrip("/"),
         "tts_lab": os.getenv("CHARACTER_SETTINGS_TTS_LAB_BASE", "http://127.0.0.1:9002").rstrip("/"),
+        "gsv": os.getenv("CHARACTER_SETTINGS_GSV_BASE", "http://127.0.0.1:9014").rstrip("/"),
     }
     owns_client = runtime_http_client is None
     client = runtime_http_client or httpx.Client(timeout=3.0)
@@ -100,6 +101,43 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                     }
                 )
         return {"ok": not errors, "providers": providers, "error": "; ".join(errors) if errors else None}
+
+    def _gsv_payload(values: dict[str, Any] | None = None, *, preload: bool | None = None) -> dict[str, Any]:
+        snapshot = settings_store.snapshot()["values"]
+        merged = dict(snapshot)
+        if values:
+            merged.update(values)
+        payload = {
+            "gpt_model": str(merged.get("GSV_TTS_GPT_MODEL") or "").strip(),
+            "sovits_model": str(merged.get("GSV_TTS_SOVITS_MODEL") or "").strip(),
+            "ref_audio": str(merged.get("GSV_TTS_REF_AUDIO") or "").strip(),
+            "ref_text": str(merged.get("GSV_TTS_REF_TEXT") or "").strip(),
+            "voice": str(merged.get("GSV_TTS_VOICE") or "murasame").strip() or "murasame",
+            "device": (str(merged.get("tts_device") or "cuda").strip() or "cuda") if str(merged.get("tts_provider") or "").strip().lower() == "gsv" else "cuda",
+        }
+        if preload is not None:
+            payload["preload"] = bool(preload)
+        return payload
+
+    def _configure_gsv(values: dict[str, Any], *, preload: bool) -> dict[str, Any]:
+        response = client.post(
+            runtime_urls["gsv"] + "/v1/configure",
+            json=_gsv_payload(values, preload=preload),
+            timeout=180.0,
+        )
+        response.raise_for_status()
+        return response.json() or {}
+
+    def _load_gsv() -> None:
+        response = client.post(runtime_urls["gsv"] + "/v1/load", timeout=180.0)
+        response.raise_for_status()
+
+    def _unload_gsv() -> None:
+        try:
+            response = client.post(runtime_urls["gsv"] + "/v1/unload", timeout=10.0)
+            response.raise_for_status()
+        except Exception:
+            pass
 
     def settings_snapshot() -> dict[str, Any]:
         snapshot = settings_store.snapshot()
@@ -238,11 +276,38 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
     @app.patch("/v1/settings")
     def patch_settings(req: SettingsPatch):
         try:
-            values = validated_tts_values(req.values)
+            raw_values = dict(req.values)
+            before = settings_store.snapshot()["values"]
+            before_provider = str(before.get("tts_provider") or "").strip().lower()
+            requested_provider = str(raw_values.get("tts_provider", before_provider) or "").strip().lower()
+            if requested_provider == "gsv" and before_provider != "gsv":
+                # Do not inherit a stale CPU setting from Kokoro/Sherpa when
+                # switching into the validated realtime GSV CUDA path.
+                raw_values["tts_device"] = "cuda"
+            gsv_updates = set(raw_values) & GSV_RUNTIME_FIELDS
+
+            # Configure the already-running GSV sidecar before provider health
+            # validation. This lets one Save action fill the missing GSV assets
+            # and select GSV without restarting the whole stack.
+            if gsv_updates:
+                _configure_gsv(raw_values, preload=requested_provider == "gsv")
+
+            values = validated_tts_values(raw_values)
             result = settings_store.save_values(values)
+
+            after = settings_store.snapshot()["values"]
+            after_provider = str(after.get("tts_provider") or "").strip().lower()
+            if after_provider == "gsv" and not gsv_updates:
+                _load_gsv()
+            elif before_provider == "gsv" and after_provider != "gsv":
+                _unload_gsv()
+
             return {"ok": True, "result": result, "settings": settings_snapshot()}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text or str(exc)
+            raise HTTPException(status_code=400, detail=f"GSV runtime configuration failed: {detail}") from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"保存配置失败：{exc}") from exc
 

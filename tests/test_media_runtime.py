@@ -218,6 +218,64 @@ class _GsvProviderClient:
         )
 
 
+class _SwitchingProviderClient:
+    def __init__(self):
+        self.post_calls = []
+
+    def get(self, url, **kwargs):
+        provider = url.rsplit("/", 1)[-1]
+        if provider == "gsv":
+            payload = {
+                "provider": {
+                    "id": "gsv",
+                    "ready": True,
+                    "loaded": True,
+                    "model": "fake-gsv",
+                    "device": "cuda:0",
+                    "voices": ["murasame"],
+                    "default_voice": "murasame",
+                    "reason": None,
+                }
+            }
+        else:
+            payload = {
+                "provider": {
+                    "id": "kokoro",
+                    "ready": True,
+                    "loaded": True,
+                    "model": "fake-kokoro",
+                    "device": "cpu",
+                    "voices": ["zf_001"],
+                    "default_voice": "zf_001",
+                    "reason": None,
+                }
+            }
+        return _QwenProviderResponse(payload)
+
+    def post(self, url, **kwargs):
+        self.post_calls.append((url, kwargs))
+        provider = kwargs["json"]["provider"]
+        if provider == "gsv":
+            return _QwenProviderResponse(
+                content=b"RIFFgsv-hot",
+                headers={
+                    "content-type": "audio/wav",
+                    "x-tts-voice": "murasame",
+                    "x-tts-device": "cuda:0",
+                    "x-tts-sample-rate": "32000",
+                },
+            )
+        return _QwenProviderResponse(
+            content=b"RIFFkokoro-hot",
+            headers={
+                "content-type": "audio/wav",
+                "x-tts-voice": "zf_001",
+                "x-tts-device": "cpu",
+                "x-tts-sample-rate": "24000",
+            },
+        )
+
+
 def make_wav(duration_ms: int = 200, sample_rate: int = 16000) -> bytes:
     count = int(sample_rate * duration_ms / 1000)
     t = np.arange(count, dtype=np.float32) / sample_rate
@@ -437,6 +495,44 @@ def test_configured_gsv_tts_routes_wav_through_media_runtime(monkeypatch):
     assert provider_client.post_calls == [
         ("http://127.0.0.1:9002/v1/tts", {"json": {"provider": "gsv", "text": "你好", "voice": "murasame", "speed": 1.0}})
     ]
+
+
+def test_formal_tts_selection_hot_reloads_config_without_recreating_media_app(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    state = {
+        "tts_provider": "kokoro",
+        "tts_voice": "zf_001",
+        "tts_speed": 1.0,
+        "tts_device": "cpu",
+    }
+    monkeypatch.setattr(media_server, "load_settings", lambda _path: SimpleNamespace(**state))
+    provider_client = _SwitchingProviderClient()
+
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        first = client.post("/v1/tts", json={"text": "第一句"})
+        assert first.status_code == 200
+        assert first.headers["x-media-provider"] == "kokoro"
+        assert first.content == b"RIFFkokoro-hot"
+
+        state.update(
+            tts_provider="gsv",
+            tts_voice="murasame",
+            tts_speed=1.0,
+            tts_device="cuda",
+        )
+        second = client.post("/v1/tts", json={"text": "第二句"})
+        assert second.status_code == 200
+        assert second.headers["x-media-provider"] == "gsv"
+        assert second.headers["x-media-voice"] == "murasame"
+        assert second.content == b"RIFFgsv-hot"
+
+        health = client.get("/health")
+        assert health.json()["tts"]["provider"] == "gsv"
+        assert health.json()["tts"]["restart_required_for_config_changes"] is False
 
 
 def test_unknown_tts_provider_is_rejected_not_silently_downgraded(monkeypatch):

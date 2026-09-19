@@ -22,7 +22,7 @@ embedding_model: "BAAI/bge-small-zh-v1.5"
 tts_provider: "kokoro"       # kokoro | edge | gsv | sherpa
 tts_voice: "zf_001"          # Provider-specific voice selected from the healthy provider inventory in Settings
 tts_speed: 1.0               # Edge maps 0.5..2.0 to -50%..+100%
-tts_device: "cpu"            # Used by local providers where supported; Edge is cloud and ignores this field
+tts_device: "cpu"            # Formal provider selection only; GSV assets live in project .env and hot-configure :9014
 
 # Image search provider for avatar candidates. Keys live in .env.
 search_provider: "searchapi"
@@ -65,3 +65,12 @@ recall_limit: 8
 # PROACTIVE_INTENT do not spend ImageGen quota automatically.
 proactive_wake_enabled: true
 proactive_wake_minutes: 60
+
+
+# GSV-TTS-Lite runtime assets are intentionally NOT stored in config.yaml.
+# Configure them in Settings Center; they persist to project-local .env:
+# GSV_TTS_GPT_MODEL="C:/path/to/voice.ckpt"
+# GSV_TTS_SOVITS_MODEL="C:/path/to/voice.pth"
+# GSV_TTS_REF_AUDIO="C:/path/to/reference.wav"
+# GSV_TTS_REF_TEXT="reference transcript"
+# GSV_TTS_VOICE="murasame"

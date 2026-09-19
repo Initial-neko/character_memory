@@ -13,6 +13,8 @@ import webbrowser
 
 import yaml
 
+from character_memory.envfile import parse_env_file
+
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL_MEDIA_ORIGINS = ("http://127.0.0.1:8000", "http://localhost:8000")
@@ -162,7 +164,11 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
-    base_env = os.environ.copy()
+    env_path = Path(args.config).resolve().parent / ".env"
+    file_env = parse_env_file(env_path)
+    # Project-local .env is persistent Settings Center storage. Explicit system
+    # environment remains the deployment override.
+    base_env = {**file_env, **os.environ}
     base_env["CHARACTER_MEMORY_CONFIG"] = args.config
     base_env["CHARACTER_CONFIG_PATH"] = args.config
     base_env.setdefault("CHARACTER_DEV_CHARACTER_BASE_URL", "http://127.0.0.1:8000")
@@ -218,21 +224,20 @@ def main() -> None:
         ),
     ]
 
-    gsv_root = Path(os.getenv("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
-    gsv_venv = Path(os.getenv("GSV_TTS_VENV", gsv_root / ".venv"))
+    gsv_root = Path(base_env.get("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
+    gsv_venv = Path(base_env.get("GSV_TTS_VENV", gsv_root / ".venv"))
     gsv_python = gsv_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     missing_gsv = [
         name for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL", "GSV_TTS_REF_AUDIO", "GSV_TTS_REF_TEXT")
         if not str(base_env.get(name, "")).strip()
     ]
-    gsv_available = gsv_python.is_file() and not missing_gsv
-    if gsv_available:
+    if gsv_python.is_file():
         gsv_env = dict(base_env)
         gsv_env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(gsv_root)])
         gsv_env.setdefault("GSV_TTS_HOST", "127.0.0.1")
         gsv_env.setdefault("GSV_TTS_PORT", "9014")
         gsv_env["GSV_TTS_DEVICE"] = tts_device
-        gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" else "0"
+        gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" and not missing_gsv else "0"
         gsv_env.setdefault("GSV_TTS_VOICE", str(base_env.get("GSV_TTS_VOICE", "") or "").strip() or "murasame")
         specs.insert(
             1,
@@ -243,15 +248,18 @@ def main() -> None:
                 gsv_env,
             ),
         )
-    elif tts_provider == "gsv":
-        if not gsv_python.is_file():
-            raise SystemExit(
-                f"GSV-TTS-Lite is selected but its isolated environment is missing: {gsv_python}. "
-                "Keep the validated GSV environment under .external/GSV-TTS-Lite/.venv or set GSV_TTS_VENV."
+        if tts_provider == "gsv" and missing_gsv:
+            print(
+                "stack: GSV selected but runtime assets are incomplete; "
+                "Settings Center can configure them without restarting the stack: "
+                + ", ".join(missing_gsv),
+                flush=True,
             )
-        raise SystemExit(
-            "GSV-TTS-Lite is selected but required environment variables are missing: "
-            + ", ".join(missing_gsv)
+    elif tts_provider == "gsv":
+        print(
+            f"stack: GSV selected but isolated runtime is missing: {gsv_python}. "
+            "Core services will still start so Settings Center remains available.",
+            flush=True,
         )
 
     owned: list[tuple[str, subprocess.Popen]] = []

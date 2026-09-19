@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 from types import SimpleNamespace
 import wave
 
@@ -8,6 +9,7 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from character_memory.gsv_tts_experiment import (
+    GsvRuntimeConfigRequest,
     GsvTtsRequest,
     GsvTtsResult,
     GsvTtsRuntime,
@@ -40,6 +42,14 @@ class FakeGsvRuntime:
         self.loaded = True
         return {**self.status(), "already_loaded": already}
 
+    def configure(self, request: GsvRuntimeConfigRequest) -> dict:
+        self.loaded = bool(request.preload)
+        return {**self.status(), "changed": ["gpt_model"]}
+
+    def unload(self) -> dict:
+        self.loaded = False
+        return {**self.status(), "unloaded": True}
+
     def synthesize(self, request: GsvTtsRequest) -> GsvTtsResult:
         assert request.text == "你好"
         assert request.voice == "murasame"
@@ -68,6 +78,21 @@ def test_gsv_sidecar_http_contract_without_real_cuda():
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["loaded"] is False
+
+        configured = client.post(
+            "/v1/configure",
+            json={
+                "gpt_model": "new.ckpt",
+                "sovits_model": "new.pth",
+                "ref_audio": "new.wav",
+                "ref_text": "参考文本",
+                "voice": "murasame",
+                "device": "cuda",
+                "preload": False,
+            },
+        )
+        assert configured.status_code == 200
+        assert configured.json()["loaded"] is False
 
         loaded = client.post("/v1/load")
         assert loaded.status_code == 200
@@ -166,6 +191,62 @@ def test_gsv_runtime_uses_upstream_infer_batched_contract(tmp_path):
         assert wav.getsampwidth() == 2
         assert wav.getframerate() == 32000
         assert wav.getnframes() == 4
+
+
+def test_gsv_runtime_can_hot_configure_and_unload(tmp_path):
+    gpt = tmp_path / "voice.ckpt"
+    sovits = tmp_path / "voice.pth"
+    ref = tmp_path / "ref.wav"
+    gpt.write_bytes(b"gpt")
+    sovits.write_bytes(b"sovits")
+    ref.write_bytes(b"wav")
+
+    class FakeTts:
+        def __init__(self, **kwargs):
+            self.tts_config = SimpleNamespace(device="cuda:0")
+
+        def load_gpt_model(self, _path):
+            pass
+
+        def load_sovits_model(self, _path):
+            pass
+
+        def cache_spk_audio(self, _path, **_kwargs):
+            pass
+
+        def cache_prompt_audio(self, **_kwargs):
+            pass
+
+    runtime = GsvTtsRuntime(
+        gpt_model="",
+        sovits_model="",
+        ref_audio="",
+        ref_text="",
+        device="cuda",
+        default_voice="murasame",
+        tts_factory=FakeTts,
+    )
+    assert runtime.status()["ready"] is False
+
+    configured = runtime.configure(
+        GsvRuntimeConfigRequest(
+            gpt_model=str(gpt),
+            sovits_model=str(sovits),
+            ref_audio=str(ref),
+            ref_text="参考文本",
+            voice="murasame",
+            device="cuda",
+            preload=True,
+        )
+    )
+    assert configured["ready"] is True
+    assert configured["loaded"] is True
+    assert Path(runtime.gpt_model) == gpt
+    assert runtime.ref_text == "参考文本"
+
+    unloaded = runtime.unload()
+    assert unloaded["ready"] is True
+    assert unloaded["loaded"] is False
 
 
 def test_gsv_status_reports_missing_assets_without_importing_gsv():

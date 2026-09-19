@@ -20,6 +20,11 @@ def _clear_secret_env(monkeypatch):
         "MSIMG_API_KEY",
         "MODELSCOPE_API_TOKEN",
         "HF_TOKEN",
+        "GSV_TTS_GPT_MODEL",
+        "GSV_TTS_SOVITS_MODEL",
+        "GSV_TTS_REF_AUDIO",
+        "GSV_TTS_REF_TEXT",
+        "GSV_TTS_VOICE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -187,6 +192,50 @@ def test_settings_save_preserves_comments_unknown_keys_and_creates_backup(tmp_pa
     assert settings.tts_device == "cuda"
 
 
+def test_gsv_runtime_fields_persist_to_dotenv_without_overwriting_yaml_or_existing_env(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    env = tmp_path / ".env"
+    config.write_text(
+        '# keep yaml\n'
+        'tts_provider: "kokoro"\n'
+        'tts_voice: "zf_001"\n'
+        'custom_extension_key: "keep-me"\n',
+        encoding="utf-8",
+    )
+    env.write_text('EXISTING_VALUE="keep-me"\n', encoding="utf-8")
+    store = SettingsStore(str(config), str(env))
+
+    result = store.save_values(
+        {
+            "GSV_TTS_GPT_MODEL": "C:/models/voice.ckpt",
+            "GSV_TTS_SOVITS_MODEL": "C:/models/voice.pth",
+            "GSV_TTS_REF_AUDIO": "C:/models/ref.wav",
+            "GSV_TTS_REF_TEXT": "参考文本",
+            "GSV_TTS_VOICE": "murasame",
+        }
+    )
+
+    assert result["changed"] is True
+    assert result["restart_required"] == []
+    yaml_text = config.read_text(encoding="utf-8")
+    assert '# keep yaml' in yaml_text
+    assert 'custom_extension_key: "keep-me"' in yaml_text
+    assert "GSV_TTS_GPT_MODEL" not in yaml_text
+
+    env_values = parse_env_file(env)
+    assert env_values["EXISTING_VALUE"] == "keep-me"
+    assert env_values["GSV_TTS_GPT_MODEL"] == "C:/models/voice.ckpt"
+    assert env_values["GSV_TTS_SOVITS_MODEL"] == "C:/models/voice.pth"
+    assert env_values["GSV_TTS_REF_AUDIO"] == "C:/models/ref.wav"
+    assert env_values["GSV_TTS_REF_TEXT"] == "参考文本"
+    assert env_values["GSV_TTS_VOICE"] == "murasame"
+
+    snapshot = store.snapshot()
+    assert snapshot["values"]["GSV_TTS_GPT_MODEL"] == "C:/models/voice.ckpt"
+    assert snapshot["values"]["GSV_TTS_REF_TEXT"] == "参考文本"
+
+
 def test_qwen3_is_not_a_formal_tts_provider(tmp_path: Path, monkeypatch):
     _clear_secret_env(monkeypatch)
     config = tmp_path / "config.yaml"
@@ -265,7 +314,7 @@ def test_settings_api_never_returns_secret_value(tmp_path: Path, monkeypatch):
             json={"values": {"tts_voice": "zf_004", "tts_speed": 1.1}},
         )
         assert patched.status_code == 200
-        assert patched.json()["result"]["restart_required"] == ["tts_speed", "tts_voice"]
+        assert patched.json()["result"]["restart_required"] == []
 
 
 def test_settings_tts_options_are_health_gated_and_provider_aware(tmp_path: Path, monkeypatch):
@@ -356,6 +405,71 @@ def test_provider_change_normalizes_stale_voice_and_device(tmp_path: Path, monke
     assert values["tts_provider"] == "gsv"
     assert values["tts_voice"] == "murasame"
     assert values["tts_device"] == "cuda"
+
+
+def test_gsv_runtime_can_be_configured_and_selected_in_one_save_without_stack_restart(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        'tts_provider: "kokoro"\n'
+        'tts_voice: "zf_001"\n'
+        'tts_device: "cpu"\n',
+        encoding="utf-8",
+    )
+
+    class ConfigurableClient(_SettingsRuntimeClient):
+        def __init__(self):
+            super().__init__()
+            self.providers["gsv"]["ready"] = False
+            self.providers["gsv"]["reason"] = "Missing GSV configuration"
+
+        def post(self, url, **kwargs):
+            self.post_calls.append((url, kwargs))
+            if url.endswith("/v1/configure"):
+                payload = kwargs["json"]
+                assert payload["gpt_model"] == "C:/models/voice.ckpt"
+                assert payload["sovits_model"] == "C:/models/voice.pth"
+                assert payload["ref_audio"] == "C:/models/ref.wav"
+                assert payload["ref_text"] == "参考文本"
+                assert payload["device"] == "cuda"
+                self.providers["gsv"]["ready"] = True
+                self.providers["gsv"]["reason"] = None
+                return _RuntimeResponse({"ready": True, "loaded": True})
+            if url.endswith("/v1/load"):
+                return _RuntimeResponse({"ready": True, "loaded": True})
+            return super().post(url, **kwargs)
+
+    runtime = ConfigurableClient()
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+    app = create_settings_app(str(config), store=store, runtime_http_client=runtime)
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/v1/settings",
+            json={
+                "values": {
+                    "GSV_TTS_GPT_MODEL": "C:/models/voice.ckpt",
+                    "GSV_TTS_SOVITS_MODEL": "C:/models/voice.pth",
+                    "GSV_TTS_REF_AUDIO": "C:/models/ref.wav",
+                    "GSV_TTS_REF_TEXT": "参考文本",
+                    "GSV_TTS_VOICE": "murasame",
+                    "tts_provider": "gsv",
+                    "tts_voice": "zf_001",
+                    "tts_device": "cpu",
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    values = response.json()["settings"]["values"]
+    assert values["tts_provider"] == "gsv"
+    assert values["tts_voice"] == "murasame"
+    assert values["tts_device"] == "cuda"
+    assert response.json()["result"]["restart_required"] == []
+
+    env_values = parse_env_file(tmp_path / ".env")
+    assert env_values["GSV_TTS_GPT_MODEL"] == "C:/models/voice.ckpt"
+    assert env_values["GSV_TTS_REF_TEXT"] == "参考文本"
 
 
 def test_settings_tts_preview_calls_selected_healthy_provider(tmp_path: Path, monkeypatch):

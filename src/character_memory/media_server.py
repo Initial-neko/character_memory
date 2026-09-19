@@ -34,7 +34,8 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
     configured_routing = runtime is None
     media = runtime or build_media_runtime_from_env()
     config_path = os.getenv("CHARACTER_CONFIG_PATH", os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml"))
-    settings = load_settings(config_path)
+    def current_settings():
+        return load_settings(config_path)
     tts_lab_base = os.getenv("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002").rstrip("/")
     owns_provider_client = provider_http_client is None
     provider_client = provider_http_client or httpx.Client(timeout=180.0)
@@ -74,13 +75,14 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 "restart_required_for_config_changes": False,
             }
 
+        settings = current_settings()
         selected = str(settings.tts_provider or "sherpa").strip().lower()
         base = {
             "provider": selected,
             "voice": settings.tts_voice,
             "speed": settings.tts_speed,
             "device": settings.tts_device,
-            "restart_required_for_config_changes": True,
+            "restart_required_for_config_changes": False,
         }
         if selected not in KNOWN_TTS_PROVIDERS:
             return {**base, "ready": False, "loaded": False, "reason": f"Unknown TTS provider: {selected}"}
@@ -103,7 +105,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 "voice": settings.tts_voice,
                 "speed": settings.tts_speed,
                 "device": provider.get("device") or ("cloud" if provider_id == "edge" else settings.tts_device),
-                "restart_required_for_config_changes": True,
+                "restart_required_for_config_changes": False,
             }
         except Exception as exc:
             return {
@@ -151,6 +153,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
 
     @app.post("/v1/tts")
     def synthesize(req: TtsRequest):
+        settings = current_settings()
         selected = str(settings.tts_provider or "sherpa").strip().lower()
         explicit_voice = str(req.voice or "").strip()
 

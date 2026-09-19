@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">Character Memory</p>
         <h1>Settings Center</h1>
-        <p class="subtle">统一管理正式运行配置与本地 Secret。TTS Provider/Voice 只允许选择当前健康检查通过的项；保存后统一重启 stack 生效。</p>
+        <p class="subtle">统一管理正式运行配置与本地 Secret。TTS Provider/Voice 只允许选择当前健康检查通过的项；TTS 选择与 GSV Runtime 参数支持热生效。</p>
       </div>
       <nav class="service-links" aria-label="Service links">
         <a href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Chat :8000</a>
@@ -56,8 +56,8 @@
 
     <section class="card footer-card">
       <h2>生效规则</h2>
-      <p>当前 V1 不做部分热更新。保存普通配置会先生成 <code>config.yaml.bak.YYYYMMDD-HHMMSS</code>，再原子替换配置；Secret 写入 <code>.env</code>，不会生成包含 Key 的历史备份。</p>
-      <p>保存完成后执行一次 <code>Ctrl+C</code> 停止当前 stack，再运行 <code>uv run character-stack</code>。正式聊天 TTS 由这里的 <strong>TTS Provider / TTS Voice / Speed / Device</strong> 决定；不可用 Provider 会被禁用，保存时服务器会再次执行健康校验。</p>
+      <p>普通 YAML 配置仍以字段级 patch 方式保存，并保留未知字段、注释和原有顺序；Secret 与 GSV Runtime 资产参数写入项目 <code>.env</code>，不会覆盖其他已有环境变量。</p>
+      <p><strong>TTS Provider / Voice / Speed / Device</strong> 与 GSV Runtime 参数支持热生效：Media Runtime 每次请求读取最新 TTS 选择，GSV 参数变更只重配/重载 <code>:9014</code> sidecar，不需要重启 Character / Media / Settings 整个 stack。其他非 TTS 字段仍以页面返回的 restart_required 为准。</p>
     </section>
   </main>
   <script src="/static/settings.js"></script>

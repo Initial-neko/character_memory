@@ -42,6 +42,7 @@ docs/
 - [`current/DEV_CONSOLE.md`](current/DEV_CONSOLE.md) — `:8002/dev` 的统一开发测试入口。
 - [`current/SETTINGS_CENTER.md`](current/SETTINGS_CENTER.md) — `:8003/settings` 的配置、`.env` Secret、迁移与 backup contract。
 - [`current/TTS_PROVIDER_LAB.md`](current/TTS_PROVIDER_LAB.md) — `:9002` Provider Runtime + Lab，Kokoro/Sherpa/CosyVoice 边界。
+- [`current/GSV_TTS_EXPERIMENT.md`](current/GSV_TTS_EXPERIMENT.md) — `:9014` GSV-TTS-Lite Lab-only sidecar、环境变量与验收边界。
 - [`current/AVATAR_SEARCH.md`](current/AVATAR_SEARCH.md) — Avatar Search 与隐私边界。
 - [`current/EVALS.md`](current/EVALS.md) — Eval 与 regression 方向。
 
@@ -57,7 +58,7 @@ docs/
 :9002 TTS Provider Runtime + Lab
 ```
 
-可选 CosyVoice sidecar 使用 `:9012`，不属于主 stack 的强制依赖。
+可选 sidecar：CosyVoice `:9012`、Qwen3-TTS `:9013`、GSV-TTS-Lite Lab experiment `:9014`；都不属于主 stack 的强制依赖。
 
 ## Research
 

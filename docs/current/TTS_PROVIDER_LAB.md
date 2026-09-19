@@ -23,14 +23,18 @@ Dev Console               http://127.0.0.1:8002/dev
 Settings Center           http://127.0.0.1:8003/settings
 TTS Provider Runtime+Lab  http://127.0.0.1:9002/tts
 Optional CosyVoice        http://127.0.0.1:9012
+Qwen3-TTS sidecar         http://127.0.0.1:9013
+GSV-TTS-Lite sidecar      http://127.0.0.1:9014
 ```
 
-`:9002` 当前暴露三类 provider：
+`:9002` 当前暴露六类 provider：
 
 1. **Sherpa VITS** — 通过 Media Runtime `:8001` 代理，用于试听比较；已保留本地 speaker `0 / 2 / 5`。
 2. **Kokoro 82M v1.1 zh** — 运行在主 Python 3.12 环境；voice 为 `zf_001 / zf_002 / zf_003 / zf_004`。
 3. **Edge TTS** — Microsoft Edge 在线语音服务；主 Python 3.12 环境直接调用，无需 API Key，但 synthesis 必须联网。
-4. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
+4. **Qwen3-TTS 0.6B** — 独立 CUDA sidecar，默认 `:9013`。
+5. **GSV-TTS-Lite** — 独立 Python 3.12/CUDA sidecar，默认 `:9014`；当前只进入 Lab，不进入正式聊天路由。
+6. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
 
 ## 2. Formal chat TTS vs Lab audition
 
@@ -197,7 +201,48 @@ CHARACTER_TTS_EDGE_PITCH=+0Hz
 CHARACTER_TTS_EDGE_PROXY=
 ```
 
-## 7. CosyVoice sidecar
+## 7. GSV-TTS-Lite Lab sidecar
+
+GSV-TTS-Lite 当前是 **Lab-only experiment**，不会改变正式 Browser TTS：
+
+```text
+TTS Lab :9002
+  -> GSV sidecar :9014
+  -> .external/GSV-TTS-Lite/.venv
+  -> full WAV
+```
+
+当前 V1 使用上游 `infer_batched`，完整生成 WAV 后返回；不做 SSE/WebRTC/Web Audio streaming。启动脚本默认 preload，并在 load 阶段加载 GPT/SoVITS 权重、缓存 speaker reference 与 prompt reference。
+
+本地必须提供：
+
+```text
+GSV_TTS_GPT_MODEL
+GSV_TTS_SOVITS_MODEL
+GSV_TTS_REF_AUDIO
+GSV_TTS_REF_TEXT
+```
+
+推荐 Git Bash 启动：
+
+```bash
+export GSV_TTS_GPT_MODEL="C:/path/to/voice.ckpt"
+export GSV_TTS_SOVITS_MODEL="C:/path/to/voice.pth"
+export GSV_TTS_REF_AUDIO="C:/path/to/reference.wav"
+export GSV_TTS_REF_TEXT="reference transcript"
+export GSV_TTS_VOICE="murasame"
+bash scripts/start-gsv-tts.sh
+```
+
+然后正常启动 `:9002` Lab：
+
+```bash
+uv run character-tts-lab
+```
+
+详细 contract 见 `docs/current/GSV_TTS_EXPERIMENT.md`。当前阶段明确不修改 `config.py` provider enum、Media Runtime 正式路由、Settings Center 或 Browser `voice.js`。
+
+## 8. CosyVoice sidecar
 
 CosyVoice 当前不是主 stack 的强制组成，也没有完成一键环境自动化。
 
@@ -230,7 +275,7 @@ CosyVoice 不可用时：
 
 如果试听和资源测量证明 CosyVoice 值得长期保留，再设计 one-click setup/start。
 
-## 8. Current manual CosyVoice setup
+## 9. Current manual CosyVoice setup
 
 当前仍可采用独立环境，例如：
 
@@ -260,7 +305,7 @@ COSYVOICE_MODEL_DIR="$(pwd)/.external/CosyVoice/pretrained_models/CosyVoice-300M
 http://127.0.0.1:9012/health
 ```
 
-## 9. Audition workflow
+## 10. Audition workflow
 
 使用同一段文本比较 Provider，重点观察：
 
@@ -277,7 +322,7 @@ Lab 展示 provider、voice、inference latency、audio duration、sample rate�
 
 多 Provider 批量生成应避免同时让大型模型争抢 RAM/VRAM；当前串行比较是合理 baseline。
 
-## 10. Decision priority
+## 11. Decision priority
 
 当前产品优先级：
 
@@ -303,7 +348,7 @@ CosyVoice fixed-speaker SFT
 
 但 benchmark 顺序不等于正式默认值；当前正式默认已经是 Kokoro `zf_001`。
 
-## 11. Testing boundary
+## 12. Testing boundary
 
 CI 可以验证：
 

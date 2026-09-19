@@ -3,7 +3,7 @@ from urllib.parse import unquote
 
 from fastapi.testclient import TestClient
 
-from character_memory.tts_lab import EdgeTtsProvider, LabSynthesisResult, Qwen3SidecarProvider, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
+from character_memory.tts_lab import EdgeTtsProvider, GsvSidecarProvider, LabSynthesisResult, Qwen3SidecarProvider, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
 
 
 class FakeTtsProvider:
@@ -108,6 +108,38 @@ class _FakeQwenClient:
             },
         )
 
+class _FakeGsvClient:
+    def __init__(self):
+        self.posts = []
+
+    def get(self, *args, **kwargs):
+        return _FakeQwenResponse(
+            {
+                "ready": True,
+                "loaded": True,
+                "voices": ["murasame"],
+                "default_voice": "murasame",
+                "model": "Murasame-e15.ckpt+Murasame_e8_s192.pth",
+                "device": "cuda:0",
+                "reason": None,
+            }
+        )
+
+    def post(self, url, **kwargs):
+        self.posts.append((url, kwargs))
+        return _FakeQwenResponse(
+            content=b"RIFFgsv",
+            headers={
+                "x-tts-voice": "murasame",
+                "x-tts-model": "Murasame-e15.ckpt%2BMurasame_e8_s192.pth",
+                "x-tts-device": "cuda:0",
+                "x-tts-inference-ms": "610.0",
+                "x-tts-audio-ms": "2500",
+                "x-tts-sample-rate": "32000",
+            },
+        )
+
+
 def test_tts_lab_provider_status_and_synthesis_contract():
     runtime = TtsLabRuntime({"fake": FakeTtsProvider()})
     app = create_tts_lab_app(runtime)
@@ -159,6 +191,39 @@ def test_qwen3_sidecar_provider_status_and_synthesis():
                     "text": "你好",
                     "voice": "Vivian",
                     "language": "Chinese",
+                    "speed": 1.0,
+                },
+                "timeout": 180.0,
+            },
+        )
+    ]
+
+
+def test_gsv_sidecar_provider_status_and_synthesis():
+    client = _FakeGsvClient()
+    provider = GsvSidecarProvider(client=client)
+
+    status = provider.status()
+    assert status["ready"] is True
+    assert status["loaded"] is True
+    assert status["default_voice"] == "murasame"
+    assert status["device"] == "cuda:0"
+
+    result = provider.synthesize("你好", voice="murasame", speed=1.0)
+    assert result.audio == b"RIFFgsv"
+    assert result.provider == "gsv"
+    assert result.voice == "murasame"
+    assert result.device == "cuda:0"
+    assert result.sample_rate == 32000
+    assert result.inference_ms == 610.0
+    assert client.posts == [
+        (
+            "http://127.0.0.1:9014/v1/tts",
+            {
+                "json": {
+                    "text": "你好",
+                    "voice": "murasame",
+                    "language": "zh",
                     "speed": 1.0,
                 },
                 "timeout": 180.0,
@@ -266,6 +331,8 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert "setup-tts-models.sh" in server
     assert '"http://127.0.0.1:9012"' in server
     assert '"http://127.0.0.1:9013"' in server
+    assert '"http://127.0.0.1:9014"' in server
+    assert '"gsv": GsvSidecarProvider' in server
     assert '"qwen3": Qwen3SidecarProvider' in server
     assert '"edge": EdgeTtsProvider' in server
     assert 'port = int(os.getenv("CHARACTER_TTS_LAB_PORT", "9002"))' in server

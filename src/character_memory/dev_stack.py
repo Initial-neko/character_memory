@@ -109,7 +109,6 @@ def _media_env(base: dict[str, str]) -> dict[str, str]:
     env.setdefault("CHARACTER_MEDIA_PORT", "8001")
     env.setdefault("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002")
     env.setdefault("CHARACTER_QWEN3_TTS_BASE", "http://127.0.0.1:9013")
-    env.setdefault("CHARACTER_TTS_GSV_VOICE", env.get("GSV_TTS_VOICE", "murasame"))
     return env
 
 
@@ -171,6 +170,9 @@ def main() -> None:
 
     python = sys.executable
     tts_provider = _configured_tts_provider(args.config)
+    tts_device = _configured_tts_device(args.config)
+    media_env = _media_env(base_env)
+    media_env["CHARACTER_MEDIA_TTS_DEVICE"] = tts_device
     specs = [
         (
             "Character Runtime",
@@ -182,7 +184,7 @@ def main() -> None:
             "Media Runtime",
             "http://127.0.0.1:8001/health",
             [python, "-m", "character_memory.media_bootstrap"],
-            _media_env(base_env),
+            media_env,
         ),
         (
             "Dev Console",
@@ -208,19 +210,13 @@ def main() -> None:
         ),
     ]
 
-    if tts_provider == "qwen3":
-        qwen_venv = Path(os.getenv("QWEN3_TTS_VENV", ROOT / ".venv-qwen3-tts"))
-        qwen_python = qwen_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        if not qwen_python.is_file():
-            raise SystemExit(
-                f"Qwen3-TTS is selected but its isolated environment is missing: {qwen_python}. "
-                "Run: bash scripts/setup-qwen3-tts.sh"
-            )
+    qwen_venv = Path(os.getenv("QWEN3_TTS_VENV", ROOT / ".venv-qwen3-tts"))
+    qwen_python = qwen_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if qwen_python.is_file():
         qwen_env = dict(base_env)
         qwen_env["PYTHONPATH"] = str(ROOT / "src")
         qwen_env.setdefault("HF_HOME", str((ROOT / "models" / "huggingface").resolve()))
-        qwen_device = "cuda:0" if _configured_tts_device(args.config) == "cuda" else "cpu"
-        qwen_dtype = "auto"
+        qwen_device = "cuda:0" if tts_device == "cuda" else "cpu"
         specs.insert(
             1,
             (
@@ -233,36 +229,33 @@ def main() -> None:
                     "--device",
                     qwen_device,
                     "--dtype",
-                    qwen_dtype,
+                    "auto",
                 ],
                 qwen_env,
             ),
         )
+    elif tts_provider == "qwen3":
+        raise SystemExit(
+            f"Qwen3-TTS is selected but its isolated environment is missing: {qwen_python}. "
+            "Run: bash scripts/setup-qwen3-tts.sh"
+        )
 
-    if tts_provider == "gsv":
-        gsv_root = Path(os.getenv("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
-        gsv_venv = Path(os.getenv("GSV_TTS_VENV", gsv_root / ".venv"))
-        gsv_python = gsv_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        if not gsv_python.is_file():
-            raise SystemExit(
-                f"GSV-TTS-Lite is selected but its isolated environment is missing: {gsv_python}. "
-                "Keep the validated GSV environment under .external/GSV-TTS-Lite/.venv or set GSV_TTS_VENV."
-            )
-        missing_gsv = [
-            name for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL", "GSV_TTS_REF_AUDIO", "GSV_TTS_REF_TEXT")
-            if not str(base_env.get(name, "")).strip()
-        ]
-        if missing_gsv:
-            raise SystemExit(
-                "GSV-TTS-Lite is selected but required environment variables are missing: "
-                + ", ".join(missing_gsv)
-            )
+    gsv_root = Path(os.getenv("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
+    gsv_venv = Path(os.getenv("GSV_TTS_VENV", gsv_root / ".venv"))
+    gsv_python = gsv_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    missing_gsv = [
+        name for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL", "GSV_TTS_REF_AUDIO", "GSV_TTS_REF_TEXT")
+        if not str(base_env.get(name, "")).strip()
+    ]
+    gsv_available = gsv_python.is_file() and not missing_gsv
+    if gsv_available:
         gsv_env = dict(base_env)
         gsv_env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(gsv_root)])
         gsv_env.setdefault("GSV_TTS_HOST", "127.0.0.1")
         gsv_env.setdefault("GSV_TTS_PORT", "9014")
-        gsv_env.setdefault("GSV_TTS_PRELOAD", "1")
-        gsv_env.setdefault("GSV_TTS_VOICE", "murasame")
+        gsv_env["GSV_TTS_DEVICE"] = tts_device
+        gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" else "0"
+        gsv_env.setdefault("GSV_TTS_VOICE", str(base_env.get("GSV_TTS_VOICE", "") or "").strip() or "murasame")
         specs.insert(
             1,
             (
@@ -271,6 +264,16 @@ def main() -> None:
                 [str(gsv_python), "-m", "character_memory.gsv_tts_experiment"],
                 gsv_env,
             ),
+        )
+    elif tts_provider == "gsv":
+        if not gsv_python.is_file():
+            raise SystemExit(
+                f"GSV-TTS-Lite is selected but its isolated environment is missing: {gsv_python}. "
+                "Keep the validated GSV environment under .external/GSV-TTS-Lite/.venv or set GSV_TTS_VENV."
+            )
+        raise SystemExit(
+            "GSV-TTS-Lite is selected but required environment variables are missing: "
+            + ", ".join(missing_gsv)
         )
 
     owned: list[tuple[str, subprocess.Popen]] = []

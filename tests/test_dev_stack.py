@@ -21,7 +21,8 @@ def test_stack_entrypoint_and_runtime_ports_are_declared():
     assert '"http://127.0.0.1:9013/health"' in script
     assert '".venv-qwen3-tts"' in script
     assert '"character_memory.qwen3_tts_experiment"' in script
-    assert 'qwen_dtype = "auto"' in script
+    assert '"--dtype"' in script
+    assert '"auto"' in script
     assert 'choices=("dev", "chat", "settings", "tts")' in script
 
 
@@ -51,3 +52,13 @@ def test_dev_stack_declares_gsv_sidecar_startup():
     assert '"GSV_TTS_GPT_MODEL"' in script
     assert '"GSV_TTS_REF_AUDIO"' in script
     assert '"CHARACTER_TTS_GSV_BASE"' in script
+
+
+def test_dev_stack_keeps_optional_sidecars_health_checkable_without_preloading():
+    script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
+    assert 'if qwen_python.is_file()' in script
+    assert 'gsv_available = gsv_python.is_file() and not missing_gsv' in script
+    assert 'gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" else "0"' in script
+    assert 'gsv_env["GSV_TTS_DEVICE"] = tts_device' in script
+    assert 'gsv_env.setdefault("GSV_TTS_VOICE"' in script
+    assert 'media_env["CHARACTER_MEDIA_TTS_DEVICE"] = tts_device' in script

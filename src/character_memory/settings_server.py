@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 import time
@@ -19,7 +20,7 @@ class SecretUpdate(BaseModel):
     value: str = Field(min_length=1, max_length=20000)
 
 
-def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStore | None = None):
+def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStore | None = None, runtime_http_client=None):
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.responses import FileResponse
@@ -39,11 +40,130 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
         "dev": os.getenv("CHARACTER_SETTINGS_DEV_BASE", "http://127.0.0.1:8002").rstrip("/"),
         "tts_lab": os.getenv("CHARACTER_SETTINGS_TTS_LAB_BASE", "http://127.0.0.1:9002").rstrip("/"),
     }
-    client = httpx.Client(timeout=3.0)
+    owns_client = runtime_http_client is None
+    client = runtime_http_client or httpx.Client(timeout=3.0)
+
+    def tts_inventory() -> dict[str, Any]:
+        try:
+            response = client.get(runtime_urls["tts_lab"] + "/v1/providers", timeout=3.0)
+            response.raise_for_status()
+            payload = response.json() or {}
+            providers: list[dict[str, Any]] = []
+            for raw in payload.get("providers") or []:
+                provider_id = str(raw.get("id") or "").strip().lower()
+                if provider_id not in {"kokoro", "sherpa", "qwen3", "edge", "gsv"}:
+                    continue
+                voices = [str(value) for value in (raw.get("voices") or []) if str(value).strip()]
+                default_voice = str(raw.get("default_voice") or (voices[0] if voices else "")).strip()
+                providers.append(
+                    {
+                        "id": provider_id,
+                        "label": str(raw.get("label") or provider_id),
+                        "ready": bool(raw.get("ready")),
+                        "loaded": bool(raw.get("loaded")),
+                        "voices": voices,
+                        "default_voice": default_voice,
+                        "supports_speed": raw.get("supports_speed") is not False,
+                        "model": raw.get("model"),
+                        "device": raw.get("device"),
+                        "reason": raw.get("reason"),
+                        "note": raw.get("note"),
+                    }
+                )
+            return {"ok": True, "providers": providers, "error": None}
+        except Exception as exc:
+            return {"ok": False, "providers": [], "error": str(exc)}
+
+    def settings_snapshot() -> dict[str, Any]:
+        snapshot = settings_store.snapshot()
+        inventory = tts_inventory()
+        providers = list(inventory["providers"])
+        current_provider = str(snapshot["values"].get("tts_provider") or "").strip().lower()
+        current_voice = str(snapshot["values"].get("tts_voice") or "").strip()
+        selected = next((item for item in providers if item["id"] == current_provider), None)
+        schema = copy.deepcopy(snapshot["schema"])
+        voice_section = next((section for section in schema if section.get("id") == "voice"), None)
+        if voice_section is not None:
+            provider_field = next((field for field in voice_section.get("fields", []) if field.get("name") == "tts_provider"), None)
+            voice_field = next((field for field in voice_section.get("fields", []) if field.get("name") == "tts_voice"), None)
+            provider_options = [
+                {
+                    "value": item["id"],
+                    "label": item["label"],
+                    "disabled": not item["ready"],
+                    "ready": item["ready"],
+                }
+                for item in providers
+            ]
+            if current_provider and not any(option["value"] == current_provider for option in provider_options):
+                provider_options.insert(
+                    0,
+                    {
+                        "value": current_provider,
+                        "label": f"{current_provider} (当前配置 · 未通过健康检查)",
+                        "disabled": True,
+                        "ready": False,
+                    },
+                )
+            if provider_field is not None:
+                provider_field["options"] = provider_options
+
+            voices = list((selected or {}).get("voices") or [])
+            voice_options = [
+                {"value": value, "label": value, "disabled": not bool(selected and selected.get("ready"))}
+                for value in voices
+            ]
+            if current_voice and current_voice not in voices:
+                voice_options.insert(
+                    0,
+                    {
+                        "value": current_voice,
+                        "label": f"{current_voice} (当前配置)",
+                        "disabled": not bool(selected and selected.get("ready")),
+                    },
+                )
+            if voice_field is not None:
+                voice_field["options"] = voice_options
+
+        snapshot["schema"] = schema
+        snapshot["tts"] = {
+            **inventory,
+            "selected_provider": current_provider,
+            "selected_voice": current_voice,
+        }
+        return snapshot
+
+    def validated_tts_values(values: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(values)
+        if not ({"tts_provider", "tts_voice"} & set(normalized)):
+            return normalized
+
+        current = settings_store.snapshot()["values"]
+        provider_id = str(normalized.get("tts_provider", current.get("tts_provider", "")) or "").strip().lower()
+        voice = str(normalized.get("tts_voice", current.get("tts_voice", "")) or "").strip()
+        inventory = tts_inventory()
+        provider = next((item for item in inventory["providers"] if item["id"] == provider_id), None)
+        if provider is None or not provider.get("ready"):
+            reason = (provider or {}).get("reason") or inventory.get("error") or "provider health check failed"
+            raise ValueError(f"TTS provider {provider_id!r} is not selectable because its health check did not pass: {reason}")
+
+        voices = list(provider.get("voices") or [])
+        default_voice = str(provider.get("default_voice") or (voices[0] if voices else "")).strip()
+        if "tts_provider" in normalized and "tts_voice" not in normalized:
+            if voice not in voices:
+                voice = default_voice
+            normalized["tts_voice"] = voice
+        if voice and voices and voice not in voices:
+            raise ValueError(
+                f"TTS voice {voice!r} is not available for healthy provider {provider_id!r}. "
+                f"Available: {', '.join(voices)}"
+            )
+        return normalized
 
     @app.on_event("shutdown")
     def shutdown():
-        client.close()
+        if owns_client:
+            client.close()
 
     @app.get("/")
     @app.get("/settings")
@@ -63,15 +183,16 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
     @app.get("/v1/settings")
     def get_settings():
         try:
-            return settings_store.snapshot()
+            return settings_snapshot()
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"读取配置失败：{exc}") from exc
 
     @app.patch("/v1/settings")
     def patch_settings(req: SettingsPatch):
         try:
-            result = settings_store.save_values(req.values)
-            return {"ok": True, "result": result, "settings": settings_store.snapshot()}
+            values = validated_tts_values(req.values)
+            result = settings_store.save_values(values)
+            return {"ok": True, "result": result, "settings": settings_snapshot()}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -101,7 +222,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
     def migrate():
         try:
             result = settings_store.migrate_legacy_secrets()
-            return {"ok": True, "result": result, "settings": settings_store.snapshot()}
+            return {"ok": True, "result": result, "settings": settings_snapshot()}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"配置迁移失败：{exc}") from exc
 

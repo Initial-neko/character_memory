@@ -37,7 +37,6 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
     settings = load_settings(config_path)
     tts_lab_base = os.getenv("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002").rstrip("/")
     qwen3_base = os.getenv("CHARACTER_QWEN3_TTS_BASE", "http://127.0.0.1:9013").rstrip("/")
-    gsv_default_voice = str(os.getenv("CHARACTER_TTS_GSV_VOICE", os.getenv("GSV_TTS_VOICE", "murasame")) or "murasame").strip() or "murasame"
     owns_provider_client = provider_http_client is None
     provider_client = provider_http_client or httpx.Client(timeout=180.0)
 
@@ -79,7 +78,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         selected = str(settings.tts_provider or "sherpa").strip().lower()
         base = {
             "provider": selected,
-            "voice": gsv_default_voice if selected == "gsv" else settings.tts_voice,
+            "voice": settings.tts_voice,
             "speed": settings.tts_speed,
             "device": settings.tts_device,
             "restart_required_for_config_changes": True,
@@ -124,7 +123,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 **base,
                 **provider,
                 "provider": provider_id,
-                "voice": gsv_default_voice if provider_id == "gsv" else settings.tts_voice,
+                "voice": settings.tts_voice,
                 "speed": settings.tts_speed,
                 "device": provider.get("device") or ("cloud" if provider_id == "edge" else settings.tts_device),
                 "restart_required_for_config_changes": True,
@@ -220,10 +219,10 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
             if selected == "edge":
                 default_voice = "zh-CN-XiaoxiaoNeural"
             elif selected == "gsv":
-                default_voice = gsv_default_voice
+                default_voice = "murasame"
             else:
                 default_voice = "zf_001"
-            voice = explicit_voice or (default_voice if selected == "gsv" else str(settings.tts_voice or default_voice))
+            voice = explicit_voice or str(settings.tts_voice or default_voice)
             speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
             try:
                 response = provider_client.post(

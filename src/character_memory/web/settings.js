@@ -35,6 +35,7 @@
         const el = document.createElement("option");
         el.value = option.value;
         el.textContent = option.label || option.value;
+        el.disabled = Boolean(option.disabled);
         input.appendChild(el);
       }
       input.value = value == null ? "" : String(value);
@@ -92,6 +93,77 @@
       card.appendChild(grid);
       sections.appendChild(card);
     }
+    wireTtsControls(snapshot);
+  }
+
+  function ttsProviderStatus(providerId) {
+    return (state.snapshot?.tts?.providers || []).find(item => item.id === providerId) || null;
+  }
+
+  function wireTtsControls(snapshot) {
+    const provider = document.getElementById("setting-tts_provider");
+    const voice = document.getElementById("setting-tts_voice");
+    const speed = document.getElementById("setting-tts_speed");
+    const device = document.getElementById("setting-tts_device");
+    if (!provider || !voice) return;
+
+    const providerWrap = provider.closest(".field");
+    let status = providerWrap?.querySelector(".tts-health-status");
+    if (!status && providerWrap) {
+      status = document.createElement("div");
+      status.className = "subtle mono tts-health-status";
+      providerWrap.appendChild(status);
+    }
+
+    function renderSelectedProvider(options = {}) {
+      const preferDefaultVoice = Boolean(options.preferDefaultVoice);
+      const item = ttsProviderStatus(provider.value);
+      const currentVoice = preferDefaultVoice ? "" : voice.value;
+      voice.innerHTML = "";
+      const voices = item?.voices?.length ? item.voices : [];
+      const configuredVoice = String(snapshot.values?.tts_voice || "");
+      for (const value of voices) {
+        const option = document.createElement("option");
+        option.value = String(value);
+        option.textContent = String(value);
+        option.disabled = !item?.ready;
+        voice.appendChild(option);
+      }
+      const configuredVoiceInvalid = !preferDefaultVoice && configuredVoice && !voices.includes(configuredVoice);
+      if (configuredVoiceInvalid) {
+        const option = document.createElement("option");
+        option.value = configuredVoice;
+        option.textContent = configuredVoice + " · 当前配置不可用";
+        option.disabled = true;
+        voice.insertBefore(option, voice.firstChild);
+      }
+      const fallback = String(item?.default_voice || configuredVoice || "");
+      if (configuredVoiceInvalid) voice.value = configuredVoice;
+      else if (currentVoice && voices.includes(currentVoice)) voice.value = currentVoice;
+      else if (fallback && voices.includes(fallback)) voice.value = fallback;
+      else if (voices.length) voice.value = voices[0];
+
+      voice.disabled = !item?.ready || voices.length === 0;
+      if (speed) speed.disabled = !item?.ready || item?.supports_speed === false;
+      if (device) device.disabled = !item?.ready || String(item?.device || "").toLowerCase() === "cloud";
+
+      if (status) {
+        if (!item) {
+          status.textContent = snapshot.tts?.error
+            ? "健康检查不可用：" + snapshot.tts.error
+            : "当前 Provider 未通过健康检查。";
+        } else if (item.ready) {
+          const loaded = item.loaded ? "loaded" : "ready";
+          status.textContent = "✓ " + loaded + " · " + (item.device || "device unknown") + " · " + (item.model || item.id)
+            + (configuredVoiceInvalid ? " · 当前 Voice 不在健康清单，请重新选择" : "");
+        } else {
+          status.textContent = "✗ unavailable · " + (item.reason || "health check failed");
+        }
+      }
+    }
+
+    provider.addEventListener("change", () => renderSelectedProvider({preferDefaultVoice: true}));
+    renderSelectedProvider();
   }
 
   function renderSecrets(snapshot) {
@@ -168,11 +240,15 @@
 
   function collectValues() {
     const values = {};
+    const current = state.snapshot?.values || {};
     document.querySelectorAll("[data-setting]").forEach(input => {
+      if (input.disabled) return;
       const name = input.dataset.setting;
-      if (input.type === "checkbox") values[name] = input.checked;
-      else if (input.type === "number") values[name] = input.value === "" ? null : Number(input.value);
-      else values[name] = input.value;
+      let value;
+      if (input.type === "checkbox") value = input.checked;
+      else if (input.type === "number") value = input.value === "" ? null : Number(input.value);
+      else value = input.value;
+      if (JSON.stringify(value) !== JSON.stringify(current[name])) values[name] = value;
     });
     return values;
   }

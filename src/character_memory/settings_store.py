@@ -56,7 +56,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
         "id": "voice",
         "title": "Voice",
-        "description": "正式聊天 TTS 默认设置。Provider Lab 仍用于试听。",
+        "description": "正式聊天 TTS。Provider/Voice 由当前健康检查动态约束；未通过健康检查的 Provider 不可选择。保存后重启 stack 生效。",
         "fields": [
             {
                 "name": "tts_provider",
@@ -72,7 +72,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
             },
             {
                 "name": "tts_voice",
-                "label": "Default Voice",
+                "label": "TTS Voice",
                 "type": "select",
                 "options": [
                     {"value": "zf_001", "label": "Kokoro zf_001"},
@@ -88,6 +88,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                     {"value": "Aiden", "label": "Qwen3 Aiden"},
                     {"value": "Ono_Anna", "label": "Qwen3 Ono_Anna"},
                     {"value": "Sohee", "label": "Qwen3 Sohee"},
+                    {"value": "murasame", "label": "GSV Murasame"},
                     {"value": "zh-CN-XiaoxiaoNeural", "label": "Edge 晓晓 Xiaoxiao"},
                     {"value": "zh-CN-XiaoyiNeural", "label": "Edge 晓伊 Xiaoyi"},
                     {"value": "zh-CN-YunjianNeural", "label": "Edge 云健 Yunjian"},
@@ -101,7 +102,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
             {"name": "tts_speed", "label": "TTS Speed", "type": "number", "min": 0.5, "max": 2, "step": 0.05},
             {
                 "name": "tts_device",
-                "label": "TTS Device",
+                "label": "TTS Device (where supported)",
                 "type": "select",
                 "options": [
                     {"value": "cpu", "label": "CPU"},

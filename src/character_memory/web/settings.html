@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">Character Memory</p>
         <h1>Settings Center</h1>
-        <p class="subtle">统一管理正式运行配置与本地 Secret。V1 保存后统一重启 stack 生效。</p>
+        <p class="subtle">统一管理正式运行配置与本地 Secret。TTS Provider/Voice 只允许选择当前健康检查通过的项；保存后统一重启 stack 生效。</p>
       </div>
       <nav class="service-links" aria-label="Service links">
         <a href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Chat :8000</a>
@@ -29,7 +29,7 @@
         <div id="configPath" class="mono subtle">loading...</div>
       </div>
       <div class="toolbar-actions">
-        <button id="reloadSettings" class="secondary" type="button">重新读取</button>
+        <button id="reloadSettings" class="secondary" type="button">重新读取 / 刷新健康状态</button>
         <button id="saveSettings" type="button">保存配置</button>
       </div>
     </section>
@@ -57,7 +57,7 @@
     <section class="card footer-card">
       <h2>生效规则</h2>
       <p>当前 V1 不做部分热更新。保存普通配置会先生成 <code>config.yaml.bak.YYYYMMDD-HHMMSS</code>，再原子替换配置；Secret 写入 <code>.env</code>，不会生成包含 Key 的历史备份。</p>
-      <p>保存完成后执行一次 <code>Ctrl+C</code> 停止当前 stack，再运行 <code>uv run character-stack</code>。正式聊天 TTS 默认由这里的 <strong>TTS Provider / Default Voice</strong> 决定。</p>
+      <p>保存完成后执行一次 <code>Ctrl+C</code> 停止当前 stack，再运行 <code>uv run character-stack</code>。正式聊天 TTS 由这里的 <strong>TTS Provider / TTS Voice / Speed / Device</strong> 决定；不可用 Provider 会被禁用，保存时服务器会再次执行健康校验。</p>
     </section>
   </main>
   <script src="/static/settings.js"></script>

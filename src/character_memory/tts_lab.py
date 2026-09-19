@@ -352,7 +352,7 @@ class Qwen3SidecarProvider:
 
 
 class GsvSidecarProvider:
-    DEFAULT_VOICES = ["gsv-default"]
+    DEFAULT_VOICES = ["murasame"]
 
     def __init__(self, base_url: str = "http://127.0.0.1:9014", client: httpx.Client | None = None):
         self.base_url = base_url.rstrip("/")

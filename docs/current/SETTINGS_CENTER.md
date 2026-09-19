@@ -95,6 +95,34 @@ Kokoro is the V1 default after audition. For `tts_provider: kokoro`, Media Runti
 
 TTS Provider Lab remains the audition/benchmark UI. Changing a dropdown in the lab does not persist the production default; change the production default in Settings Center.
 
+### Health-gated TTS selection
+
+Settings Center does not trust a static provider list for TTS selection. On every settings refresh it asks `:9002/v1/providers` for the current provider inventory and health state.
+
+The Voice section therefore behaves as follows:
+
+- only providers with `ready=true` are selectable;
+- unhealthy/unavailable providers remain visible but disabled, with the provider reason shown in the UI;
+- the Voice dropdown is rebuilt from the selected healthy provider's reported `voices`;
+- switching Provider automatically selects that provider's `default_voice`;
+- save performs the same health/voice validation again on the server, so stale browser state cannot persist an unhealthy provider;
+- changing unrelated settings is still allowed when the currently configured TTS happens to be unavailable.
+
+Formal voice selection is now consistently persisted in `tts_voice`. For GSV, the sidecar reports the voice identity associated with its configured reference (currently `murasame`); Settings writes that reported voice into `tts_voice`, and Media Runtime sends the same value during synthesis.
+
+`tts_device` is used by local providers where supported. Edge reports `cloud`, so the Device control is disabled while Edge is selected.
+
+### Health-checkable sidecars without eager GPU model load
+
+To make an unselected local provider discoverable without occupying model VRAM, `character-stack` may start prepared Qwen3/GSV sidecar processes in a health-only/lazy state:
+
+- Qwen3 sidecar starts when its isolated environment exists, but does not load the model merely for health;
+- GSV sidecar starts when its isolated environment and required asset environment variables exist;
+- GSV preloads only when `tts_provider: gsv`; otherwise it reports readiness without loading the model;
+- if a selected provider's required environment/assets are missing, stack startup still fails explicitly.
+
+This allows Settings to offer only providers that are actually runnable while avoiding eager residency of every local TTS model.
+
 ## Startup
 
 Canonical local startup:

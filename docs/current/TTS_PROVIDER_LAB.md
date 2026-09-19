@@ -36,6 +36,14 @@ GSV-TTS-Lite sidecar      http://127.0.0.1:9014
 5. **GSV-TTS-Lite** — 独立 Python 3.12/CUDA sidecar，默认 `:9014`；既可在 Lab 试听，也可通过 `tts_provider: gsv` 进入正式聊天路由。
 6. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
 
+## Provider health as Settings input
+
+`:9002/v1/providers` is also the authoritative live inventory used by Settings Center for TTS selection.
+
+A provider is selectable in Settings only when its status reports `ready=true`. The provider's health payload also supplies the Voice list, default voice, speed capability, device and failure reason. Settings revalidates this inventory again on save.
+
+For local sidecars, "ready" does not require the model to be loaded into VRAM. Qwen3 and GSV may run as lightweight health-checkable processes while unselected; GSV only preloads its model when it is the formal selected provider.
+
 ## 2. Formal chat TTS vs Lab audition
 
 正式 Browser voice **始终调用稳定 Media Runtime contract**：

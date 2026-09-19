@@ -20,9 +20,9 @@ embedding_model: "BAAI/bge-small-zh-v1.5"
 # Qwen3-TTS runs in its isolated .venv-qwen3-tts sidecar on :9013 so Torch/CUDA
 # dependencies never enter the core Character Memory environment.
 tts_provider: "kokoro"       # kokoro | qwen3 | edge | gsv | sherpa
-tts_voice: "zf_001"          # GSV uses GSV_TTS_VOICE/CHARACTER_TTS_GSV_VOICE (default murasame); other providers use this field
+tts_voice: "zf_001"          # Provider-specific voice selected from the healthy provider inventory in Settings
 tts_speed: 1.0               # Edge maps 0.5..2.0 to -50%..+100%; Qwen3 currently ignores speed
-tts_device: "cpu"            # Edge is online/cloud; qwen3/gsv: cuda recommended; kokoro/sherpa may use cpu
+tts_device: "cpu"            # Used by local providers where supported; Edge is cloud and ignores this field
 
 # Image search provider for avatar candidates. Keys live in .env.
 search_provider: "searchapi"

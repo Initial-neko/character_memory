@@ -396,7 +396,7 @@ def test_configured_gsv_health_uses_provider_runtime(monkeypatch):
     monkeypatch.setattr(
         media_server,
         "load_settings",
-        lambda _path: SimpleNamespace(tts_provider="gsv", tts_voice="zf_001", tts_speed=1.0, tts_device="cuda"),
+        lambda _path: SimpleNamespace(tts_provider="gsv", tts_voice="murasame", tts_speed=1.0, tts_device="cuda"),
     )
     provider_client = _GsvProviderClient()
     with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
@@ -421,7 +421,7 @@ def test_configured_gsv_tts_routes_wav_through_media_runtime(monkeypatch):
     monkeypatch.setattr(
         media_server,
         "load_settings",
-        lambda _path: SimpleNamespace(tts_provider="gsv", tts_voice="zf_001", tts_speed=1.0, tts_device="cuda"),
+        lambda _path: SimpleNamespace(tts_provider="gsv", tts_voice="murasame", tts_speed=1.0, tts_device="cuda"),
     )
     provider_client = _GsvProviderClient()
     with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:

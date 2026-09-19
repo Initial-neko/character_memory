@@ -189,9 +189,9 @@ POST :8001/v1/tts
 
 ```yaml
 tts_provider: "kokoro"     # kokoro | qwen3 | edge | gsv | sherpa
-tts_voice: "zf_001"
+tts_voice: "zf_001"        # provider-specific; Settings only offers voices reported by the healthy provider
 tts_speed: 1.0
-tts_device: "cpu"          # cpu | cuda for Kokoro
+tts_device: "cpu"          # local provider device where supported; Edge ignores it
 ```
 
 ### Kokoro
@@ -223,7 +223,7 @@ Browser
   -> 32kHz WAV
 ```
 
-当前正式接入只使用一个默认 GSV voice，不引入每角色 voice registry。默认 voice 为 `murasame`，可通过 `GSV_TTS_VOICE` 或 `CHARACTER_TTS_GSV_VOICE` 覆盖。选择 GSV 后，`character-stack` 会复用 `.external/GSV-TTS-Lite/.venv` 启动 `:9014`；必须预先提供 `GSV_TTS_GPT_MODEL`、`GSV_TTS_SOVITS_MODEL`、`GSV_TTS_REF_AUDIO`、`GSV_TTS_REF_TEXT`。
+当前正式接入只使用一个 GSV reference voice，不引入每角色 voice registry。sidecar 默认向健康接口报告 `murasame`（可通过 `GSV_TTS_VOICE` 命名该本地 reference voice）；Settings 只允许选择健康接口报告的 voice，并把它统一保存到 `tts_voice`。选择 GSV 后，`character-stack` 会复用 `.external/GSV-TTS-Lite/.venv` 启动 `:9014`；必须预先提供 `GSV_TTS_GPT_MODEL`、`GSV_TTS_SOVITS_MODEL`、`GSV_TTS_REF_AUDIO`、`GSV_TTS_REF_TEXT`。
 
 ### Sherpa
 

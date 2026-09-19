@@ -22,6 +22,71 @@ def _clear_secret_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+class _RuntimeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+        self.text = ""
+
+    @property
+    def is_success(self):
+        return 200 <= self.status_code < 300
+
+    def raise_for_status(self):
+        if not self.is_success:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+class _SettingsRuntimeClient:
+    def __init__(self, providers=None):
+        self.providers = providers or [
+            {
+                "id": "kokoro",
+                "label": "Kokoro 82M v1.1 zh",
+                "ready": True,
+                "loaded": False,
+                "voices": ["zf_001", "zf_002", "zf_003", "zf_004"],
+                "default_voice": "zf_001",
+                "supports_speed": True,
+                "device": "cpu",
+                "model": "kokoro",
+                "reason": None,
+            },
+            {
+                "id": "gsv",
+                "label": "GSV-TTS-Lite",
+                "ready": True,
+                "loaded": False,
+                "voices": ["murasame"],
+                "default_voice": "murasame",
+                "supports_speed": True,
+                "device": "cuda",
+                "model": "gsv",
+                "reason": None,
+            },
+            {
+                "id": "qwen3",
+                "label": "Qwen3-TTS 0.6B",
+                "ready": False,
+                "loaded": False,
+                "voices": ["Vivian"],
+                "default_voice": "Vivian",
+                "supports_speed": False,
+                "device": "cuda:0",
+                "model": "qwen3",
+                "reason": "sidecar unavailable",
+            },
+        ]
+
+    def get(self, url, **kwargs):
+        if url.endswith("/v1/providers"):
+            return _RuntimeResponse({"providers": self.providers})
+        return _RuntimeResponse({"ok": True})
+
+
 def test_legacy_secrets_move_to_env_without_plaintext_backup(tmp_path: Path, monkeypatch):
     _clear_secret_env(monkeypatch)
     config = tmp_path / "config.yaml"
@@ -126,7 +191,7 @@ def test_settings_api_never_returns_secret_value(tmp_path: Path, monkeypatch):
         encoding="utf-8",
     )
     store = SettingsStore(str(config), str(tmp_path / ".env"))
-    app = create_settings_app(str(config), store=store)
+    app = create_settings_app(str(config), store=store, runtime_http_client=_SettingsRuntimeClient())
 
     with TestClient(app) as client:
         initial = client.get("/v1/settings")
@@ -159,11 +224,80 @@ def test_settings_api_never_returns_secret_value(tmp_path: Path, monkeypatch):
         assert patched.json()["result"]["restart_required"] == ["tts_speed", "tts_voice"]
 
 
+def test_settings_tts_options_are_health_gated_and_provider_aware(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "kokoro"\ntts_voice: "zf_001"\ntts_device: "cpu"\n', encoding="utf-8")
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=_SettingsRuntimeClient(),
+    )
+
+    with TestClient(app) as client:
+        snapshot = client.get("/v1/settings").json()
+        voice_section = next(section for section in snapshot["schema"] if section["id"] == "voice")
+        provider_field = next(field for field in voice_section["fields"] if field["name"] == "tts_provider")
+        voice_field = next(field for field in voice_section["fields"] if field["name"] == "tts_voice")
+
+        options = {item["value"]: item for item in provider_field["options"]}
+        assert options["kokoro"]["disabled"] is False
+        assert options["gsv"]["disabled"] is False
+        assert options["qwen3"]["disabled"] is True
+        assert [item["value"] for item in voice_field["options"]] == ["zf_001", "zf_002", "zf_003", "zf_004"]
+
+
+def test_settings_rejects_unhealthy_provider_and_autoselects_healthy_default_voice(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "kokoro"\ntts_voice: "zf_001"\ntts_device: "cpu"\n', encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+    app = create_settings_app(
+        str(config),
+        store=store,
+        runtime_http_client=_SettingsRuntimeClient(),
+    )
+
+    with TestClient(app) as client:
+        rejected = client.patch("/v1/settings", json={"values": {"tts_provider": "qwen3"}})
+        assert rejected.status_code == 400
+        assert "health check did not pass" in rejected.text
+
+        accepted = client.patch("/v1/settings", json={"values": {"tts_provider": "gsv", "tts_device": "cuda"}})
+        assert accepted.status_code == 200
+        assert accepted.json()["settings"]["values"]["tts_provider"] == "gsv"
+        assert accepted.json()["settings"]["values"]["tts_voice"] == "murasame"
+
+    settings = load_settings(str(config))
+    assert settings.tts_provider == "gsv"
+    assert settings.tts_voice == "murasame"
+    assert settings.tts_device == "cuda"
+
+
+def test_settings_rejects_voice_not_reported_by_healthy_provider(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "gsv"\ntts_voice: "murasame"\n', encoding="utf-8")
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=_SettingsRuntimeClient(),
+    )
+
+    with TestClient(app) as client:
+        response = client.patch("/v1/settings", json={"values": {"tts_voice": "zf_001"}})
+
+    assert response.status_code == 400
+    assert "not available for healthy provider" in response.text
+
+
 def test_settings_center_and_formal_tts_wiring_are_declared():
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
     stack = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
     media = Path("src/character_memory/media_server.py").read_text(encoding="utf-8")
     settings_store = Path("src/character_memory/settings_store.py").read_text(encoding="utf-8")
+    settings_server = Path("src/character_memory/settings_server.py").read_text(encoding="utf-8")
+    settings_js = Path("src/character_memory/web/settings.js").read_text(encoding="utf-8")
     chat = Path("src/character_memory/web/index.html").read_text(encoding="utf-8")
     lab = Path("src/character_memory/web/tts_lab.html").read_text(encoding="utf-8")
 
@@ -177,6 +311,10 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert '"edge"' in media
     assert '{"value": "edge", "label": "Microsoft Edge TTS (online)"}' in settings_store
     assert '{"value": "gsv", "label": "GSV-TTS-Lite (local)"}' in settings_store
+    assert '/v1/providers' in settings_server
+    assert "health check did not pass" in settings_server
+    assert "tts-health-status" in settings_js
+    assert "option.disabled" in settings_js
     assert "zh-CN-XiaoxiaoNeural" in settings_store
     assert '"http://127.0.0.1:9013"' in media
     assert 'f"{qwen3_base}/v1/tts"' in media

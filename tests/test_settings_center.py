@@ -156,7 +156,7 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert 'choices=("dev", "chat", "settings", "tts")' in stack
     assert '"character_memory.settings_server"' in stack
     assert 'settings.tts_provider' in media
-    assert '"provider": "kokoro"' in media
+    assert 'selected in {"kokoro", "edge"}' in media
     assert '"provider": "qwen3"' in media
     assert '"edge"' in media
     assert '{"value": "edge", "label": "Microsoft Edge TTS (online)"}' in settings_store

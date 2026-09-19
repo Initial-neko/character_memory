@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Character Memory TTS Provider Lab</title>
+  <title>Character Memory TTS Workbench</title>
   <link rel="stylesheet" href="/static/dev.css" />
   <link rel="stylesheet" href="/static/tts_lab.css" />
 </head>
@@ -12,8 +12,8 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Character Memory</p>
-        <h1>TTS Provider Lab</h1>
-        <p class="subtle">统一试听 Sherpa VITS、Kokoro 中文模型与 CosyVoice SFT。正式聊天默认 TTS 请在 Settings Center 中配置。</p>
+        <h1>TTS Workbench</h1>
+        <p class="subtle">实时 TTS 试听 + 独立 Voice Design 工具。正式聊天 Provider 仍只在 Settings Center 中配置；Qwen3-TTS VoiceDesign 不属于实时 Provider。</p>
       </div>
       <div class="service-links">
         <a class="secondary-link" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Chat :8000</a>
@@ -52,6 +52,60 @@
       </div>
     </section>
 
+    <section class="card wide voice-design-card">
+      <div class="card-title-row">
+        <div>
+          <h2>Voice Design · Qwen3-TTS 1.7B</h2>
+          <p class="subtle">根据自然语言描述生成新声线。该工具独立于正式聊天 TTS，不进入 Provider 下拉框，也不会随正常 stack 自动加载大模型。</p>
+        </div>
+        <div class="actions">
+          <span id="voiceDesignBadge" class="badge">unknown</span>
+          <button id="refreshVoiceDesign" class="secondary">刷新 VoiceDesign</button>
+        </div>
+      </div>
+      <div class="voice-design-grid">
+        <div class="voice-design-inputs">
+          <label for="voiceDesignRaw">原始声线描述</label>
+          <textarea id="voiceDesignRaw" rows="4" placeholder="例如：年轻女性声线，清亮柔和，略带慵懒感，不要太嗲。"></textarea>
+          <div class="actions">
+            <button id="polishVoiceDesign" class="secondary">AI 润色</button>
+            <span id="voiceDesignPolishStatus" class="metric-inline">复用 Character Memory 标准 LLM</span>
+          </div>
+          <label for="voiceDesignInstruct">VoiceDesign Instruct</label>
+          <textarea id="voiceDesignInstruct" rows="5" placeholder="AI 润色结果会出现在这里，也可以手工修改。"></textarea>
+          <label for="voiceDesignText">测试文本</label>
+          <textarea id="voiceDesignText" rows="4">你好，这是 Character Memory 的新声线试听。</textarea>
+          <div class="voice-design-options">
+            <label>Language
+              <select id="voiceDesignLanguage">
+                <option value="Chinese" selected>Chinese</option>
+                <option value="English">English</option>
+                <option value="Japanese">Japanese</option>
+                <option value="Korean">Korean</option>
+                <option value="German">German</option>
+                <option value="French">French</option>
+                <option value="Russian">Russian</option>
+                <option value="Portuguese">Portuguese</option>
+                <option value="Spanish">Spanish</option>
+                <option value="Italian">Italian</option>
+                <option value="Auto">Auto</option>
+              </select>
+            </label>
+            <label>Max New Tokens
+              <input id="voiceDesignMaxTokens" type="number" min="128" max="4096" step="128" value="2048" />
+            </label>
+          </div>
+          <div class="actions">
+            <button id="generateVoiceDesign" disabled>生成 Voice Design</button>
+          </div>
+        </div>
+        <div class="voice-design-output">
+          <pre id="voiceDesignStatus" class="result">等待 VoiceDesign sidecar...</pre>
+          <audio id="voiceDesignAudio" controls></audio>
+          <pre id="voiceDesignResult" class="result">尚未生成。</pre>
+        </div>
+      </div>
+    </section>
     <section class="card wide">
       <div class="card-title-row">
         <div>
@@ -66,7 +120,7 @@
 
     <section class="card wide">
       <div class="card-title-row"><h2>运行边界</h2><span class="pill">experimental</span></div>
-      <p class="subtle">Sherpa 复用 Media Runtime :8001；Kokoro 使用预下载的本地模型；CosyVoice 使用独立 sidecar :9012。Media Runtime 是聊天页面稳定的 TTS 入口，并根据 Settings 中的正式 Provider 选择转发。</p>
+      <p class="subtle">Sherpa/Kokoro/Edge/GSV 属于实时 TTS 测试范围；CosyVoice 仍是实验 Provider。Qwen3-TTS 1.7B VoiceDesign 作为独立工具通过预留 sidecar 接口调用，不属于正式聊天 Provider。</p>
     </section>
   </main>
   <script src="/static/tts_lab.js"></script>

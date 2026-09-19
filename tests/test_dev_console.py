@@ -108,6 +108,8 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
     html = Path("src/character_memory/web/dev.html").read_text(encoding="utf-8")
     script = Path("src/character_memory/web/dev.js").read_text(encoding="utf-8")
     assert "Dev Console" in html
+    assert 'href="http://127.0.0.1:9002/tts"' in html
+    assert "TTS Workbench :9002" in html
     assert ">LLM<" in html
     assert ">TTS<" in html
     assert ">ASR<" in html

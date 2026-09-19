@@ -165,6 +165,8 @@ Dev ImageGen 可以持久化测试 MediaAsset，方便继续做 avatar/media 检
 
 ## 4. Settings boundary
 
+Dev Console 顶栏提供直接进入 `TTS Workbench :9002` 的入口，TTS Provider 试听与 VoiceDesign 工具仍由 Workbench 自己负责。
+
 Dev Console 不是 Secret/config editor。
 
 正式配置入口：

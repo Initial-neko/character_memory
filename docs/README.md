@@ -42,7 +42,8 @@ docs/
 - [`current/DEV_CONSOLE.md`](current/DEV_CONSOLE.md) — `:8002/dev` 的统一开发测试入口。
 - [`current/SETTINGS_CENTER.md`](current/SETTINGS_CENTER.md) — `:8003/settings` 的配置、`.env` Secret、迁移与 backup contract。
 - [`current/TTS_PROVIDER_LAB.md`](current/TTS_PROVIDER_LAB.md) — `:9002` Provider Runtime + Lab，多 TTS Provider 试听与当前边界。
-- [`current/QWEN3_TTS_EXPERIMENT.md`](current/QWEN3_TTS_EXPERIMENT.md) — `:9013` Qwen3-TTS 0.6B sidecar、CustomVoice/Base clone；VoiceDesign 当前暂缓。
+- [`current/QWEN3_TTS_EXPERIMENT.md`](current/QWEN3_TTS_EXPERIMENT.md) — `:9013` Qwen3-TTS 0.6B 实验 sidecar 与当前产品边界。
+- [`current/QWEN3_VOICE_DESIGN_TOOL.md`](current/QWEN3_VOICE_DESIGN_TOOL.md) — `:9002` Voice Design Workbench + `:9015` Qwen3-TTS 1.7B 本地 sidecar 接口契约。
 - [`current/GSV_TTS_EXPERIMENT.md`](current/GSV_TTS_EXPERIMENT.md) — `:9014` GSV-TTS-Lite sidecar、正式聊天路由、环境变量与当前边界。
 - [`current/AVATAR_SEARCH.md`](current/AVATAR_SEARCH.md) — Avatar Search 与隐私边界。
 - [`current/EVALS.md`](current/EVALS.md) — Eval 与 regression 方向。
@@ -59,7 +60,7 @@ docs/
 :9002 TTS Provider Runtime + Lab
 ```
 
-可选/实验 sidecar：CosyVoice `:9012`、GSV-TTS-Lite `:9014`；Qwen3-TTS `:9013` 仅保留手动实验/未来 VoiceDesign 用途，不由正常 `character-stack` 启动，也不是正式聊天 Provider。
+可选/实验 sidecar：CosyVoice `:9012`、GSV-TTS-Lite `:9014`；Qwen3-TTS 0.6B `:9013` 仅保留手动实验。Qwen3-TTS 1.7B VoiceDesign 预留 `:9015`，只由 TTS Workbench 调用，不由正常 `character-stack` 启动，也不是正式聊天 Provider。
 
 ## Research
 

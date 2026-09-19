@@ -60,3 +60,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+.voice-design-card { border-style: dashed; }
+.voice-design-grid { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(320px,.8fr); gap: 16px; margin-top: 8px; }
+.voice-design-inputs, .voice-design-output { display: grid; gap: 10px; }
+.voice-design-inputs label, .voice-design-options label { display: grid; gap: 6px; }
+.voice-design-options { display: grid; grid-template-columns: minmax(160px,1fr) minmax(160px,.7fr); gap: 12px; }
+.voice-design-output audio { width: 100%; }
+.voice-design-output .result { min-height: 120px; }
+@media (max-width: 900px) { .voice-design-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .voice-design-options { grid-template-columns: 1fr; } }

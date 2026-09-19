@@ -3,7 +3,7 @@ from urllib.parse import unquote
 
 from fastapi.testclient import TestClient
 
-from character_memory.tts_lab import EdgeTtsProvider, GsvSidecarProvider, LabSynthesisResult, Qwen3SidecarProvider, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
+from character_memory.tts_lab import EdgeTtsProvider, GsvSidecarProvider, LabSynthesisResult, Qwen3SidecarProvider, Qwen3VoiceDesignSidecar, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
 
 
 class FakeTtsProvider:
@@ -140,6 +140,51 @@ class _FakeGsvClient:
         )
 
 
+class _FakeVoiceDesignClient:
+    def __init__(self):
+        self.posts = []
+
+    def get(self, url, **kwargs):
+        assert url == "http://127.0.0.1:9015/health"
+        return _FakeQwenResponse(
+            {
+                "ready": True,
+                "loaded": True,
+                "model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+                "device": "cuda:0",
+                "reason": None,
+            }
+        )
+
+    def post(self, url, **kwargs):
+        self.posts.append((url, kwargs))
+        return _FakeQwenResponse(
+            content=b"RIFFvoice-design",
+            headers={
+                "content-type": "audio/wav",
+                "x-voice-design-model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+                "x-voice-design-device": "cuda:0",
+                "x-voice-design-inference-ms": "3210.5",
+                "x-voice-design-audio-ms": "2800",
+                "x-voice-design-sample-rate": "24000",
+            },
+        )
+
+
+class _FakePolishModel:
+    model = "fake-llm"
+
+    def __init__(self):
+        self.calls = []
+
+    def _request(self, messages, *, conversation_id=None, **kwargs):
+        self.calls.append((messages, conversation_id, kwargs))
+        return "年轻女性声线，音色清亮柔和，略带慵懒感，语速中等偏慢，避免刻意撒娇。"
+
+    def close(self):
+        pass
+
+
 def test_tts_lab_provider_status_and_synthesis_contract():
     runtime = TtsLabRuntime({"fake": FakeTtsProvider()})
     app = create_tts_lab_app(runtime)
@@ -230,6 +275,81 @@ def test_gsv_sidecar_provider_status_and_synthesis():
             },
         )
     ]
+
+
+def test_qwen3_voice_design_sidecar_contract():
+    client = _FakeVoiceDesignClient()
+    tool = Qwen3VoiceDesignSidecar(client=client)
+
+    status = tool.status()
+    assert status["ready"] is True
+    assert status["loaded"] is True
+    assert status["model"] == "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+
+    result = tool.generate(
+        "你好，这是试听。",
+        language="Chinese",
+        instruct="年轻女性声线，清亮柔和。",
+        max_new_tokens=2048,
+    )
+    assert result.audio == b"RIFFvoice-design"
+    assert result.provider == "qwen3-voice-design"
+    assert result.device == "cuda:0"
+    assert result.sample_rate == 24000
+    assert client.posts == [
+        (
+            "http://127.0.0.1:9015/v1/voice-design",
+            {
+                "json": {
+                    "text": "你好，这是试听。",
+                    "language": "Chinese",
+                    "instruct": "年轻女性声线，清亮柔和。",
+                    "max_new_tokens": 2048,
+                },
+                "timeout": 300.0,
+            },
+        )
+    ]
+
+
+def test_voice_design_workbench_status_generate_and_standard_llm_polish():
+    vd_client = _FakeVoiceDesignClient()
+    voice_design = Qwen3VoiceDesignSidecar(client=vd_client)
+    polish_model = _FakePolishModel()
+    app = create_tts_lab_app(
+        TtsLabRuntime({"fake": FakeTtsProvider()}),
+        voice_design=voice_design,
+        model_factory=lambda: polish_model,
+    )
+
+    with TestClient(app) as client:
+        status = client.get("/v1/voice-design/status")
+        assert status.status_code == 200
+        assert status.json()["voice_design"]["ready"] is True
+
+        polished = client.post(
+            "/v1/voice-design/polish",
+            json={"description": "年轻一点，温柔，不要太嗲", "language": "Chinese"},
+        )
+        assert polished.status_code == 200
+        assert "清亮柔和" in polished.json()["instruct"]
+        assert polished.json()["model"] == "fake-llm"
+
+        generated = client.post(
+            "/v1/voice-design/generate",
+            json={
+                "text": "你好，这是试听。",
+                "language": "Chinese",
+                "instruct": polished.json()["instruct"],
+                "max_new_tokens": 2048,
+            },
+        )
+        assert generated.status_code == 200
+        assert generated.content == b"RIFFvoice-design"
+        assert generated.headers["x-voice-design-device"] == "cuda:0"
+        assert unquote(generated.headers["x-voice-design-model"]) == "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+
+    assert polish_model.calls[0][1] == "tts-voice-design-polish"
 
 
 def test_edge_tts_provider_streams_mp3_without_network_dependency_in_test():
@@ -331,6 +451,8 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert "setup-tts-models.sh" in server
     assert '"http://127.0.0.1:9012"' in server
     assert '"http://127.0.0.1:9014"' in server
+    assert '"http://127.0.0.1:9015"' in server
+    assert '"Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"' in server
     assert '"gsv": GsvSidecarProvider' in server
     assert '"qwen3": Qwen3SidecarProvider' not in server
     assert '"edge": EdgeTtsProvider' in server
@@ -366,6 +488,13 @@ def test_tts_lab_web_ui_exposes_provider_voice_and_ab_controls():
     assert 'id="generateTtsLab"' in html
     assert 'id="compareReady"' in html
     assert 'id="comparisonGrid"' in html
+    assert 'id="voiceDesignRaw"' in html
+    assert 'id="voiceDesignInstruct"' in html
+    assert 'id="generateVoiceDesign"' in html
+    assert 'id="polishVoiceDesign"' in html
     assert 'fetch("/v1/providers")' in script
     assert 'fetch("/v1/tts"' in script
+    assert 'fetch("/v1/voice-design/status")' in script
+    assert 'fetch("/v1/voice-design/polish"' in script
+    assert 'fetch("/v1/voice-design/generate"' in script
     assert "decodeURIComponent" in script

@@ -605,6 +605,112 @@ class CosyVoiceSidecarProvider:
         )
 
 
+class Qwen3VoiceDesignSidecar:
+    """Optional Qwen3-TTS 1.7B VoiceDesign tool adapter.
+
+    This is deliberately separate from realtime TTS providers. The normal
+    Character stack never selects it through tts_provider.
+    """
+
+    MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+
+    def __init__(self, base_url: str = "http://127.0.0.1:9015", client: httpx.Client | None = None):
+        self.base_url = base_url.rstrip("/")
+        self.client = client or httpx.Client(timeout=300.0)
+        self._owns_client = client is None
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
+
+    def status(self) -> dict:
+        fallback = {
+            "id": "qwen3-voice-design",
+            "label": "Qwen3-TTS 1.7B VoiceDesign",
+            "ready": False,
+            "loaded": False,
+            "model": self.MODEL,
+            "device": None,
+            "reason": f"VoiceDesign sidecar is not running at {self.base_url}",
+            "base_url": self.base_url,
+        }
+        try:
+            response = self.client.get(f"{self.base_url}/health", timeout=0.8)
+            response.raise_for_status()
+            data = response.json() or {}
+            return {
+                **fallback,
+                "ready": bool(data.get("ready")),
+                "loaded": bool(data.get("loaded")),
+                "model": data.get("model") or self.MODEL,
+                "device": data.get("device"),
+                "reason": data.get("reason"),
+                "base_url": self.base_url,
+            }
+        except Exception:
+            return fallback
+
+    def generate(
+        self,
+        text: str,
+        *,
+        language: str,
+        instruct: str,
+        max_new_tokens: int = 2048,
+    ) -> LabSynthesisResult:
+        started = time.perf_counter()
+        response = self.client.post(
+            f"{self.base_url}/v1/voice-design",
+            json={
+                "text": text,
+                "language": language,
+                "instruct": instruct,
+                "max_new_tokens": int(max_new_tokens),
+            },
+            timeout=300.0,
+        )
+        if response.is_error:
+            raise RuntimeError(response.text or f"VoiceDesign sidecar returned HTTP {response.status_code}")
+        total_ms = (time.perf_counter() - started) * 1000.0
+        headers = response.headers
+        inference_ms = float(
+            headers.get("x-voice-design-inference-ms")
+            or headers.get("x-tts-inference-ms")
+            or total_ms
+        )
+        audio_ms = float(
+            headers.get("x-voice-design-audio-ms")
+            or headers.get("x-tts-audio-ms")
+            or 0.0
+        )
+        sample_rate = int(
+            headers.get("x-voice-design-sample-rate")
+            or headers.get("x-tts-sample-rate")
+            or 24000
+        )
+        model = (
+            headers.get("x-voice-design-model")
+            or headers.get("x-tts-model")
+            or self.MODEL
+        )
+        device = (
+            headers.get("x-voice-design-device")
+            or headers.get("x-tts-device")
+            or "unknown"
+        )
+        return LabSynthesisResult(
+            audio=response.content,
+            sample_rate=sample_rate,
+            provider="qwen3-voice-design",
+            voice="designed",
+            model=model,
+            device=device,
+            inference_ms=round(inference_ms, 1),
+            audio_ms=round(audio_ms, 1),
+            media_type=(headers.get("content-type") or "audio/wav").split(";", 1)[0],
+        )
+
+
 class TtsLabRuntime:
     def __init__(self, providers: dict[str, LabTtsProvider] | None = None):
         self.providers = providers or {
@@ -648,7 +754,25 @@ class TtsLabRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
 
 
-def create_tts_lab_app(runtime: TtsLabRuntime | None = None):
+class VoiceDesignRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    language: str = Field(default="Chinese", min_length=1, max_length=32)
+    instruct: str = Field(min_length=1, max_length=4000)
+    max_new_tokens: int = Field(default=2048, ge=128, le=4096)
+
+
+class VoiceDesignPolishRequest(BaseModel):
+    description: str = Field(min_length=1, max_length=4000)
+    language: str = Field(default="Chinese", min_length=1, max_length=32)
+
+
+def create_tts_lab_app(
+    runtime: TtsLabRuntime | None = None,
+    *,
+    voice_design: Qwen3VoiceDesignSidecar | None = None,
+    config_path: str = "config.yaml",
+    model_factory=None,
+):
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.responses import FileResponse, Response
@@ -657,6 +781,29 @@ def create_tts_lab_app(runtime: TtsLabRuntime | None = None):
         raise RuntimeError("TTS Lab requires the api extra") from exc
 
     lab = runtime or TtsLabRuntime()
+    voice_design_tool = voice_design or Qwen3VoiceDesignSidecar(
+        os.getenv("CHARACTER_TTS_QWEN3_VOICE_DESIGN_BASE", "http://127.0.0.1:9015")
+    )
+    polish_model_holder: dict[str, object] = {}
+    polish_model_lock = threading.Lock()
+
+    def get_polish_model():
+        model = polish_model_holder.get("model")
+        if model is not None:
+            return model
+        with polish_model_lock:
+            model = polish_model_holder.get("model")
+            if model is None:
+                if model_factory is not None:
+                    model = model_factory()
+                else:
+                    from character_memory.app import build_model
+                    from character_memory.config import load_settings
+
+                    model = build_model(load_settings(config_path))
+                polish_model_holder["model"] = model
+            return model
+
     web_dir = Path(__file__).with_name("web")
     app = FastAPI(title="Character Memory TTS Provider Lab", version="0.1")
     app.mount("/static", StaticFiles(directory=web_dir), name="static")
@@ -664,6 +811,12 @@ def create_tts_lab_app(runtime: TtsLabRuntime | None = None):
     @app.on_event("shutdown")
     def shutdown():
         lab.close()
+        voice_design_tool.close()
+        model = polish_model_holder.get("model")
+        if model is not None:
+            close = getattr(model, "close", None)
+            if callable(close):
+                close()
 
     @app.get("/")
     @app.get("/tts")
@@ -708,6 +861,74 @@ def create_tts_lab_app(runtime: TtsLabRuntime | None = None):
             },
         )
 
+    @app.get("/v1/voice-design/status")
+    def voice_design_status():
+        return {"voice_design": voice_design_tool.status()}
+
+    @app.post("/v1/voice-design/polish")
+    def voice_design_polish(req: VoiceDesignPolishRequest):
+        started = time.perf_counter()
+        try:
+            model = get_polish_model()
+            request = getattr(model, "_request", None)
+            if not callable(request):
+                raise RuntimeError("configured model does not expose the OpenAI-compatible request path")
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是 TTS 声线描述编辑器。把用户的自然语言要求整理成适合 "
+                        "Qwen3-TTS VoiceDesign 的 instruct。保留用户指定的年龄感、性别感、"
+                        "音高、音色、语速、口音、情绪和表达方式；不要添加人物身份、台词内容"
+                        "或用户没有要求的设定。只输出最终 instruct，不要解释。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"目标语种：{req.language}\n原始声线描述：{req.description.strip()}",
+                },
+            ]
+            reply = str(request(messages, conversation_id="tts-voice-design-polish") or "").strip()
+            if not reply:
+                raise RuntimeError("LLM returned an empty VoiceDesign instruction")
+            return {
+                "ok": True,
+                "instruct": reply,
+                "model": str(getattr(model, "model", "")),
+                "total_ms": round((time.perf_counter() - started) * 1000.0, 1),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"VoiceDesign prompt polish failed: {exc}") from exc
+
+    @app.post("/v1/voice-design/generate")
+    def voice_design_generate(req: VoiceDesignRequest):
+        status = voice_design_tool.status()
+        if not status.get("ready"):
+            raise HTTPException(
+                status_code=503,
+                detail=status.get("reason") or "Qwen3 VoiceDesign sidecar is not ready",
+            )
+        try:
+            result = voice_design_tool.generate(
+                req.text,
+                language=req.language,
+                instruct=req.instruct,
+                max_new_tokens=req.max_new_tokens,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return Response(
+            content=result.audio,
+            media_type=result.media_type,
+            headers={
+                "X-Voice-Design-Model": quote(result.model, safe="/:._-"),
+                "X-Voice-Design-Device": result.device,
+                "X-Voice-Design-Inference-Ms": str(result.inference_ms),
+                "X-Voice-Design-Audio-Ms": str(result.audio_ms),
+                "X-Voice-Design-Sample-Rate": str(result.sample_rate),
+            },
+        )
+
     return app
 
 
@@ -719,7 +940,8 @@ def main():
     host = os.getenv("CHARACTER_TTS_LAB_HOST", "127.0.0.1")
     port = int(os.getenv("CHARACTER_TTS_LAB_PORT", "9002"))
     print(f"tts-lab: http://{host}:{port}/tts")
-    uvicorn.run(create_tts_lab_app(), host=host, port=port, reload=False, timeout_graceful_shutdown=2)
+    config_path = os.getenv("CHARACTER_CONFIG_PATH", os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml"))
+    uvicorn.run(create_tts_lab_app(config_path=config_path), host=host, port=port, reload=False, timeout_graceful_shutdown=2)
 
 
 if __name__ == "__main__":

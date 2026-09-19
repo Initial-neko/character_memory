@@ -1,6 +1,6 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = {providers: []};
+  const state = {providers: [], voiceDesignUrl: null};
 
   function pretty(value) {
     return JSON.stringify(value, null, 2);
@@ -212,14 +212,123 @@
     await loadProviders();
   }
 
+  function renderVoiceDesignStatus(status) {
+    const badge = $("voiceDesignBadge");
+    const generate = $("generateVoiceDesign");
+    const payload = status?.voice_design || {};
+    const ready = Boolean(payload.ready);
+    badge.className = ready ? "badge ok" : "badge bad";
+    badge.textContent = ready ? (payload.loaded ? "loaded" : "ready") : "unavailable";
+    generate.disabled = !ready;
+    $("voiceDesignStatus").textContent = pretty({
+      ready,
+      loaded: Boolean(payload.loaded),
+      model: payload.model || "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+      device: payload.device || null,
+      base_url: payload.base_url || "http://127.0.0.1:9015",
+      reason: payload.reason || null,
+    });
+  }
+
+  async function loadVoiceDesignStatus() {
+    $("refreshVoiceDesign").disabled = true;
+    try {
+      const response = await fetch("/v1/voice-design/status");
+      if (!response.ok) throw new Error(await response.text());
+      renderVoiceDesignStatus(await response.json());
+    } catch (error) {
+      renderVoiceDesignStatus({voice_design: {ready: false, reason: error.message}});
+    } finally {
+      $("refreshVoiceDesign").disabled = false;
+    }
+  }
+
+  async function polishVoiceDesign() {
+    const button = $("polishVoiceDesign");
+    const description = $("voiceDesignRaw").value.trim();
+    if (!description) {
+      $("voiceDesignPolishStatus").textContent = "请先填写原始声线描述。";
+      return;
+    }
+    button.disabled = true;
+    $("voiceDesignPolishStatus").textContent = "AI 润色中...";
+    try {
+      const response = await fetch("/v1/voice-design/polish", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          description,
+          language: $("voiceDesignLanguage").value,
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      $("voiceDesignInstruct").value = data.instruct || "";
+      $("voiceDesignPolishStatus").textContent = String(data.total_ms || 0) + " ms · " + (data.model || "standard LLM");
+    } catch (error) {
+      $("voiceDesignPolishStatus").textContent = "润色失败：" + error.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function generateVoiceDesign() {
+    const button = $("generateVoiceDesign");
+    const instruct = $("voiceDesignInstruct").value.trim();
+    const text = $("voiceDesignText").value.trim();
+    if (!instruct || !text) {
+      $("voiceDesignResult").textContent = "ERROR: Instruct 和测试文本都不能为空。";
+      return;
+    }
+    button.disabled = true;
+    $("voiceDesignResult").textContent = "生成中...";
+    const started = performance.now();
+    try {
+      const response = await fetch("/v1/voice-design/generate", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          text,
+          language: $("voiceDesignLanguage").value,
+          instruct,
+          max_new_tokens: Number($("voiceDesignMaxTokens").value || 2048),
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const blob = await response.blob();
+      if (state.voiceDesignUrl) URL.revokeObjectURL(state.voiceDesignUrl);
+      state.voiceDesignUrl = URL.createObjectURL(blob);
+      $("voiceDesignAudio").src = state.voiceDesignUrl;
+      $("voiceDesignResult").textContent = pretty({
+        model: decodedHeader(response.headers, "x-voice-design-model"),
+        device: response.headers.get("x-voice-design-device"),
+        inference_ms: Number(response.headers.get("x-voice-design-inference-ms") || 0),
+        audio_ms: Number(response.headers.get("x-voice-design-audio-ms") || 0),
+        sample_rate: Number(response.headers.get("x-voice-design-sample-rate") || 0),
+        http_ms: Math.round(performance.now() - started),
+      });
+      await $("voiceDesignAudio").play().catch(() => {});
+      await loadVoiceDesignStatus();
+    } catch (error) {
+      $("voiceDesignResult").textContent = "ERROR: " + error.message;
+    } finally {
+      const status = await fetch("/v1/voice-design/status").then(r => r.ok ? r.json() : null).catch(() => null);
+      button.disabled = !status?.voice_design?.ready;
+    }
+  }
   $("refreshProviders").addEventListener("click", loadProviders);
   $("ttsLabProvider").addEventListener("change", renderVoiceSelect);
   $("generateTtsLab").addEventListener("click", generateSingle);
   $("compareReady").addEventListener("click", compareReady);
+  $("refreshVoiceDesign").addEventListener("click", loadVoiceDesignStatus);
+  $("polishVoiceDesign").addEventListener("click", polishVoiceDesign);
+  $("generateVoiceDesign").addEventListener("click", generateVoiceDesign);
   window.addEventListener("beforeunload", () => {
     document.querySelectorAll("audio[data-object-url]").forEach((audio) => {
       if (audio.dataset.objectUrl) URL.revokeObjectURL(audio.dataset.objectUrl);
     });
+    if (state.voiceDesignUrl) URL.revokeObjectURL(state.voiceDesignUrl);
   });
   loadProviders();
+  loadVoiceDesignStatus();
 })();

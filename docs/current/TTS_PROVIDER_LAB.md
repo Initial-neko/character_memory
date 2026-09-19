@@ -1,4 +1,4 @@
-# TTS Provider Runtime + Lab
+# TTS Workbench / Provider Runtime
 
 `:9002` 当前既是本地 TTS Provider Runtime，也是多 Provider 试听/benchmark UI。
 
@@ -23,8 +23,9 @@ Dev Console               http://127.0.0.1:8002/dev
 Settings Center           http://127.0.0.1:8003/settings
 TTS Provider Runtime+Lab  http://127.0.0.1:9002/tts
 Optional CosyVoice        http://127.0.0.1:9012
-Qwen3-TTS sidecar         http://127.0.0.1:9013
-GSV-TTS-Lite sidecar      http://127.0.0.1:9014
+Qwen3-TTS 0.6B experiment http://127.0.0.1:9013 (manual only)
+GSV-TTS-Lite sidecar       http://127.0.0.1:9014
+Qwen3 VoiceDesign tool     http://127.0.0.1:9015 (optional local sidecar)
 ```
 
 `:9002` 当前暴露五类 provider：
@@ -208,11 +209,13 @@ CHARACTER_TTS_EDGE_PITCH=+0Hz
 CHARACTER_TTS_EDGE_PROXY=
 ```
 
-## 7. Qwen3-TTS experiment boundary
+## 7. Qwen3-TTS tool boundary
 
-Qwen3-TTS is not part of the Provider Lab inventory or formal realtime chat providers. Its isolated `:9013` code/scripts are retained only for explicit experiments and future VoiceDesign work. It is not started by the normal `character-stack`.
+Qwen3-TTS is not part of the realtime Provider inventory or formal chat providers. The old isolated `:9013` 0.6B code/scripts remain manual experiments.
 
-Detailed notes: `docs/current/QWEN3_TTS_EXPERIMENT.md`.
+Qwen3-TTS 1.7B VoiceDesign has a dedicated Workbench section that calls an optional local sidecar on `:9015`. It is a voice-generation tool, not a Provider. The Workbench also offers AI prompt polish through the existing Character Memory LLM configuration.
+
+Contract: `docs/current/QWEN3_VOICE_DESIGN_TOOL.md`.
 
 ## 8. GSV-TTS-Lite sidecar
 

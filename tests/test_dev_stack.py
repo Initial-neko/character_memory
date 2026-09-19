@@ -52,6 +52,13 @@ def test_qwen3_is_not_a_formal_stack_provider(tmp_path):
         raise AssertionError("qwen3 must not be accepted as a formal TTS provider")
 
 
+def test_dev_stack_reserves_voice_design_base_without_starting_it():
+    script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
+    assert '"CHARACTER_TTS_QWEN3_VOICE_DESIGN_BASE"' in script
+    assert '"http://127.0.0.1:9015"' in script
+    assert '"Qwen3-TTS 1.7B VoiceDesign Runtime"' not in script
+
+
 def test_dev_stack_declares_gsv_sidecar_startup():
     script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
     assert '"GSV-TTS-Lite Runtime"' in script

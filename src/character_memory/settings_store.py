@@ -66,6 +66,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                     {"value": "kokoro", "label": "Kokoro 82M v1.1 zh"},
                     {"value": "qwen3", "label": "Qwen3-TTS 0.6B"},
                     {"value": "edge", "label": "Microsoft Edge TTS (online)"},
+                    {"value": "gsv", "label": "GSV-TTS-Lite (local)"},
                     {"value": "sherpa", "label": "Sherpa VITS"},
                 ],
             },

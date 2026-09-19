@@ -33,7 +33,7 @@ GSV-TTS-Lite sidecar      http://127.0.0.1:9014
 2. **Kokoro 82M v1.1 zh** — 运行在主 Python 3.12 环境；voice 为 `zf_001 / zf_002 / zf_003 / zf_004`。
 3. **Edge TTS** — Microsoft Edge 在线语音服务；主 Python 3.12 环境直接调用，无需 API Key，但 synthesis 必须联网。
 4. **Qwen3-TTS 0.6B** — 独立 CUDA sidecar，默认 `:9013`。
-5. **GSV-TTS-Lite** — 独立 Python 3.12/CUDA sidecar，默认 `:9014`；当前只进入 Lab，不进入正式聊天路由。
+5. **GSV-TTS-Lite** — 独立 Python 3.12/CUDA sidecar，默认 `:9014`；既可在 Lab 试听，也可通过 `tts_provider: gsv` 进入正式聊天路由。
 6. **CosyVoice 300M SFT** — optional Python 3.10 sidecar，默认 `:9012`。
 
 ## 2. Formal chat TTS vs Lab audition
@@ -201,9 +201,9 @@ CHARACTER_TTS_EDGE_PITCH=+0Hz
 CHARACTER_TTS_EDGE_PROXY=
 ```
 
-## 7. GSV-TTS-Lite Lab sidecar
+## 7. GSV-TTS-Lite sidecar
 
-GSV-TTS-Lite 当前是 **Lab-only experiment**，不会改变正式 Browser TTS：
+GSV-TTS-Lite 保留 Lab 试听能力，同时已接入正式 Browser TTS：
 
 ```text
 TTS Lab :9002
@@ -240,7 +240,7 @@ bash scripts/start-gsv-tts.sh
 uv run character-tts-lab
 ```
 
-详细 contract 见 `docs/current/GSV_TTS_EXPERIMENT.md`。当前阶段明确不修改 `config.py` provider enum、Media Runtime 正式路由、Settings Center 或 Browser `voice.js`。
+详细 contract 见 `docs/current/GSV_TTS_EXPERIMENT.md`。当前正式接入只使用一个配置好的 GSV voice；多角色 voice registry 与 Qwen3 reference 生成流程留到后续。
 
 ## 8. CosyVoice sidecar
 

@@ -211,7 +211,7 @@ class GsvTtsRuntime:
             "cuda_allocated_mb": allocated,
             "cuda_reserved_mb": reserved,
             "reason": reason,
-            "note": "Lab-only GSV sidecar; full-WAV V1, not wired into formal :8001 chat TTS yet.",
+            "note": "Full-WAV GSV sidecar used by both TTS Lab and formal :8001 routing.",
         }
 
     def load(self) -> dict:

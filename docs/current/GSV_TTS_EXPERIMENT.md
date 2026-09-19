@@ -1,17 +1,18 @@
 # GSV-TTS-Lite Experiment
 
-Status: Lab-only experiment. It is not yet a formal chat TTS provider.
+Status: available in both TTS Lab and the formal `:8001/v1/tts` route. V1 still uses one configured reference/voice.
 
 ## Architecture
 
 Character Memory keeps GSV-TTS-Lite isolated from the main Python environment:
 
-    :9002 TTS Provider Runtime + Lab
+    Browser -> Media Runtime :8001
+      -> :9002 TTS Provider Runtime + Lab
       -> GSV sidecar :9014
       -> external GSV-TTS-Lite Python 3.12 CUDA environment
       -> full WAV response
 
-The browser still knows nothing about GSV. Formal chat continues to use the existing :8001 Media Runtime route.
+The browser still knows nothing about the GSV-specific sidecar. It always calls `:8001/v1/tts`; Media Runtime routes `tts_provider=gsv` through `:9002` to `:9014`.
 
 ## Local runtime
 
@@ -126,14 +127,12 @@ scripts/start-gsv-tts.sh enables preload by default so the first Lab request doe
 
 ## Current boundary
 
-This phase does not:
+Formal GSV routing is intentionally minimal:
 
-- add gsv to config.py tts_provider;
-- modify Media Runtime formal routing;
-- modify Settings Center;
-- modify browser voice.js;
-- implement per-character voice profiles;
-- implement SSE, WebRTC or chunked streaming;
-- copy or modify external model assets.
+- `config.py` and Settings Center accept `tts_provider: gsv`;
+- Media Runtime routes GSV through the existing `:9002` provider path;
+- `character-stack` starts the isolated `:9014` sidecar when GSV is selected;
+- TTS Lab remains the place to audition GSV and other providers;
+- the formal route uses one configured GSV voice (default `murasame`).
 
-Promotion to a formal provider should only happen after local Lab audition confirms latency, stability, VRAM behavior and voice quality.
+This phase still does **not** implement per-character voice profiles, a voice registry, Qwen3-to-reference asset generation, SSE/WebRTC/chunked TTS, or model/reference asset management. Those remain optional follow-up work after the provider proves useful in real chat.

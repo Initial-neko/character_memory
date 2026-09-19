@@ -68,7 +68,7 @@ def _configured_tts_provider(config_path: str) -> str:
         path = Path(config_path)
         data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
         value = str((data or {}).get("tts_provider", "kokoro") or "kokoro").strip().lower()
-        return value if value in {"kokoro", "sherpa", "qwen3"} else "kokoro"
+        return value if value in {"kokoro", "sherpa", "qwen3", "edge", "gsv"} else "kokoro"
     except (OSError, yaml.YAMLError):
         return "kokoro"
 
@@ -109,6 +109,7 @@ def _media_env(base: dict[str, str]) -> dict[str, str]:
     env.setdefault("CHARACTER_MEDIA_PORT", "8001")
     env.setdefault("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002")
     env.setdefault("CHARACTER_QWEN3_TTS_BASE", "http://127.0.0.1:9013")
+    env.setdefault("CHARACTER_TTS_GSV_VOICE", env.get("GSV_TTS_VOICE", "murasame"))
     return env
 
 
@@ -119,6 +120,7 @@ def _tts_lab_env(base: dict[str, str], config_path: str) -> dict[str, str]:
     env.setdefault("CHARACTER_TTS_LAB_MEDIA_BASE", "http://127.0.0.1:8001")
     env.setdefault("CHARACTER_TTS_COSYVOICE_BASE", "http://127.0.0.1:9012")
     env.setdefault("CHARACTER_TTS_QWEN3_BASE", "http://127.0.0.1:9013")
+    env.setdefault("CHARACTER_TTS_GSV_BASE", "http://127.0.0.1:9014")
     env.setdefault("CHARACTER_TTS_KOKORO_DEVICE", _configured_tts_device(config_path))
     return env
 
@@ -234,6 +236,40 @@ def main() -> None:
                     qwen_dtype,
                 ],
                 qwen_env,
+            ),
+        )
+
+    if tts_provider == "gsv":
+        gsv_root = Path(os.getenv("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
+        gsv_venv = Path(os.getenv("GSV_TTS_VENV", gsv_root / ".venv"))
+        gsv_python = gsv_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if not gsv_python.is_file():
+            raise SystemExit(
+                f"GSV-TTS-Lite is selected but its isolated environment is missing: {gsv_python}. "
+                "Keep the validated GSV environment under .external/GSV-TTS-Lite/.venv or set GSV_TTS_VENV."
+            )
+        missing_gsv = [
+            name for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL", "GSV_TTS_REF_AUDIO", "GSV_TTS_REF_TEXT")
+            if not str(base_env.get(name, "")).strip()
+        ]
+        if missing_gsv:
+            raise SystemExit(
+                "GSV-TTS-Lite is selected but required environment variables are missing: "
+                + ", ".join(missing_gsv)
+            )
+        gsv_env = dict(base_env)
+        gsv_env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(gsv_root)])
+        gsv_env.setdefault("GSV_TTS_HOST", "127.0.0.1")
+        gsv_env.setdefault("GSV_TTS_PORT", "9014")
+        gsv_env.setdefault("GSV_TTS_PRELOAD", "1")
+        gsv_env.setdefault("GSV_TTS_VOICE", "murasame")
+        specs.insert(
+            1,
+            (
+                "GSV-TTS-Lite Runtime",
+                "http://127.0.0.1:9014/health",
+                [str(gsv_python), "-m", "character_memory.gsv_tts_experiment"],
+                gsv_env,
             ),
         )
 

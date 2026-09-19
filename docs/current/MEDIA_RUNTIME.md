@@ -26,6 +26,7 @@ Media Runtime :8001/v1/tts
   ├─ sherpa -> local VITS
   ├─ kokoro -> :9002/v1/tts -> Kokoro
   ├─ edge -> :9002/v1/tts -> Microsoft Edge online TTS
+  ├─ gsv -> :9002/v1/tts -> :9014 GSV-TTS-Lite
   └─ qwen3 -> :9013/v1/tts -> Qwen3-TTS
 Browser playback
 ```
@@ -39,6 +40,8 @@ Dev Console               :8002
 Settings Center           :8003
 TTS Provider Runtime+Lab  :9002
 optional CosyVoice        :9012
+optional Qwen3-TTS         :9013
+optional GSV-TTS-Lite      :9014
 ```
 
 推荐统一启动：
@@ -185,7 +188,7 @@ POST :8001/v1/tts
 正式选择由 `config.yaml` / Settings Center 控制：
 
 ```yaml
-tts_provider: "kokoro"     # kokoro | qwen3 | edge | sherpa
+tts_provider: "kokoro"     # kokoro | qwen3 | edge | gsv | sherpa
 tts_voice: "zf_001"
 tts_speed: 1.0
 tts_device: "cpu"          # cpu | cuda for Kokoro
@@ -206,6 +209,21 @@ Browser
 ### Edge TTS
 
 当 `tts_provider: edge`，`:8001` 通过 `:9002` 调用 Edge TTS。它是在线 Provider，无需 API Key，但 synthesis 依赖公网。默认 voice 为 `zh-CN-XiaoxiaoNeural`。Edge 原生 MP3 会以 `audio/mpeg` 原样返回，Browser 当前 Blob/Audio 播放链可直接处理，不做额外 WAV 转码。
+
+### GSV-TTS-Lite
+
+当 `tts_provider: gsv`，正式链路复用 Provider Runtime：
+
+```text
+Browser
+  -> :8001/v1/tts
+  -> :9002/v1/tts {provider=gsv}
+  -> :9014/v1/tts
+  -> GSV-TTS-Lite
+  -> 32kHz WAV
+```
+
+当前正式接入只使用一个默认 GSV voice，不引入每角色 voice registry。默认 voice 为 `murasame`，可通过 `GSV_TTS_VOICE` 或 `CHARACTER_TTS_GSV_VOICE` 覆盖。选择 GSV 后，`character-stack` 会复用 `.external/GSV-TTS-Lite/.venv` 启动 `:9014`；必须预先提供 `GSV_TTS_GPT_MODEL`、`GSV_TTS_SOVITS_MODEL`、`GSV_TTS_REF_AUDIO`、`GSV_TTS_REF_TEXT`。
 
 ### Sherpa
 

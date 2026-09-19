@@ -31,3 +31,23 @@ def test_dev_console_is_linked_from_settings_center():
     assert 'href="http://127.0.0.1:8002/dev"' in html
     assert 'href="http://127.0.0.1:9002/tts"' in html
     assert "Settings Center" in html
+
+
+def test_configured_tts_provider_accepts_edge_and_gsv(tmp_path):
+    from character_memory.dev_stack import _configured_tts_provider
+
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "edge"\n', encoding="utf-8")
+    assert _configured_tts_provider(str(config)) == "edge"
+
+    config.write_text('tts_provider: "gsv"\n', encoding="utf-8")
+    assert _configured_tts_provider(str(config)) == "gsv"
+
+
+def test_dev_stack_declares_gsv_sidecar_startup():
+    script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
+    assert '"GSV-TTS-Lite Runtime"' in script
+    assert '"http://127.0.0.1:9014/health"' in script
+    assert '"GSV_TTS_GPT_MODEL"' in script
+    assert '"GSV_TTS_REF_AUDIO"' in script
+    assert '"CHARACTER_TTS_GSV_BASE"' in script

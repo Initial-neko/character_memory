@@ -88,6 +88,22 @@ def test_settings_save_preserves_comments_unknown_keys_and_creates_backup(tmp_pa
     assert settings.tts_device == "cuda"
 
 
+def test_gsv_is_an_accepted_tts_provider(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "kokoro"\ntts_voice: "zf_001"\n', encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    result = store.save_values({"tts_provider": "gsv"})
+
+    assert result["changed"] is True
+    assert load_settings(str(config)).tts_provider == "gsv"
+    schema = store.snapshot()["schema"]
+    voice = next(section for section in schema if section["id"] == "voice")
+    provider = next(field for field in voice["fields"] if field["name"] == "tts_provider")
+    assert any(option["value"] == "gsv" for option in provider["options"])
+
+
 def test_system_environment_overrides_dotenv(tmp_path: Path, monkeypatch):
     _clear_secret_env(monkeypatch)
     config = tmp_path / "config.yaml"
@@ -156,10 +172,11 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert 'choices=("dev", "chat", "settings", "tts")' in stack
     assert '"character_memory.settings_server"' in stack
     assert 'settings.tts_provider' in media
-    assert 'selected in {"kokoro", "edge"}' in media
+    assert 'selected in {"kokoro", "edge", "gsv"}' in media
     assert '"provider": "qwen3"' in media
     assert '"edge"' in media
     assert '{"value": "edge", "label": "Microsoft Edge TTS (online)"}' in settings_store
+    assert '{"value": "gsv", "label": "GSV-TTS-Lite (local)"}' in settings_store
     assert "zh-CN-XiaoxiaoNeural" in settings_store
     assert '"http://127.0.0.1:9013"' in media
     assert 'f"{qwen3_base}/v1/tts"' in media

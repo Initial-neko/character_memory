@@ -373,7 +373,7 @@ class GsvSidecarProvider:
             "default_voice": self.DEFAULT_VOICES[0],
             "supports_speed": True,
             "reason": f"GSV-TTS-Lite sidecar is not running at {self.base_url}",
-            "note": "Lab-only provider; start with bash scripts/start-gsv-tts.sh.",
+            "note": "Available in Lab and formal routing; start the :9014 sidecar with the validated GSV environment.",
         }
         try:
             response = self.client.get(f"{self.base_url}/health", timeout=3.0)

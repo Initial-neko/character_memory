@@ -193,6 +193,32 @@ class _EdgeProviderClient:
         )
 
 
+class _GsvProviderClient:
+    def __init__(self):
+        self.get_calls = []
+        self.post_calls = []
+
+    def get(self, url, **kwargs):
+        self.get_calls.append((url, kwargs))
+        return _QwenProviderResponse(
+            {"provider": {"id": "gsv", "ready": True, "loaded": True, "model": "fake-gsv", "device": "cuda:0", "voices": ["murasame"], "default_voice": "murasame", "reason": None}}
+        )
+
+    def post(self, url, **kwargs):
+        self.post_calls.append((url, kwargs))
+        return _QwenProviderResponse(
+            content=b"RIFFgsv-wav",
+            headers={
+                "content-type": "audio/wav",
+                "x-tts-voice": "murasame",
+                "x-tts-device": "cuda:0",
+                "x-tts-inference-ms": "612.4",
+                "x-tts-audio-ms": "2886",
+                "x-tts-sample-rate": "32000",
+            },
+        )
+
+
 def make_wav(duration_ms: int = 200, sample_rate: int = 16000) -> bytes:
     count = int(sample_rate * duration_ms / 1000)
     t = np.arange(count, dtype=np.float32) / sample_rate
@@ -360,6 +386,77 @@ def test_configured_edge_tts_routes_mp3_through_media_runtime(monkeypatch):
     assert provider_client.post_calls == [
         ("http://127.0.0.1:9002/v1/tts", {"json": {"provider": "edge", "text": "你好", "voice": "zh-CN-XiaoxiaoNeural", "speed": 1.0}})
     ]
+
+
+def test_configured_gsv_health_uses_provider_runtime(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(tts_provider="gsv", tts_voice="zf_001", tts_speed=1.0, tts_device="cuda"),
+    )
+    provider_client = _GsvProviderClient()
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        health = client.get("/health")
+
+    assert health.status_code == 200
+    payload = health.json()
+    assert payload["tts_runtime"]["ready"] is False
+    assert payload["tts"]["provider"] == "gsv"
+    assert payload["tts"]["ready"] is True
+    assert payload["tts"]["voice"] == "murasame"
+    assert payload["tts"]["device"] == "cuda:0"
+    assert provider_client.get_calls == [("http://127.0.0.1:9002/v1/providers/gsv", {"timeout": 0.4})]
+
+
+def test_configured_gsv_tts_routes_wav_through_media_runtime(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(tts_provider="gsv", tts_voice="zf_001", tts_speed=1.0, tts_device="cuda"),
+    )
+    provider_client = _GsvProviderClient()
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        response = client.post("/v1/tts", json={"text": "你好"})
+
+    assert response.status_code == 200
+    assert response.content == b"RIFFgsv-wav"
+    assert response.headers["content-type"].startswith("audio/wav")
+    assert response.headers["x-media-provider"] == "gsv"
+    assert response.headers["x-media-voice"] == "murasame"
+    assert response.headers["x-media-device"] == "cuda:0"
+    assert response.headers["x-media-sample-rate"] == "32000"
+    assert provider_client.post_calls == [
+        ("http://127.0.0.1:9002/v1/tts", {"json": {"provider": "gsv", "text": "你好", "voice": "murasame", "speed": 1.0}})
+    ]
+
+
+def test_unknown_tts_provider_is_rejected_not_silently_downgraded(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts())
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(tts_provider="totally-unknown", tts_voice="0", tts_speed=1.0, tts_device="cpu"),
+    )
+    with TestClient(media_server.create_media_app(provider_http_client=_ProviderClient())) as client:
+        response = client.post("/v1/tts", json={"text": "你好"})
+
+    assert response.status_code == 400
+    assert "totally-unknown" in response.json()["detail"]
+    assert runtime.tts.calls == []
 
 
 def test_configured_qwen3_health_uses_isolated_sidecar(monkeypatch):

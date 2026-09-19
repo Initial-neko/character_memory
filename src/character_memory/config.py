@@ -30,7 +30,7 @@ class Settings(BaseModel):
 
     # Formal chat TTS selection. Kokoro is now the default after local audition;
     # the Provider Lab remains available for A/B testing other providers.
-    tts_provider: str = Field(default="kokoro", pattern=r"^(kokoro|sherpa|qwen3|edge)$")
+    tts_provider: str = Field(default="kokoro", pattern=r"^(kokoro|sherpa|qwen3|edge|gsv)$")
     tts_voice: str = "zf_001"
     tts_speed: float = Field(default=1.0, ge=0.5, le=2.0)
     tts_device: str = Field(default="cpu", pattern=r"^(cpu|cuda)$")

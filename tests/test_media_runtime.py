@@ -214,7 +214,6 @@ class _GsvProviderClient:
                 "x-tts-device": "cuda:0",
                 "x-tts-inference-ms": "612.4",
                 "x-tts-audio-ms": "2886",
-                "x-tts-sample-rate": "32000",
             },
         )
 

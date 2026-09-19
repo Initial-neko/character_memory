@@ -209,7 +209,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                     "X-Media-Device": response.headers.get("x-tts-device", settings.tts_device),
                     "X-Media-Inference-Ms": response.headers.get("x-tts-inference-ms", "0"),
                     "X-Media-Audio-Ms": response.headers.get("x-tts-audio-ms", "0"),
-                    "X-Media-Sample-Rate": response.headers.get("x-tts-sample-rate", "32000" if selected == "gsv" else "24000"),
+                    "X-Media-Sample-Rate": response.headers.get("x-tts-sample-rate", "24000"),
                     "X-Media-RTF": response.headers.get("x-tts-rtf", ""),
                 },
             )
@@ -248,7 +248,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                     "X-Media-Device": response.headers.get("x-tts-device", "cloud" if selected == "edge" else settings.tts_device),
                     "X-Media-Inference-Ms": response.headers.get("x-tts-inference-ms", "0"),
                     "X-Media-Audio-Ms": response.headers.get("x-tts-audio-ms", "0"),
-                    "X-Media-Sample-Rate": response.headers.get("x-tts-sample-rate", "24000"),
+                    "X-Media-Sample-Rate": response.headers.get("x-tts-sample-rate", "32000" if selected == "gsv" else "24000"),
                 },
             )
 

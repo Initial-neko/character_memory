@@ -153,10 +153,21 @@ personas/<name>/voice/ref.txt
 
 ### C. 稳定性控制
 
-- sidecar 请求模型增加 `seed`（int，可选）、`temperature`、`top_k`、`top_p`。
-- 固定 `seed` 时同一输入必须产出同一音频（测试断言用）。
-- 默认值从当前的 `temperature=1.0, top_k=15` 收紧到更保守的取值，降低跑飞概率。
-- 增加**时长/重复保护**：对生成 token 数或音频时长设上限，超限截断并记日志，避免 10.72s 那类输出直接进正式链路。
+**已核对的引擎能力**（`gsv_tts/TTS.py` 的 `infer_batched` 签名）：
+
+```python
+top_k=15, top_p=1.0, temperature=1.0,
+repetition_penalty=1.35, noise_scale=0.5, speed=1.0
+```
+
+**引擎没有 `seed` 参数。** 全文件 grep `seed` 无任何命中。因此：
+
+- **确定可用**：把 `temperature` / `top_k` / `top_p` / `repetition_penalty` / `noise_scale` 透传到 `infer_batched`。这些参数今天就存在，只是 sidecar 没有暴露。
+- **不确定可用**：字节级可复现。只能靠 `torch.manual_seed()` 全局播种去试，能否生效取决于 GPT 采样是否走 torch 全局 RNG、以及 SoVITS 的 `noise_scale` 噪声源是否同样受控、CUDA 算子是否确定性。**这是一个必须先验证的假设，不能当成既定事实写进实现。**
+
+因此 Phase 1 拆成两步：先 spike 验证 `torch.manual_seed` 能否带来确定性；**能**则暴露 `seed` 字段并以字节一致作为测试断言；**不能**则放弃可复现承诺，改为"降方差 + 时长保护"，测试断言改为统计性质（例如同输入跑 N 次，时长极差小于阈值）。
+
+- **时长/重复保护**：对生成音频时长设上限，超限截断并记日志，避免 10.72s 那类输出直接进正式链路。`repetition_penalty` 从默认 1.35 上调是抑制跑飞的第一手段，需实测确定取值。
 
 ### D. 正式链路接入
 
@@ -200,7 +211,7 @@ personas/<name>/voice/ref.txt
 | Phase | 内容 | 退出条件 |
 |---|---|---|
 | **0. Spike（决策门）** | Qwen3 合成一段参考 → 重启 GSV 指向它 → 与 `MAY_0035.wav` 参考 A/B 试听 | **听感是否可接受**。不达标则 B 改人工素材，架构不变 |
-| 1. 稳定性 | seed / temperature / top_k 透传 + 时长保护 | 固定 seed 同输入产出同一音频；跑飞不再进链路 |
+| 1. 稳定性 | 采样参数透传 + `torch.manual_seed` 确定性 spike + 时长保护 | 跑飞不再进链路；确定性结论明确（能或不能，均有实测依据） |
 | 2. 音色层 | 参考注册表 + 按请求切参考 + LRU 缓存 + preload 列表 | 同一进程内两个 voice 交替请求均正确 |
 | 3. 正式接入 | `media_server` gsv 分支 + health 分支 + **unknown-provider 守卫** + `dev_stack` 白名单 | `:8001/v1/tts` 在 `tts_provider: gsv` 下返回 GSV 音频；未知 provider 不再静默降级 |
 | 4. Lab UI | 参考生成 / 试听 / 固化流程 + 角色目录落盘 | 不走命令行即可为一个角色产出并固化参考 |
@@ -238,7 +249,7 @@ Phase 1 必须在 Phase 3 之前：否则接入的是不可复现的语音源。
 
 1. `tts_provider: gsv` 时，`:8001/v1/tts` 返回真实 GSV 音频（非 Sherpa），响应头 `X-Media-Provider: gsv`。
 2. 未知 `tts_provider` 返回错误，**不再**静默降级。
-3. 同一 `seed` + 同一输入，两次合成字节一致。
+3. 同一输入重复合成，输出**稳定**：`torch.manual_seed` 若验证有效，则字节一致；若无效，则同输入 N 次合成的时长极差低于实测确定的阈值（不承诺字节一致，但不再出现 6.0s vs 10.7s 这种量级的漂移）。
 4. 同进程内 `murasame`（微调）与任一共享底模 voice 交替请求，各自音色正确且不互相污染。
 5. 一个角色可仅通过 Lab UI 完成"Qwen3 生成参考 → 试听 → 固化 → 在正式链路使用"。
 6. `/health` 对 gsv 的报告与实际路由一致，不再复用 Sherpa 状态。

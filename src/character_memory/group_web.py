@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from character_memory.application.group_conversation_service import GroupConversationService
 from character_memory.group_store import GroupRepository
 from character_memory.images import load_image_catalog
+from character_memory.voice_message_fields import voice_fields
 
 
 logger = logging.getLogger("character_memory.group_web")
@@ -197,6 +198,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "image_id": event.metadata.get("image_id"),
             "media_id": event.metadata.get("media_id"),
             "image": image,
+            **voice_fields(event.metadata),
             "source_conversation_event_id": event.metadata.get("source_conversation_event_id"),
             "turn_summary": turn_summary if role == "user" else None,
         }

@@ -10,6 +10,7 @@ from uuid import uuid4
 from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.runtime.context import compile_context
+from character_memory.voice_message_fields import voice_pending_fields
 
 
 logger = logging.getLogger("character_memory.application.group")
@@ -411,6 +412,11 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                             continue
                         content = f"[图片：{image.label}]"
                         metadata.update({"image_id": image.id, "image_label": image.label})
+                    elif action.type == ActionType.VOICE_MESSAGE:
+                        if not (action.message or "").strip():
+                            continue
+                        content = (action.message or "").strip()
+                        metadata.update(voice_pending_fields())
                     else:
                         if not (action.message or "").strip():
                             continue

@@ -11,6 +11,7 @@ from character_memory.domain.models import ActionDecision, ActionType, EXPRESSIV
 from character_memory.runtime.context import compile_context
 from character_memory.runtime.sticker_retrieval import StickerRetriever
 from character_memory.visual_runtime import direct_visual_available, generate_direct_visual_action
+from character_memory.voice_message_fields import voice_pending_fields
 
 
 logger = logging.getLogger("character_memory.runtime")
@@ -367,6 +368,11 @@ class PersonRuntime:
                             continue
                         content = f"[图片：{image.label}]"
                         metadata.update({"image_id": image.id, "image_label": image.label})
+                    elif action.type == ActionType.VOICE_MESSAGE:
+                        if not (action.message or "").strip():
+                            continue
+                        content = (action.message or "").strip()
+                        metadata.update(voice_pending_fields())
                     else:
                         if not (action.message or "").strip():
                             continue

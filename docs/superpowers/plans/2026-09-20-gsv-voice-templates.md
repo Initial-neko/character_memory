@@ -397,6 +397,30 @@ def test_resolve_voice_registry_lets_a_character_override_the_template_models(tm
 Run: `uv run pytest tests/test_voices_templates.py -q --no-header`
 Expected: FAIL — `ImportError: cannot import name 'load_character_voice'`
 
+- [ ] **Step 2b: 先收敛读文档的重复，再加第三个读者**
+
+Task 1 的审查把这条列为 Important，并建议**随本任务做**而不是回头返工：`load_template`（`voices.py:127-142`、`157-169`）与 `load_voice_profile`（`voices.py:216-235`、`246-262`）的「读盘 → `yaml.safe_load` → `isinstance(raw, dict)` → `model_validate` → 包装成 `VoiceProfileError`」这一段几乎逐字相同。本任务正要加**第三个**读者 `load_character_voice`，不先收敛就是抄第三遍；而这个模块 docstring 记的教训恰恰是「同一份 schema 的多个读者漂移，而且静默失败」。
+
+**先抽 helper，再写新读者。** 目标形状：
+
+```python
+def _read_document(path, model, *, unreadable, empty) -> BaseModel:
+    """读盘、解析、校验一份 voice 文档，把每种失败统一包装成 VoiceProfileError。"""
+```
+
+- 读盘 + `yaml.safe_load` + `OSError`/`YAMLError` 包装
+- `raw is None` 与「不是 mapping」的两种分支（各调用方文案不同，用参数传）
+- `model_validate` + `ValidationError` 包装
+
+三个调用方各自只留**真正属于自己**的部分：读哪个路径、缺省 `voice_id` 从哪来（模板是 `path.stem`、角色是父目录名）、以及返回什么（`VoiceProfile` 还是模板名字符串）。文件不存在时的行为也不同（`load_template` 抛错、`load_voice_profile` 返回 `None`、`load_character_voice` 返回 `None`），这部分**留在各调用方**，不进 helper。
+
+**硬约束：既有错误文案逐字节不变。** 回归闸门是
+
+Run: `uv run pytest tests/test_voices.py tests/test_voices_templates.py -q --no-header`
+Expected: `tests/test_voices.py` 与改动前**同样通过**（该文件对 `load_voice_profile` 有约 30 条断言，其中 4 条直接比对文案：`tests/test_voices.py:81,118,128,150`，含 `str(missing.resolve()) in str(excinfo.value)`）。
+
+**若你发现某条文案无法在不改变字节的前提下共享，停下报告，不要改文案。** 跨模块契约优先于 DRY；这不是可以自行权衡的地方。
+
 - [ ] **Step 3: 实现**
 
 追加到 `src/character_memory/voices.py` 末尾：
@@ -906,6 +930,7 @@ git commit -m "Add one-shot migrations onto the template model"
 
 **Files:**
 - Modify: `src/character_memory/gsv_tts_experiment.py:93-104` (`_persona_root` 旁加 `_voices_root`)、`:173-203` (`_load_voices` / `_voice_ids`)、`:259-274` (`_asset_status`)
+- Modify: `src/character_memory/dev_stack.py:278`（钉 `GSV_TTS_VOICES_ROOT` 绝对路径）
 - Test: `tests/test_gsv_voice_templates.py` (新建)
 
 **Interfaces:**
@@ -1248,6 +1273,24 @@ def _voices_root(voices_root: str | Path | None) -> str:
         )
 ```
 
+- [ ] **Step 3b: 在 `dev_stack` 里钉住 voices root**
+
+Task 1 的审查发现计划漏了这一步：全局约束要求 `GSV_TTS_VOICES_ROOT` 与 `GSV_TTS_PERSONA_ROOT` 一样由**启动脚本与 `dev_stack` 两处**钉绝对路径，但只有 Task 12 钉了脚本，无人钉 `dev_stack`。而 `uv run character-stack` 正是日常启动路径——缺这一步，sidecar 拿到的就是相对的 `Path("voices")`，随 cwd 解析，正是那条约束警告的失败方式（且是静默的：模板全查不到，角色全部落到默认声线）。
+
+`dev_stack.py:278` 是既有的同级写法：
+
+```python
+        gsv_env.setdefault("GSV_TTS_PERSONA_ROOT", str(ROOT / "personas"))
+```
+
+紧挨它加一行：
+
+```python
+        # Same reason as the persona root: a relative root resolves against the
+        # sidecar's cwd, which dev_stack does not control.
+        gsv_env.setdefault("GSV_TTS_VOICES_ROOT", str(ROOT / "voices"))
+```
+
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_gsv_voice_templates.py tests/test_gsv_tts_experiment.py tests/test_voices.py -q --no-header`
@@ -1256,7 +1299,7 @@ Expected: 新增 7 passed；既有测试若因 `_asset_status` 语义变更而�
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/character_memory/gsv_tts_experiment.py tests/test_gsv_voice_templates.py
+git add src/character_memory/gsv_tts_experiment.py src/character_memory/dev_stack.py tests/test_gsv_voice_templates.py
 git commit -m "Load templates and character references into the GSV registry"
 ```
 

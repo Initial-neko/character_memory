@@ -38,6 +38,7 @@ import yaml
 
 from character_memory.voices import (
     CHARACTER_VOICE_FILENAME,
+    TEMPLATE_FILE_SUFFIX,
     VoiceProfileError,
     load_voice_profile,
     template_root,
@@ -78,7 +79,7 @@ def _copy_audio(source: Path, voices_root: Path, name: str) -> str:
     target_dir = voices_root / name
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / source.name
-    if target.exists():
+    if target.is_file():
         return source.name
     temp = target.with_suffix(".wav.tmp")
     shutil.copy2(source, temp)
@@ -101,9 +102,23 @@ def _is_safe_name(name: str) -> bool:
     environment; both are arbitrary strings. ``a/b`` would be written into a
     directory that does not exist, ``../x`` outside ``voices/``. One refused
     name is a note, not a crash.
+
+    A name ending in the template suffix is refused for a different reason: this
+    migration creates a *directory* ``voices/<name>/`` for the audio, and
+    ``discover_templates`` globs ``*{TEMPLATE_FILE_SUFFIX}`` -- a directory
+    matches that glob, so the loader would try to read a directory as a document
+    and report "template not found" for a file nobody created. The sidecar would
+    then refuse to start, and nothing here removes directories, so no later run
+    could repair it. Matched case-insensitively: ``Path.glob`` is case-insensitive
+    on Windows, where this runs, so ``MURASAME.YAML`` would be just as fatal.
     """
 
-    return bool(name) and Path(name).name == name and name not in {".", ".."}
+    return (
+        bool(name)
+        and Path(name).name == name
+        and name not in {".", ".."}
+        and not name.lower().endswith(TEMPLATE_FILE_SUFFIX)
+    )
 
 
 def _migrate_character_clips(personas_root: Path, voices_root: Path, report: MigrationReport) -> None:
@@ -195,7 +210,10 @@ def _migrate_character_clips(personas_root: Path, voices_root: Path, report: Mig
             # The two writes are separate steps so that this one -- the file a
             # user is most likely to be holding open, since it is the one they
             # would edit -- cannot take the remaining characters down with it.
-            report.notes.append(f"{character_id}: failed ({exc})")
+            # Named separately from the failure above: both can fire for one
+            # character, and "failed" twice with different exceptions does not
+            # say which write to look at.
+            report.notes.append(f"{character_id}: failed to rewrite the reference ({exc})")
             continue
 
         report.migrated_characters.append(character_id)

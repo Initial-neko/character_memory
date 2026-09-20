@@ -390,6 +390,44 @@ def test_an_unsafe_voice_id_is_noted_and_the_character_keeps_its_old_file(tmp_pa
     assert not (voices / "escape.yaml").exists()
 
 
+def test_a_voice_id_ending_in_the_template_suffix_is_refused(tmp_path):
+    """``voices/<name>.yaml`` would be created as a *directory*, and the glob finds it.
+
+    ``discover_templates`` globs ``*{TEMPLATE_FILE_SUFFIX}``; a directory matches
+    that glob, so the loader would try to read a directory as a document and fail
+    the whole sidecar with "template not found" for a file the user never wrote.
+    Nothing here removes directories, so no later run could clear it -- the same
+    unrecoverable-start-up class as the ``../escape`` case above, by a different
+    route.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    persona = _legacy_character(personas, "haru")
+    voice_file = persona.parent / "voice.yaml"
+    document = yaml.safe_load(voice_file.read_text(encoding="utf-8"))
+    document["voice_id"] = "murasame.yaml"
+    voice_file.write_text(
+        yaml.safe_dump(document, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    before = voice_file.read_bytes()
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
+    assert report.created_templates == []
+    assert report.migrated_characters == []
+    assert any("not usable as a file name" in note for note in report.notes)
+    assert voice_file.read_bytes() == before
+    assert not (voices / "murasame.yaml").exists()
+    # The point of the refusal: the tree is still readable afterwards.
+    assert discover_templates(voices) == {}
+
+
 def test_a_failed_write_does_not_strand_the_other_characters(tmp_path):
     """An unwritable template is one character's problem, not the whole tree's.
 
@@ -452,6 +490,36 @@ def test_a_failed_reference_rewrite_still_reports_the_template_it_wrote(tmp_path
     assert "template" not in yaml.safe_load(
         (personas / "a-haru" / "voice.yaml").read_text(encoding="utf-8")
     )
+
+
+def test_a_directory_squatting_on_the_audio_name_is_a_note_rather_than_a_bad_template(tmp_path):
+    """The audio target is checked as a *file*, not merely as an existing path.
+
+    A directory at ``voices/<name>/<clip>.wav`` exists, so an existence check
+    calls the copy done and the template then points ``ref_audio`` at a
+    directory -- which ``load_template``'s ``is_file()`` rejects, taking the whole
+    registry (and the sidecar) down with a message about a file the user did
+    create. Failing the copy instead is one character's note.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    persona = _legacy_character(personas, "haru")
+    (voices / "haru" / "abcdef0123456789.wav").mkdir(parents=True)
+    before = (persona.parent / "voice.yaml").read_bytes()
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
+    assert report.created_templates == []
+    assert report.migrated_characters == []
+    assert any("haru" in note and "failed" in note for note in report.notes)
+    assert not (voices / "haru.yaml").exists()
+    assert (persona.parent / "voice.yaml").read_bytes() == before
 
 
 def test_a_character_without_a_voice_file_is_silent(tmp_path):

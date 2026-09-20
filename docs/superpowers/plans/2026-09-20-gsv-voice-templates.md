@@ -287,7 +287,7 @@ git commit -m "Add template readers to the voice registry"
   - `CHARACTER_VOICE_FILENAME: str = "voice.yaml"`
   - `load_character_voice(persona_path: str | Path) -> str | None`
   - `discover_character_voices(persona_paths: Iterable[str | Path]) -> dict[str, str]`
-  - `resolve_voice_registry(*, templates: dict[str, VoiceProfile], character_voices: dict[str, str], default: str) -> dict[str, VoiceProfile]`
+  - `resolve_voice_registry(*, templates: dict[str, VoiceProfile], character_voices: dict[str, str]) -> dict[str, VoiceProfile]`
 
 **关键语义（spec §5.2）**：角色**没有** `voice.yaml` → 不进注册表（静默降级给调用方）；角色**有** `voice.yaml` 但模板不存在 → `VoiceProfileError`。
 
@@ -356,7 +356,6 @@ def test_resolve_voice_registry_maps_a_character_onto_its_template(tmp_path):
     registry = resolve_voice_registry(
         templates=discover_templates(tmp_path / "voices"),
         character_voices=discover_character_voices([persona]),
-        default="murasame",
     )
 
     assert registry["haru"].ref_text == "你好，今天天气不错。"
@@ -378,7 +377,10 @@ def test_resolve_voice_registry_raises_when_a_referenced_template_is_missing(tmp
         )
 
 
-def test_resolve_voice_registry_lets_a_character_override_the_template_models(tmp_path):
+def test_resolve_voice_registry_inherits_the_template_models(tmp_path):
+    """A character cannot set models itself -- ``_CharacterVoiceDocument`` forbids
+    it, because the same clip under two characters must not resolve to two
+    different models. It inherits whatever the template declares."""
     _write_template(tmp_path / "voices", "murasame", gpt_model="base.ckpt")
     personas = tmp_path / "personas"
     persona = _write_character(personas, "haru", {"template": "murasame"})
@@ -386,7 +388,6 @@ def test_resolve_voice_registry_lets_a_character_override_the_template_models(tm
     registry = resolve_voice_registry(
         templates=discover_templates(tmp_path / "voices"),
         character_voices=discover_character_voices([persona]),
-        default="murasame",
     )
 
     assert registry["haru"].gpt_model == "base.ckpt"
@@ -510,7 +511,6 @@ def resolve_voice_registry(
     *,
     templates: dict[str, VoiceProfile],
     character_voices: dict[str, str],
-    default: str,
 ) -> dict[str, VoiceProfile]:
     """Merge the template tree and the character tree into one registry.
 
@@ -519,9 +519,9 @@ def resolve_voice_registry(
     of the same name, because the character is the more specific answer.
 
     A character pointing at a template that does not exist raises: that is a
-    configuration error, not an unconfigured character. ``default`` is exempt --
-    it is allowed to name a template that was never created, since readiness
-    (``_asset_status``) reports that case separately.
+    configuration error, not an unconfigured character. An *unreferenced* missing
+    template is not this function's business -- readiness (``_asset_status``)
+    reports a default template that was never created.
     """
 
     registry: dict[str, VoiceProfile] = dict(templates)
@@ -533,8 +533,10 @@ def resolve_voice_registry(
                 f"{character_id} references unknown template {template_name!r}"
             )
         # Re-key onto the character id so the browser's ``voice: <character id>``
-        # resolves directly; the profile itself is shared, not copied.
-        registry[character_id] = profile
+        # resolves directly. Copied, not shared: ``registry[k].voice_id == k``
+        # then holds for every key, and two characters on one template cannot
+        # alias a single mutable object.
+        registry[character_id] = profile.model_copy(update={"voice_id": character_id})
 
     return registry
 ```
@@ -542,7 +544,7 @@ def resolve_voice_registry(
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_voices_templates.py -q --no-header`
-Expected: 14 passed
+Expected: 15 passed（Task 1 遗留 8 条 + 本任务新增 7 条；早先写的「14」是把本文件的模板侧用例少算了一条）
 
 - [ ] **Step 5: 提交**
 
@@ -1146,7 +1148,6 @@ def _voices_root(voices_root: str | Path | None) -> str:
         return resolve_voice_registry(
             templates=discover_templates(self.voices_root),
             character_voices=discover_character_voices(persona_paths),
-            default=self.default_voice,
         )
 ```
 
@@ -1174,6 +1175,15 @@ def _voices_root(voices_root: str | Path | None) -> str:
         ``GsvTtsResult.voice`` never report a profile that was not applied.
         """
         name = str(requested or self.default_voice).strip() or self.default_voice
+        # The registry is one flat namespace, and a character id is allowed to
+        # shadow a template name: ``resolve_voice_registry`` re-keys a
+        # character's profile onto its id, so the character wins the key. Reading
+        # the fallback out of that same map is deliberate -- the specific answer
+        # beats the general one -- and the consequence is that a character
+        # *named after* the default template becomes the fallback for every
+        # unknown name. That is accepted, not a bug to repair here with a second,
+        # template-only lookup: two lookup paths would let ``X-TTS-Voice`` report
+        # a profile the engine did not use.
         profile = self._voices.get(name) or self._voices.get(self.default_voice)
         if profile is None:
             # Even the default template is missing. Still must not raise: this

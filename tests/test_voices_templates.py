@@ -117,10 +117,24 @@ def test_template_root_prefers_the_explicit_argument(tmp_path, monkeypatch):
 # --- character references ---------------------------------------------------
 
 
-def _write_character(root: Path, character_id: str, document: dict | None) -> Path:
+def _write_character(
+    root: Path,
+    character_id: str,
+    document: dict | None,
+    *,
+    persona_id: str | None = None,
+) -> Path:
+    """``character_id`` names the directory; ``persona_id`` fills the ``id`` field.
+
+    They are separate parameters because they are separate things in the app, and
+    one case below depends on them disagreeing.
+    """
+
     persona = root / character_id / "persona.yaml"
     persona.parent.mkdir(parents=True, exist_ok=True)
-    persona.write_text(f"id: {character_id}\nname: {character_id}\n", encoding="utf-8")
+    persona.write_text(
+        f"id: {persona_id or character_id}\nname: {character_id}\n", encoding="utf-8"
+    )
     if document is not None:
         import yaml
 
@@ -202,3 +216,52 @@ def test_resolve_voice_registry_inherits_the_template_models(tmp_path):
     )
 
     assert registry["haru"].gpt_model == "base.ckpt"
+
+
+def test_discover_character_voices_keys_on_the_persona_id(tmp_path):
+    """The browser sends ``voice: <profile["id"]>`` -- the ``id`` field, not the
+    directory name. A registry keyed on the directory would never match that
+    request and the character would fall back to the default template in
+    silence, which is the failure this whole layer exists to prevent."""
+
+    personas = tmp_path / "personas"
+    persona = _write_character(
+        personas, "haru", {"template": "murasame"}, persona_id="haruka"
+    )
+
+    assert discover_character_voices([persona]) == {"haruka": "murasame"}
+
+
+def test_a_character_without_a_voice_file_stays_out_of_the_registry(tmp_path):
+    """The other half of spec 5.2: never given a voice is normal, not an error."""
+
+    personas = tmp_path / "personas"
+    persona = _write_character(personas, "haru", None)
+
+    assert discover_character_voices([persona]) == {}
+
+
+def test_load_character_voice_rejects_a_document_that_is_not_a_mapping(tmp_path):
+    """A list is the realistic typo (a stray ``- ``), and it must not read as
+    'no voice configured' -- that would be the silent fallback this forbids."""
+
+    persona = _write_character(tmp_path, "haru", None)
+    (persona.parent / "voice.yaml").write_text("- murasame\n", encoding="utf-8")
+
+    with pytest.raises(VoiceProfileError, match="expected a YAML mapping with a 'template' key"):
+        load_character_voice(persona)
+
+
+def test_discover_character_voices_rejects_two_personas_claiming_one_id(tmp_path):
+    """Two directories may declare the same ``id``, and the app keeps whichever
+    it finds first while dropping the rest. A voice cannot be attached to an id
+    two personas claim: whichever one won, the other would be silently wrong."""
+
+    personas = tmp_path / "personas"
+    first = _write_character(personas, "haru", {"template": "murasame"})
+    second = _write_character(
+        personas, "haru-alt", {"template": "murasame"}, persona_id="haru"
+    )
+
+    with pytest.raises(VoiceProfileError, match="duplicate character id 'haru'"):
+        discover_character_voices([first, second])

@@ -134,6 +134,7 @@ def _read_document(
 
 
 TEMPLATE_FILE_SUFFIX = ".yaml"
+CHARACTER_VOICE_FILENAME = "voice.yaml"
 
 
 def template_root(configured: str | Path | None = None) -> Path:
@@ -317,9 +318,6 @@ def discover_voice_profiles(
     return profiles
 
 
-CHARACTER_VOICE_FILENAME = "voice.yaml"
-
-
 class _CharacterVoiceDocument(BaseModel):
     """Raw shape of a character's ``voice.yaml``: a reference and nothing else.
 
@@ -365,22 +363,58 @@ def load_character_voice(persona_path: str | Path) -> str | None:
     return name
 
 
+def _character_id(persona_path: Path) -> str:
+    """Resolve a character's id exactly as ``discover_character_profiles`` does.
+
+    The ``id`` field wins and the directory name is the fallback. It has to be
+    the *same expression* as ``config.py:180``, because the browser asks for a
+    voice by ``profile["id"]`` -- that field, not the directory. A registry
+    anchored on the directory name answers a question nobody asks for any
+    persona whose two disagree, and the character drops to the default template
+    without a word.
+
+    An unreadable persona document degrades to the directory name rather than
+    raising: whether a persona is usable is the persona loader's call to make
+    (``discover_character_profiles`` drops it), and this function has no
+    standing to fail the whole voice registry over it.
+    """
+
+    try:
+        data = yaml.safe_load(persona_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        data = None
+    if not isinstance(data, dict):
+        data = {}
+    return str(data.get("id") or persona_path.parent.name).strip()
+
+
 def discover_character_voices(
     persona_paths: Iterable[str | Path],
 ) -> dict[str, str]:
     """Build ``{character_id: template_name}`` for every persona that names one.
 
-    The character id is the persona directory name -- the same anchor
-    ``discover_character_profiles`` uses -- because the sidecar globs
-    ``*/persona.yaml`` and has no other identifier to hand.
+    ``persona_paths`` are ``*/persona.yaml`` paths, the same set the app
+    discovers. The key is the character's id per :func:`_character_id`, which is
+    what the browser sends; a character with no ``voice.yaml`` is simply absent,
+    and one whose ``voice.yaml`` is unusable raises from
+    :func:`load_character_voice` before this function has an id to key on.
     """
 
     references: dict[str, str] = {}
     for persona_path in persona_paths:
+        persona_path = Path(persona_path)
         name = load_character_voice(persona_path)
         if name is None:
             continue
-        character_id = Path(persona_path).parent.name
+        character_id = _character_id(persona_path)
+        if not character_id:
+            # Reachable only when the ``id`` field is present but blank, since
+            # the directory name is the fallback. ``discover_character_profiles``
+            # drops that character entirely, so there is nothing for a voice to
+            # attach to -- and failing loud beats registering an unreachable key.
+            raise VoiceProfileError(
+                f"{persona_path}: persona id is empty; omit it to default to the directory name"
+            )
         previous = references.get(character_id)
         if previous is not None:
             raise VoiceProfileError(

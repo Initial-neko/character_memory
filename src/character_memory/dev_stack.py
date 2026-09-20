@@ -16,10 +16,48 @@ import yaml
 
 from character_memory.envfile import parse_env_file
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_IDS, provider_spec
+from character_memory.voices import TEMPLATE_FILE_SUFFIX, VoiceProfileError, load_template
 
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL_MEDIA_ORIGINS = ("http://127.0.0.1:8000", "http://localhost:8000")
+#: The sidecar's default template name (``gsv_tts_experiment.DEFAULT_VOICE``).
+#: Spelled out rather than imported: the launcher must not pull the sidecar's
+#: torch/numpy-side module, and this value is part of the env contract either way.
+DEFAULT_GSV_VOICE = "murasame"
+
+
+def _gsv_missing_assets(values: dict[str, str]) -> list[str]:
+    """Why the GSV sidecar cannot synthesise yet, as operator-facing names.
+
+    Readiness is the sidecar's own contract (``GsvTtsRuntime._asset_status``):
+    both base models are configured *and* the default template resolves to a
+    clip. The two legacy reference variables are deliberately not checked -- they
+    stopped taking part in readiness when the reference moved into the template,
+    and naming them here sent the operator to variables that change nothing while
+    never mentioning the real cause.
+
+    The template is read with the same reader the sidecar uses, so the reason
+    printed here is the reason the sidecar would refuse with. A relative root is
+    resolved against ``ROOT`` because that is the cwd the child is spawned with.
+    """
+
+    missing = [
+        name
+        for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL")
+        if not str(values.get(name) or "").strip()
+    ]
+
+    default_voice = str(values.get("GSV_TTS_VOICE") or "").strip() or DEFAULT_GSV_VOICE
+    root = Path(str(values.get("GSV_TTS_VOICES_ROOT") or "").strip() or "voices")
+    if not root.is_absolute():
+        root = ROOT / root
+    template = root / f"{default_voice}{TEMPLATE_FILE_SUFFIX}"
+    try:
+        load_template(template)
+    except VoiceProfileError as exc:
+        missing.append(f"default template {default_voice!r}: {exc}")
+    return missing
 
 
 def _probe(url: str, timeout: float = 0.8) -> tuple[bool, str | None]:
@@ -156,6 +194,11 @@ def _tts_lab_env(base: dict[str, str], config_path: str) -> dict[str, str]:
     env.setdefault("CHARACTER_TTS_GSV_BASE", "http://127.0.0.1:9014")
     env.setdefault("CHARACTER_TTS_QWEN3_VOICE_DESIGN_BASE", "http://127.0.0.1:9015")
     env.setdefault("CHARACTER_TTS_KOKORO_DEVICE", _configured_tts_device(config_path))
+    # The template tree is named absolutely here for the same reason the sidecar
+    # pins it: every child is spawned with cwd=ROOT, so a relative "voices" would
+    # only work by inheriting that accident. This process does not read templates
+    # yet; whoever does must not have to rediscover why the root is absolute.
+    env.setdefault("GSV_TTS_VOICES_ROOT", str(ROOT / "voices"))
     return env
 
 
@@ -167,6 +210,7 @@ def _settings_env(base: dict[str, str]) -> dict[str, str]:
     env.setdefault("CHARACTER_SETTINGS_MEDIA_BASE", "http://127.0.0.1:8001")
     env.setdefault("CHARACTER_SETTINGS_DEV_BASE", "http://127.0.0.1:8002")
     env.setdefault("CHARACTER_SETTINGS_TTS_LAB_BASE", "http://127.0.0.1:9002")
+    env.setdefault("GSV_TTS_VOICES_ROOT", str(ROOT / "voices"))
     return env
 
 
@@ -259,10 +303,6 @@ def main() -> None:
     gsv_root = Path(persisted_env.get("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
     gsv_venv = Path(persisted_env.get("GSV_TTS_VENV", gsv_root / ".venv"))
     gsv_python = gsv_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    missing_gsv = [
-        name for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL", "GSV_TTS_REF_AUDIO", "GSV_TTS_REF_TEXT")
-        if not str(persisted_env.get(name, "")).strip()
-    ]
     if gsv_python.is_file():
         # GSV is the one child that consumes GSV_TTS_* as process environment.
         # Merge the persistent project file here only, with real system env winning.
@@ -271,14 +311,17 @@ def main() -> None:
         gsv_env.setdefault("GSV_TTS_HOST", "127.0.0.1")
         gsv_env.setdefault("GSV_TTS_PORT", "9014")
         gsv_env["GSV_TTS_DEVICE"] = tts_device
-        gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" and not missing_gsv else "0"
-        gsv_env.setdefault("GSV_TTS_VOICE", str(persisted_env.get("GSV_TTS_VOICE", "") or "").strip() or "murasame")
-        # Absolute on purpose: the sidecar globs this for per-persona voice
-        # manifests, and a relative value would follow the child's cwd.
+        gsv_env.setdefault("GSV_TTS_VOICE", str(persisted_env.get("GSV_TTS_VOICE", "") or "").strip() or DEFAULT_GSV_VOICE)
+        # Absolute on purpose: the sidecar globs this for the character voice
+        # references, and a relative value would follow the child's cwd.
         gsv_env.setdefault("GSV_TTS_PERSONA_ROOT", str(ROOT / "personas"))
         # Same reason as the persona root: a relative root resolves against the
         # sidecar's cwd, which dev_stack does not control.
         gsv_env.setdefault("GSV_TTS_VOICES_ROOT", str(ROOT / "voices"))
+        # Judged on the environment the child actually receives, defaults
+        # included -- checking the raw .env here would miss the pinned roots.
+        missing_gsv = _gsv_missing_assets(gsv_env)
+        gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" and not missing_gsv else "0"
         specs.insert(
             1,
             (

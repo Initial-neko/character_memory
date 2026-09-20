@@ -71,8 +71,63 @@ def test_dev_stack_declares_gsv_sidecar_startup():
     assert '"GSV-TTS-Lite Runtime"' in script
     assert '"http://127.0.0.1:9014/health"' in script
     assert '"GSV_TTS_GPT_MODEL"' in script
-    assert '"GSV_TTS_REF_AUDIO"' in script
     assert '"CHARACTER_TTS_GSV_BASE"' in script
+
+
+def test_gsv_missing_assets_follows_the_template_readiness_contract(tmp_path):
+    """Readiness is the sidecar's contract: two models *and* the default template.
+
+    The legacy ``GSV_TTS_REF_AUDIO``/``GSV_TTS_REF_TEXT`` pair stopped taking part
+    in it when the reference moved into the template, so reporting them as
+    "incomplete" pointed the operator at two variables that change nothing and
+    never mentioned the real cause -- a default template that does not exist.
+    """
+    from character_memory.dev_stack import _gsv_missing_assets
+
+    voices = tmp_path / "voices"
+    values = {
+        "GSV_TTS_GPT_MODEL": "gpt.ckpt",
+        "GSV_TTS_SOVITS_MODEL": "sovits.pth",
+        "GSV_TTS_VOICES_ROOT": str(voices),
+        # Unset on purpose: the legacy pair must not appear in the verdict.
+        "GSV_TTS_REF_AUDIO": "",
+        "GSV_TTS_REF_TEXT": "",
+    }
+
+    missing = _gsv_missing_assets(values)
+
+    assert len(missing) == 1, missing
+    assert "murasame" in missing[0]
+    assert str(voices / "murasame.yaml") in missing[0]
+    assert "GSV_TTS_REF_AUDIO" not in missing[0]
+
+    # A template with a clip of its own completes the picture, legacy keys and all.
+    clip = voices / "murasame" / "clip.wav"
+    clip.parent.mkdir(parents=True)
+    clip.write_bytes(b"RIFF")
+    (voices / "murasame.yaml").write_text(
+        "ref_audio: murasame/clip.wav\nref_text: 参考文本。\n", encoding="utf-8"
+    )
+    assert _gsv_missing_assets(values) == []
+
+    # An unusable template is reported with its reason, not counted as present.
+    clip.unlink()
+    unusable = _gsv_missing_assets(values)
+    assert len(unusable) == 1 and "ref_audio" in unusable[0], unusable
+
+
+def test_gsv_missing_assets_names_the_configured_default_template(tmp_path):
+    """The name is the operator's, and a relative root belongs to the child's cwd."""
+    from character_memory.dev_stack import ROOT, _gsv_missing_assets
+
+    missing = _gsv_missing_assets(
+        {"GSV_TTS_VOICE": "haru", "GSV_TTS_VOICES_ROOT": "voices"}
+    )
+
+    assert missing[:2] == ["GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL"]
+    assert "haru" in missing[2]
+    # Children are spawned with cwd=ROOT, so that is where a relative root lands.
+    assert str(ROOT / "voices" / "haru.yaml") in missing[2]
 
 
 def test_dev_stack_keeps_gsv_health_checkable_without_requiring_runtime_assets():
@@ -99,6 +154,23 @@ def test_dev_stack_pins_the_gsv_persona_root_to_an_absolute_path():
     """A relative persona root would break the moment the sidecar's cwd differs."""
     script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
     assert 'gsv_env.setdefault("GSV_TTS_PERSONA_ROOT", str(ROOT / "personas"))' in script
+    assert 'gsv_env.setdefault("GSV_TTS_VOICES_ROOT", str(ROOT / "voices"))' in script
+
+
+def test_every_child_that_touches_templates_gets_the_absolute_voices_root():
+    """Settings Center and TTS Lab are pinned too, not just the sidecar.
+
+    They are spawned with ``cwd=ROOT``, so a relative "voices" happens to work
+    today -- which is exactly the accident the absolute path exists to remove.
+    Whoever reads templates in those processes next must not inherit the answer
+    from the launcher's working directory.
+    """
+    from character_memory.dev_stack import ROOT, _settings_env, _tts_lab_env
+
+    expected = str(ROOT / "voices")
+
+    assert _settings_env({})["GSV_TTS_VOICES_ROOT"] == expected
+    assert _tts_lab_env({}, "config.yaml")["GSV_TTS_VOICES_ROOT"] == expected
 
 
 def test_gsv_start_script_pins_the_persona_root_to_an_absolute_path():

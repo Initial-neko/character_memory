@@ -372,6 +372,84 @@ def test_one_provider_health_failure_does_not_hide_other_healthy_providers(tmp_p
     assert "edge probe timeout" in snapshot["tts"]["error"]
 
 
+def test_kokoro_device_change_is_persisted_but_requires_tts_runtime_restart(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        'tts_provider: "kokoro"\n'
+        'tts_voice: "zf_001"\n'
+        'tts_device: "cpu"\n',
+        encoding="utf-8",
+    )
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=_SettingsRuntimeClient(),
+    )
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/v1/settings",
+            json={"values": {"tts_device": "cuda"}},
+        )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["persisted"] is True
+    assert result["restart_required"] == ["tts_device"]
+    assert result["runtime_apply"]["applied"] is True
+    assert result["runtime_apply"]["restart_required"] == ["tts_device"]
+    assert load_settings(str(config)).tts_device == "cuda"
+
+
+def test_persisted_gsv_selection_reports_runtime_apply_failure_separately(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        'tts_provider: "kokoro"\n'
+        'tts_voice: "zf_001"\n'
+        'tts_device: "cpu"\n',
+        encoding="utf-8",
+    )
+
+    class FailOnPreloadClient(_SettingsRuntimeClient):
+        def post(self, url, **kwargs):
+            self.post_calls.append((url, kwargs))
+            if url.endswith("/v1/configure"):
+                if kwargs.get("json", {}).get("preload"):
+                    raise RuntimeError("CUDA OOM during GSV preload")
+                self.providers["gsv"]["ready"] = True
+                self.providers["gsv"]["reason"] = None
+                return _RuntimeResponse({"ready": True, "loaded": False})
+            return super().post(url, **kwargs)
+
+    runtime = FailOnPreloadClient()
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=runtime,
+    )
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/v1/settings",
+            json={
+                "values": {
+                    "tts_provider": "gsv",
+                    "tts_voice": "murasame",
+                    "tts_device": "cuda",
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result"]["persisted"] is True
+    assert body["result"]["runtime_apply"]["applied"] is False
+    assert "CUDA OOM" in body["result"]["runtime_apply"]["error"]
+    assert load_settings(str(config)).tts_provider == "gsv"
+
+
 def test_provider_change_normalizes_stale_voice_and_device(tmp_path: Path, monkeypatch):
     _clear_secret_env(monkeypatch)
     config = tmp_path / "config.yaml"
@@ -594,6 +672,8 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert 'device.value = detected' in settings_js
     assert '/v1/tts-preview' in settings_js
     assert 'Cloud (Provider managed)' in settings_js
+    assert "runtime_apply" in settings_js
+    assert "需重启对应 TTS Runtime" in settings_js
     assert "zh-CN-XiaoxiaoNeural" in settings_store
     assert 'http://127.0.0.1:8003/settings' in chat
     assert 'http://127.0.0.1:8003/settings' in lab

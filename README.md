@@ -21,9 +21,10 @@
 - 用户图片输入 + Vision；浏览器 Camera / Display Capture 会选择关键帧作为本轮 transient Vision context，不把帧二进制长期写进聊天事实。
 - ImageGen：Direct 与 Group 中 Character 都可以自主选择 `SELFIE / SCENE`；同时保留用户显式“AI 生成图片”草稿工具。
 - Avatar Search / Avatar Generate / 从聊天图片设头像。
-- Media Runtime：SenseVoice ASR；正式 Browser TTS 固定走 `:8001/v1/tts`，按配置使用 Kokoro 或 Sherpa。
-- TTS Provider Runtime + Lab：`:9002` 承载 Kokoro/Sherpa/CosyVoice provider audition，其中 Kokoro 也是 V1 正式默认 TTS provider。
-- Settings Center：`config.yaml` 管非敏感配置，`.env` 管 Secret；修改后统一重启 stack 生效。
+- Media Runtime：SenseVoice ASR；正式 Browser TTS 固定走 `:8001/v1/tts`，按配置路由 Kokoro / Sherpa / Edge / GSV-TTS-Lite。
+- TTS Workbench + Provider Runtime：`:9002` 承载正式 Provider adapter、试听/benchmark，以及可选 VoiceDesign 工具；Sherpa 试听使用独立 provider-specific Media route，不经过正式 TTS selector。
+- GSV-TTS-Lite：独立 `:9014` sidecar，支持 per-character `voice.yaml` registry；VoiceDesign freeze 可以把试听结果固化为角色 reference。
+- Settings Center：`config.yaml` 管正式运行选择，`.env` 管 Secret 与 GSV runtime 资产。Provider/Voice/Speed 与 GSV runtime 配置支持热生效；Kokoro/Sherpa device 变更只需重启对应 TTS Runtime。
 - Dev Console：统一测试 LLM、ASR/TTS、ImageGen、资源与运行状态。
 - pytest、Browser Smoke、JSONL Eval regression。
 
@@ -46,11 +47,15 @@ Character Runtime :8000                                         │
                                                                 │
 Media Runtime :8001 <-------------------------------------------┘
 ├─ SenseVoice ASR
-├─ Sherpa VITS fallback
+├─ Sherpa VITS local runtime
+├─ /v1/providers/sherpa/tts  (Workbench-only direct Sherpa route)
 └─ formal /v1/tts router
-      └─ Kokoro -> TTS Provider Runtime :9002/v1/tts
+      ├─ Sherpa -> local VITS
+      └─ Kokoro / Edge / GSV -> TTS Provider Runtime :9002/v1/tts
 
 Optional CosyVoice sidecar :9012
+GSV-TTS-Lite sidecar :9014 (when its isolated runtime exists)
+Qwen3 VoiceDesign :9015 (manual/optional tool, never a formal chat Provider)
 ```
 
 这些服务是独立进程。Voice、Vision、Camera/Screen Share 与 ImageGen 都复用同一个 Persistent Person，不存在第二套“语音人物”或“视觉人物”。
@@ -72,7 +77,7 @@ bash scripts/setup-media-models.sh
 uv run character-memory init
 ```
 
-`setup-media-models.sh` 会复用 `scripts/sync-all.sh`，同时准备 Sherpa ASR/TTS 与 Kokoro 模型/voice 文件。只需要重新同步 Python 开发依赖时可运行：
+`setup-media-models.sh` 会复用 `scripts/sync-all.sh`，同时准备本地 BGE Embedding、Sherpa ASR/TTS 与 Kokoro 模型/voice 文件。Character Runtime 的 sentence-transformers 路径是 strict-offline，正常启动/首轮聊天不会临时访问 Hugging Face。只需要重新同步 Python 开发依赖时可运行：
 
 ```bash
 bash scripts/sync-all.sh
@@ -81,8 +86,8 @@ bash scripts/sync-all.sh
 配置约定：
 
 ```text
-config.yaml   非敏感运行配置
-.env          API Key / Token
+config.yaml   正式运行选择与非敏感应用配置
+.env          API Key / Token + GSV 本地 runtime 资产路径
 ```
 
 Secret 优先通过 Settings Center 管理，也可以在系统环境变量中覆盖，例如：

@@ -5,7 +5,7 @@ from urllib.parse import unquote
 
 from fastapi.testclient import TestClient
 
-from character_memory.tts_lab import EdgeTtsProvider, GsvSidecarProvider, LabSynthesisResult, Qwen3SidecarProvider, Qwen3VoiceDesignSidecar, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
+from character_memory.tts_lab import EdgeTtsProvider, GsvSidecarProvider, LabSynthesisResult, Qwen3VoiceDesignSidecar, SherpaMediaProvider, TtsLabRuntime, create_tts_lab_app
 
 
 class FakeTtsProvider:
@@ -79,37 +79,6 @@ class _FakeQwenResponse:
         return self._payload
 
 
-class _FakeQwenClient:
-    def __init__(self):
-        self.posts = []
-
-    def get(self, *args, **kwargs):
-        return _FakeQwenResponse(
-            {
-                "ready": True,
-                "loaded": True,
-                "voices": ["Vivian", "Serena"],
-                "default_voice": "Vivian",
-                "model": "fake-qwen3",
-                "device": "cuda:0",
-                "reason": None,
-            }
-        )
-
-    def post(self, url, **kwargs):
-        self.posts.append((url, kwargs))
-        return _FakeQwenResponse(
-            content=b"RIFFqwen",
-            headers={
-                "x-tts-voice": "Vivian",
-                "x-tts-model": "fake-qwen3",
-                "x-tts-device": "cuda:0",
-                "x-tts-inference-ms": "88.8",
-                "x-tts-audio-ms": "800",
-                "x-tts-sample-rate": "24000",
-            },
-        )
-
 class _FakeGsvClient:
     def __init__(self):
         self.posts = []
@@ -179,8 +148,8 @@ class _FakePolishModel:
     def __init__(self):
         self.calls = []
 
-    def _request(self, messages, *, conversation_id=None, **kwargs):
-        self.calls.append((messages, conversation_id, kwargs))
+    def complete_text_for_session(self, messages, session_id):
+        self.calls.append((messages, session_id, {}))
         return "年轻女性声线，音色清亮柔和，略带慵懒感，语速中等偏慢，避免刻意撒娇。"
 
     def close(self):
@@ -212,38 +181,6 @@ def test_tts_lab_provider_status_and_synthesis_contract():
         assert response.headers["x-tts-sample-rate"] == "24000"
         assert response.headers["x-tts-inference-ms"] == "12.3"
 
-
-
-def test_qwen3_sidecar_provider_status_and_synthesis():
-    client = _FakeQwenClient()
-    provider = Qwen3SidecarProvider(client=client)
-
-    status = provider.status()
-    assert status["ready"] is True
-    assert status["loaded"] is True
-    assert status["default_voice"] == "Vivian"
-    assert status["device"] == "cuda:0"
-
-    result = provider.synthesize("你好", voice="Vivian", speed=1.0)
-    assert result.audio == b"RIFFqwen"
-    assert result.provider == "qwen3"
-    assert result.voice == "Vivian"
-    assert result.device == "cuda:0"
-    assert result.inference_ms == 88.8
-    assert client.posts == [
-        (
-            "http://127.0.0.1:9013/v1/tts",
-            {
-                "json": {
-                    "text": "你好",
-                    "voice": "Vivian",
-                    "language": "Chinese",
-                    "speed": 1.0,
-                },
-                "timeout": 180.0,
-            },
-        )
-    ]
 
 
 def test_gsv_sidecar_provider_status_and_synthesis():
@@ -446,7 +383,7 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert "CosyVoice" not in all_extra
 
     assert 'REPO_ID = "hexgrad/Kokoro-82M-v1.1-zh"' in server
-    assert 'DEFAULT_VOICES = ["zf_001", "zf_002", "zf_003", "zf_004"]' in server
+    assert 'DEFAULT_VOICES = list(provider_spec("kokoro").voices)' in server
     for voice in ("zf_001", "zf_002", "zf_003", "zf_004"):
         assert voice in prefetch
     assert "try_to_load_from_cache" in server
@@ -456,11 +393,12 @@ def test_tts_lab_static_provider_inventory_and_dependency_isolation():
     assert '"http://127.0.0.1:9015"' in server
     assert '"Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"' in server
     assert '"gsv": GsvSidecarProvider' in server
-    assert '"qwen3": Qwen3SidecarProvider' not in server
+    assert "class Qwen3SidecarProvider" not in server
     assert '"edge": EdgeTtsProvider' in server
     assert 'port = int(os.getenv("CHARACTER_TTS_LAB_PORT", "9002"))' in server
 
     assert "bash scripts/sync-all.sh" in setup_media
+    assert "prefetch_embedding_model.py" in setup_media
     assert "prefetch_tts_models.py" in setup_media
     assert "exec bash scripts/setup-media-models.sh" in setup_tts
     assert '"kokoro-v1_1-zh.pth"' in prefetch

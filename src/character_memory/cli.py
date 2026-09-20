@@ -106,6 +106,10 @@ def _run_server(config_path: str, host: str, port: int):
     except ImportError as exc:
         raise SystemExit("WebUI dependencies are missing. Run: uv sync --extra api") from exc
     os.environ["CHARACTER_MEMORY_CONFIG"] = config_path
+    # Production web startup eagerly warms the Person Runtime (including the
+    # strict-offline local embedding) in a background thread while /health stays
+    # immediately available.
+    os.environ.setdefault("CHARACTER_MEMORY_EAGER_WARMUP", "1")
     print(f"web: http://{host}:{port}")
     # SSE requests are intentionally long-lived, so Uvicorn cannot wait for
     # every connection to end naturally during Ctrl+C. Keep graceful shutdown

@@ -10,9 +10,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from character_memory.settings_store import GSV_RUNTIME_FIELDS, SettingsStore
-
-
-FORMAL_TTS_PROVIDER_IDS = ("kokoro", "sherpa", "edge", "gsv")
+from character_memory.tts_registry import FORMAL_TTS_PROVIDER_IDS, provider_spec
 
 
 class SettingsPatch(BaseModel):
@@ -70,7 +68,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                 providers.append(
                     {
                         "id": provider_id,
-                        "label": str(raw.get("label") or provider_id),
+                        "label": str(raw.get("label") or provider_spec(provider_id).label),
                         "ready": bool(raw.get("ready")),
                         "loaded": bool(raw.get("loaded")),
                         "voices": voices,
@@ -80,6 +78,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                         "device": raw.get("device"),
                         "reason": raw.get("reason"),
                         "note": raw.get("note"),
+                        "device_hot_apply": provider_spec(provider_id).device_hot_apply,
                     }
                 )
             except Exception as exc:
@@ -88,7 +87,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                 providers.append(
                     {
                         "id": provider_id,
-                        "label": provider_id,
+                        "label": provider_spec(provider_id).label,
                         "ready": False,
                         "loaded": False,
                         "voices": [],
@@ -98,6 +97,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                         "device": None,
                         "reason": f"health check failed: {exc}",
                         "note": None,
+                        "device_hot_apply": provider_spec(provider_id).device_hot_apply,
                     }
                 )
         return {"ok": not errors, "providers": providers, "error": "; ".join(errors) if errors else None}
@@ -133,11 +133,8 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
         response.raise_for_status()
 
     def _unload_gsv() -> None:
-        try:
-            response = client.post(runtime_urls["gsv"] + "/v1/unload", timeout=10.0)
-            response.raise_for_status()
-        except Exception:
-            pass
+        response = client.post(runtime_urls["gsv"] + "/v1/unload", timeout=10.0)
+        response.raise_for_status()
 
     def settings_snapshot() -> dict[str, Any]:
         snapshot = settings_store.snapshot()
@@ -275,34 +272,97 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
 
     @app.patch("/v1/settings")
     def patch_settings(req: SettingsPatch):
-        try:
-            raw_values = dict(req.values)
-            before = settings_store.snapshot()["values"]
-            before_provider = str(before.get("tts_provider") or "").strip().lower()
-            requested_provider = str(raw_values.get("tts_provider", before_provider) or "").strip().lower()
-            if requested_provider == "gsv" and before_provider != "gsv":
-                # Do not inherit a stale CPU setting from Kokoro/Sherpa when
-                # switching into the validated realtime GSV CUDA path.
-                raw_values["tts_device"] = "cuda"
-            gsv_updates = set(raw_values) & GSV_RUNTIME_FIELDS
+        raw_values = dict(req.values)
+        before = settings_store.snapshot()["values"]
+        before_provider = str(before.get("tts_provider") or "").strip().lower()
+        requested_provider = str(raw_values.get("tts_provider", before_provider) or "").strip().lower()
+        if requested_provider == "gsv" and before_provider != "gsv":
+            # Do not inherit the previous local provider's device when entering
+            # the validated realtime GSV path.
+            raw_values["tts_device"] = "cuda"
 
-            # Configure the already-running GSV sidecar before provider health
-            # validation. This lets one Save action fill the missing GSV assets
-            # and select GSV without restarting the whole stack.
-            if gsv_updates:
-                _configure_gsv(raw_values, preload=requested_provider == "gsv")
+        gsv_updates = {
+            name for name in GSV_RUNTIME_FIELDS
+            if name in raw_values
+            and str(raw_values.get(name) or "").strip() != str(before.get(name) or "").strip()
+        }
+        gsv_device_update = (
+            requested_provider == "gsv"
+            and "tts_device" in raw_values
+            and str(raw_values.get("tts_device") or "").strip().lower()
+            != str(before.get("tts_device") or "").strip().lower()
+        )
+        gsv_preconfigured = False
+
+        try:
+            # GSV may currently be unhealthy only because the values being saved
+            # are its missing assets. Apply them without preloading first so the
+            # normal health gate can validate the prospective provider.
+            if gsv_updates or gsv_device_update:
+                _configure_gsv(raw_values, preload=False)
+                gsv_preconfigured = True
 
             values = validated_tts_values(raw_values)
-            result = settings_store.save_values(values)
+            try:
+                result = settings_store.save_values(values)
+            except Exception:
+                # Runtime was only provisionally changed. Restore the previous
+                # persisted GSV configuration if the atomic persistence step fails.
+                if gsv_preconfigured:
+                    try:
+                        _configure_gsv(before, preload=before_provider == "gsv")
+                    except Exception:
+                        pass
+                raise
 
             after = settings_store.snapshot()["values"]
             after_provider = str(after.get("tts_provider") or "").strip().lower()
-            if after_provider == "gsv" and not gsv_updates:
-                _load_gsv()
-            elif before_provider == "gsv" and after_provider != "gsv":
-                _unload_gsv()
+            runtime_apply = {
+                "attempted": False,
+                "applied": True,
+                "error": None,
+                "restart_required": list(result.get("restart_required") or []),
+            }
 
-            return {"ok": True, "result": result, "settings": settings_snapshot()}
+            try:
+                if after_provider == "gsv" and (gsv_preconfigured or before_provider != "gsv"):
+                    runtime_apply["attempted"] = True
+                    _configure_gsv(after, preload=True)
+                elif before_provider == "gsv" and after_provider != "gsv":
+                    runtime_apply["attempted"] = True
+                    _unload_gsv()
+
+                # Device changes are hot only when the already-running provider
+                # actually reports the requested device. Otherwise persistence is
+                # successful but that field remains explicitly restart-required.
+                if "tts_device" in (result.get("updated") or []) and after_provider != "edge":
+                    try:
+                        provider = _healthy_provider(after_provider)
+                        running_device = _runtime_device_value(provider)
+                    except Exception:
+                        running_device = None
+                    configured_device = str(after.get("tts_device") or "").strip().lower()
+                    if running_device and running_device == configured_device:
+                        result["restart_required"] = [
+                            item for item in (result.get("restart_required") or [])
+                            if item != "tts_device"
+                        ]
+                runtime_apply["restart_required"] = list(result.get("restart_required") or [])
+            except Exception as exc:
+                # Persistence already succeeded. Do not lie with "save failed";
+                # return the two states separately so the UI can tell the user the
+                # config is durable but runtime application needs attention.
+                runtime_apply["attempted"] = True
+                runtime_apply["applied"] = False
+                runtime_apply["error"] = str(exc)
+
+            result["persisted"] = True
+            result["runtime_apply"] = runtime_apply
+            return {
+                "ok": True,
+                "result": result,
+                "settings": settings_snapshot(),
+            }
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except httpx.HTTPStatusError as exc:

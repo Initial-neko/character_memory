@@ -104,11 +104,14 @@ media.py                    media asset storage/contracts
 media_runtime.py            local ASR/Sherpa TTS providers/runtime
 media_bootstrap.py          Windows/native media bootstrap
 media_server.py             Media Runtime FastAPI + formal TTS router
-tts_lab.py                  :9002 TTS Provider Runtime + Lab
+tts_lab.py                  :9002 TTS Provider Runtime + Workbench
+tts_registry.py             formal realtime TTS provider metadata/ids/defaults
+voices.py                   per-persona voice.yaml registry contract
+gsv_tts_experiment.py       isolated :9014 GSV sidecar adapter/runtime
 config.py                   Settings model + character discovery
-envfile.py                  .env read/write + precedence helpers
-settings_store.py           config/secret persistence + migration/backup
-settings_server.py          :8003 Settings Center FastAPI
+envfile.py                  .env read/write + precedence/atomic multi-key helpers
+settings_store.py           config/env persistence + migration/backup
+settings_server.py          :8003 Settings Center FastAPI + runtime apply orchestration
 persona_builder.py          character draft/build flow
 resource_metrics.py         local resource sampling
 logging_utils.py            logging setup
@@ -167,9 +170,10 @@ bash scripts/sync-all.sh
 
 ```text
 scripts/sync-all.sh             canonical dev environment sync
-scripts/setup-media-models.sh   canonical local ASR/Sherpa/Kokoro setup
-scripts/setup-tts-models.sh     compatibility wrapper -> setup-media-models.sh
-scripts/prefetch_tts_models.py  Kokoro model/voice prefetch
+scripts/setup-media-models.sh       canonical local Embedding/ASR/Sherpa/Kokoro setup
+scripts/setup-tts-models.sh         compatibility wrapper -> setup-media-models.sh
+scripts/prefetch_embedding_model.py explicit sentence-transformers cache prefetch
+scripts/prefetch_tts_models.py      Kokoro model/voice prefetch
 scripts/run-media.sh            standalone Media Runtime helper
 scripts/benchmark_media.py      local ASR/TTS benchmark
 scripts/cosyvoice_sidecar.py    optional Python 3.10 CosyVoice sidecar
@@ -240,6 +244,8 @@ time_format.js          shared MM-DD HH:mm:ss timestamp formatter
 | Group chat | `group_store.py` → `application/group_conversation_service.py` → `group_web.py` → `web/groups.js` |
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
 | Memory/Recall | `memory/embedding.py` → `memory/recall.py` → `storage/sqlite.py` |
+| Formal TTS registry/routing | `tts_registry.py` → `settings_server.py` / `media_server.py` → `tts_lab.py` |
+| Character GSV voice | `voices.py` → `gsv_tts_experiment.py` → `tts_lab.py` VoiceDesign freeze |
 | Sticker | `stickers.py` → `runtime/sticker_retrieval.py` → `web/stickers.js` |
 | 用户图片/Vision | `media.py` → `api.py/async_web.py` → `web/images.js` |
 | Camera/Screen Vision | `visual_capture_web.py` → `web/visual_capture.js` / `web/voice.js` |

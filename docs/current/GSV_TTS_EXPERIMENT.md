@@ -180,17 +180,20 @@ scripts/start-gsv-tts.sh enables preload by default so the first Lab request doe
 
 ## Current boundary
 
-Formal GSV routing is intentionally minimal:
+Formal GSV routing now has two voice layers:
 
-- `config.py` and Settings Center accept `tts_provider: gsv`;
-- Media Runtime routes GSV through the existing `:9002` provider path;
-- `character-stack` starts the isolated `:9014` sidecar when GSV is selected;
-- TTS Lab remains the place to audition GSV and other providers;
-- the sidecar reports one configured GSV voice identity (default `murasame`), and the formal route persists/selects that value through `tts_voice`.
+- `config.py` / Settings select `tts_provider: gsv` and the global/default formal voice;
+- Media Runtime routes GSV through `:9002` to the isolated `:9014` sidecar;
+- Settings owns the global/default GSV GPT/SoVITS/reference configuration and can hot-configure/reload `:9014`;
+- `personas/<character>/voice.yaml` optionally registers a per-character reference;
+- Browser voice requests carry the Character id. Registered ids use their character reference; unknown ids degrade to the global/default reference;
+- VoiceDesign freeze stores the exact auditioned WAV bytes under `personas/<character>/voice/`, writes provenance + transcript to `voice.yaml`, then calls `POST /v1/voices/reload`.
 
-`GSV_TTS_VOICE` names the sidecar/reference voice exposed in health; it is not a second formal-chat voice selector. Settings reads that health inventory and persists the selected value into `tts_voice`.
+`GSV_TTS_VOICE` names the global/default reference. It does not replace the per-character registry.
 
-This phase still does **not** implement per-character voice profiles, a voice registry, Qwen3-to-reference asset generation, SSE/WebRTC/chunked TTS, or model/reference asset management. Qwen3 VoiceDesign is explicitly deferred for now because it is not required for GSV operation and would add GPU/VRAM pressure. Reference audio may continue to come from any practical source; no specific voice-generation model is a dependency of GSV.
+Registry reload deliberately keeps the warm engine resident. A profile may override GPT/SoVITS models; unset profile model fields inherit the global runtime models.
+
+Still out of scope: SSE/WebRTC/token-level browser streaming and a general model-asset management system. Qwen3 VoiceDesign remains optional tooling, not a prerequisite for GSV and not a formal chat Provider.
 
 
 ## Runtime configuration ownership
@@ -207,4 +210,6 @@ GSV_TTS_REF_TEXT
 GSV_TTS_VOICE
 ```
 
-The sidecar can start with these fields missing and report `ready=false`. Settings Center may then configure the running sidecar through `POST /v1/configure`; no full-stack restart is required. Model/reference changes unload the old engine before loading the new one, while switching away from GSV uses `POST /v1/unload` to release GPU memory.
+The sidecar can start with these fields missing and report `ready=false`. Settings Center may then configure the running sidecar through `POST /v1/configure`; no full-stack restart is required. Model/reference/device changes unload and reload the GSV engine when needed, while switching away from GSV uses `POST /v1/unload` to release GPU memory.
+
+The project launcher does not inject the whole project `.env` into every child process. Only the GSV child receives its `GSV_TTS_*` values as process environment because that upstream runtime consumes environment variables directly. This preserves the intended precedence `real system env > project .env` and prevents Settings edits from being masked by stale launcher-copied values.

@@ -59,6 +59,10 @@ fetch_model "$TTS_NAME" "$TTS_URL" "model.onnx"
 # The helper uses the Hugging Face cache under models/huggingface and downloads
 # the model + valid v1.1 Chinese voice packs before runtime synthesis.
 export HF_HOME="${HF_HOME:-$MODEL_ROOT/huggingface}"
+
+# Runtime embedding is strict-offline. Acquire it explicitly during setup so
+# Character Runtime never reaches Hugging Face on startup or first chat.
+uv run python scripts/prefetch_embedding_model.py
 uv run python scripts/prefetch_tts_models.py
 
 cat <<EOF

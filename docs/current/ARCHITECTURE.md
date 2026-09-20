@@ -23,11 +23,17 @@ Character Runtime :8000                                         │
                                                                 │
 Media Runtime :8001 <-------------------------------------------┘
 ├─ SenseVoice ASR
-├─ Sherpa VITS fallback
+├─ Sherpa VITS local runtime
+├─ Workbench-only direct Sherpa route /v1/providers/sherpa/tts
 └─ formal /v1/tts router
-      └─ Kokoro -> TTS Provider Runtime :9002/v1/tts
+      ├─ Sherpa -> local VITS
+      └─ Kokoro / Edge / GSV -> :9002/v1/tts
+                                  └─ GSV -> :9014
 
 Optional CosyVoice sidecar :9012
+Manual Qwen3-TTS 0.6B experiment :9013
+GSV-TTS-Lite sidecar :9014 when isolated runtime exists
+Optional Qwen3 VoiceDesign tool :9015 (not a formal chat Provider)
 ```
 
 推荐开发入口：
@@ -45,13 +51,7 @@ bash scripts/sync-all.sh
 
 `character-stack` 只负责编排；各服务仍是独立进程。它会复用已经健康运行的服务，因此修改代码后需要确认旧进程确实已经重启。
 
-`:9002` 在 V1 同时承担两个角色：
-
-```text
-TTS Provider Runtime
-+
-TTS Lab UI
-```
+`:9002` 在 V1 同时承担 Provider Runtime 与 TTS Workbench。Workbench 还承载 optional VoiceDesign UI，但 Qwen3 VoiceDesign 本身不是正式聊天 Provider。正式 Provider id/默认 voice/device lifecycle metadata 集中在 `tts_registry.py`，避免 Config / Settings / Media / Workbench 各自维护一份名单。
 
 这是当前实现事实，不代表长期架构必须保持耦合。后续如果 Provider Runtime 与试听 UI 的职责开始互相干扰，再在大版本中拆分。
 
@@ -221,7 +221,9 @@ future Person context
 
 Event Log 永远优先于 Memory。Memory 是认知派生层，可以重建、合并、遗忘；不能反向篡改原始经历。
 
-默认 local embedding 是 `BAAI/bge-small-zh-v1.5`。
+默认 local embedding 是 `BAAI/bge-small-zh-v1.5`。Character Web 进程启动后立即在后台 warm Person Runtime/Embedding，同时保持 `/health` 可用。SentenceTransformer runtime 使用 strict `local_files_only=True`；模型下载只允许出现在 setup/prefetch 阶段，不允许正常启动或第一句话临时访问 Hub。
+
+Memory recall 不再为每一轮把整个历史 Memory 全部解包并做 NumPy cosine。SQLite 先提供有上限的候选集（最近 768 + 最高 importance 256 的去重并集），随后执行现有 semantic/recency/importance 排序；exact duplicate admission 仍可跨全部 active Memory 精确查找。这个边界延缓长期 Memory 的 O(N) 增长，同时不提前引入向量数据库。
 
 ## 8. LLM / Vision provider
 
@@ -313,13 +315,16 @@ tts_device: cpu
 
 选择实现。
 
-当 `tts_provider: kokoro`：
+正式 Browser 始终调用 `:8001/v1/tts`：
 
 ```text
-Browser -> :8001/v1/tts -> :9002/v1/tts -> Kokoro
+sherpa -> local VITS
+kokoro -> :9002 -> Kokoro
+edge   -> :9002 -> Edge online TTS
+gsv    -> :9002 -> :9014 GSV-TTS-Lite
 ```
 
-当 `tts_provider: sherpa` 时，`:8001` 直接使用本地 Sherpa runtime。
+Workbench 试听 Sherpa 使用独立 `:8001/v1/providers/sherpa/tts`，因此不会经过正式 Provider selector。
 
 Media Runtime 不 import / instantiate `PersonRuntime`。Main LLM、Vision、Memory 都留在 Character Runtime。
 
@@ -344,14 +349,14 @@ system environment > .env > legacy config.yaml secret
 
 Settings Center 会迁移已知 legacy plaintext Secret，普通 config save 会在替换前创建 timestamped `.bak`。浏览器不会拿到现有 Secret 明文。
 
-V1 明确采用 restart policy：修改配置后重启 stack，让所有服务读取同一份 coherent snapshot。
+配置不再采用“一律重启整个 stack”的策略。TTS Provider/Voice/Speed 由 Media Runtime 每次请求读取；GSV runtime 配置/device 通过 sidecar 热应用。Kokoro/Sherpa 的 device 属于模型进程初始化参数，变更时只重启对应 `:9002` / `:8001`。其他普通 LLM/storage 配置仍由 Settings 返回明确的 `restart_required`。
 
 ## 13. TTS Provider Runtime + Lab
 
-`:9002` 当前暴露：
+`:9002` 当前 Workbench 暴露：
 
 - Kokoro 82M v1.1 zh；
-- Sherpa（通过 `:8001`）；
+- Sherpa（通过 `:8001/v1/providers/sherpa/tts`）；
 - optional CosyVoice sidecar `:9012`。
 
 Lab 下拉选择只用于试听/benchmark，不会自动改变正式 TTS 默认值。正式 provider/voice 由 Settings Center / `config.yaml` 决定。

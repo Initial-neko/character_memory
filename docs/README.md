@@ -57,10 +57,10 @@ docs/
 :8001 Media Runtime
 :8002 Dev Console
 :8003 Settings Center
-:9002 TTS Provider Runtime + Lab
+:9002 TTS Provider Runtime + Workbench
 ```
 
-可选/实验 sidecar：CosyVoice `:9012`、GSV-TTS-Lite `:9014`；Qwen3-TTS 0.6B `:9013` 仅保留手动实验。Qwen3-TTS 1.7B VoiceDesign 预留 `:9015`，只由 TTS Workbench 调用，不由正常 `character-stack` 启动，也不是正式聊天 Provider。
+Sidecar：CosyVoice `:9012` 为可选实验；GSV-TTS-Lite `:9014` 在其隔离 runtime 存在时由 `character-stack` 编排并可处于未配置/未加载状态；Qwen3-TTS 0.6B `:9013` 仅保留手动实验。Qwen3-TTS 1.7B VoiceDesign `:9015` 只由 TTS Workbench 调用，不由正常 `character-stack` 启动，也不是正式聊天 Provider。
 
 ## Research
 

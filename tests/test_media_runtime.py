@@ -580,6 +580,38 @@ def test_configured_sherpa_tts_lets_settings_speed_govern_when_request_omits_spe
     assert runtime.tts.calls[0][2] == pytest.approx(1.25)
 
 
+def test_sherpa_provider_endpoint_bypasses_formal_router(monkeypatch):
+    """Lab Sherpa audition must stay Sherpa even when formal chat uses GSV."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts())
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(
+            tts_provider="gsv",
+            tts_voice="murasame",
+            tts_speed=1.0,
+            tts_device="cuda",
+        ),
+    )
+    provider_client = _ProviderClient()
+
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        response = client.post(
+            "/v1/providers/sherpa/tts",
+            json={"text": "Sherpa audition", "speaker_id": 2, "voice": "2", "speed": 1.1},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["x-media-provider"] == "fake-tts"
+    assert response.headers["x-media-voice"] == "2"
+    assert runtime.tts.calls == [("Sherpa audition", 2, 1.1)]
+    assert provider_client.post_calls == []
+
+
 def test_formal_tts_selection_hot_reloads_config_without_recreating_media_app(monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

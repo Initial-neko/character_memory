@@ -42,11 +42,9 @@ class DeterministicEmbedding(EmbeddingProvider):
 class SentenceTransformerEmbedding(EmbeddingProvider):
     """Local semantic embedding with cache-first HuggingFace resolution.
 
-    A model id such as ``BAAI/bge-small-zh-v1.5`` normally lives in the local
-    HuggingFace cache after its first download. Always try that cache in strict
-    local-only mode first so startup does not pay remote Hub metadata/network
-    latency on every process launch. Only a genuine local cache miss falls back
-    to the normal online-capable SentenceTransformer load.
+    Runtime is strict-offline: a model id such as ``BAAI/bge-small-zh-v1.5`` must
+    already exist in the local HuggingFace cache. Setup/prefetch commands own
+    network access; normal Character Runtime never falls back to the Hub.
     """
 
     def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5"):
@@ -60,16 +58,13 @@ class SentenceTransformerEmbedding(EmbeddingProvider):
         try:
             self.model = SentenceTransformer(model_name, local_files_only=True)
         except Exception as exc:
-            # First install (or an incomplete cache) still needs a one-time Hub
-            # download. Keep this fallback explicit and observable rather than
-            # silently probing the network on every normal startup.
-            source = "hub-fallback"
-            logger.warning(
-                "embedding local cache unavailable model=%s error=%s; falling back to Hub-capable load",
-                model_name,
-                exc,
-            )
-            self.model = SentenceTransformer(model_name)
+            # Runtime is deliberately strict-offline. Model acquisition belongs
+            # to setup/prefetch, never to Character Runtime startup or first chat.
+            raise RuntimeError(
+                f"Embedding model is not available in the local cache: {model_name}. "
+                "Run bash scripts/setup-media-models.sh (or scripts/prefetch_embedding_model.py) "
+                "while online, then start Character Memory again."
+            ) from exc
 
         load_ms = round((time.perf_counter() - load_started) * 1000, 1)
         total_ms = round((time.perf_counter() - started) * 1000, 1)

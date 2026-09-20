@@ -82,9 +82,14 @@ class PersonRuntime:
         """Small V0 admission gate: reject low-value and near-duplicate memories."""
         if not candidates:
             return [], []
+        candidate_loader = getattr(self.store, "list_memory_candidates", None)
+        if callable(candidate_loader):
+            source_existing = candidate_loader(character_id, at=event_time)
+        else:
+            source_existing = self.store.list_memories(character_id)
         existing = [
             memory
-            for memory in self.store.list_memories(character_id)
+            for memory in source_existing
             if _aware(memory.event_time) <= _aware(event_time)
         ]
         comparison = [
@@ -106,6 +111,16 @@ class PersonRuntime:
                 decision["decision"] = "SKIP_LOW_VALUE"
                 decisions.append(decision)
                 continue
+
+            exact_finder = getattr(self.store, "find_active_memory_by_content", None)
+            if callable(exact_finder):
+                exact = exact_finder(character_id, content, at=event_time)
+                if exact is not None:
+                    decision["decision"] = "SKIP_DUPLICATE"
+                    decision["duplicate_memory_id"] = exact.id
+                    decision["similarity"] = 1.0
+                    decisions.append(decision)
+                    continue
 
             try:
                 embedding = self.embeddings.embed(content)

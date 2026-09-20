@@ -13,7 +13,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -29,8 +29,8 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies
-        run: uv sync --extra api --extra dev
+      - name: Install canonical runtime dependencies
+        run: uv sync --extra all
 
       - name: Run tests
         run: uv run pytest -q
@@ -86,4 +86,4 @@ jobs:
       - name: Run browser smoke
         env:
           RUN_PLAYWRIGHT: "1"
-        run: uv run pytest -q tests/test_p0_17b_playwright.py tests/test_p0_17c_playwright.py --browser chromium
+        run: uv run pytest -q tests/test_p0_17b_playwright.py tests/test_p0_17c_playwright.py tests/test_settings_playwright.py --browser chromium

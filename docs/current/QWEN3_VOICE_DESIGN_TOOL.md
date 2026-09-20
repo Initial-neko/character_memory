@@ -131,7 +131,7 @@ base_url
 chat_model
 ```
 
-No second API key or LLM configuration is introduced.
+No second API key or LLM configuration is introduced. Workbench calls the public `PersonModel.complete_text_for_session()` contract; it does not reach into the OpenAI-compatible adapter's private `_request()` transport method.
 
 ### Generate
 

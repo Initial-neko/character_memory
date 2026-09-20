@@ -23,6 +23,14 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 127
 fi
 
-echo "sync-all: syncing canonical development stack (uv sync --extra all)"
-uv sync --extra all "$@"
+SYNC_ARGS=(--extra all)
+if [[ -f uv.lock ]]; then
+  SYNC_ARGS+=(--locked)
+  echo "sync-all: verified uv.lock found; using locked dependency graph"
+else
+  echo "sync-all: uv.lock is not committed/present; resolving declared dependency graph"
+fi
+
+echo "sync-all: syncing canonical development stack"
+uv sync "${SYNC_ARGS[@]}" "$@"
 echo "sync-all: ready"

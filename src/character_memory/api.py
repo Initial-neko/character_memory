@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import threading
@@ -98,24 +99,27 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         max_bytes=int(getattr(settings, "media_max_bytes", 8 * 1024 * 1024)),
     )
     runtime_error: str | None = None
+    runtime_loading = False
     init_lock = threading.Lock()
     character_write_lock = threading.RLock()
     proactive_stop = threading.Event()
     proactive_thread: threading.Thread | None = None
+    warmup_thread: threading.Thread | None = None
 
     def get_bundle() -> AppBundle:
-        nonlocal app_bundle, runtime_error
+        nonlocal app_bundle, runtime_error, runtime_loading
         if app_bundle is not None:
             return app_bundle
         with init_lock:
             if app_bundle is not None:
                 return app_bundle
-            logger.info("api.runtime lazy_init start config=%s", config_path)
+            logger.info("api.runtime init start config=%s", config_path)
+            runtime_loading = True
             try:
                 app_bundle = build_app(config_path)
                 runtime_error = None
                 logger.info(
-                    "api.runtime lazy_init ready model=%s vision_model=%s characters=%d total_ms=%.1f",
+                    "api.runtime init ready model=%s vision_model=%s characters=%d total_ms=%.1f",
                     app_bundle.settings.chat_model,
                     app_bundle.settings.vision_model,
                     len(app_bundle.characters),
@@ -124,8 +128,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 return app_bundle
             except Exception as exc:
                 runtime_error = str(exc)
-                logger.exception("api.runtime lazy_init failed error=%s", exc)
+                logger.exception("api.runtime init failed error=%s", exc)
                 raise
+            finally:
+                runtime_loading = False
 
     def require_bundle() -> AppBundle:
         try:
@@ -402,9 +408,26 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         refresh_runtime_sticker_catalog=refresh_runtime_sticker_catalog,
     )
 
+    def warm_runtime() -> None:
+        try:
+            get_bundle()
+        except Exception:
+            # /health stays available and exposes runtime_error. Normal requests
+            # return 503 through require_bundle instead of silently retrying a
+            # remote model download (local embeddings are strict-offline).
+            logger.exception("api.runtime warmup_failed")
+
     @app.on_event("startup")
     def _startup():
-        nonlocal proactive_thread
+        nonlocal proactive_thread, warmup_thread
+        eager_warmup = os.getenv("CHARACTER_MEMORY_EAGER_WARMUP", "0").strip().lower() in {"1", "true", "yes", "on"}
+        if own_bundle and eager_warmup and (warmup_thread is None or not warmup_thread.is_alive()) and app_bundle is None:
+            warmup_thread = threading.Thread(
+                target=warm_runtime,
+                name="character-memory-runtime-warmup",
+                daemon=True,
+            )
+            warmup_thread.start()
         if own_bundle and (proactive_thread is None or not proactive_thread.is_alive()):
             proactive_thread = threading.Thread(
                 target=proactive_loop,
@@ -433,6 +456,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "ok": True,
             "web": "ready",
             "runtime_loaded": app_bundle is not None,
+            "runtime_loading": runtime_loading,
             "runtime_error": runtime_error,
             "model": settings.chat_model,
             "vision_model": getattr(settings, "vision_model", ""),

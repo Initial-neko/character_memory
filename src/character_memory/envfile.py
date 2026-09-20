@@ -114,6 +114,51 @@ def upsert_env_value(path: str | Path, name: str, value: str) -> None:
     _atomic_write(target, "\n".join(updated))
 
 
+
+def update_env_values(path: str | Path, values: dict[str, str]) -> None:
+    """Atomically update several .env keys while preserving unrelated lines.
+
+    This is the multi-key counterpart of :func:`upsert_env_value`. Settings
+    Center uses it for provider runtime configuration so a crash cannot leave
+    half of one logical GSV update persisted.
+    """
+
+    if not values:
+        return
+    for name in values:
+        if not _ENV_NAME_RE.fullmatch(name):
+            raise ValueError(f"invalid environment variable name: {name}")
+
+    target = Path(path)
+    lines = target.read_text(encoding="utf-8").splitlines() if target.is_file() else []
+    remaining = {name: _encode_value(value) for name, value in values.items()}
+    updated: list[str] = []
+    seen: set[str] = set()
+
+    for line in lines:
+        stripped = line.strip()
+        matched = None
+        for name in remaining:
+            if re.match(rf"^(?:export\s+)?{re.escape(name)}\s*=", stripped):
+                matched = name
+                break
+        if matched is None:
+            updated.append(line)
+            continue
+        if matched not in seen:
+            updated.append(f"{matched}={remaining[matched]}")
+            seen.add(matched)
+
+    for name, encoded in remaining.items():
+        if name in seen:
+            continue
+        if updated and updated[-1].strip():
+            updated.append("")
+        updated.append(f"{name}={encoded}")
+
+    _atomic_write(target, "\n".join(updated))
+
+
 def delete_env_value(path: str | Path, name: str) -> bool:
     target = Path(path)
     if not target.is_file():

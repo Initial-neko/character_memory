@@ -1,127 +1,124 @@
 # V1 Technical Debt Register
 
-这份清单只记录**仍然真实存在**的维护债务，不把“可以重构”自动等同于“应该现在重构”。
+This register records only debt that still exists on current `main`. A possible refactor is not automatically a required refactor.
 
-## 已处理
+## Recently resolved
 
-### Sticker CLI ownership drift
+### TTS provider/config drift
 
-已将 `sticker_import_cli.py` 从 character-local 写入语义收敛到当前 global Sticker ownership：
+Formal realtime Provider metadata now lives in `character_memory.tts_registry`. Config validation, Settings and Media routing consume the same Provider ids/default metadata instead of maintaining independent hard-coded lists.
 
-- 新导入写 `resolve_sticker_dir(settings)`；
-- `--character` 仅保留为 deprecated compatibility 参数；
-- legacy persona-local manifests 继续只读兼容；
-- Web / CLI / Runtime 对 Sticker ownership 的定义重新一致。
+The obsolete Qwen3 0.6B realtime Workbench adapter was removed. Qwen3 remains only as manual experiment / VoiceDesign tooling.
 
-### Windows CI visibility
+### Settings runtime-state ambiguity
 
-CI 增加 `windows-latest` smoke job，安装 `api + dev + media` 依赖并覆盖：
-
-- cross-platform scripts；
-- Windows/native media bootstrap；
-- Sticker CLI regression。
-
-该 job 不下载 ASR/TTS 模型，不做实时推理，只守住安装和 native bootstrap contract。
-
-## 仍需处理：高优先级
-
-### Dependency lock / frozen install
-
-当前仓库没有提交 `uv.lock`，CI 仍使用普通 `uv sync`。虽然关键依赖已有 pin/bounds，但长期仍可能因 transitive dependency 漂移而改变环境。
-
-目标：
+Settings now separates durable persistence from runtime application. A GSV reload failure after a successful save is reported as:
 
 ```text
-commit uv.lock
-CI -> uv sync --frozen / --locked
-setup scripts -> respect committed lock
+persisted = true
+runtime_apply.applied = false
 ```
 
-这项应在可实际生成并验证 lockfile 的开发环境中完成，不手写 lockfile。
+rather than falsely reporting that persistence failed.
 
-## 仍需观察：中优先级
+Project `.env` is no longer copied into every child process, so a persisted value cannot masquerade as a higher-precedence system environment override and hide later Settings edits.
+
+### TTS device semantics
+
+Provider/Voice/Speed remain hot. GSV can hot-reconfigure device. Kokoro and Sherpa device changes are explicitly restart-required for the owning TTS runtime only (`:9002` / `:8001`), not for the whole stack.
+
+### Sherpa Workbench routing
+
+Sherpa audition now uses `:8001/v1/providers/sherpa/tts`, which bypasses the formal chat selector. The Workbench can no longer display Sherpa while accidentally synthesizing the configured GSV/Kokoro/Edge Provider.
+
+### Embedding startup/network ownership
+
+The local sentence-transformers runtime is strict-offline and Web startup eagerly warms the runtime in the background. Setup explicitly prefetches the embedding model; normal startup/first chat cannot silently download from the Hub.
+
+### Long-memory unbounded Python scan
+
+Recall/admission now uses a bounded recent + high-importance vector candidate working set. Exact duplicate detection still queries all active Memory text through SQLite. This postpones the need for a vector database without making per-turn NumPy work grow without bound.
+
+### Legacy trace compatibility full scan
+
+The post-migration compatibility path is retained, because old code may have written legacy ACTION trace metadata after migration 004. It now tracks an incremental event-id cursor instead of rescanning every historical ACTION row at every process start.
+
+### Settings/cross-service test visibility
+
+CI now installs the canonical `all` runtime dependency set for the main test job, has a browser Settings Provider/Voice/Device flow, and has a contract proving Sherpa audition bypasses the formal selector.
+
+### GSV unload observability
+
+Settings no longer swallows every GSV unload exception. Runtime application failures are surfaced through the same persisted-vs-runtime result.
+
+### `.pytest-tmp/`
+
+The throwaway harness directory is ignored.
+
+## High priority / environment reproducibility
+
+### Dependency lock
+
+The repository does not currently publish a verified `uv.lock` from this branch. Do not hand-write one.
+
+`scripts/sync-all.sh` now behaves safely in both cases:
+
+```text
+uv.lock present  -> uv sync --extra all --locked
+no uv.lock       -> uv sync --extra all
+```
+
+A developer-generated, verified local lockfile can therefore be added later without changing the setup contract. Once it is intentionally committed, CI should also be tightened to require the lock rather than merely support it.
+
+## Medium priority / observe before refactoring
 
 ### Deprecated browser audio capture API
 
-`web/dictation.js` 当前使用 `AudioContext.createScriptProcessor()`。该 API 已是历史接口；V1 尚能工作，不应无测试地直接替换。后续应评估 `AudioWorklet`，并保持现有 16 kHz WAV / draft-only dictation contract。
+`web/dictation.js` still uses `AudioContext.createScriptProcessor()`. It works today but is deprecated by browsers. A future migration to `AudioWorklet` needs real microphone/browser regression coverage and must preserve the current PCM16/dictation contract.
 
 ### Duplicated sidecar infrastructure
 
-`float_audio_to_wav()` exists in three copies — `gsv_tts_experiment.py:84`,
-`qwen3_tts_experiment.py:62`, `media_runtime.py:110`. The new VoiceDesign sidecar
-imports the Qwen3 one rather than adding a fourth, but the other two remain.
+Audio/WAV and CUDA support helpers still have copies across the media/GSV/Qwen experimental runtimes. Because GSV and Qwen run in different virtual environments but import the same Character Memory source tree, a small shared sidecar-support module is feasible.
 
-The two TTS sidecars also now duplicate `_resolve_device` / `_resolve_dtype` /
-`_cuda_memory` / `_reset_cuda_peak` / `_sync_cuda` (`qwen3_voice_design_experiment.py`
-vs `gsv_tts_experiment.py`). They run in **different virtualenvs**, but both import the
-same `character_memory` source tree, so a shared `tts_sidecar_support.py` would work.
+Do not refactor solely for deduplication; do it when another sidecar change would otherwise require modifying the same lifecycle logic in multiple places.
 
-They have already drifted: VoiceDesign's `load()` clears the CUDA cache, resets peak
-stats and syncs before loading; GSV's `load()` does none of that (only `unload()` and
-the `configure()` reset path call `empty_cache`). Neither difference is a bug today —
-but that is exactly how two copies become two behaviours.
+### Source-string tests in `test_dev_stack.py`
 
-### `test_dev_stack.py` asserts on source strings
-
-`tests/test_dev_stack.py` reads `dev_stack.py` as text and asserts substrings like
-`'"http://127.0.0.1:9002/tts"' in script`. These pass when the behaviour is broken and
-fail on cosmetic reformatting. `tests/test_dev_stack_health.py` was added as the
-behavioural counterpart for the probe logic; the launch/spawn assertions still need it.
-
-### `.pytest-tmp/` is not gitignored
-
-Throwaway harnesses under `.pytest-tmp/` (seed audition, VoiceDesign spikes) show up as
-untracked noise. Either ignore the directory or move one-off scripts somewhere explicit.
-
-### GSV unload swallows every exception
-
-`settings_server.py:135-140` wraps `POST :9014/v1/unload` in a bare `except Exception:
-pass`, and nothing covers it. A failed unload therefore looks identical to a successful
-one, and the user is told the card was released when it was not.
+Some launcher tests still assert source substrings. Behavioral probe tests exist, but spawn/environment ownership could be exercised more directly with subprocess fakes. This is test maintainability debt, not a current runtime defect.
 
 ### Large edge modules
 
-以下文件已经偏大，但“文件大”本身不是拆分理由：
+Several modules are large (`api.py`, group service, SQLite store, visual routes, and major web JS files). Size alone is not a reason to move code. Split only where ownership/testing conflicts become concrete.
 
-- `api.py`
-- `group_conversation_service.py`
-- `storage/sqlite.py`
-- `visual_web.py`
-- `web/app.js`
-- `web/groups.js`
-- `web/voice.js`
+### TTS Workbench / Provider Runtime coupling
 
-只有当继续修改导致 ownership 混乱、测试困难或频繁冲突时，再按稳定 contract 拆分。
+`:9002` currently owns both formal adapters and the Workbench (including optional VoiceDesign UI orchestration). The stable browser-facing API remains `:8001/v1/tts`, so this internal coupling is acceptable while lifecycle needs are aligned.
 
-## 延后到大版本：低收益高 churn
+If Workbench-only tooling begins forcing production Provider lifecycle/dependencies, split the UI/tool orchestration from formal Provider Runtime in a deliberate versioned change.
 
-### Top-level `*_web.py` package layout
+## Longer-term research debt
 
-route modules 位于 package 顶层属于历史结构债，但当前职责清楚。V1 不为了目录美观迁移到 `transport/http/`，避免全仓 import churn。
+### Memory indexing strategy
 
-### Historical `p0_*.css`
+The bounded candidate set makes current complexity predictable, but it is not an ANN index and does not solve every future scale case. Measure real Memory count/latency before selecting sqlite-vec, FAISS, another ANN layer, or a dedicated vector store.
 
-正式页面仍加载多份 milestone 命名 CSS。这是样式命名债，不是运行时缺陷。后续若统一样式系统，应一次性按组件/页面 ownership 重组，而不是逐个改名。
+### Multi-process application runtime
 
-### TTS Provider Runtime / Lab coupling
+ReactionScheduler/SSE delivery remains process-local. SQLite is durable, but multiple Character Runtime workers would need a durable/shared job queue and cross-process event transport before being considered correct.
 
-`:9002` 同时承担 Kokoro provider runtime 与 audition lab。当前正式链路稳定，拆服务会增加启动、配置和端口复杂度；除非 Lab 与 production lifecycle 真正冲突，否则不在 V1 拆分。
+### Life / Inspector and historical CSS
 
-### Life / Inspector
+The frozen life simulation/inspector and milestone-named CSS remain supported code, not dead code. Removal/renaming would create broad churn and belongs to a larger version if product direction warrants it.
 
-`life/` 与 `ui.py` 仍有入口和测试，不是 dead code。产品方向虽冻结其扩张，但删除属于大版本决策，不做零碎删减。
-
-## 原则
-
-处理技术债时优先级如下：
+## Priority rule
 
 ```text
-真实故障风险
-> 可复现性 / 平台稳定性
-> 语义冲突
-> 高频修改冲突
-> 可读性
-> 目录/命名美观
+real correctness risk
+> reproducibility/platform stability
+> semantic drift
+> frequently edited ownership
+> readability
+> cosmetic directory/name cleanup
 ```
 
-任何“大重构”都需要先证明它解决了当前真实问题，而不是仅仅让结构更像理想架构。
+Any broad refactor should first identify the real failure mode it removes.

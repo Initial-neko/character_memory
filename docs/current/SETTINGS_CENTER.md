@@ -1,176 +1,118 @@
 # Settings Center
 
-Settings Center is the single configuration management surface for Character Memory local runtime.
+Settings Center (`:8003/settings`) is the persistent configuration surface for Character Memory. Source code remains authoritative; this document describes the current `main` contract.
 
-## Ports and ownership
-
-```text
-Chat              :8000
-Media Runtime     :8001
-Dev Console       :8002
-Settings Center   :8003/settings
-TTS Provider Lab  :9002/tts
-```
-
-Settings Center owns **configuration persistence**, not model/runtime execution. Runtime services load the persisted configuration on startup.
-
-## Source of truth
-
-V1 deliberately keeps two persistence files:
-
-```text
-config.yaml   non-sensitive runtime configuration
-.env          API keys / tokens only
-```
-
-Effective secret precedence is:
-
-```text
-system environment > .env > legacy config.yaml value
-```
-
-The final `legacy config.yaml` level exists only for backward compatibility. When Settings Center sees plaintext legacy secret fields, it migrates them to `.env` and removes the plaintext fields from `config.yaml`.
-
-The browser never receives existing secret values. Secret status contains only metadata such as `configured`, `source`, and `stored_in_env`.
-
-## Legacy secret migration
-
-Recognized migration fields:
-
-```text
-api_key            -> OPENCODE_GO_API_KEY
-embedding_api_key  -> EMBEDDING_API_KEY
-search_api_key     -> SEARCHAPI_API_KEY or BRAVE_SEARCH_API_KEY
-agnes_api_key      -> AGNES_API_KEY
-msimg_api_key      -> MSIMG_API_KEY
-```
-
-`search_api_key` uses the configured `search_provider` to choose its target environment name.
-
-Migration order is intentionally safe:
-
-1. write the secret to `.env` when needed;
-2. verify/persist the environment file;
-3. remove plaintext secret keys from `config.yaml`;
-4. write a **sanitized** config backup.
-
-Settings Center never creates a historical `.env.bak.*` chain. This avoids multiplying plaintext credentials on disk.
-
-## Normal config save
-
-The configuration editor is schema-driven in the UI, but V1 preserves the existing flat `config.yaml` contract so current runtime code stays compatible.
-
-On every changed normal-config save:
+## 1. Ownership
 
 ```text
 config.yaml
-  -> config.yaml.bak.YYYYMMDD-HHMMSS
-  -> validate complete Settings model
+  -> application/runtime selection and ordinary non-secret settings
+
+.env
+  -> API keys/tokens
+  -> GSV-TTS-Lite local runtime asset paths
+```
+
+The two files intentionally have different ownership. `config.yaml` answers **what the application selects**; provider-specific GSV model/reference paths do not belong there.
+
+Effective secret/runtime-env precedence is:
+
+```text
+real system environment > adjacent project .env > legacy config.yaml secret
+```
+
+`character-stack` does **not** promote the whole project `.env` into every child process. Doing so would make persisted values look like immutable system overrides and would hide later Settings edits. Only the GSV sidecar receives its persisted `GSV_TTS_*` values as process environment because the upstream runtime consumes that contract.
+
+## 2. Persistence guarantees
+
+Normal YAML saves:
+
+```text
+validate complete Settings model
   -> patch only edited top-level keys
-  -> atomic replace config.yaml
+  -> preserve comments / unknown extension keys / ordering
+  -> atomic replace
+  -> config.yaml.bak.YYYYMMDD-HHMMSS
 ```
 
-Comments, unknown extension keys, and unrelated ordering are preserved. Settings Center does not reserialize the whole YAML file with `safe_dump`.
+GSV runtime fields are updated in `.env` as one atomic multi-key edit. Unrelated variables are preserved. If the second persistence surface fails, Settings rolls the first surface back so one logical save does not leave `config.yaml` and `.env` describing different states.
 
-V1 has an explicit restart policy: persisted changes are not partially hot-reloaded. Stop the current stack and start it again so Character Runtime, Media Runtime, Dev Console, Settings Center and TTS Provider Lab read one coherent snapshot.
+Existing secrets are never returned to the browser. Secret status exposes only metadata such as `configured`, `source`, and `stored_in_env`.
 
-## Formal chat TTS
+## 3. Formal TTS selection
 
-Formal browser voice still calls the stable Media Runtime endpoint:
+Formal browser voice always calls:
 
 ```text
-Browser -> :8001/v1/tts
+Browser -> Media Runtime :8001/v1/tts
 ```
 
-Media Runtime reads:
+The selector lives in `config.yaml`:
 
 ```yaml
-tts_provider: kokoro
-tts_voice: zf_001
-tts_speed: 1.0
-tts_device: cpu
-```
-
-Kokoro is the V1 default after audition. For `tts_provider: kokoro`, Media Runtime forwards synthesis to the local provider service exposed by `:9002/v1/tts`; the browser never needs provider-specific URLs or extra CORS rules. Sherpa remains selectable as a fallback/default through Settings.
-
-TTS Provider Lab remains the audition/benchmark UI. Changing a dropdown in the lab does not persist the production default; change the production default in Settings Center.
-
-### Health-gated TTS selection
-
-Settings Center does not trust a static provider list for TTS selection. On every settings refresh it probes only the formal realtime providers individually through `:9002/v1/providers/{provider_id}`: Kokoro, Sherpa, Edge and GSV. One failed/slow provider no longer invalidates the whole inventory.
-
-The Voice section therefore behaves as follows:
-
-- only providers with `ready=true` are selectable;
-- unhealthy/unavailable providers remain visible but disabled, with the provider reason shown in the UI;
-- the Voice dropdown is rebuilt from the selected healthy provider's reported `voices`;
-- switching Provider automatically selects that provider's `default_voice` and reconciles the Device control with the running provider (`cuda`/`cpu`/cloud);
-- save performs the same health/voice validation again on the server; when Provider changes, stale incompatible Voice/Device values are normalized to the healthy provider defaults instead of failing the save;
-- changing unrelated settings is still allowed when the currently configured TTS happens to be unavailable.
-
-Formal voice selection is now consistently persisted in `tts_voice`. For GSV, the sidecar reports the voice identity associated with its configured reference (currently `murasame`); Settings writes that reported voice into `tts_voice`, and Media Runtime sends the same value during synthesis.
-
-`tts_device` is used by local providers where supported. Edge reports `cloud`, so the Device control switches to `Cloud (Provider managed)` and is disabled while Edge is selected.
-
-The Voice section also exposes a **测试当前 TTS** action. It calls Settings Center `POST /v1/tts-preview`, which rechecks provider health and then proxies the selected Provider/Voice/Speed to `:9002/v1/tts`. This is an audition only; it does not persist configuration.
-
-### Health-checkable local providers without eager GPU model load
-
-GSV sidecar starts when its isolated environment and required asset environment variables exist. It preloads only when `tts_provider: gsv`; otherwise it can report readiness without loading the model. If selected GSV assets are missing, stack startup fails explicitly.
-
-Qwen3-TTS is not part of the formal provider inventory and is not started by normal `character-stack`; it remains manual experimental/future VoiceDesign tooling.
-
-## Startup
-
-Canonical local startup:
-
-```bash
-bash scripts/setup-media-models.sh
-uv run character-stack
-```
-
-Open Settings directly with:
-
-```bash
-uv run character-stack --open settings
-```
-
-or:
-
-```text
-http://127.0.0.1:8003/settings
-```
-
-Chat and TTS Lab both link to the Settings Center.
-
-## HTTP surface
-
-```text
-GET    /health
-GET    /settings
-GET    /v1/settings
-PATCH  /v1/settings
-PUT    /v1/settings/secrets/{ENV_NAME}
-DELETE /v1/settings/secrets/{ENV_NAME}
-POST   /v1/settings/migrate
-GET    /v1/runtime-status
-```
-
-Secret mutation endpoints accept only the explicit allowlist in `settings_store.py`. Existing secret values are never returned by the API.
-
-
-## TTS hot-apply and GSV runtime persistence
-
-Formal TTS selection stays in `config.yaml`:
-
-```yaml
-tts_provider: gsv
+tts_provider: gsv        # kokoro | sherpa | edge | gsv
 tts_voice: murasame
 tts_speed: 1.0
 tts_device: cuda
 ```
 
-GSV model/reference assets are provider runtime configuration and are persisted separately in the project-local `.env`:
+Qwen3-TTS is not a formal realtime Provider. Qwen3 VoiceDesign remains a Workbench tool.
+
+Provider metadata is centralized in `character_memory.tts_registry`; Config validation, Settings inventory and Media routing consume the same formal provider IDs.
+
+### Health-gated Provider and Voice
+
+Settings probes the four formal providers individually through `:9002/v1/providers/{id}`.
+
+- only `ready=true` providers are selectable;
+- Voice options come from that provider's runtime health;
+- changing Provider chooses its reported default Voice;
+- server-side validation repeats the health/voice check on save;
+- stale Voice/Device values from the previous Provider are normalized during Provider switching;
+- one unavailable Provider cannot hide the healthy providers.
+
+The Voice card also has **测试当前 TTS**, which calls `POST /v1/tts-preview` and performs a real synthesis through `:9002`.
+
+## 4. Hot-apply semantics
+
+Not every field called “device” can truthfully hot-apply.
+
+| Change | Current behavior |
+| --- | --- |
+| TTS Provider | hot on next `:8001/v1/tts` request |
+| TTS Voice | hot |
+| TTS Speed | hot |
+| GSV GPT/SoVITS/reference/voice runtime values | `:9014 /v1/configure`, hot |
+| GSV Device | unload/reconfigure/reload, hot |
+| Kokoro Device | persisted; restart **TTS Provider Runtime :9002** |
+| Sherpa Device | persisted; restart **Media Runtime :8001** |
+| Edge Device | cloud-managed; local device control disabled |
+| ordinary LLM/storage settings | restart requirement is returned explicitly |
+
+Media Runtime reloads the current formal TTS selector for every health/synthesis request. It does not claim that an already-instantiated local model moved devices merely because YAML changed.
+
+The save response separates persistence from runtime application:
+
+```json
+{
+  "result": {
+    "persisted": true,
+    "restart_required": [],
+    "runtime_apply": {
+      "attempted": true,
+      "applied": true,
+      "error": null,
+      "restart_required": []
+    }
+  }
+}
+```
+
+If persistence succeeds but a GSV reload fails (for example CUDA OOM), Settings returns the durable configuration together with `runtime_apply.applied=false`. It does not misreport that situation as “save failed”.
+
+## 5. GSV runtime configuration
+
+These values persist in the project `.env`:
 
 ```text
 GSV_TTS_GPT_MODEL
@@ -180,14 +122,52 @@ GSV_TTS_REF_TEXT
 GSV_TTS_VOICE
 ```
 
-Settings Center edits these values without replacing the rest of `.env`; `upsert_env_value` updates only the named key and preserves unrelated variables. The YAML editor likewise patches only changed top-level fields and preserves comments/unknown keys.
+The first four are required for the global/default GSV reference. `GSV_TTS_VOICE` defaults to `murasame`.
 
-TTS changes no longer require restarting the whole stack:
+Per-character frozen voices are separate again:
 
-- Media Runtime reloads `tts_provider / tts_voice / tts_speed / tts_device` from the config file for each TTS request and health response.
-- GSV sidecar exposes `POST /v1/configure`, `POST /v1/load`, and `POST /v1/unload`.
-- Saving GSV model/reference fields pushes the new values into the already-running `:9014` process.
-- Selecting GSV loads it immediately; switching away unloads GSV to release VRAM.
-- `character-stack` reads project `.env` on startup and starts the GSV sidecar whenever its isolated venv exists, even when the asset fields are still incomplete. Incomplete GSV configuration therefore disables GSV instead of preventing Settings Center from starting.
+```text
+personas/<character>/voice.yaml
+personas/<character>/voice/<content-addressed>.wav
+```
 
-Other non-TTS runtime/storage settings may still report `restart_required`; only those fields require process restart.
+A GSV sidecar can start health-checkable with incomplete global assets. Settings can fill the runtime configuration through `POST :9014/v1/configure`; selecting GSV preloads it, and switching away unloads it to release VRAM.
+
+A normal Settings workflow therefore does not require shell exports. Manual `GSV_TTS_*` system variables remain deployment overrides and intentionally win over project `.env`.
+
+## 6. Legacy secret migration
+
+Recognized legacy plaintext fields include:
+
+```text
+api_key            -> OPENCODE_GO_API_KEY
+embedding_api_key  -> EMBEDDING_API_KEY
+search_api_key     -> SEARCHAPI_API_KEY or BRAVE_SEARCH_API_KEY
+agnes_api_key      -> AGNES_API_KEY
+msimg_api_key      -> MSIMG_API_KEY
+```
+
+Migration writes the secret to `.env`, removes plaintext YAML values, and keeps only a sanitized YAML backup. Settings never creates a historical `.env.bak.*` chain.
+
+## 7. HTTP surface
+
+```text
+GET    /health
+GET    /settings
+GET    /v1/settings
+PATCH  /v1/settings
+POST   /v1/tts-preview
+PUT    /v1/settings/secrets/{ENV_NAME}
+DELETE /v1/settings/secrets/{ENV_NAME}
+POST   /v1/settings/migrate
+GET    /v1/runtime-status
+```
+
+## 8. Startup
+
+```bash
+bash scripts/setup-media-models.sh
+uv run character-stack --open settings
+```
+
+The canonical setup also prefetches the local BGE embedding because the normal Character Runtime is strict-offline for sentence-transformers models.

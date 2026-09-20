@@ -7,9 +7,7 @@ from pydantic import BaseModel, Field
 
 from character_memory.config import load_settings
 from character_memory.media_runtime import MediaRuntime, build_media_runtime_from_env
-
-
-KNOWN_TTS_PROVIDERS = {"sherpa", "kokoro", "edge", "gsv"}
+from character_memory.tts_registry import FORMAL_TTS_PROVIDER_SET, provider_spec
 
 
 class TtsRequest(BaseModel):
@@ -84,11 +82,23 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
             "device": settings.tts_device,
             "restart_required_for_config_changes": False,
         }
-        if selected not in KNOWN_TTS_PROVIDERS:
+        if selected not in FORMAL_TTS_PROVIDER_SET:
             return {**base, "ready": False, "loaded": False, "reason": f"Unknown TTS provider: {selected}"}
 
-        if selected not in {"kokoro", "edge", "gsv"}:
-            return {**local_tts, **base}
+        if selected == "sherpa":
+            actual_device = str(local_tts.get("device") or "").strip().lower()
+            configured_device = str(settings.tts_device or "").strip().lower()
+            return {
+                **base,
+                **local_tts,
+                "provider": "sherpa",
+                "voice": settings.tts_voice,
+                "speed": settings.tts_speed,
+                "configured_device": configured_device,
+                "restart_required_for_config_changes": bool(
+                    actual_device and configured_device and actual_device != configured_device
+                ),
+            }
 
         # Query only the selected provider. Calling :9002/health would also ask
         # its Sherpa adapter to call this Media Runtime and create a health cycle.
@@ -98,6 +108,9 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
             response = provider_client.get(f"{tts_lab_base}/v1/providers/{provider_id}", timeout=0.4)
             response.raise_for_status()
             provider = dict((response.json() or {}).get("provider") or {})
+            actual_device = str(provider.get("device") or "").strip().lower()
+            configured_device = str(settings.tts_device or "").strip().lower()
+            spec = provider_spec(provider_id)
             return {
                 **base,
                 **provider,
@@ -105,7 +118,14 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 "voice": settings.tts_voice,
                 "speed": settings.tts_speed,
                 "device": provider.get("device") or ("cloud" if provider_id == "edge" else settings.tts_device),
-                "restart_required_for_config_changes": False,
+                "configured_device": configured_device,
+                "restart_required_for_config_changes": bool(
+                    spec.device_mode == "local"
+                    and not spec.device_hot_apply
+                    and actual_device
+                    and configured_device
+                    and not actual_device.startswith(configured_device)
+                ),
             }
         except Exception as exc:
             return {
@@ -151,24 +171,51 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
             raise HTTPException(status_code=code, detail=str(exc)) from exc
         return result.to_dict()
 
+    def _local_sherpa_response(req: TtsRequest, *, speaker_id: int, speed: float):
+        try:
+            result = media.synthesize(req.text, speaker_id=speaker_id, speed=speed)
+        except (RuntimeError, ValueError) as exc:
+            code = 503 if isinstance(exc, RuntimeError) else 400
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        return Response(
+            content=result.audio,
+            media_type="audio/wav",
+            headers={
+                "X-Media-Provider": result.provider,
+                "X-Media-Voice": str(speaker_id),
+                "X-Media-Device": result.device,
+                "X-Media-Inference-Ms": str(result.inference_ms),
+                "X-Media-Audio-Ms": str(result.audio_ms),
+                "X-Media-Sample-Rate": str(result.sample_rate),
+            },
+        )
+
+    @app.post("/v1/providers/sherpa/tts")
+    def synthesize_sherpa_provider(req: TtsRequest):
+        """Provider-specific Sherpa endpoint used by the TTS Workbench.
+
+        Unlike /v1/tts this route never consults the configured formal provider,
+        so auditioning Sherpa cannot accidentally route to Kokoro/GSV/Edge.
+        """
+
+        explicit_voice = str(req.voice or "").strip()
+        speaker_id = int(explicit_voice) if explicit_voice.isdigit() else int(req.speaker_id or 0)
+        speed = float(req.speed if req.speed is not None else 1.0)
+        return _local_sherpa_response(req, speaker_id=speaker_id, speed=speed)
+
     @app.post("/v1/tts")
     def synthesize(req: TtsRequest):
         settings = current_settings()
         selected = str(settings.tts_provider or "sherpa").strip().lower()
         explicit_voice = str(req.voice or "").strip()
 
-        if configured_routing and selected not in KNOWN_TTS_PROVIDERS:
+        if configured_routing and selected not in FORMAL_TTS_PROVIDER_SET:
             raise HTTPException(status_code=400, detail=f"Unknown TTS provider: {selected}")
 
         if configured_routing and selected in {"kokoro", "edge", "gsv"}:
             # :9002 is both the audition UI and the provider service in V1.
             # Media Runtime remains the stable browser-facing endpoint.
-            if selected == "edge":
-                default_voice = "zh-CN-XiaoxiaoNeural"
-            elif selected == "gsv":
-                default_voice = "murasame"
-            else:
-                default_voice = "zf_001"
+            default_voice = provider_spec(selected).default_voice
             voice = explicit_voice or str(settings.tts_voice or default_voice)
             speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
             try:
@@ -198,40 +245,24 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 },
             )
 
-        try:
-            if configured_routing:
-                configured_voice = str(settings.tts_voice or "0")
-                # `voice` carries a character id (`"momo"`), not a speaker number, so a
-                # non-numeric voice must fall through to the browser's per-character
-                # speaker hash instead of collapsing every character onto speaker 0.
-                if explicit_voice.isdigit():
-                    speaker_id = int(explicit_voice)
-                elif req.speaker_id is not None:
-                    speaker_id = req.speaker_id
-                elif configured_voice.isdigit():
-                    speaker_id = int(configured_voice)
-                else:
-                    speaker_id = 0
-                speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
+        if configured_routing:
+            configured_voice = str(settings.tts_voice or "0")
+            # `voice` carries a character id (`"momo"`), not a speaker number, so a
+            # non-numeric voice falls through to the browser-provided speaker hash
+            # before the configured numeric Sherpa default.
+            if explicit_voice.isdigit():
+                speaker_id = int(explicit_voice)
+            elif req.speaker_id is not None:
+                speaker_id = req.speaker_id
+            elif configured_voice.isdigit():
+                speaker_id = int(configured_voice)
             else:
-                speaker_id = int(req.speaker_id or 0)
-                speed = float(req.speed if req.speed is not None else 1.0)
-            result = media.synthesize(req.text, speaker_id=speaker_id, speed=speed)
-        except (RuntimeError, ValueError) as exc:
-            code = 503 if isinstance(exc, RuntimeError) else 400
-            raise HTTPException(status_code=code, detail=str(exc)) from exc
-        return Response(
-            content=result.audio,
-            media_type="audio/wav",
-            headers={
-                "X-Media-Provider": result.provider,
-                "X-Media-Voice": str(speaker_id),
-                "X-Media-Device": result.device,
-                "X-Media-Inference-Ms": str(result.inference_ms),
-                "X-Media-Audio-Ms": str(result.audio_ms),
-                "X-Media-Sample-Rate": str(result.sample_rate),
-            },
-        )
+                speaker_id = 0
+            speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
+        else:
+            speaker_id = int(req.speaker_id or 0)
+            speed = float(req.speed if req.speed is not None else 1.0)
+        return _local_sherpa_response(req, speaker_id=speaker_id, speed=speed)
 
     @app.get("/v1/metrics/recent")
     def recent_metrics(limit: int = Query(default=50, ge=1, le=200)):

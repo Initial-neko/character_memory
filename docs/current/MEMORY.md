@@ -55,16 +55,29 @@ embedding_provider: sentence-transformers
 embedding_model: BAAI/bge-small-zh-v1.5
 ```
 
-当前 SentenceTransformer wrapper 优先使用本地 HuggingFace cache；本地没有时才 fallback 到 Hub 获取模型。
+SentenceTransformer runtime 是 **strict-offline**：
 
-因此要区分：
+```text
+SentenceTransformer(model, local_files_only=True)
+```
 
-- **下载缓存**：避免每次从网络重新下载模型；
-- **进程加载**：每次 Character Runtime 冷启动仍要 import torch/transformers 并把权重从磁盘加载到内存。
+正常 Character Runtime 启动和第一句话都不会 fallback 到 Hugging Face Hub。模型获取只发生在明确的 setup/prefetch 阶段：
 
-冷启动耗时不能和 steady-state Recall latency 混为一谈。
+```bash
+bash scripts/setup-media-models.sh
+# 或
+uv run python scripts/prefetch_embedding_model.py
+```
 
-SQLite 当前负责持久化；Vector retrieval 是可替换索引层。只有 benchmark 证明 NumPy full scan 不够时，才讨论 FTS/vector extension/FAISS/专用向量数据库。
+Web Runtime 启动后会立即在后台 warm `AppBundle` / Embedding；`/health` 仍然先可用，并通过 `runtime_loading / runtime_loaded / runtime_error` 暴露状态。这样冷启动的 torch/transformers import 与权重加载不会隐藏到“用户第一句话”里。
+
+仍要区分：
+
+- **prefetch/cache**：允许联网取得模型；
+- **process warmup**：只从本地 cache 加载；
+- **steady-state recall**：聊天中的向量计算。
+
+SQLite 继续负责持久化；当前不引入专用向量数据库。
 
 ## 4. Memory Candidate 不是 Memory Write
 
@@ -137,6 +150,23 @@ score = 0.70 * semantic
 - 只能 Recall `event_time <= now` 的 Memory，避免研究模式未来泄漏；
 - embedding 维度变化后，旧向量不混用；使用 re-embed 工具重建；
 - Recall 结果只是 Context，不等于人物必须在回复中提起它。
+
+### Bounded candidate set
+
+长期运行不再在每一轮把该 Character 的全部 active Memory BLOB 解包并做 NumPy cosine。SQLite 先构造有上限的候选并集：
+
+```text
+recent active memories      <= 768
+highest-importance memories <= 256
+                     ↓ de-duplicate by id
+vector ranking working set  <= 1024
+```
+
+“highest importance”分支保证很老但重要的 Memory 不会仅因时间久就从候选集消失。最终候选仍使用原来的 semantic + recency + importance 公式排序。
+
+Admission 的 exact duplicate 另走 SQLite 全 active 精确文本查询，因此一条很老的完全相同 Memory 即使不在 vector shortlist 中，也不会重复写入。Semantic near-duplicate 检查只对 bounded candidate set 做 cosine。
+
+这不是 ANN，也不是最终长期记忆算法；它只是用低复杂度改动把常规每轮 Python/NumPy 工作量从随 N 无界增长收成固定上限。是否引入 sqlite-vec/FAISS/专用向量库仍由长期 benchmark 决定。
 
 长期可研究的信号包括 emotional salience、relationship relevance、associative activation 等，但当前不提前复杂化 ranking。
 

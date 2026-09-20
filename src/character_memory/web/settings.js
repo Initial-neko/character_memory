@@ -187,6 +187,7 @@
       }
       if (device) {
         const detected = runtimeDevice(item);
+        const configuredDevice = String(snapshot.values?.tts_device || "").trim().toLowerCase();
         const cloud = String(item?.device || "").trim().toLowerCase() === "cloud";
         let cloudOption = device.querySelector('option[value="cloud"]');
         if (cloud && !cloudOption) {
@@ -199,8 +200,18 @@
         }
         device.disabled = !item?.ready || cloud;
         if (cloud) device.value = "cloud";
+        else if (providerChanged && detected) device.value = detected;
+        else if (["cpu", "cuda"].includes(configuredDevice)) device.value = configuredDevice;
         else if (detected) device.value = detected;
-        device.title = cloud ? "该 Provider 使用云端服务，不使用本地 CPU/CUDA 设置。" : "";
+
+        const pendingDeviceRestart = Boolean(
+          !cloud && detected && device.value && detected !== device.value && item?.device_hot_apply === false
+        );
+        device.title = cloud
+          ? "该 Provider 使用云端服务，不使用本地 CPU/CUDA 设置。"
+          : pendingDeviceRestart
+            ? `当前 Runtime 仍在 ${detected.toUpperCase()}；保存后的 ${device.value.toUpperCase()} 需要重启对应 TTS Runtime。`
+            : "";
       }
       if (previewButton) previewButton.disabled = !item?.ready || !selectedVoice;
 
@@ -211,7 +222,16 @@
             : "当前 Provider 未通过健康检查。";
         } else if (item.ready) {
           const loaded = item.loaded ? "loaded" : "ready";
-          status.textContent = "✓ " + loaded + " · " + (item.device || "device unknown") + " · " + (item.model || item.id)
+          const configuredDevice = String(snapshot.values?.tts_device || "").trim().toLowerCase();
+          const detectedDevice = runtimeDevice(item);
+          const devicePending = Boolean(
+            item.device_hot_apply === false &&
+            detectedDevice &&
+            ["cpu", "cuda"].includes(configuredDevice) &&
+            detectedDevice !== configuredDevice
+          );
+          status.textContent = "✓ " + loaded + " · runtime " + (item.device || "device unknown") + " · " + (item.model || item.id)
+            + (devicePending ? " · configured " + configuredDevice.toUpperCase() + "（需重启对应 TTS Runtime）" : "")
             + (correctedVoice ? " · Voice 已自动切换为 " + selectedVoice + "（保存后写入配置）" : "");
         } else {
           status.textContent = "✗ unavailable · " + (item.reason || "health check failed");
@@ -397,10 +417,16 @@
       renderSections(payload.settings);
       renderSecrets(payload.settings);
       const result = payload.result || {};
-      if (result.changed) {
+      const runtimeApply = result.runtime_apply || {};
+      if (runtimeApply.applied === false) {
+        showNotice(
+          `配置已持久化，但运行态应用失败：${runtimeApply.error || "unknown runtime error"}。无需重新保存；修复 Runtime 后可重新加载/切换。`,
+          true,
+        );
+      } else if (result.changed) {
         const restart = result.restart_required || [];
         if (restart.length) {
-          showNotice(`配置已保存。以下字段需要重启相关 Runtime 才完全生效：${restart.join(", ")}。`);
+          showNotice(`配置已保存。以下字段需要重启对应 Runtime 才完全生效：${restart.join(", ")}。不需要重启整个 stack。`);
         } else {
           showNotice("配置已保存并已热生效，无需重启整个 stack。");
         }

@@ -24,7 +24,12 @@ class VectorRecall:
         vectors = []
         recencies = []
         importances = []
-        for memory in self.store.list_memories(character_id):
+        candidate_loader = getattr(self.store, "list_memory_candidates", None)
+        if callable(candidate_loader):
+            source_memories = candidate_loader(character_id, at=n)
+        else:
+            source_memories = self.store.list_memories(character_id)
+        for memory in source_memories:
             if not memory.embedding:
                 continue
             t = memory.event_time if memory.event_time.tzinfo else memory.event_time.replace(tzinfo=timezone.utc)

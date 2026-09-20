@@ -77,12 +77,16 @@ Media Runtime owns：
 - formal `/v1/tts` routing
 - local media inference timings
 
-TTS Provider Runtime `:9002` 当前 owns：
+TTS Provider Runtime / Workbench `:9002` 当前 owns：
 
-- Kokoro model lifecycle
-- provider audition API/UI
-- Sherpa proxy entry for lab comparison
-- optional CosyVoice sidecar proxy
+- Kokoro model lifecycle；
+- Kokoro / Edge / GSV formal provider adapters；
+- multi-provider audition / benchmark UI；
+- optional CosyVoice proxy；
+- optional Qwen3 VoiceDesign Workbench tooling。
+
+Sherpa 模型仍只由 Media Runtime 持有。Workbench 试听 Sherpa 时调用专用
+`POST :8001/v1/providers/sherpa/tts`，不会经过正式 `/v1/tts` selector，也不会加载第二份 Sherpa。
 
 Media Runtime 不 import / instantiate `PersonRuntime`。停止 Media Runtime 不应让纯文本聊天不可用。
 
@@ -102,6 +106,7 @@ bash scripts/setup-media-models.sh
 
 `setup-media-models.sh` 会先复用 `sync-all.sh`，然后准备：
 
+- local BGE Embedding cache；
 - SenseVoice ASR；
 - Sherpa VITS；
 - Kokoro `v1.1-zh` model + voice packs。
@@ -222,15 +227,40 @@ Browser
   -> 32kHz WAV
 ```
 
-当前正式接入只使用一个 GSV reference voice，不引入每角色 voice registry。sidecar 默认向健康接口报告 `murasame`（可通过 `GSV_TTS_VOICE` 命名该本地 reference voice）；Settings 只允许选择健康接口报告的 voice，并把它统一保存到 `tts_voice`。选择 GSV 后，`character-stack` 会复用 `.external/GSV-TTS-Lite/.venv` 启动 `:9014`；必须预先提供 `GSV_TTS_GPT_MODEL`、`GSV_TTS_SOVITS_MODEL`、`GSV_TTS_REF_AUDIO`、`GSV_TTS_REF_TEXT`。
+GSV 有两层 voice 来源：
+
+- project `.env` 中的 global/default reference（`GSV_TTS_*`）；
+- 可选的 `personas/<character>/voice.yaml` per-character registry。
+
+Browser 会把 Character id 作为 GSV voice 请求发送；registry 中存在该 id 时使用角色 reference，不存在时退回 global/default reference。VoiceDesign freeze 会保存用户实际试听的 WAV、写入 `voice.yaml`，再调用 `:9014/v1/voices/reload`，不会为了 registry 变化卸载已热身的 GPT/SoVITS 权重。
+
+`character-stack` 在独立 GSV venv 存在时启动 `:9014`。global asset 尚未配置完整时 sidecar 可以保持 listening/`ready=false`，Settings Center 可随后填写并通过 `/v1/configure` 热配置，不需要先用 shell export，也不会阻止整个 stack 启动。
 
 ### Sherpa
 
 当 `tts_provider: sherpa`，`:8001` 直接使用本地 Sherpa VITS。兼容 voice 为 `0 / 2 / 5`。
 
-### Lab choice is not production config
+Workbench 的 Sherpa audition 使用：
 
-`:9002/tts` 的 provider/voice 下拉只用于试听。切换 Lab 选项不会写入正式配置；正式默认值在 Settings Center 修改，并按 V1 restart policy 重启 stack 后生效。
+```text
+POST :8001/v1/providers/sherpa/tts
+```
+
+这个 endpoint 强制调用底层 Sherpa，不读取当前正式 Provider；因此正式配置为 GSV/Kokoro/Edge 时也不会出现“界面显示 Sherpa、实际听到别的 Provider”的假试听。
+
+### Workbench choice is not production config
+
+`:9002/tts` 的 Provider/Voice 下拉只用于试听。正式默认值在 Settings Center 修改。
+
+热生效边界：
+
+- Provider / Voice / Speed：下一次正式 TTS 请求即生效；
+- GSV asset / reference / device：通过 `:9014` reload 生效；
+- Kokoro device：模型属于 `:9002` 进程，切 CPU/CUDA 后重启 `:9002`；
+- Sherpa device：模型属于 `:8001` 进程，切 CPU/CUDA 后重启 `:8001`；
+- Edge：cloud-managed，没有本地 Device reload。
+
+因此不再要求为了普通 TTS 设置修改而重启整个 stack。
 
 ## 6. ASR configuration
 
@@ -267,6 +297,7 @@ Media Runtime：
 GET  /health
 POST /v1/asr
 POST /v1/tts
+POST /v1/providers/sherpa/tts
 GET  /v1/metrics/recent
 ```
 

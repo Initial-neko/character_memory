@@ -19,6 +19,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from character_memory.media_runtime import float_audio_to_wav
+from character_memory.tts_registry import provider_spec
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,8 +67,8 @@ class SherpaMediaProvider:
                 "label": "Sherpa VITS (current baseline)",
                 "ready": bool(tts.get("ready")),
                 "loaded": bool(tts.get("loaded")),
-                "voices": ["0", "2", "5"],
-                "default_voice": "0",
+                "voices": list(provider_spec("sherpa").voices),
+                "default_voice": provider_spec("sherpa").default_voice,
                 "supports_speed": True,
                 "model": tts.get("model"),
                 "device": tts.get("device", "cpu"),
@@ -92,8 +93,8 @@ class SherpaMediaProvider:
             raise ValueError(f"Sherpa voice must be a numeric speaker id, got: {voice}") from exc
         started = time.perf_counter()
         response = self.client.post(
-            f"{self.base_url}/v1/tts",
-            json={"text": text, "speaker_id": speaker_id, "speed": speed},
+            f"{self.base_url}/v1/providers/sherpa/tts",
+            json={"text": text, "speaker_id": speaker_id, "voice": str(speaker_id), "speed": speed},
             timeout=120.0,
         )
         if response.is_error:
@@ -120,7 +121,7 @@ class KokoroProvider:
     SAMPLE_RATE = 24000
     # v1.1-zh uses numbered Chinese speaker packs. The old zf_xiaobei/... names
     # belong to the base Kokoro-82M repository and return 404 against v1.1-zh.
-    DEFAULT_VOICES = ["zf_001", "zf_002", "zf_003", "zf_004"]
+    DEFAULT_VOICES = list(provider_spec("kokoro").voices)
 
     def __init__(self, device: str = "cpu"):
         self.device = device or "cpu"
@@ -274,90 +275,8 @@ class KokoroProvider:
         )
 
 
-class Qwen3SidecarProvider:
-    DEFAULT_VOICES = [
-        "Vivian",
-        "Serena",
-        "Uncle_Fu",
-        "Dylan",
-        "Eric",
-        "Ryan",
-        "Aiden",
-        "Ono_Anna",
-        "Sohee",
-    ]
-
-    def __init__(self, base_url: str = "http://127.0.0.1:9013", client: httpx.Client | None = None):
-        self.base_url = base_url.rstrip("/")
-        self.client = client or httpx.Client(timeout=180.0)
-        self._owns_client = client is None
-
-    def close(self) -> None:
-        if self._owns_client:
-            self.client.close()
-
-    def status(self) -> dict:
-        fallback = {
-            "id": "qwen3",
-            "label": "Qwen3-TTS 0.6B",
-            "ready": False,
-            "loaded": False,
-            "voices": list(self.DEFAULT_VOICES),
-            "default_voice": self.DEFAULT_VOICES[0],
-            "supports_speed": False,
-            "reason": f"Qwen3-TTS sidecar is not running at {self.base_url}",
-        }
-        try:
-            response = self.client.get(f"{self.base_url}/health", timeout=3.0)
-            response.raise_for_status()
-            data = response.json()
-            voices = data.get("voices") or list(self.DEFAULT_VOICES)
-            return {
-                **fallback,
-                "ready": bool(data.get("ready", True)),
-                "loaded": bool(data.get("loaded")),
-                "voices": voices,
-                "default_voice": data.get("default_voice") or voices[0],
-                "model": data.get("model"),
-                "device": data.get("device"),
-                "reason": data.get("reason"),
-                "note": data.get("note"),
-            }
-        except Exception:
-            return fallback
-
-    def synthesize(self, text: str, *, voice: str, speed: float) -> LabSynthesisResult:
-        started = time.perf_counter()
-        response = self.client.post(
-            f"{self.base_url}/v1/tts",
-            json={
-                "text": text,
-                "voice": voice or self.DEFAULT_VOICES[0],
-                "language": "Chinese",
-                "speed": speed,
-            },
-            timeout=180.0,
-        )
-        if response.is_error:
-            raise RuntimeError(response.text)
-        total_ms = (time.perf_counter() - started) * 1000.0
-        inference_ms = float(response.headers.get("x-tts-inference-ms") or total_ms)
-        audio_ms = float(response.headers.get("x-tts-audio-ms") or 0.0)
-        sample_rate = int(response.headers.get("x-tts-sample-rate") or 0)
-        return LabSynthesisResult(
-            audio=response.content,
-            sample_rate=sample_rate,
-            provider="qwen3",
-            voice=response.headers.get("x-tts-voice", voice or self.DEFAULT_VOICES[0]),
-            model=response.headers.get("x-tts-model", "Qwen3-TTS-12Hz-0.6B-CustomVoice"),
-            device=response.headers.get("x-tts-device", "unknown"),
-            inference_ms=round(inference_ms, 1),
-            audio_ms=round(audio_ms, 1),
-        )
-
-
 class GsvSidecarProvider:
-    DEFAULT_VOICES = ["murasame"]
+    DEFAULT_VOICES = list(provider_spec("gsv").voices)
 
     def __init__(self, base_url: str = "http://127.0.0.1:9014", client: httpx.Client | None = None):
         self.base_url = base_url.rstrip("/")
@@ -431,13 +350,7 @@ class GsvSidecarProvider:
 
 
 class EdgeTtsProvider:
-    DEFAULT_VOICES = [
-        "zh-CN-XiaoxiaoNeural",
-        "zh-CN-XiaoyiNeural",
-        "zh-CN-YunjianNeural",
-        "zh-CN-YunxiNeural",
-        "zh-CN-YunyangNeural",
-    ]
+    DEFAULT_VOICES = list(provider_spec("edge").voices)
     SAMPLE_RATE = 24000
     BITRATE_BPS = 48000
     MODEL = "Microsoft Edge Read Aloud"
@@ -992,9 +905,9 @@ def create_tts_lab_app(
         started = time.perf_counter()
         try:
             model = get_polish_model()
-            request = getattr(model, "_request", None)
-            if not callable(request):
-                raise RuntimeError("configured model does not expose the OpenAI-compatible request path")
+            complete = getattr(model, "complete_text_for_session", None)
+            if not callable(complete):
+                raise RuntimeError("configured model does not expose the public text-completion contract")
             messages = [
                 {
                     "role": "system",
@@ -1010,7 +923,7 @@ def create_tts_lab_app(
                     "content": f"目标语种：{req.language}\n原始声线描述：{req.description.strip()}",
                 },
             ]
-            reply = str(request(messages, conversation_id="tts-voice-design-polish") or "").strip()
+            reply = str(complete(messages, "tts-voice-design-polish") or "").strip()
             if not reply:
                 raise RuntimeError("LLM returned an empty VoiceDesign instruction")
             return {

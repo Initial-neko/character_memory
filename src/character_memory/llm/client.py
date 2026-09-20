@@ -77,6 +77,15 @@ class PersonModel(ABC):
     def structured_for_session(self, prompt: str, schema: type[BaseModel], session_id: str):
         return self.structured_with_images_for_session(prompt, [], schema, session_id)
 
+    def complete_text_for_session(self, messages: list[dict], session_id: str) -> str:
+        """Public provider-neutral raw text completion used by tool UIs.
+
+        This deliberately exposes text completion without making callers depend
+        on OpenAICompatibleModel._request(), which is a transport detail.
+        """
+
+        raise RuntimeError("this PersonModel does not support raw text completion")
+
     @abstractmethod
     def plan_day(self, context: str) -> DailyLifePlan:
         ...
@@ -433,6 +442,9 @@ class OpenAICompatibleModel(PersonModel):
 
     def structured_for_session(self, prompt: str, schema: type[BaseModel], session_id: str):
         return self._call(prompt, schema, conversation_id=session_id)
+
+    def complete_text_for_session(self, messages: list[dict], session_id: str) -> str:
+        return self._request(messages, conversation_id=session_id)
 
     def structured_with_images_for_session(
         self,

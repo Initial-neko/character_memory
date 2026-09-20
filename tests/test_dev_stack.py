@@ -47,7 +47,7 @@ def test_qwen3_is_not_a_formal_stack_provider(tmp_path):
     try:
         _configured_tts_provider(str(config))
     except ValueError as exc:
-        assert "Qwen3-TTS is reserved for future voice-design tooling" in str(exc)
+        assert "Unsupported formal TTS provider" in str(exc)
     else:
         raise AssertionError("qwen3 must not be accepted as a formal TTS provider")
 
@@ -86,10 +86,13 @@ def test_dev_stack_keeps_gsv_health_checkable_without_requiring_runtime_assets()
     assert 'media_env["CHARACTER_MEDIA_TTS_DEVICE"] = tts_device' in script
 
 
-def test_dev_stack_reads_project_dotenv_with_system_environment_override():
+def test_dev_stack_keeps_project_dotenv_out_of_general_child_process_environment():
     script = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
     assert 'parse_env_file' in script
-    assert 'base_env = {**file_env, **os.environ}' in script
+    assert 'base_env = os.environ.copy()' in script
+    assert 'persisted_env = {**file_env, **os.environ}' in script
+    assert 'gsv_env = {**file_env, **base_env}' in script
+    assert 'base_env = {**file_env, **os.environ}' not in script
 
 
 def test_dev_stack_pins_the_gsv_persona_root_to_an_absolute_path():

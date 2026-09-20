@@ -15,6 +15,7 @@ import webbrowser
 import yaml
 
 from character_memory.envfile import parse_env_file
+from character_memory.tts_registry import FORMAL_TTS_PROVIDER_IDS, provider_spec
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,12 +104,8 @@ def _configured_tts_provider(config_path: str) -> str:
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError(f"Unable to read TTS provider from {config_path}: {exc}") from exc
     value = str((data or {}).get("tts_provider", "kokoro") or "kokoro").strip().lower()
-    if value not in {"kokoro", "sherpa", "edge", "gsv"}:
-        raise ValueError(
-            f"Unsupported formal TTS provider: {value}. "
-            "Allowed realtime providers: kokoro, sherpa, edge, gsv. "
-            "Qwen3-TTS is reserved for future voice-design tooling."
-        )
+    if value not in FORMAL_TTS_PROVIDER_IDS:
+        provider_spec(value)
     return value
 
 
@@ -197,9 +194,13 @@ def main() -> None:
 
     env_path = Path(args.config).resolve().parent / ".env"
     file_env = parse_env_file(env_path)
-    # Project-local .env is persistent Settings Center storage. Explicit system
-    # environment remains the deployment override.
-    base_env = {**file_env, **os.environ}
+    # Do not inject project .env values into every child process. load_settings()
+    # and SettingsStore read the adjacent .env directly; promoting those values
+    # into os.environ would make them look like immutable system overrides and
+    # hide later Settings Center edits. System environment remains the true
+    # deployment override.
+    base_env = os.environ.copy()
+    persisted_env = {**file_env, **os.environ}
     base_env["CHARACTER_MEMORY_CONFIG"] = args.config
     base_env["CHARACTER_CONFIG_PATH"] = args.config
     base_env.setdefault("CHARACTER_DEV_CHARACTER_BASE_URL", "http://127.0.0.1:8000")
@@ -255,21 +256,23 @@ def main() -> None:
         ),
     ]
 
-    gsv_root = Path(base_env.get("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
-    gsv_venv = Path(base_env.get("GSV_TTS_VENV", gsv_root / ".venv"))
+    gsv_root = Path(persisted_env.get("GSV_TTS_ROOT", ROOT / ".external" / "GSV-TTS-Lite"))
+    gsv_venv = Path(persisted_env.get("GSV_TTS_VENV", gsv_root / ".venv"))
     gsv_python = gsv_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     missing_gsv = [
         name for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL", "GSV_TTS_REF_AUDIO", "GSV_TTS_REF_TEXT")
-        if not str(base_env.get(name, "")).strip()
+        if not str(persisted_env.get(name, "")).strip()
     ]
     if gsv_python.is_file():
-        gsv_env = dict(base_env)
+        # GSV is the one child that consumes GSV_TTS_* as process environment.
+        # Merge the persistent project file here only, with real system env winning.
+        gsv_env = {**file_env, **base_env}
         gsv_env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(gsv_root)])
         gsv_env.setdefault("GSV_TTS_HOST", "127.0.0.1")
         gsv_env.setdefault("GSV_TTS_PORT", "9014")
         gsv_env["GSV_TTS_DEVICE"] = tts_device
         gsv_env["GSV_TTS_PRELOAD"] = "1" if tts_provider == "gsv" and not missing_gsv else "0"
-        gsv_env.setdefault("GSV_TTS_VOICE", str(base_env.get("GSV_TTS_VOICE", "") or "").strip() or "murasame")
+        gsv_env.setdefault("GSV_TTS_VOICE", str(persisted_env.get("GSV_TTS_VOICE", "") or "").strip() or "murasame")
         # Absolute on purpose: the sidecar globs this for per-persona voice
         # manifests, and a relative value would follow the child's cwd.
         gsv_env.setdefault("GSV_TTS_PERSONA_ROOT", str(ROOT / "personas"))

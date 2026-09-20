@@ -12,7 +12,8 @@ from typing import Any
 import yaml
 
 from character_memory.config import Settings, load_settings
-from character_memory.envfile import delete_env_value, effective_env_value, env_source, parse_env_file, upsert_env_value
+from character_memory.envfile import delete_env_value, effective_env_value, env_source, parse_env_file, update_env_values, upsert_env_value
+from character_memory.tts_registry import FORMAL_TTS_PROVIDERS
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,6 @@ HOT_APPLY_FIELDS = {
     "tts_provider",
     "tts_voice",
     "tts_speed",
-    "tts_device",
     *GSV_RUNTIME_FIELDS,
 }
 
@@ -78,10 +78,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "label": "TTS Provider",
                 "type": "select",
                 "options": [
-                    {"value": "kokoro", "label": "Kokoro 82M v1.1 zh"},
-                    {"value": "edge", "label": "Microsoft Edge TTS (online)"},
-                    {"value": "gsv", "label": "GSV-TTS-Lite (local)"},
-                    {"value": "sherpa", "label": "Sherpa VITS"},
+                    {"value": item.id, "label": item.label}
+                    for item in FORMAL_TTS_PROVIDERS
                 ],
             },
             {
@@ -89,19 +87,9 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "label": "TTS Voice",
                 "type": "select",
                 "options": [
-                    {"value": "zf_001", "label": "Kokoro zf_001"},
-                    {"value": "zf_002", "label": "Kokoro zf_002"},
-                    {"value": "zf_003", "label": "Kokoro zf_003"},
-                    {"value": "zf_004", "label": "Kokoro zf_004"},
-                    {"value": "murasame", "label": "GSV Murasame"},
-                    {"value": "zh-CN-XiaoxiaoNeural", "label": "Edge 晓晓 Xiaoxiao"},
-                    {"value": "zh-CN-XiaoyiNeural", "label": "Edge 晓伊 Xiaoyi"},
-                    {"value": "zh-CN-YunjianNeural", "label": "Edge 云健 Yunjian"},
-                    {"value": "zh-CN-YunxiNeural", "label": "Edge 云希 Yunxi"},
-                    {"value": "zh-CN-YunyangNeural", "label": "Edge 云扬 Yunyang"},
-                    {"value": "0", "label": "Sherpa speaker 0"},
-                    {"value": "2", "label": "Sherpa speaker 2"},
-                    {"value": "5", "label": "Sherpa speaker 5"},
+                    {"value": voice, "label": f"{item.id} · {voice}"}
+                    for item in FORMAL_TTS_PROVIDERS
+                    for voice in item.voices
                 ],
             },
             {"name": "tts_speed", "label": "TTS Speed", "type": "number", "min": 0.5, "max": 2, "step": 0.05},
@@ -413,10 +401,28 @@ class SettingsStore:
             return {"changed": False, "backup": None, "updated": [], "restart_required": []}
 
         backup = self._write_backup(original_text) if config_changed and original_text else None
-        if config_changed:
-            _atomic_write(self.config_path, updated_text)
-        for key, value in changed_env.items():
-            upsert_env_value(self.env_path, key, value)
+        env_existed = self.env_path.is_file()
+        env_original = self.env_path.read_text(encoding="utf-8") if env_existed else ""
+        try:
+            if config_changed:
+                _atomic_write(self.config_path, updated_text)
+            if changed_env:
+                update_env_values(self.env_path, changed_env)
+        except Exception:
+            # Keep the two persistence surfaces coherent. Each individual write
+            # is atomic; this rollback prevents a failed second write from
+            # leaving config.yaml and .env describing different logical saves.
+            if config_changed:
+                _atomic_write(self.config_path, original_text)
+            if changed_env:
+                if env_existed:
+                    _atomic_write(self.env_path, env_original)
+                else:
+                    try:
+                        self.env_path.unlink()
+                    except FileNotFoundError:
+                        pass
+            raise
 
         updated = sorted([*normalized_config.keys(), *changed_env.keys()])
         restart_required = sorted(field for field in updated if field not in HOT_APPLY_FIELDS)
@@ -488,6 +494,6 @@ class SettingsStore:
             "values": values,
             "schema": SETTINGS_SCHEMA,
             "secrets": self.secret_statuses(),
-            "restart_policy": "TTS selection and GSV runtime settings hot-apply. Other runtime/storage changes may still require service restart.",
+            "restart_policy": "Provider/Voice/Speed and GSV runtime assets hot-apply. GSV device hot-applies through its sidecar; Kokoro/Sherpa device changes require their runtime process to restart.",
             "last_migration": self.last_migration,
         }

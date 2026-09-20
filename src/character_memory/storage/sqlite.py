@@ -178,6 +178,14 @@ class SQLiteStore:
             """
         )
 
+    def _create_memory_candidate_indexes_locked(self) -> None:
+        self.conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_memories_character_active_importance
+            ON memories(character_id,active,importance DESC,event_time_epoch DESC,id DESC);
+            """
+        )
+
     def _init_schema(self):
         with self._lock:
             self.conn.executescript(
@@ -257,7 +265,8 @@ class SQLiteStore:
             mental_rows = self._run_migration_locked("core/003-mental-state-history", self._seed_mental_state_history_locked)
             migrated = self._run_migration_locked("core/004-runtime-trace-extraction", self._migrate_legacy_action_traces_locked)
             self._run_migration_locked("core/005-indexes", self._create_core_indexes_locked)
-            compat_migrated = self._migrate_legacy_action_traces_locked()
+            self._run_migration_locked("core/006-memory-candidate-indexes", self._create_memory_candidate_indexes_locked)
+            compat_migrated = self._migrate_legacy_action_traces_incremental_locked()
             self.conn.commit()
             if intent_added:
                 logger.info("storage.intent_migration added=source_event_id")
@@ -272,7 +281,7 @@ class SQLiteStore:
             if migrated:
                 logger.info("storage.trace_migration migrated=%d", migrated)
             if compat_migrated:
-                logger.info("storage.trace_compat_migration migrated=%d", compat_migrated)
+                logger.info("storage.trace_compat_incremental migrated=%d", compat_migrated)
 
     def _migrate_legacy_action_traces_locked(self) -> int:
         rows = self.conn.execute(
@@ -301,6 +310,68 @@ class SQLiteStore:
                 (json.dumps(metadata, ensure_ascii=False), row["id"]),
             )
             migrated += 1
+        return migrated
+
+    def _migrate_legacy_action_traces_incremental_locked(self) -> int:
+        """Compatibility scan only ACTION rows added since the previous startup."""
+
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS compatibility_cursors("
+            "name TEXT PRIMARY KEY,last_id INTEGER NOT NULL)"
+        )
+        name = "legacy-action-trace"
+        row = self.conn.execute(
+            "SELECT last_id FROM compatibility_cursors WHERE name=?",
+            (name,),
+        ).fetchone()
+        last_id = int(row["last_id"]) if row is not None else 0
+        max_row = self.conn.execute(
+            "SELECT COALESCE(MAX(id),0) AS max_id FROM events WHERE event_type=?",
+            (EventType.ACTION.value,),
+        ).fetchone()
+        max_id = int(max_row["max_id"] or 0)
+        if max_id <= last_id:
+            return 0
+
+        rows = self.conn.execute(
+            "SELECT id,character_id,event_time,event_time_epoch,metadata_json FROM events "
+            "WHERE event_type=? AND id>? AND id<=? AND metadata_json LIKE '%\"trace\"%'",
+            (EventType.ACTION.value, last_id, max_id),
+        ).fetchall()
+        migrated = 0
+        for event_row in rows:
+            try:
+                metadata = json.loads(event_row["metadata_json"])
+            except (TypeError, ValueError):
+                continue
+            trace = metadata.pop("trace", None)
+            if not isinstance(trace, dict):
+                continue
+            source_event_id = trace.get("source_event_id") or metadata.get("source_event_id")
+            if source_event_id is None:
+                continue
+            self.conn.execute(
+                "INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO NOTHING",
+                (
+                    event_row["character_id"],
+                    int(source_event_id),
+                    event_row["event_time"],
+                    event_row["event_time_epoch"],
+                    json.dumps(trace, ensure_ascii=False),
+                ),
+            )
+            self.conn.execute(
+                "UPDATE events SET metadata_json=? WHERE id=?",
+                (json.dumps(metadata, ensure_ascii=False), event_row["id"]),
+            )
+            migrated += 1
+
+        self.conn.execute(
+            "INSERT INTO compatibility_cursors(name,last_id) VALUES(?,?) "
+            "ON CONFLICT(name) DO UPDATE SET last_id=excluded.last_id",
+            (name, max_id),
+        )
         return migrated
 
     def _maybe_commit(self):
@@ -399,6 +470,93 @@ class SQLiteStore:
                 sql += " ORDER BY event_time_epoch DESC,id DESC LIMIT ?"
                 rows = list(reversed(self.conn.execute(sql, [*args, limit]).fetchall()))
             return [Memory(id=r["id"], character_id=r["character_id"], content=r["content"], memory_type=r["memory_type"], event_time=parse_datetime(r["event_time"]), importance=r["importance"], source_event_id=r["source_event_id"], active=bool(r["active"]), metadata=json.loads(r["metadata_json"]), embedding=self._unpack(r["embedding"]) if include_embedding else None) for r in rows]
+
+    def find_active_memory_by_content(self, character_id: str, content: str, *, at: datetime | None = None) -> Memory | None:
+        normalized = str(content or "").strip()
+        if not normalized:
+            return None
+        with self._lock:
+            sql = (
+                "SELECT * FROM memories WHERE character_id=? AND active=1 "
+                "AND event_time_epoch IS NOT NULL AND trim(content)=? COLLATE NOCASE"
+            )
+            args: list = [character_id, normalized]
+            if at is not None:
+                sql += " AND event_time_epoch<=?"
+                args.append(epoch_us(at))
+            sql += " ORDER BY event_time_epoch DESC,id DESC LIMIT 1"
+            row = self.conn.execute(sql, args).fetchone()
+            if row is None:
+                return None
+            return Memory(
+                id=row["id"],
+                character_id=row["character_id"],
+                content=row["content"],
+                memory_type=row["memory_type"],
+                event_time=parse_datetime(row["event_time"]),
+                importance=row["importance"],
+                source_event_id=row["source_event_id"],
+                active=bool(row["active"]),
+                metadata=json.loads(row["metadata_json"]),
+                embedding=self._unpack(row["embedding"]),
+            )
+
+    def list_memory_candidates(
+        self,
+        character_id: str,
+        *,
+        at: datetime | None = None,
+        recent_limit: int = 768,
+        important_limit: int = 256,
+    ) -> list[Memory]:
+        """Bound vector work without introducing a vector database.
+
+        Candidate recall keeps the most recent active memories plus the
+        highest-importance memories (including old ones). The union caps Python
+        BLOB unpacking/cosine work while preserving a path for durable important
+        memories to remain recallable.
+        """
+
+        recent_limit = max(1, int(recent_limit))
+        important_limit = max(1, int(important_limit))
+        with self._lock:
+            where = "character_id=? AND active=1 AND event_time_epoch IS NOT NULL"
+            args: list = [character_id]
+            if at is not None:
+                where += " AND event_time_epoch<=?"
+                args.append(epoch_us(at))
+
+            recent = self.conn.execute(
+                f"SELECT * FROM memories WHERE {where} "
+                "ORDER BY event_time_epoch DESC,id DESC LIMIT ?",
+                [*args, recent_limit],
+            ).fetchall()
+            important = self.conn.execute(
+                f"SELECT * FROM memories WHERE {where} "
+                "ORDER BY importance DESC,event_time_epoch DESC,id DESC LIMIT ?",
+                [*args, important_limit],
+            ).fetchall()
+
+            rows = {int(row["id"]): row for row in [*recent, *important]}
+            ordered = sorted(
+                rows.values(),
+                key=lambda row: (int(row["event_time_epoch"] or 0), int(row["id"])),
+            )
+            return [
+                Memory(
+                    id=row["id"],
+                    character_id=row["character_id"],
+                    content=row["content"],
+                    memory_type=row["memory_type"],
+                    event_time=parse_datetime(row["event_time"]),
+                    importance=row["importance"],
+                    source_event_id=row["source_event_id"],
+                    active=bool(row["active"]),
+                    metadata=json.loads(row["metadata_json"]),
+                    embedding=self._unpack(row["embedding"]),
+                )
+                for row in ordered
+            ]
 
     def list_events(self, character_id: str, limit: int = 50, event_type: str | None = None, before: datetime | None = None) -> list[Event]:
         with self._lock:

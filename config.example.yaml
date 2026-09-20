@@ -1,4 +1,4 @@
-# Copy to config.yaml. Secrets belong in .env and are managed by Settings Center.
+# Copy to config.yaml. Secrets and GSV runtime asset paths belong in .env and are managed by Settings Center.
 base_url: "https://opencode.ai/zen/go/v1"
 # OpenCode Go model id. deepseek-flash is used for text and image turns by default.
 chat_model: "deepseek-flash"
@@ -8,7 +8,8 @@ vision_model: ""
 chat_temperature: 0.7
 llm_attempts: 2
 
-# Real semantic embeddings are enabled from Day 1.
+# Real semantic embeddings are enabled from Day 1. Runtime loading is strict-offline;
+# run scripts/setup-media-models.sh (or prefetch_embedding_model.py) before normal startup.
 embedding_provider: "sentence-transformers"
 embedding_model: "BAAI/bge-small-zh-v1.5"
 # Alternative for any provider exposing POST /embeddings:
@@ -22,7 +23,7 @@ embedding_model: "BAAI/bge-small-zh-v1.5"
 tts_provider: "kokoro"       # kokoro | edge | gsv | sherpa
 tts_voice: "zf_001"          # Provider-specific voice selected from the healthy provider inventory in Settings
 tts_speed: 1.0               # Edge maps 0.5..2.0 to -50%..+100%
-tts_device: "cpu"            # Formal provider selection only; GSV assets live in project .env and hot-configure :9014
+tts_device: "cpu"            # Desired local device. GSV hot-reloads; Kokoro(:9002)/Sherpa(:8001) require only that owning runtime to restart.
 
 # Image search provider for avatar candidates. Keys live in .env.
 search_provider: "searchapi"

@@ -59,6 +59,11 @@ def test_mark_ready_sets_the_asset_and_republishes_the_same_id(tmp_path):
     assert metadata[VOICE_STATUS] == "ready"
     assert metadata[VOICE_MEDIA_ID] == "abc123"
     assert metadata[VOICE_DURATION_MS] == 1840
+    # update_event_metadata REPLACES the document, so the patch must be merged
+    # into the existing metadata rather than written over it: metadata_json has
+    # no schema validation, and a wholesale replace would drop this key -- and
+    # every other key the patch does not name -- with no error anywhere.
+    assert metadata["action"] == "VOICE_MESSAGE"
 
     channel_key, event_type, data = hub.published[0]
     assert event_type == "character_event"
@@ -89,6 +94,49 @@ def test_mark_failed_records_the_reason_and_keeps_the_text(tmp_path):
     assert reloaded.metadata[VOICE_STATUS] == "failed"
     assert reloaded.metadata[VOICE_ERROR] == "provider unavailable"
     assert reloaded.metadata[VOICE_MEDIA_ID] is None
+
+
+def test_mark_failed_after_ready_clears_the_stale_media_reference(tmp_path):
+    """A message that had audio and then failed must not keep pointing at it.
+
+    The pending -> failed path cannot observe this: the pending fixture already
+    seeds both keys as None, so a failed patch that omits the explicit clear
+    would look identical. Only ready -> failed exercises the clear.
+    """
+    store, saved = _pending(tmp_path)
+    hub = _FakeHub()
+
+    assert (
+        mark_voice_message_ready(
+            store,
+            hub,
+            saved.id,
+            character_id="momo",
+            conversation_id="momo:default",
+            media_id="abc123",
+            duration_ms=1840,
+        )
+        is True
+    )
+    assert store.get_event(saved.id).metadata[VOICE_MEDIA_ID] == "abc123"
+
+    assert (
+        mark_voice_message_failed(
+            store,
+            hub,
+            saved.id,
+            character_id="momo",
+            conversation_id="momo:default",
+            error="provider unavailable",
+        )
+        is True
+    )
+
+    metadata = store.get_event(saved.id).metadata
+    assert metadata[VOICE_STATUS] == "failed"
+    assert metadata[VOICE_MEDIA_ID] is None
+    assert metadata[VOICE_DURATION_MS] is None
+    assert metadata[VOICE_ERROR] == "provider unavailable"
 
 
 def test_unknown_event_id_is_reported_not_raised(tmp_path):

@@ -5,7 +5,7 @@ import os
 import httpx
 from pydantic import BaseModel, Field
 
-from character_memory.config import load_settings
+from character_memory.config import DEFAULT_VOICE_SILENCE_MS, load_settings
 from character_memory.media_runtime import MediaRuntime, build_media_runtime_from_env
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_SET, provider_spec
 
@@ -146,6 +146,16 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         status["tts_runtime"] = runtime_tts
         status["tts"] = selected_tts
         status["tts_selected"] = selected_tts
+        # Voice-call capture parameters. The browser already fetches /health
+        # before it opens the microphone, so serving them here costs no extra
+        # round trip and keeps one source of truth for the endpointing
+        # threshold. getattr, because several callers stub load_settings with a
+        # bare namespace that predates this field.
+        status["voice_capture"] = {
+            "silence_ms": int(
+                getattr(current_settings(), "voice_silence_ms", DEFAULT_VOICE_SILENCE_MS)
+            ),
+        }
         return {"ok": True, **status}
 
     @app.post("/v1/asr")

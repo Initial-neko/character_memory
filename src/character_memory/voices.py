@@ -394,7 +394,6 @@ def resolve_voice_registry(
     *,
     templates: dict[str, VoiceProfile],
     character_voices: dict[str, str],
-    default: str,
 ) -> dict[str, VoiceProfile]:
     """Merge the template tree and the character tree into one registry.
 
@@ -403,11 +402,9 @@ def resolve_voice_registry(
     of the same name, because the character is the more specific answer.
 
     A character pointing at a template that does not exist raises: that is a
-    configuration error, not an unconfigured character. ``default`` is exempt --
-    it is allowed to name a template that was never created, since readiness
-    (``_asset_status``) reports that case separately. For the same reason this
-    function never consults ``default``: a missing default template is a
-    readiness answer, not a load-time failure.
+    configuration error, not an unconfigured character. An *unreferenced* missing
+    template is not this function's business -- readiness (``_asset_status``)
+    reports a default template that was never created.
     """
 
     registry: dict[str, VoiceProfile] = dict(templates)
@@ -419,9 +416,9 @@ def resolve_voice_registry(
                 f"{character_id} references unknown template {template_name!r}"
             )
         # Re-key onto the character id so the browser's ``voice: <character id>``
-        # resolves directly. The profile is copied rather than shared: the
-        # character id is also what ``_resolve_voice`` reports back in
-        # ``X-TTS-Voice``, and the template's own entry has to keep its name.
+        # resolves directly. Copied, not shared: ``registry[k].voice_id == k``
+        # then holds for every key, and two characters on one template cannot
+        # alias a single mutable object.
         registry[character_id] = profile.model_copy(update={"voice_id": character_id})
 
     return registry

@@ -168,7 +168,6 @@ def test_resolve_voice_registry_maps_a_character_onto_its_template(tmp_path):
     registry = resolve_voice_registry(
         templates=discover_templates(tmp_path / "voices"),
         character_voices=discover_character_voices([persona]),
-        default="murasame",
     )
 
     assert registry["haru"].ref_text == "你好，今天天气不错。"
@@ -186,11 +185,13 @@ def test_resolve_voice_registry_raises_when_a_referenced_template_is_missing(tmp
         resolve_voice_registry(
             templates={},
             character_voices=discover_character_voices([persona]),
-            default="murasame",
         )
 
 
-def test_resolve_voice_registry_lets_a_character_override_the_template_models(tmp_path):
+def test_resolve_voice_registry_inherits_the_template_models(tmp_path):
+    """A character cannot set models itself -- ``_CharacterVoiceDocument`` forbids
+    it, because the same clip under two characters must not resolve to two
+    different models. It inherits whatever the template declares."""
     _write_template(tmp_path / "voices", "murasame", gpt_model="base.ckpt")
     personas = tmp_path / "personas"
     persona = _write_character(personas, "haru", {"template": "murasame"})
@@ -198,7 +199,6 @@ def test_resolve_voice_registry_lets_a_character_override_the_template_models(tm
     registry = resolve_voice_registry(
         templates=discover_templates(tmp_path / "voices"),
         character_voices=discover_character_voices([persona]),
-        default="murasame",
     )
 
     assert registry["haru"].gpt_model == "base.ckpt"

@@ -6,6 +6,7 @@ in the repo that owns a reference clip; a character only ever names one.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -265,3 +266,20 @@ def test_discover_character_voices_rejects_two_personas_claiming_one_id(tmp_path
 
     with pytest.raises(VoiceProfileError, match="duplicate character id 'haru'"):
         discover_character_voices([first, second])
+
+
+def test_discover_character_voices_skips_a_blank_persona_id(tmp_path, caplog):
+    """A quoted blank ``id`` is present but unusable -- the directory fallback
+    covers an *absent* field only. ``config.discover_character_profiles`` drops
+    such a persona, so it is undiscoverable and no request can name it: nothing
+    can get the wrong voice, and one unselectable character must not stop the
+    sidecar from starting for all the others."""
+
+    personas = tmp_path / "personas"
+    persona = _write_character(personas, "haru", {"template": "murasame"})
+    persona.write_text("id: '   '\nname: haru\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="character_memory.voices"):
+        assert discover_character_voices([persona]) == {}
+
+    assert "persona id is empty" in caplog.text

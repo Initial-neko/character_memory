@@ -293,6 +293,8 @@ git commit -m "Add template readers to the voice registry"
 
 - [ ] **Step 1: 写失败的测试**
 
+（文件顶部 import 区需补 `import logging`，字母序在 `from pathlib import Path` 之前——本步最后一条用例要断言日志。）
+
 追加到 `tests/test_voices_templates.py`：
 
 ```python
@@ -453,6 +455,23 @@ def test_discover_character_voices_rejects_two_personas_claiming_one_id(tmp_path
 
     with pytest.raises(VoiceProfileError, match="duplicate character id 'haru'"):
         discover_character_voices([first, second])
+
+
+def test_discover_character_voices_skips_a_blank_persona_id(tmp_path, caplog):
+    """A quoted blank ``id`` is present but unusable -- the directory fallback
+    covers an *absent* field only. ``config.discover_character_profiles`` drops
+    such a persona, so it is undiscoverable and no request can name it: nothing
+    can get the wrong voice, and one unselectable character must not stop the
+    sidecar from starting for all the others."""
+
+    personas = tmp_path / "personas"
+    persona = _write_character(personas, "haru", {"template": "murasame"})
+    persona.write_text("id: '   '\nname: haru\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="character_memory.voices"):
+        assert discover_character_voices([persona]) == {}
+
+    assert "persona id is empty" in caplog.text
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -485,6 +504,14 @@ Expected: `tests/test_voices.py` 与改动前**同样通过**（该文件对 `lo
 **若你发现某条文案无法在不改变字节的前提下共享，停下报告，不要改文案。** 跨模块契约优先于 DRY；这不是可以自行权衡的地方。
 
 - [ ] **Step 3: 实现**
+
+`voices.py` 目前没有模块 logger，本步需要一个（`discover_character_voices` 跳过空白 id 时留一行日志）。在文件顶部 import 区补 `import logging`（字母序在 `os` 之前），并在 import 区与 `class VoiceProfileError` 之间加：
+
+```python
+logger = logging.getLogger("character_memory.voices")
+```
+
+命名沿用仓库约定 `character_memory.<模块名>`（Task 4 会在 `gsv_tts_experiment.py` 加同形的 logger）。
 
 追加到 `src/character_memory/voices.py` 末尾：
 
@@ -521,22 +548,15 @@ def load_character_voice(persona_path: str | Path) -> str | None:
     if not voice_path.is_file():
         return None
 
-    try:
-        raw = yaml.safe_load(voice_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise VoiceProfileError(f"{voice_path}: unreadable voice reference: {exc}") from exc
-
-    if not isinstance(raw, dict):
-        raise VoiceProfileError(
-            f"{voice_path}: expected a YAML mapping with a 'template' key"
-        )
-
-    try:
-        document = _CharacterVoiceDocument.model_validate(raw)
-    except ValidationError as exc:
-        raise VoiceProfileError(
-            f"{voice_path}: invalid voice profile: {_describe_validation_error(exc)}"
-        ) from exc
+    document = _read_document(
+        voice_path,
+        _CharacterVoiceDocument,
+        unreadable="unreadable voice reference",
+        # A null document and a non-mapping one are the same complaint here:
+        # this file has exactly one thing to say, and neither says it.
+        empty="expected a YAML mapping with a 'template' key",
+        non_mapping="expected a YAML mapping with a 'template' key",
+    )
 
     name = (document.template or "").strip()
     if not name:
@@ -579,6 +599,10 @@ def discover_character_voices(
     what the browser sends; a character with no ``voice.yaml`` is simply absent,
     and one whose ``voice.yaml`` is unusable raises from
     :func:`load_character_voice` before this function has an id to key on.
+
+    The line between raising and skipping is *discoverability*: raise when a
+    character the app will show could get the wrong voice (the duplicate id
+    below), skip when the app will not show it at all (a blank id).
     """
 
     references: dict[str, str] = {}
@@ -589,13 +613,17 @@ def discover_character_voices(
             continue
         character_id = _character_id(persona_path)
         if not character_id:
-            # Reachable only when the ``id`` field is present but blank, since
-            # the directory name is the fallback. ``discover_character_profiles``
-            # drops that character entirely, so there is nothing for a voice to
-            # attach to -- and failing loud beats registering an unreachable key.
-            raise VoiceProfileError(
-                f"{persona_path}: persona id is empty; omit it to default to the directory name"
+            # Reachable only when the ``id`` field is present but blank; the
+            # directory name is the fallback otherwise. ``config.py:181`` drops
+            # such a persona, so it is not discoverable and no request can name
+            # it -- there is no voice to get wrong, which is what earns a skip
+            # where the duplicate-id case below earns a raise. The sidecar also
+            # must not refuse to start over a character nobody can select.
+            logger.warning(
+                "ignoring %s: persona id is empty and the character is not discoverable",
+                persona_path.parent / CHARACTER_VOICE_FILENAME,
             )
+            continue
         previous = references.get(character_id)
         if previous is not None:
             raise VoiceProfileError(
@@ -642,7 +670,7 @@ def resolve_voice_registry(
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_voices_templates.py -q --no-header`
-Expected: 19 passed（Task 1 遗留 8 条 + 本任务 11 条。计数四度改过，每次都记在这里免得下一个人以为是自己数错：先写「14」（漏算本文件的模板侧用例），改「15」；id 锚点从目录名改为 `id` 字段时补两条（id 定 key、无 voice.yaml 不进注册表）；审查又指出角色侧三条新错误串与重复 id 分支全无覆盖，再补两条（非 mapping 文档、两个 persona 抢同一个 id））
+Expected: 20 passed（Task 1 遗留 8 条 + 本任务 12 条。计数五度改过，每次都记在这里免得下一个人以为是自己数错：先写「14」（漏算本文件的模板侧用例），改「15」；id 锚点从目录名改为 `id` 字段时补两条（id 定 key、无 voice.yaml 不进注册表）；审查又指出角色侧三条新错误串与重复 id 分支全无覆盖，再补两条（非 mapping 文档、两个 persona 抢同一个 id）；空白 id 分支由「抛错」改为「跳过 + 记日志」再补一条（`caplog` 断言），共 8 + 12 = 20）
 
 - [ ] **Step 5: 提交**
 

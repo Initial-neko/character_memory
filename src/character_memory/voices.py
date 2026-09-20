@@ -13,6 +13,7 @@ invalid one raises loudly.
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,9 @@ from typing import Iterable, TypeVar
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
+
+
+logger = logging.getLogger("character_memory.voices")
 
 
 class VoiceProfileError(ValueError):
@@ -398,6 +402,10 @@ def discover_character_voices(
     what the browser sends; a character with no ``voice.yaml`` is simply absent,
     and one whose ``voice.yaml`` is unusable raises from
     :func:`load_character_voice` before this function has an id to key on.
+
+    The line between raising and skipping is *discoverability*: raise when a
+    character the app will show could get the wrong voice (the duplicate id
+    below), skip when the app will not show it at all (a blank id).
     """
 
     references: dict[str, str] = {}
@@ -408,13 +416,17 @@ def discover_character_voices(
             continue
         character_id = _character_id(persona_path)
         if not character_id:
-            # Reachable only when the ``id`` field is present but blank, since
-            # the directory name is the fallback. ``discover_character_profiles``
-            # drops that character entirely, so there is nothing for a voice to
-            # attach to -- and failing loud beats registering an unreachable key.
-            raise VoiceProfileError(
-                f"{persona_path}: persona id is empty; omit it to default to the directory name"
+            # Reachable only when the ``id`` field is present but blank; the
+            # directory name is the fallback otherwise. ``config.py:181`` drops
+            # such a persona, so it is not discoverable and no request can name
+            # it -- there is no voice to get wrong, which is what earns a skip
+            # where the duplicate-id case below earns a raise. The sidecar also
+            # must not refuse to start over a character nobody can select.
+            logger.warning(
+                "ignoring %s: persona id is empty and the character is not discoverable",
+                persona_path.parent / CHARACTER_VOICE_FILENAME,
             )
+            continue
         previous = references.get(character_id)
         if previous is not None:
             raise VoiceProfileError(

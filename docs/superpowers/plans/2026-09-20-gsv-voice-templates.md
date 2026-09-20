@@ -769,7 +769,6 @@ import yaml
 
 from character_memory.voices import (
     VoiceProfileError,
-    discover_voice_profiles,
     load_voice_profile,
     template_root,
 )
@@ -1109,6 +1108,16 @@ from character_memory.voices import (
 
 （`VoiceProfile` 可能已经在 import 里；合并进既有 import 语句，不要重复。）
 
+同时补一个模块 logger——本模块目前没有，而 `migrate_if_needed` 需要它（见 (g)）：
+
+```python
+import logging
+
+logger = logging.getLogger("character_memory.gsv_tts_experiment")
+```
+
+（仓库惯例，照 `visual_web.py:22` / `avatar_web.py:14` 的写法：logger 名是 `character_memory.<模块名>`。）
+
 **(b)** 在 `_persona_root`（`:93-104`）之后加一个同形状的函数：
 
 ```python
@@ -1266,6 +1275,20 @@ def _voices_root(voices_root: str | Path | None) -> str:
                 },
             )
             if not report.skipped:
+                # ``MigrationReport.notes`` is the only record of what the
+                # migration declined to touch, and it is exactly what an
+                # operator needs when a character comes out voiceless after an
+                # upgrade. Without this the field is written and never read.
+                for note in report.notes:
+                    logger.warning("GSV voice migration: %s", note)
+                if report.created_templates:
+                    logger.info(
+                        "GSV voice migration created %d template(s) and migrated %d "
+                        "character(s): %s",
+                        len(report.created_templates),
+                        len(report.migrated_characters),
+                        ", ".join(report.created_templates),
+                    )
                 self._voices = self._load_voices()
             return report
 ```
@@ -3080,7 +3103,9 @@ export GSV_TTS_VOICES_ROOT="${GSV_TTS_VOICES_ROOT:-$(cd "$(dirname "$0")/.." && 
 - [ ] **Step 4: 全量测试**
 
 Run: `uv run pytest -q --no-header`
-Expected: 全 passed（基线 480 + 新增约 75 条用例，含参数化）
+Expected: **0 failed**，且 skipped 只有 5 条（`RUN_PLAYWRIGHT=1` 门控的那几条）。
+
+别拿一个固定数字当预期：本任务是最后一个，前面 Task 3-11 各自都在加用例，任何写死的总数到这一步都是错的（本计划早先写的「基线 480」在 Task 2 结束时实测已是 486 passed / 5 skipped）。要盯的是**没有 failed、skipped 不多不少**。
 
 - [ ] **Step 5: 提交**
 

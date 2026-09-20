@@ -47,6 +47,33 @@ def _gsv_assets(tmp_path: Path) -> tuple[Path, Path, Path]:
     return gpt, sovits, ref
 
 
+def _require_a_real_clip(path) -> str:
+    """The engine's own contract, faked honestly: a bad path is a hard error.
+
+    Upstream ``cache_spk_audio``/``cache_prompt_audio`` open the path with
+    ``av.open`` inside a try/finally and let the failure escape. A fake that
+    merely records would hide the entire class of bug this file is guarding
+    against -- ``load()`` pre-warming the engine from a runtime-global
+    ``ref_audio`` that is now ``""``, which the operator met as
+    ``Invalid argument returned 22`` with no path in the message.
+    """
+
+    value = str(path or "").strip()
+    if not value or not Path(value).is_file():
+        raise ValueError(f"refusing a reference clip that does not exist: {value!r}")
+    return value
+
+
+def _as_paths(value) -> list[str]:
+    """Upstream accepts one path or a list of them for the same argument."""
+
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
 def _default_registry(ref: Path) -> dict[str, VoiceProfile]:
     """A registry in which the default voice resolves, so the engine can load.
 
@@ -129,8 +156,6 @@ def test_gsv_sidecar_http_contract_without_real_cuda():
             json={
                 "gpt_model": "new.ckpt",
                 "sovits_model": "new.pth",
-                "ref_audio": "new.wav",
-                "ref_text": "参考文本",
                 "voice": "murasame",
                 "device": "cuda",
                 "preload": False,
@@ -198,16 +223,15 @@ def test_gsv_runtime_uses_upstream_infer_batched_contract(tmp_path):
     runtime = GsvTtsRuntime(
         gpt_model=str(gpt),
         sovits_model=str(sovits),
-        ref_audio=str(ref),
-        ref_text="参考文本。",
         device="cuda:0",
         default_voice="murasame",
         tts_factory=FakeTts,
         persona_root=tmp_path / "personas",
         voices_root=tmp_path / "voices",
         # Readiness needs the default template to resolve, and the calls below
-        # assert on the global reference this test wrote. An injected registry is
-        # authoritative and keeps both exactly where the test put them.
+        # assert on the reference this test wrote. An injected registry is
+        # authoritative and keeps it exactly where the test put it -- the
+        # reference now comes from there, not from a runtime-global.
         voices=_default_registry(ref),
     )
 
@@ -225,8 +249,11 @@ def test_gsv_runtime_uses_upstream_infer_batched_contract(tmp_path):
     assert calls["init"]["use_flash_attn"] is False
     assert calls["gpt"] == str(gpt)
     assert calls["sovits"] == str(sovits)
-    assert calls["cache_spk"][0] == str(ref)
-    assert calls["cache_prompt"]["prompt_audio_paths"] == str(ref)
+    # The reference is handed over per request for the engine to cache lazily;
+    # nothing warms it during load() any more (this fake records but never
+    # caches, so a KeyError here would mean load() went back to pre-warming).
+    assert "cache_spk" not in calls
+    assert "cache_prompt" not in calls
     assert calls["infer"]["spk_audio_paths"] == str(ref)
     assert calls["infer"]["prompt_audio_paths"] == str(ref)
     assert calls["infer"]["prompt_audio_texts"] == "参考文本。"
@@ -271,8 +298,6 @@ def test_gsv_runtime_can_hot_configure_and_unload(tmp_path):
     runtime = GsvTtsRuntime(
         gpt_model="",
         sovits_model="",
-        ref_audio="",
-        ref_text="",
         device="cuda",
         default_voice="murasame",
         tts_factory=FakeTts,
@@ -288,8 +313,6 @@ def test_gsv_runtime_can_hot_configure_and_unload(tmp_path):
         GsvRuntimeConfigRequest(
             gpt_model=str(gpt),
             sovits_model=str(sovits),
-            ref_audio=str(ref),
-            ref_text="参考文本",
             voice="murasame",
             device="cuda",
             preload=True,
@@ -298,7 +321,7 @@ def test_gsv_runtime_can_hot_configure_and_unload(tmp_path):
     assert configured["ready"] is True
     assert configured["loaded"] is True
     assert Path(runtime.gpt_model) == gpt
-    assert runtime.ref_text == "参考文本"
+    assert Path(runtime.sovits_model) == sovits
 
     unloaded = runtime.unload()
     assert unloaded["ready"] is True
@@ -309,8 +332,6 @@ def test_gsv_status_reports_missing_assets_without_importing_gsv(tmp_path):
     runtime = GsvTtsRuntime(
         gpt_model="",
         sovits_model="",
-        ref_audio="",
-        ref_text="",
         tts_factory=lambda **kwargs: None,
         persona_root=tmp_path / "personas",
         voices_root=tmp_path / "voices",
@@ -373,8 +394,6 @@ def test_gsv_seed_is_applied_under_the_lock_and_before_inference(tmp_path):
     runtime = GsvTtsRuntime(
         gpt_model=str(gpt),
         sovits_model=str(sovits),
-        ref_audio=str(ref),
-        ref_text="参考文本。",
         device="cpu",
         default_voice="murasame",
         tts_factory=FakeTts,
@@ -424,8 +443,6 @@ def test_gsv_request_seed_overrides_the_runtime_default(tmp_path):
     runtime = GsvTtsRuntime(
         gpt_model=str(gpt),
         sovits_model=str(sovits),
-        ref_audio=str(ref),
-        ref_text="参考文本。",
         device="cpu",
         tts_factory=FakeTts,
         torch_module=torch,
@@ -471,8 +488,6 @@ def test_gsv_seed_none_keeps_the_unseeded_behaviour(tmp_path):
     runtime = GsvTtsRuntime(
         gpt_model=str(gpt),
         sovits_model=str(sovits),
-        ref_audio=str(ref),
-        ref_text="参考文本。",
         device="cpu",
         seed=None,
         tts_factory=FakeTts,
@@ -542,8 +557,6 @@ def test_gsv_reports_the_seed_it_used_over_http(tmp_path):
     runtime = GsvTtsRuntime(
         gpt_model=str(gpt),
         sovits_model=str(sovits),
-        ref_audio=str(ref),
-        ref_text="参考文本。",
         device="cpu",
         tts_factory=FakeTts,
         torch_module=RecordingTorch(),
@@ -664,12 +677,22 @@ def _write_persona(
 
 
 def _recording_engine(calls: dict[str, list]):
-    """Fake GSV engine that records every call the runtime makes on it."""
+    """Fake GSV engine that records every call the runtime makes on it.
+
+    Two of its behaviours are copied from upstream rather than invented, because
+    they are what the tests below assert on:
+
+    * ``cache_*`` refuse an empty or missing clip, exactly as the real engine's
+      ``av.open`` does.
+    * ``infer_batched`` caches a reference on miss, which is why the runtime does
+      not have to pre-warm anything at load time.
+    """
 
     class FakeTts:
         def __init__(self, **kwargs):
             calls.setdefault("init", []).append(kwargs)
             self.tts_config = SimpleNamespace(device="cpu")
+            self.warm_clips: dict[str, set[str]] = {"spk": set(), "prompt": set()}
 
         def load_gpt_model(self, path):
             calls.setdefault("gpt", []).append(path)
@@ -679,12 +702,30 @@ def _recording_engine(calls: dict[str, list]):
 
         def cache_spk_audio(self, path, **kwargs):
             calls.setdefault("cache_spk", []).append((path, kwargs))
+            self.warm_clips["spk"].add(_require_a_real_clip(path))
 
         def cache_prompt_audio(self, **kwargs):
             calls.setdefault("cache_prompt", []).append(kwargs)
+            for path in _as_paths(kwargs.get("prompt_audio_paths")):
+                self.warm_clips["prompt"].add(_require_a_real_clip(path))
 
         def infer_batched(self, **kwargs):
             calls.setdefault("infer", []).append(kwargs)
+            # gsv_tts/TTS.py:665-666,685-688 -- a clip is encoded on first use,
+            # so a cold engine needs no warmup and a load() that warmed one was
+            # depending on a file it did not have to.
+            for path in _as_paths(kwargs.get("spk_audio_paths")):
+                if str(path) not in self.warm_clips["spk"]:
+                    self.cache_spk_audio(path)
+            texts = _as_paths(kwargs.get("prompt_audio_texts"))
+            for index, path in enumerate(_as_paths(kwargs.get("prompt_audio_paths"))):
+                if str(path) in self.warm_clips["prompt"]:
+                    continue
+                self.cache_prompt_audio(
+                    prompt_audio_paths=path,
+                    prompt_audio_texts=texts[index] if index < len(texts) else "",
+                    prompt_language="auto",
+                )
             return (
                 SimpleNamespace(
                     audio_data=np.asarray([0.0, 0.25], dtype=np.float32),
@@ -696,21 +737,22 @@ def _recording_engine(calls: dict[str, list]):
 
 
 class _Rig:
-    """A runtime wired to a recording fake engine, plus its global asset paths."""
+    """A runtime wired to a recording fake engine, plus its shared model paths.
+
+    There is no runtime-global reference to set up any more: a reference comes
+    from the template the request resolves to, so the only fixture a test needs
+    is ``_write_template``.
+    """
 
     def __init__(self, tmp_path: Path, **overrides):
         self.calls: dict[str, list] = {}
         self.gpt = tmp_path / "voice-e15.ckpt"
         self.sovits = tmp_path / "voice-e8.pth"
-        self.ref = tmp_path / "global-reference.wav"
         self.gpt.write_bytes(b"gpt")
         self.sovits.write_bytes(b"sovits")
-        self.ref.write_bytes(b"wav")
         kwargs = {
             "gpt_model": str(self.gpt),
             "sovits_model": str(self.sovits),
-            "ref_audio": str(self.ref),
-            "ref_text": "全局参考文本。",
             "device": "cpu",
             "default_voice": "murasame",
             "tts_factory": _recording_engine(self.calls),
@@ -1015,3 +1057,85 @@ def test_gsv_runtime_reads_the_persona_root_from_the_environment(tmp_path, monke
 
     assert rig.runtime.persona_root == str(personas)
     assert "momo" in rig.runtime.status()["voices"]
+
+
+# --- The runtime-global reference is gone ---------------------------------------
+
+
+def test_gsv_configure_request_rejects_the_retired_reference_fields():
+    """An old request body must be refused, not quietly ignored.
+
+    ``GSV_TTS_REF_AUDIO``/``GSV_TTS_REF_TEXT`` used to be how a sidecar learned
+    its reference; that is a template's job now. The model is ``extra="forbid"``
+    on purpose, so a stale script or an old client gets a 4xx instead of a
+    no-op -- and the failure mode of a silently ignored reference is the wrong
+    voice, not an error message.
+    """
+
+    assert "ref_audio" not in GsvRuntimeConfigRequest.model_fields
+    assert "ref_text" not in GsvRuntimeConfigRequest.model_fields
+    with pytest.raises(ValidationError):
+        GsvRuntimeConfigRequest(ref_audio="C:/old/ref.wav")
+    with pytest.raises(ValidationError):
+        GsvRuntimeConfigRequest.model_validate({"ref_text": "旧参考文本"})
+
+
+def test_gsv_configure_over_http_refuses_the_retired_reference_fields():
+    """The same refusal across the HTTP boundary the scripts actually cross."""
+
+    with TestClient(create_gsv_tts_app(FakeGsvRuntime())) as client:
+        response = client.post("/v1/configure", json={"ref_audio": "C:/old/ref.wav"})
+
+    assert response.status_code == 422
+
+
+def test_gsv_runtime_loads_without_any_runtime_global_reference(tmp_path):
+    """``load()`` must not need a reference at all.
+
+    Readiness is "the shared models and the default template resolve", so a
+    warmup here was a second, unmaintained source of truth: with the reference
+    fields deleted from the settings page it was handed ``""``, and the real
+    engine fails on that with ``Invalid argument returned 22`` -- a message
+    that names no path, arriving after ``/health`` had already said ready.
+    """
+
+    personas = _persona_root(tmp_path)
+    _write_template(tmp_path, "murasame")
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    ready, reason = rig.runtime._asset_status()
+    assert ready is True, reason
+
+    loaded = rig.runtime.load()
+
+    assert loaded["already_loaded"] is False
+    assert loaded["loaded"] is True
+    # Nothing was pre-warmed: the engine caches a clip on its first use, so a
+    # load that had to be handed a reference is a load that can fail on one.
+    assert rig.calls.get("cache_spk", []) == []
+    assert rig.calls.get("cache_prompt", []) == []
+
+
+def test_gsv_synthesis_hands_the_engine_the_templates_own_reference(tmp_path):
+    """The reference reaches the engine from the template, on the first request.
+
+    Asserted through the engine's own calls rather than through the profile:
+    whatever the runtime *says* it resolved, these are the paths GSV is handed,
+    and they are also what its lazy cache-on-miss stores. There is no warmup
+    left to do it earlier, which is exactly why the first request has to.
+    """
+
+    personas = _persona_root(tmp_path)
+    clip = _write_template(tmp_path, "murasame", ref_text="模板参考文本。")
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    result, infer = rig.synthesize(voice="murasame")
+
+    assert result.voice == "murasame"
+    assert infer["spk_audio_paths"] == clip
+    assert infer["prompt_audio_paths"] == clip
+    assert infer["prompt_audio_texts"] == "模板参考文本。"
+    assert len(rig.calls["cache_prompt"]) == 1
+    assert rig.calls["cache_prompt"][0]["prompt_audio_paths"] == clip
+    assert rig.calls["cache_prompt"][0]["prompt_audio_texts"] == "模板参考文本。"
+    assert [path for path, _ in rig.calls["cache_spk"]] == [clip]

@@ -170,10 +170,10 @@ Global/default runtime assets are managed through Settings Center and persisted 
 ```text
 GSV_TTS_GPT_MODEL
 GSV_TTS_SOVITS_MODEL
-GSV_TTS_REF_AUDIO
-GSV_TTS_REF_TEXT
 GSV_TTS_VOICE
 ```
+
+`GSV_TTS_VOICE` names the default template, not a reference clip: each template under `voices/<name>.yaml` carries its own `ref_audio` and `ref_text`.
 
 Manual `export GSV_TTS_...` remains valid only as an explicit system/deployment override or when launching the sidecar by hand. It is not the normal application workflow.
 
@@ -188,18 +188,19 @@ POST :9014/v1/voices/reload
 
 When selected, Settings preloads GSV. Switching away unloads it to release VRAM.
 
-### Per-character voice registry
+### Voice templates and the character registry
 
-A character can own:
+A voice is a template, and a character only names one:
 
 ```text
-personas/<character>/voice.yaml
-personas/<character>/voice/<content-addressed>.wav
+voices/<name>.yaml                    # ref_audio + ref_text: the only carrier
+voices/<name>/<content-addressed>.wav
+personas/<character>/voice.yaml       # one line: template: <name>
 ```
 
-The browser sends the Character id as the requested voice for GSV. If that id exists in the GSV registry, the character-specific reference is used; otherwise GSV falls back to the configured default reference instead of muting the character.
+The browser sends the Character id as the requested voice for GSV. If that id resolves in the GSV registry, the template it names is used; otherwise GSV falls back to the default template (`GSV_TTS_VOICE`) instead of muting the character.
 
-VoiceDesign freeze stores the exact auditioned WAV and transcript, writes `voice.yaml`, then asks the GSV sidecar to reload the registry without unloading the warm GPT/SoVITS engine.
+VoiceDesign freeze stores the exact auditioned WAV and transcript as a template, rewrites the character's `voice.yaml` to name it, then asks the GSV sidecar to reload the registry without unloading the warm GPT/SoVITS engine.
 
 Detailed behavior and determinism measurements live in `GSV_TTS_EXPERIMENT.md`.
 

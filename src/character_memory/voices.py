@@ -1,11 +1,33 @@
-"""Per-persona voice profiles.
+"""Voice registration: templates carry the clip, characters name one.
 
-``voice.yaml`` sits next to a character's ``persona.yaml`` and points at the
-reference audio + transcript GSV needs to clone that character's voice. The
-file is optional: a persona without one simply has no registered voice. A
-persona that *does* have one is treated as a load-time contract, because GSV
-cannot recover from a missing reference clip or an empty transcript at
-synthesis time (``cache_prompt_audio`` raises on empty prompt text).
+Two trees, not one.
+
+A **template** under ``voices/<name>.yaml`` is the only carrier of a voice. It
+holds ``ref_audio`` (resolved relative to the template's own directory) and the
+``ref_text`` GSV clones from, so nothing else needs to know either.
+
+A **character reference** at ``personas/<id>/voice.yaml`` is a pointer and
+nothing more: one line, ``template: <name>``. Keeping the clip out of it is what
+lets two characters share one voice, and it is enforced -- any other key in that
+file is rejected, the ``ref_audio``/``ref_text`` form included.
+
+Both trees are optional and both fail the same way: a missing file means "not
+configured" and degrades silently, a file that exists but cannot be trusted
+raises loudly. GSV cannot recover from a missing reference clip or an empty
+transcript at synthesis time (``cache_prompt_audio`` raises on empty prompt
+text), so a half-configured voice is a load-time error instead of a surprise at
+the first request.
+
+:func:`discover_templates` and :func:`discover_character_voices` read the two
+trees; :func:`resolve_voice_registry` merges them into the single
+``{name: profile}`` registry a request is answered from, where a character id
+overrides a template of the same name.
+
+One thing this module reads is not a voice document: :func:`_character_id` opens
+``persona.yaml`` for its ``id`` field, because that field -- not the directory
+name -- is what the browser sends as the requested voice. It duplicates
+``config.py``'s ``discover_character_profiles`` expression on purpose, and the
+two must stay identical or a character gets keyed under a name nobody asks for.
 
 Mirrors the sticker loader's shape: a missing asset degrades silently, an
 invalid one raises loudly.

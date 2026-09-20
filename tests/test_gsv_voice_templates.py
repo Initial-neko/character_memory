@@ -50,8 +50,6 @@ def _runtime(tmp_path: Path, **kwargs) -> GsvTtsRuntime:
     return GsvTtsRuntime(
         gpt_model=str(ckpt),
         sovits_model=str(sovits),
-        ref_audio="",
-        ref_text="",
         tts_factory=lambda **_: None,
         persona_root=tmp_path / "personas",
         voices_root=tmp_path / "voices",
@@ -139,16 +137,19 @@ def test_a_character_with_no_voice_file_degrades_silently(tmp_path):
 def test_the_fallback_never_uses_the_legacy_reference_fields(tmp_path):
     """The sharp version of the test above.
 
-    Once the settings page stops driving ``GSV_TTS_REF_AUDIO``/``_REF_TEXT``
-    (Task 5), both attributes are empty strings. The old fallback returned them
-    directly, which would hand GSV a blank reference for every character with no
-    voice -- a silent, total breakage. Assert they are empty *and* that a real
-    reference still comes back, so the test cannot pass by accident.
+    The settings page stopped driving ``GSV_TTS_REF_AUDIO``/``_REF_TEXT``, and
+    the runtime-global pair they fed is gone from the sidecar entirely: there is
+    no attribute left to read, so a fallback cannot come back without the test
+    failing. The old one returned those two values directly, which would hand
+    GSV a blank reference for every character with no voice -- a silent, total
+    breakage. Assert the attributes do not exist *and* that a real reference
+    still comes back, so the test cannot pass by accident.
     """
 
     _template(tmp_path / "voices", "murasame")
     runtime = _runtime(tmp_path, default_voice="murasame")
-    assert runtime.ref_audio == "" and runtime.ref_text == ""
+    assert not hasattr(runtime, "ref_audio")
+    assert not hasattr(runtime, "ref_text")
 
     _, ref_audio, ref_text, _, _ = runtime._resolve_voice("someone-with-no-voice")
 

@@ -82,13 +82,14 @@ class GsvRuntimeConfigRequest(BaseModel):
     # Voice manifests change only through POST /v1/voices/reload. ``configure``
     # unloads the engine whenever a tracked field changes, so accepting a
     # ``voices`` field here would drop the warm GPT/SoVITS weights for what is
-    # purely a file change. Rejecting unknown fields keeps that door shut.
+    # purely a file change. Rejecting unknown fields keeps that door shut -- and
+    # it is also what turns the retired ``ref_audio``/``ref_text`` pair into a
+    # 4xx instead of a silent no-op: the reference belongs to a template now, so
+    # a caller still sending one has to be told, not humoured.
     model_config = ConfigDict(extra="forbid")
 
     gpt_model: str | None = None
     sovits_model: str | None = None
-    ref_audio: str | None = None
-    ref_text: str | None = None
     device: str | None = None
     models_dir: str | None = None
     voice: str | None = None
@@ -147,8 +148,6 @@ class GsvTtsRuntime:
         *,
         gpt_model: str,
         sovits_model: str,
-        ref_audio: str,
-        ref_text: str,
         device: str = "cuda",
         models_dir: str = "",
         default_voice: str = DEFAULT_VOICE,
@@ -164,8 +163,6 @@ class GsvTtsRuntime:
     ):
         self.gpt_model = str(gpt_model or "").strip()
         self.sovits_model = str(sovits_model or "").strip()
-        self.ref_audio = str(ref_audio or "").strip()
-        self.ref_text = str(ref_text or "").strip()
         self.device_requested = str(device or "cuda").strip()
         self.models_dir = str(models_dir or "").strip()
         self.default_voice = str(default_voice or DEFAULT_VOICE).strip() or DEFAULT_VOICE
@@ -499,12 +496,12 @@ class GsvTtsRuntime:
                 engine = factory(**kwargs)
                 engine.load_gpt_model(self.gpt_model)
                 engine.load_sovits_model(self.sovits_model)
-                engine.cache_spk_audio(self.ref_audio, sovits_model=self.sovits_model)
-                engine.cache_prompt_audio(
-                    prompt_audio_paths=self.ref_audio,
-                    prompt_audio_texts=self.ref_text,
-                    prompt_language=self.prompt_language,
-                )
+                # Deliberately no reference warmup: the clip is chosen per
+                # request (from a template) and gsv_tts caches it on first use
+                # (TTS.py:665-666,685-688), so warming one here would only make
+                # "the engine loaded" depend on a file this step does not need --
+                # and an empty or missing one fails as ``Invalid argument
+                # returned 22``, a message that names no path at all.
                 self._tts = engine
                 self._import_torch()
                 self._sync_cuda()
@@ -538,8 +535,6 @@ class GsvTtsRuntime:
         updates = {
             "gpt_model": request.gpt_model,
             "sovits_model": request.sovits_model,
-            "ref_audio": request.ref_audio,
-            "ref_text": request.ref_text,
             "device_requested": request.device,
             "models_dir": request.models_dir,
             "default_voice": request.voice,
@@ -657,8 +652,6 @@ def create_gsv_tts_app(runtime: GsvTtsRuntime | None = None):
     engine = runtime or GsvTtsRuntime(
         gpt_model=os.getenv("GSV_TTS_GPT_MODEL", ""),
         sovits_model=os.getenv("GSV_TTS_SOVITS_MODEL", ""),
-        ref_audio=os.getenv("GSV_TTS_REF_AUDIO", ""),
-        ref_text=os.getenv("GSV_TTS_REF_TEXT", ""),
         device=os.getenv("GSV_TTS_DEVICE", "cuda"),
         models_dir=os.getenv("GSV_TTS_MODELS_DIR", ""),
         default_voice=os.getenv("GSV_TTS_VOICE", DEFAULT_VOICE),
@@ -749,8 +742,6 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=int(os.getenv("GSV_TTS_PORT", str(DEFAULT_PORT))))
     parser.add_argument("--gpt-model", default=os.getenv("GSV_TTS_GPT_MODEL", ""))
     parser.add_argument("--sovits-model", default=os.getenv("GSV_TTS_SOVITS_MODEL", ""))
-    parser.add_argument("--ref-audio", default=os.getenv("GSV_TTS_REF_AUDIO", ""))
-    parser.add_argument("--ref-text", default=os.getenv("GSV_TTS_REF_TEXT", ""))
     parser.add_argument("--device", default=os.getenv("GSV_TTS_DEVICE", "cuda"))
     parser.add_argument("--models-dir", default=os.getenv("GSV_TTS_MODELS_DIR", ""))
     parser.add_argument("--voice", default=os.getenv("GSV_TTS_VOICE", DEFAULT_VOICE))
@@ -776,8 +767,6 @@ def main() -> None:
     runtime = GsvTtsRuntime(
         gpt_model=args.gpt_model,
         sovits_model=args.sovits_model,
-        ref_audio=args.ref_audio,
-        ref_text=args.ref_text,
         device=args.device,
         models_dir=args.models_dir,
         default_voice=args.voice,

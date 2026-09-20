@@ -3,6 +3,11 @@
 VoiceDesign is unseeded: four identical requests produced different durations.
 Freezing therefore persists the exact WAV bytes that were auditioned, never a
 re-synthesis. These tests pin that down against the real filesystem.
+
+Freezing writes three things, in this order: the clip under ``voices/<name>/``,
+the template document ``voices/<name>.yaml``, and finally the character's own
+``personas/<id>/voice.yaml`` reference. The order is the point -- a crash may
+leave an orphaned file, never a reference to a template with no audio.
 """
 
 from __future__ import annotations
@@ -23,7 +28,13 @@ from character_memory.tts_lab import (
     TtsLabRuntime,
     create_tts_lab_app,
 )
-from character_memory.voices import discover_voice_profiles, load_voice_profile
+from character_memory.voices import (
+    discover_character_voices,
+    discover_templates,
+    load_character_voice,
+    load_template,
+    resolve_voice_registry,
+)
 
 VOICE_DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 
@@ -205,7 +216,8 @@ def test_artifact_tokens_are_not_derived_from_content(tmp_path):
 # --- freeze ------------------------------------------------------------------
 
 
-def test_freeze_writes_voice_yaml_with_the_frozen_schema(tmp_path):
+def test_freeze_writes_the_template_with_the_frozen_schema(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     persona_dir = _write_persona(_persona_root(tmp_path), "momo")
     app, _ = _build_app(tmp_path)
     with TestClient(app) as client:
@@ -214,19 +226,21 @@ def test_freeze_writes_voice_yaml_with_the_frozen_schema(tmp_path):
 
     assert response.status_code == 200
     digest = hashlib.sha256(audio).hexdigest()[:16]
-    relative = f"voice/{digest}.wav"
+    relative = f"momo/{digest}.wav"
     body = response.json()
     assert body == {
         "ok": True,
         "character_id": "momo",
         "voice_id": "momo",
+        "template": "momo",
         "ref_audio": relative,
         "ref_text": "你好，这是试听。",
+        "shared_with": [],
         "activated": True,
         "reason": None,
     }
 
-    document = yaml.safe_load((persona_dir / "voice.yaml").read_text(encoding="utf-8"))
+    document = yaml.safe_load((tmp_path / "voices" / "momo.yaml").read_text(encoding="utf-8"))
     assert document == {
         "voice_id": "momo",
         "ref_audio": relative,
@@ -241,63 +255,187 @@ def test_freeze_writes_voice_yaml_with_the_frozen_schema(tmp_path):
     assert created_at.tzinfo is not None
     assert created_at.utcoffset().total_seconds() == 0
 
+    # The character's own file is a reference and nothing else: the clip lives
+    # in the template tree, so a character can never hold a second copy of it.
+    assert yaml.safe_load((persona_dir / "voice.yaml").read_text(encoding="utf-8")) == {
+        "template": "momo"
+    }
 
-def test_frozen_voice_yaml_is_loadable_by_the_registry(tmp_path):
-    """The freeze writer and the registry reader must agree on one schema.
 
-    The writer records provenance (``created_at`` / ``instruct`` / ``model``)
-    that GSV itself does not need, because a VoiceDesign clip cannot be
-    regenerated from its prompt -- the record is the only thing that explains a
-    frozen clip later. If the reader refuses those keys, the whole
-    generate -> freeze loop still answers 200 and still writes every file, but
-    ``activated`` is always False and the voice never reaches the registry: a
-    dead end that no single-module test can see.
-    """
-    persona_dir = _write_persona(_persona_root(tmp_path), "momo")
+def test_freezing_writes_a_template_then_a_reference(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     app, _ = _build_app(tmp_path)
-    with TestClient(app) as client:
-        _, token = _generate(client, text="你好，这是试听。", instruct="年轻女性声线")
-        response = _freeze(client, character_id="momo", artifact_id=token)
+    _write_persona(_persona_root(tmp_path), "momo")
+    client = TestClient(app)
+    _, artifact_id = _generate(client, text="你好，这是试听。", instruct="可爱萝莉音")
+
+    response = _freeze(client, character_id="momo", artifact_id=artifact_id)
+
     assert response.status_code == 200
+    template = yaml.safe_load((tmp_path / "voices" / "momo.yaml").read_text(encoding="utf-8"))
+    # The reference text is the string the audio was synthesized from, so it is
+    # exact by construction -- no human transcription, which is the failure mode
+    # that makes zero-shot cloning come out wrong.
+    assert template["ref_text"] == "你好，这是试听。"
+    assert template["instruct"] == "可爱萝莉音"
+    # ref_audio is relative to the template file, so resolve it the same way
+    # load_template does rather than against the cwd.
+    assert (tmp_path / "voices" / template["ref_audio"]).is_file()
 
-    profile = load_voice_profile(persona_dir / "persona.yaml")
+    reference = yaml.safe_load(
+        (_persona_root(tmp_path) / "momo" / "voice.yaml").read_text(encoding="utf-8")
+    )
+    assert reference == {"template": "momo"}
 
-    assert profile is not None
+
+def test_freezing_writes_exactly_three_files(tmp_path, monkeypatch):
+    """Pin the write set, so a stray or half-written file cannot appear unnoticed."""
+
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    app, _ = _build_app(tmp_path)
+    _write_persona(_persona_root(tmp_path), "momo")
+    client = TestClient(app)
+    _, artifact_id = _generate(client, text="你好，这是试听。", instruct="可爱萝莉音")
+
+    _freeze(client, character_id="momo", artifact_id=artifact_id)
+
+    written = _tree(tmp_path)
+    clips = {name for name in written if name.startswith("voices/momo/")}
+
+    assert len(clips) == 1 and next(iter(clips)).endswith(".wav")
+    # The persona file is the fixture, not a freeze output.
+    assert written - clips - {"personas/momo/persona.yaml"} == {
+        "voices/momo.yaml",
+        "personas/momo/voice.yaml",
+    }
+
+
+def test_the_frozen_template_round_trips_through_the_reader(tmp_path, monkeypatch):
+    """Writer to reader, across the module boundary. This drift shipped once."""
+
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    app, _ = _build_app(tmp_path)
+    _write_persona(_persona_root(tmp_path), "momo")
+    client = TestClient(app)
+    _, artifact_id = _generate(client, text="你好，这是试听。", instruct="可爱萝莉音")
+    _freeze(client, character_id="momo", artifact_id=artifact_id)
+
+    profile = load_template(tmp_path / "voices" / "momo.yaml")
+
     assert profile.voice_id == "momo"
     assert profile.ref_text == "你好，这是试听。"
     assert Path(profile.ref_audio).is_file()
-    assert set(discover_voice_profiles([persona_dir / "persona.yaml"])) == {"momo"}
+
+    # And the reference the route wrote is readable by the strict reader too --
+    # a template nobody references is a voice the chat page never uses.
+    referenced = load_character_voice(_persona_root(tmp_path) / "momo" / "persona.yaml")
+    assert referenced == "momo"
 
 
-def test_frozen_voice_yaml_survives_an_unquoted_created_at(tmp_path):
+def test_the_frozen_voice_resolves_for_the_character_in_the_registry(tmp_path, monkeypatch):
+    """The end of the chain: freeze -> both readers -> the sidecar's registry.
+
+    This is the whole feature in one assertion. Each hop has its own test; what
+    this catches is a shape that round-trips through each reader alone but does
+    not merge -- a character whose reference names a template the registry does
+    not carry leaves the sidecar permanently not ready, silently.
+    """
+
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    persona_dir = _write_persona(_persona_root(tmp_path), "momo")
+    app, _ = _build_app(tmp_path)
+    client = TestClient(app)
+    _, artifact_id = _generate(client, text="你好，这是试听。", instruct="可爱萝莉音")
+    _freeze(client, character_id="momo", artifact_id=artifact_id)
+
+    registry = resolve_voice_registry(
+        templates=discover_templates(tmp_path / "voices"),
+        character_voices=discover_character_voices(
+            [persona_dir / "persona.yaml"], voices_root=tmp_path / "voices"
+        ),
+    )
+
+    assert registry["momo"].voice_id == "momo"
+    assert registry["momo"].ref_text == "你好，这是试听。"
+    assert Path(registry["momo"].ref_audio).is_file()
+
+
+def test_a_hand_written_template_survives_an_unquoted_created_at(tmp_path):
     """``created_at`` is written quoted, but a hand-edited file is not.
 
     YAML turns an unquoted ISO timestamp into a datetime, so the reader has to
     accept both spellings rather than pin the field to ``str``.
     """
-    persona_dir = _write_persona(_persona_root(tmp_path), "momo")
-    (persona_dir / "voice").mkdir()
-    (persona_dir / "voice" / "clip.wav").write_bytes(b"RIFFclip")
-    (persona_dir / "voice.yaml").write_text(
-        "ref_audio: voice/clip.wav\n"
+    voices = tmp_path / "voices"
+    (voices / "momo").mkdir(parents=True)
+    (voices / "momo" / "clip.wav").write_bytes(b"RIFFclip")
+    (voices / "momo.yaml").write_text(
+        "ref_audio: momo/clip.wav\n"
         "ref_text: 你好\n"
         "created_at: 2026-09-19T15:26:34.472897+00:00\n",
         encoding="utf-8",
     )
 
-    profile = load_voice_profile(persona_dir / "persona.yaml")
+    profile = load_template(voices / "momo.yaml")
 
-    assert profile is not None
     assert profile.voice_id == "momo"
 
 
-def test_frozen_wav_is_exactly_the_auditioned_bytes(tmp_path):
-    persona_dir = _write_persona(_persona_root(tmp_path), "momo")
+def test_freezing_twice_overwrites_the_template_but_keeps_both_clips(tmp_path, monkeypatch):
+    """The old WAV stays as an orphan on purpose.
+
+    Content addressing is what makes this safe: a design cannot be regenerated,
+    so overwriting the clip an older template still pointed at would lose a
+    voice permanently. An orphan only costs disk.
+    """
+
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    app, voice_client = _build_app(tmp_path)
+    _write_persona(_persona_root(tmp_path), "momo")
+    client = TestClient(app)
+
+    _, first = _generate(client, text="第一次", instruct="可爱萝莉音")
+    _freeze(client, character_id="momo", artifact_id=first)
+    voice_client.audio = b"RIFFvoice-design-b"
+    _, second = _generate(client, text="第二次", instruct="可爱萝莉音")
+    _freeze(client, character_id="momo", artifact_id=second)
+
+    template = yaml.safe_load((tmp_path / "voices" / "momo.yaml").read_text(encoding="utf-8"))
+    assert template["ref_text"] == "第二次"
+    assert len(list((tmp_path / "voices" / "momo").glob("*.wav"))) == 2
+
+
+def test_freezing_reports_other_characters_sharing_the_template(tmp_path, monkeypatch):
+    """Spec 7.1: overwriting changes their voice too, so the caller must be told."""
+
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    app, _ = _build_app(tmp_path)
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo")
+    _write_persona(personas, "haru")
+    client = TestClient(app)
+
+    _, first = _generate(client, text="你好，这是试听。", instruct="可爱萝莉音")
+    _freeze(client, character_id="momo", artifact_id=first)
+    # haru now points at momo's template, so re-freezing momo affects haru too.
+    (personas / "haru" / "voice.yaml").write_text("template: momo\n", encoding="utf-8")
+
+    _, second = _generate(client, text="第二次", instruct="可爱萝莉音")
+    response = _freeze(client, character_id="momo", artifact_id=second)
+
+    assert response.json()["shared_with"] == ["haru"]
+
+
+def test_frozen_wav_is_exactly_the_auditioned_bytes(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    _write_persona(_persona_root(tmp_path), "momo")
     app, voice_client = _build_app(tmp_path)
     with TestClient(app) as client:
         audio, token = _generate(client, text="你好，这是试听。", instruct="年轻女性声线")
         assert _freeze(client, character_id="momo", artifact_id=token).status_code == 200
-        written = (persona_dir / "voice" / f"{hashlib.sha256(audio).hexdigest()[:16]}.wav").read_bytes()
+        written = (
+            tmp_path / "voices" / "momo" / f"{hashlib.sha256(audio).hexdigest()[:16]}.wav"
+        ).read_bytes()
 
     assert written == audio
     assert written == b"RIFFvoice-design-a"
@@ -305,8 +443,9 @@ def test_frozen_wav_is_exactly_the_auditioned_bytes(tmp_path):
     assert len(voice_client.posts) == 1
 
 
-def test_ref_text_is_the_text_that_produced_the_audio(tmp_path):
-    persona_dir = _write_persona(_persona_root(tmp_path), "momo")
+def test_ref_text_is_the_text_that_produced_the_audio(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    _write_persona(_persona_root(tmp_path), "momo")
     app, voice_client = _build_app(tmp_path)
     with TestClient(app) as client:
         _, token = _generate(client, text="第一句试听文本。", instruct="年轻女性声线")
@@ -315,13 +454,14 @@ def test_ref_text_is_the_text_that_produced_the_audio(tmp_path):
         _, second = _generate(client, text="第二句完全不同的文本。", instruct="低沉男声")
         assert _freeze(client, character_id="momo", artifact_id=second).status_code == 200
 
-    document = yaml.safe_load((persona_dir / "voice.yaml").read_text(encoding="utf-8"))
+    document = yaml.safe_load((tmp_path / "voices" / "momo.yaml").read_text(encoding="utf-8"))
     assert document["ref_text"] == "第二句完全不同的文本。"
     assert document["instruct"] == "低沉男声"
 
 
-def test_refreeze_keeps_both_wavs_because_designs_are_not_reproducible(tmp_path):
-    persona_dir = _write_persona(_persona_root(tmp_path), "momo")
+def test_refreeze_keeps_both_wavs_because_designs_are_not_reproducible(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    _write_persona(_persona_root(tmp_path), "momo")
     app, voice_client = _build_app(tmp_path)
     with TestClient(app) as client:
         first_audio, first_token = _generate(client, text="你好，这是试听。", instruct="年轻女性声线")
@@ -330,15 +470,17 @@ def test_refreeze_keeps_both_wavs_because_designs_are_not_reproducible(tmp_path)
         second_audio, second_token = _generate(client, text="你好，这是试听。", instruct="年轻女性声线")
         response = _freeze(client, character_id="momo", artifact_id=second_token)
 
+    clip_dir = tmp_path / "voices" / "momo"
     first_name = f"{hashlib.sha256(first_audio).hexdigest()[:16]}.wav"
     second_name = f"{hashlib.sha256(second_audio).hexdigest()[:16]}.wav"
     assert first_name != second_name
-    assert (persona_dir / "voice" / first_name).read_bytes() == first_audio
-    assert (persona_dir / "voice" / second_name).read_bytes() == second_audio
-    assert response.json()["ref_audio"] == f"voice/{second_name}"
+    assert (clip_dir / first_name).read_bytes() == first_audio
+    assert (clip_dir / second_name).read_bytes() == second_audio
+    assert response.json()["ref_audio"] == f"momo/{second_name}"
 
 
-def test_freeze_unknown_character_is_404_and_writes_nothing(tmp_path):
+def test_freeze_unknown_character_is_404_and_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     _write_persona(_persona_root(tmp_path), "momo")
     app, _ = _build_app(tmp_path)
     with TestClient(app) as client:
@@ -351,7 +493,8 @@ def test_freeze_unknown_character_is_404_and_writes_nothing(tmp_path):
 
 
 @pytest.mark.parametrize("character_id", ["../../etc", "..\\..\\x", "../momo", "momo/../.."])
-def test_freeze_rejects_path_traversal_character_ids(tmp_path, character_id):
+def test_freeze_rejects_path_traversal_character_ids(tmp_path, monkeypatch, character_id):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     _write_persona(_persona_root(tmp_path), "momo")
     app, _ = _build_app(tmp_path)
     with TestClient(app) as client:
@@ -360,18 +503,22 @@ def test_freeze_rejects_path_traversal_character_ids(tmp_path, character_id):
 
     assert response.status_code == 404
     assert _tree(tmp_path) == {"personas/momo/persona.yaml"}
-    assert not (tmp_path / "voice").exists()
+    assert not (tmp_path / "voices").exists()
     assert not (tmp_path.parent / "etc").exists()
     assert not (tmp_path.parent / "x").exists()
     assert not (tmp_path.parent / "momo").exists()
 
 
-def test_freeze_writes_beside_the_discovered_persona_even_when_the_id_is_a_path(tmp_path):
+def test_freeze_never_uses_the_declared_id_as_a_path(tmp_path, monkeypatch):
     """persona.yaml can declare any id, so the id must never be used as a path.
 
-    The persona directory name is not authoritative either: the write directory
-    comes from the discovered profile's persona_path.
+    The write directory comes from the discovered profile's persona_path, and
+    the template name falls back to the persona directory name when the id is
+    not a legal filename: ``../../escaped`` is a known character (the whitelist
+    answers "does this character exist"), which says nothing about whether the
+    id is safe to join onto a directory.
     """
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     root = _persona_root(tmp_path)
     declared_id = "../../escaped"
     persona = root / "evil" / "persona.yaml"
@@ -385,14 +532,20 @@ def test_freeze_writes_beside_the_discovered_persona_even_when_the_id_is_a_path(
 
     assert response.status_code == 200
     digest = hashlib.sha256(audio).hexdigest()[:16]
-    assert response.json()["voice_id"] == declared_id
-    assert (root / "evil" / "voice" / f"{digest}.wav").read_bytes() == audio
-    assert (root / "evil" / "voice.yaml").is_file()
+    body = response.json()
+    assert body["character_id"] == declared_id
+    assert body["template"] == "evil"
+    assert (tmp_path / "voices" / "evil" / f"{digest}.wav").read_bytes() == audio
+    assert yaml.safe_load((root / "evil" / "voice.yaml").read_text(encoding="utf-8")) == {
+        "template": "evil"
+    }
     assert not (tmp_path.parent / "escaped").exists()
+    assert not (tmp_path.parent / "escaped.yaml").exists()
     assert not (tmp_path / "escaped").exists()
 
 
-def test_freeze_unknown_artifact_is_404(tmp_path):
+def test_freeze_unknown_artifact_is_404(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     persona_dir = _write_persona(_persona_root(tmp_path), "momo")
     app, _ = _build_app(tmp_path)
     with TestClient(app) as client:
@@ -401,10 +554,12 @@ def test_freeze_unknown_artifact_is_404(tmp_path):
     assert response.status_code == 404
     assert "generate" in response.text.lower()
     assert not (persona_dir / "voice.yaml").exists()
+    assert not (tmp_path / "voices").exists()
 
 
-def test_artifact_store_evicts_the_oldest_entry_beyond_eight(tmp_path):
+def test_artifact_store_evicts_the_oldest_entry_beyond_eight(tmp_path, monkeypatch):
     """Only 8 auditioned designs are kept; evicting must be a clean 404."""
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     _write_persona(_persona_root(tmp_path), "momo")
     app, voice_client = _build_app(tmp_path)
     with TestClient(app) as client:
@@ -419,7 +574,8 @@ def test_artifact_store_evicts_the_oldest_entry_beyond_eight(tmp_path):
         assert _freeze(client, character_id="momo", artifact_id=tokens[8]).status_code == 200
 
 
-def test_freeze_reload_failure_is_non_fatal_and_files_stay_on_disk(tmp_path):
+def test_freeze_reload_failure_is_non_fatal_and_files_stay_on_disk(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     persona_dir = _write_persona(_persona_root(tmp_path), "momo")
     app, _ = _build_app(
         tmp_path,
@@ -434,12 +590,14 @@ def test_freeze_reload_failure_is_non_fatal_and_files_stay_on_disk(tmp_path):
     assert body["ok"] is True
     assert body["activated"] is False
     assert body["reason"]
-    assert body["ref_audio"] == f"voice/{hashlib.sha256(audio).hexdigest()[:16]}.wav"
+    assert body["ref_audio"] == f"momo/{hashlib.sha256(audio).hexdigest()[:16]}.wav"
+    assert (tmp_path / "voices" / "momo.yaml").is_file()
     assert (persona_dir / "voice.yaml").is_file()
 
 
-def test_freeze_reload_http_404_is_also_non_fatal(tmp_path):
-    """The reload route is added by another agent; until then every failure is soft."""
+def test_freeze_reload_http_404_is_also_non_fatal(tmp_path, monkeypatch):
+    """The reload route may be missing on an older sidecar; every failure is soft."""
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     _write_persona(_persona_root(tmp_path), "momo")
     app, _ = _build_app(tmp_path, registry_client=_FakeRegistryClient(status_code=404))
     with TestClient(app) as client:
@@ -451,8 +609,27 @@ def test_freeze_reload_http_404_is_also_non_fatal(tmp_path):
     assert response.json()["reason"]
 
 
-def test_freeze_request_rejects_extra_fields(tmp_path):
+def test_a_broken_sibling_reference_does_not_break_the_freeze(tmp_path, monkeypatch):
+    """``shared_with`` reads every sibling's voice.yaml; one bad file must not 500."""
+
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
+    personas = _persona_root(tmp_path)
+    _write_persona(personas, "momo")
+    broken = _write_persona(personas, "haru")
+    (broken / "voice.yaml").write_text("template: [unclosed\n", encoding="utf-8")
+
+    app, _ = _build_app(tmp_path)
+    with TestClient(app) as client:
+        _, token = _generate(client, text="你好", instruct="年轻女性声线")
+        response = _freeze(client, character_id="momo", artifact_id=token)
+
+    assert response.status_code == 200
+    assert response.json()["shared_with"] == []
+
+
+def test_freeze_request_rejects_extra_fields(tmp_path, monkeypatch):
     """A client must not be able to smuggle text/audio into the frozen profile."""
+    monkeypatch.setenv("GSV_TTS_VOICES_ROOT", str(tmp_path / "voices"))
     _write_persona(_persona_root(tmp_path), "momo")
     app, _ = _build_app(tmp_path)
     with TestClient(app) as client:

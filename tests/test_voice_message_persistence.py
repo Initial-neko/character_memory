@@ -73,3 +73,36 @@ def test_update_event_metadata_leaves_the_row_readable(tmp_path):
     row = store.conn.execute("SELECT event_time_epoch FROM events WHERE id=?", (saved.id,)).fetchone()
     assert row["event_time_epoch"] is not None
     assert store.get_event(saved.id) is not None
+
+
+def test_group_update_event_metadata_replaces_the_document(tmp_path):
+    """GroupRepository reaches through self.store rather than owning a
+    connection of its own, so this is the one place that proxy access could
+    silently be written wrong. It also has no caller yet, which is exactly why
+    it needs a real test rather than a one-off script."""
+    from character_memory.group_store import GroupEvent, GroupRepository
+
+    store = _store(tmp_path)
+    repo = GroupRepository(store)
+    now = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    group = repo.create_group("测试群", ["momo", "rin"], now)
+    saved = repo.append_event(
+        GroupEvent(
+            conversation_id=group.id,
+            turn_id="turn-1",
+            actor_type="CHARACTER",
+            actor_id="momo",
+            event_type="CHARACTER_MESSAGE",
+            event_time=now,
+            content="晚上好呀",
+            metadata={"action": "VOICE_MESSAGE", "voice_status": "pending"},
+        )
+    )
+
+    assert repo.update_event_metadata(saved.id, {"action": "VOICE_MESSAGE", "voice_status": "ready"}) is True
+    assert repo.update_event_metadata(999999, {"voice_status": "ready"}) is False
+
+    # list_events filters on event_time_epoch IS NOT NULL, so reading the row
+    # back proves the UPDATE did not clear that column.
+    events = repo.list_events(group.id)
+    assert events[-1].metadata["voice_status"] == "ready"

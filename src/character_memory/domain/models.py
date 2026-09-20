@@ -32,9 +32,28 @@ class ActionType(str, Enum):
     EMOJI = "EMOJI"
     STICKER = "STICKER"
     IMAGE = "IMAGE"
+    # A spoken chat message: the text is still the message body (shown when the
+    # bubble is expanded), with generated audio attached via event metadata.
+    VOICE_MESSAGE = "VOICE_MESSAGE"
     # P0.19 internal visual-tool intent. This is not a visible chat message by
     # itself; direct-chat orchestration may turn it into a generated IMAGE event.
     GENERATE_IMAGE = "GENERATE_IMAGE"
+
+
+# Actions that produce a visible outward message. Both chat modes consult this
+# one set. It used to be duplicated verbatim in runtime/person_runtime.py and
+# application/group_conversation_service.py, where editing one copy silently
+# dropped the action in the other chat mode.
+EXPRESSIVE_ACTIONS = frozenset({
+    ActionType.REPLY,
+    ActionType.MINIMAL_RESPONSE,
+    ActionType.PROACTIVE_MESSAGE,
+    ActionType.MESSAGE,
+    ActionType.VOICE_MESSAGE,
+    ActionType.EMOJI,
+    ActionType.STICKER,
+    ActionType.IMAGE,
+})
 
 
 class Event(BaseModel):
@@ -107,6 +126,7 @@ class ActionDecision(BaseModel):
             ActionType.MINIMAL_RESPONSE,
             ActionType.PROACTIVE_MESSAGE,
             ActionType.MESSAGE,
+            ActionType.VOICE_MESSAGE,
             ActionType.EMOJI,
         }
         if self.type in message_actions:

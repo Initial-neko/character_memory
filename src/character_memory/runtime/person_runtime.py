@@ -7,7 +7,7 @@ from typing import Callable
 
 import numpy as np
 
-from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
+from character_memory.domain.models import ActionDecision, ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.context import compile_context
 from character_memory.runtime.sticker_retrieval import StickerRetriever
 from character_memory.visual_runtime import direct_visual_available, generate_direct_visual_action
@@ -17,15 +17,6 @@ logger = logging.getLogger("character_memory.runtime")
 
 _MEMORY_MIN_IMPORTANCE = 0.35
 _MEMORY_DUPLICATE_SIMILARITY = 0.93
-_EXPRESSIVE_ACTIONS = {
-    ActionType.REPLY,
-    ActionType.MINIMAL_RESPONSE,
-    ActionType.PROACTIVE_MESSAGE,
-    ActionType.MESSAGE,
-    ActionType.EMOJI,
-    ActionType.STICKER,
-    ActionType.IMAGE,
-}
 
 
 class SupersededReaction(RuntimeError):
@@ -355,7 +346,7 @@ class PersonRuntime:
                     created_intent_ids.append(intent_id)
 
                 for index, action in enumerate(reaction.actions):
-                    if action.type not in _EXPRESSIVE_ACTIONS:
+                    if action.type not in EXPRESSIVE_ACTIONS:
                         continue
                     metadata = {
                         "action": action.type.value,

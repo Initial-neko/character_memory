@@ -351,15 +351,30 @@ def load_character_voice(persona_path: str | Path) -> str | None:
     if not voice_path.is_file():
         return None
 
-    document = _read_document(
-        voice_path,
-        _CharacterVoiceDocument,
-        unreadable="unreadable voice reference",
-        # A null document and a non-mapping one are the same complaint here:
-        # this file has exactly one thing to say, and neither says it.
-        empty="expected a YAML mapping with a 'template' key",
-        non_mapping="expected a YAML mapping with a 'template' key",
-    )
+    try:
+        document = _read_document(
+            voice_path,
+            _CharacterVoiceDocument,
+            unreadable="unreadable voice reference",
+            # A null document and a non-mapping one are the same complaint here:
+            # this file has exactly one thing to say, and neither says it.
+            empty="expected a YAML mapping with a 'template' key",
+            non_mapping="expected a YAML mapping with a 'template' key",
+        )
+    except VoiceProfileError as exc:
+        # The pre-template form carried ``ref_audio``/``ref_text`` inline. This
+        # model declares neither and forbids extras, so either word appearing in
+        # this message means the file is in that form -- which is *not* read any
+        # more, and nothing converts it. The fix is to build the clip into a
+        # template, and that is worth spelling out: the validation message on its
+        # own names the file but not the way out of it.
+        if "ref_audio" in str(exc) or "ref_text" in str(exc):
+            raise VoiceProfileError(
+                f"{exc}; this is the pre-template form, which is no longer read -- "
+                f"move the clip into a template under {template_root()} and leave "
+                f"only 'template: <name>' in this file"
+            ) from exc
+        raise
 
     name = (document.template or "").strip()
     if not name:

@@ -158,14 +158,24 @@ def test_load_character_voice_reads_the_template_name(tmp_path):
 
 
 def test_load_character_voice_rejects_a_self_contained_profile(tmp_path):
-    """The old form has no writer any more; seeing one means migration did not run."""
+    """The old form has no writer any more, and nothing migrates it either.
+
+    A file in that shape is a hand-edit or a tree from before the template model,
+    and a loud error is the intended outcome -- but it has to say which file and
+    what to do, since no code path will do it for the operator.
+    """
 
     persona = _write_character(
         tmp_path, "haru", {"ref_audio": "voice/x.wav", "ref_text": "你好"}
     )
 
-    with pytest.raises(VoiceProfileError, match="invalid voice profile"):
+    with pytest.raises(VoiceProfileError) as excinfo:
         load_character_voice(persona)
+
+    message = str(excinfo.value)
+    assert "invalid voice profile" in message
+    assert str(persona.parent / "voice.yaml") in message
+    assert "template" in message and "no longer read" in message
 
 
 def test_load_character_voice_requires_a_non_empty_name(tmp_path):

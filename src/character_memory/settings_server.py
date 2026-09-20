@@ -13,6 +13,25 @@ from character_memory.settings_store import GSV_RUNTIME_FIELDS, SettingsStore
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_IDS, provider_spec
 
 
+def build_gsv_payload(merged: dict[str, Any]) -> dict[str, Any]:
+    """Map settings onto the sidecar's ``configure`` body.
+
+    ``ref_audio``/``ref_text`` are deliberately *absent* rather than empty.
+    ``configure`` treats ``None`` as "leave alone" and ``""`` as "overwrite", and
+    those two attributes have no empty-string fallback (unlike ``default_voice``
+    and friends). Sending ``""`` would blank the live reference -- which showed
+    up as "GSV got worse after I removed the settings fields", not as an error.
+    The reference clip lives in a template now, so there is nothing here to send.
+    """
+
+    return {
+        "gpt_model": str(merged.get("GSV_TTS_GPT_MODEL") or "").strip(),
+        "sovits_model": str(merged.get("GSV_TTS_SOVITS_MODEL") or "").strip(),
+        "voice": str(merged.get("GSV_TTS_VOICE") or "murasame").strip() or "murasame",
+        "device": (str(merged.get("tts_device") or "cuda").strip() or "cuda") if str(merged.get("tts_provider") or "").strip().lower() == "gsv" else "cuda",
+    }
+
+
 class SettingsPatch(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
@@ -103,18 +122,10 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
         return {"ok": not errors, "providers": providers, "error": "; ".join(errors) if errors else None}
 
     def _gsv_payload(values: dict[str, Any] | None = None, *, preload: bool | None = None) -> dict[str, Any]:
-        snapshot = settings_store.snapshot()["values"]
-        merged = dict(snapshot)
+        merged = dict(settings_store.snapshot()["values"])
         if values:
             merged.update(values)
-        payload = {
-            "gpt_model": str(merged.get("GSV_TTS_GPT_MODEL") or "").strip(),
-            "sovits_model": str(merged.get("GSV_TTS_SOVITS_MODEL") or "").strip(),
-            "ref_audio": str(merged.get("GSV_TTS_REF_AUDIO") or "").strip(),
-            "ref_text": str(merged.get("GSV_TTS_REF_TEXT") or "").strip(),
-            "voice": str(merged.get("GSV_TTS_VOICE") or "murasame").strip() or "murasame",
-            "device": (str(merged.get("tts_device") or "cuda").strip() or "cuda") if str(merged.get("tts_provider") or "").strip().lower() == "gsv" else "cuda",
-        }
+        payload = build_gsv_payload(merged)
         if preload is not None:
             payload["preload"] = bool(preload)
         return payload

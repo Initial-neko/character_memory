@@ -38,10 +38,11 @@ LEGACY_SECRET_FIELDS = {
 }
 
 GSV_RUNTIME_FIELDS = {
+    # The two shared base models plus the default template name. The reference
+    # clip and its transcript moved into templates (voices/<name>.yaml), so the
+    # per-field pair that used to live here is gone.
     "GSV_TTS_GPT_MODEL",
     "GSV_TTS_SOVITS_MODEL",
-    "GSV_TTS_REF_AUDIO",
-    "GSV_TTS_REF_TEXT",
     "GSV_TTS_VOICE",
 }
 HOT_APPLY_FIELDS = {
@@ -107,7 +108,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
         "id": "gsv-runtime",
         "title": "GSV-TTS-Lite Runtime",
-        "description": "GSV 本地资产配置，持久化到项目 .env，不写入 config.yaml。四个资产字段必须配置完整后 GSV 才会通过健康检查；保存后热配置 sidecar，无需重启整个 stack。",
+        "description": "GSV 本地资产配置，持久化到项目 .env，不写入 config.yaml。两个底模 + 默认模板名；参考音频与参考文本由模板（voices/<名>.yaml）提供，在 TTS Lab 的声音合成页创建。保存后热配置 sidecar，无需重启整个 stack。",
         "fields": [
             {
                 "name": "GSV_TTS_GPT_MODEL",
@@ -124,23 +125,12 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "placeholder": "C:/path/to/Murasame_e8_s192.pth",
             },
             {
-                "name": "GSV_TTS_REF_AUDIO",
-                "label": "Reference Audio (.wav)",
-                "type": "text",
-                "storage": "env",
-                "placeholder": "C:/path/to/reference.wav",
-            },
-            {
-                "name": "GSV_TTS_REF_TEXT",
-                "label": "Reference Text",
-                "type": "text",
-                "storage": "env",
-                "placeholder": "与 reference.wav 完全一致的参考文本",
-            },
-            {
+                # Options are injected per request by the Settings Center from the
+                # live template registry (same graft the ``tts_voice`` field gets),
+                # so the static schema carries the type but not the list.
                 "name": "GSV_TTS_VOICE",
-                "label": "Voice Name",
-                "type": "text",
+                "label": "Default Template",
+                "type": "select",
                 "storage": "env",
                 "placeholder": "murasame",
             },

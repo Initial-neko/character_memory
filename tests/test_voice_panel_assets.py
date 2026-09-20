@@ -95,3 +95,50 @@ def test_the_panel_does_not_share_a_stylesheet_with_the_call_ui():
 
     assert (WEB / "voices.css").is_file()
     assert not (WEB / "voice.css").read_text(encoding="utf-8").count("voice-panel")
+
+
+# --- the TTS Lab's half of the freeze path -----------------------------------
+#
+# The Workbench talks to the Lab on :9002 rather than to the chat app, so its
+# contract is checked against tts_lab.py's own route table.
+
+
+def test_the_lab_offers_saving_a_template_without_a_character():
+    source = (WEB / "tts_lab.js").read_text(encoding="utf-8")
+
+    assert "save-template" in source
+    assert "voiceDesignTemplateName" in source
+
+
+def test_the_lab_warns_before_overwriting_a_shared_template():
+    """Overwriting changes other characters' voices; the user must see that first."""
+
+    source = (WEB / "tts_lab.js").read_text(encoding="utf-8")
+
+    assert "shared_with" in source
+
+
+def test_the_lab_markup_carries_the_save_controls_the_script_reads():
+    """``$()`` returns null for a missing id, and the panel dies at load."""
+
+    html = (WEB / "tts_lab.html").read_text(encoding="utf-8")
+
+    assert 'id="saveVoiceDesignTemplate"' in html
+    assert 'id="voiceDesignTemplateName"' in html
+    assert 'id="voiceDesignTemplateStatus"' in html
+
+
+def test_the_lab_save_control_is_wired():
+    source = (WEB / "tts_lab.js").read_text(encoding="utf-8")
+
+    assert '$("saveVoiceDesignTemplate").addEventListener("click", saveVoiceDesignTemplate)' in source
+
+
+def test_the_lab_posts_to_the_path_the_lab_registers():
+    """Both halves of the cross-process contract, spelled the same."""
+
+    source = (WEB / "tts_lab.js").read_text(encoding="utf-8")
+    lab = (ROOT / "src" / "character_memory" / "tts_lab.py").read_text(encoding="utf-8")
+
+    assert '"/v1/voice-design/save-template"' in lab
+    assert '"/v1/voice-design/save-template"' in source

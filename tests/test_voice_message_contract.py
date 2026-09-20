@@ -31,11 +31,24 @@ def test_voice_message_is_expressive():
     assert ActionType.VOICE_MESSAGE in EXPRESSIVE_ACTIONS
 
 
-def test_both_chat_modes_consult_the_same_action_set():
+def test_every_action_gate_consults_the_shared_set():
     """Identity, not equality: two equal sets would drift apart on the next edit,
-    and the drift is silent -- the action just stops producing a message."""
-    from character_memory.application import group_conversation_service
+    and the drift is silent -- the action just stops producing a message. Four
+    modules used to hold their own byte-identical copy of this set."""
+    from character_memory.application import group_conversation_service, proactive_service
+    from character_memory.eval import runner as eval_runner
     from character_memory.runtime import person_runtime
 
-    assert person_runtime.EXPRESSIVE_ACTIONS is EXPRESSIVE_ACTIONS
-    assert group_conversation_service.EXPRESSIVE_ACTIONS is EXPRESSIVE_ACTIONS
+    for module in (person_runtime, group_conversation_service, proactive_service, eval_runner):
+        assert module.EXPRESSIVE_ACTIONS is EXPRESSIVE_ACTIONS, module.__name__
+
+
+def test_the_intent_ticker_counts_a_voice_reply_as_executed():
+    """life/ticker.py keeps a narrower set on purpose -- it excludes STICKER and
+    IMAGE, and this task must not widen that. But a voice reply does execute the
+    intent, so VOICE_MESSAGE belongs there or the intent is logged as dropped."""
+    from character_memory.life import ticker
+
+    assert ActionType.VOICE_MESSAGE in ticker._INTENT_EXECUTED_ACTIONS
+    assert ActionType.STICKER not in ticker._INTENT_EXECUTED_ACTIONS
+    assert ActionType.IMAGE not in ticker._INTENT_EXECUTED_ACTIONS

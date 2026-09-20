@@ -3,6 +3,20 @@ from __future__ import annotations
 from character_memory.domain.models import ActionType, Event, EventType
 
 
+# Which actions count as having executed a proactive intent. Deliberately
+# narrower than domain.models.EXPRESSIVE_ACTIONS: a sticker or an image alone
+# does not discharge an intent. Kept local rather than derived so the two
+# questions can move independently.
+_INTENT_EXECUTED_ACTIONS = frozenset({
+    ActionType.PROACTIVE_MESSAGE,
+    ActionType.REPLY,
+    ActionType.MINIMAL_RESPONSE,
+    ActionType.MESSAGE,
+    ActionType.EMOJI,
+    ActionType.VOICE_MESSAGE,
+})
+
+
 class TimeTicker:
     """Turns world time and pending intents into ordinary PersonRuntime events."""
 
@@ -27,7 +41,7 @@ class TimeTicker:
             )
             results.append(result)
             action = result.reaction.action.type
-            if action in {ActionType.PROACTIVE_MESSAGE, ActionType.REPLY, ActionType.MINIMAL_RESPONSE, ActionType.MESSAGE, ActionType.EMOJI}:
+            if action in _INTENT_EXECUTED_ACTIONS:
                 status = "EXECUTED"
             elif action == ActionType.DEFER:
                 status = "DEFERRED"

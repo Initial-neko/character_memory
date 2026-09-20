@@ -23,3 +23,6 @@ personas/*/voice/
 personas/*/voice.yaml
 # Characters created at runtime through the app are local data too.
 personas/character-*/
+# Voice templates own the reference clips; they are local assets, not source.
+# personas/<id>/voice.yaml stays tracked -- that is configuration, not audio.
+voices/

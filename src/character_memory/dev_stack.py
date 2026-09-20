@@ -276,6 +276,9 @@ def main() -> None:
         # Absolute on purpose: the sidecar globs this for per-persona voice
         # manifests, and a relative value would follow the child's cwd.
         gsv_env.setdefault("GSV_TTS_PERSONA_ROOT", str(ROOT / "personas"))
+        # Same reason as the persona root: a relative root resolves against the
+        # sidecar's cwd, which dev_stack does not control.
+        gsv_env.setdefault("GSV_TTS_VOICES_ROOT", str(ROOT / "voices"))
         specs.insert(
             1,
             (

@@ -21,7 +21,7 @@ from character_memory.gsv_tts_experiment import (
     _env_seed,
     create_gsv_tts_app,
 )
-from character_memory.voices import VoiceProfileError
+from character_memory.voices import VoiceProfile, VoiceProfileError
 
 
 class RecordingTorch:
@@ -45,6 +45,21 @@ def _gsv_assets(tmp_path: Path) -> tuple[Path, Path, Path]:
     sovits.write_bytes(b"sovits")
     ref.write_bytes(b"wav")
     return gpt, sovits, ref
+
+
+def _default_registry(ref: Path) -> dict[str, VoiceProfile]:
+    """A registry in which the default voice resolves, so the engine can load.
+
+    Readiness is "the shared models *and* the default template resolve": a
+    runtime with no ``murasame`` template reports itself not ready and refuses
+    every synthesis. Injected rather than written to disk, because these tests
+    are about the seed and the HTTP contract, not about discovery.
+    """
+    return {
+        "murasame": VoiceProfile(
+            voice_id="murasame", ref_audio=str(ref), ref_text="参考文本。"
+        )
+    }
 
 
 class FakeGsvRuntime:
@@ -188,6 +203,12 @@ def test_gsv_runtime_uses_upstream_infer_batched_contract(tmp_path):
         device="cuda:0",
         default_voice="murasame",
         tts_factory=FakeTts,
+        persona_root=tmp_path / "personas",
+        voices_root=tmp_path / "voices",
+        # Readiness needs the default template to resolve, and the calls below
+        # assert on the global reference this test wrote. An injected registry is
+        # authoritative and keeps both exactly where the test put them.
+        voices=_default_registry(ref),
     )
 
     status = runtime.status()
@@ -255,6 +276,11 @@ def test_gsv_runtime_can_hot_configure_and_unload(tmp_path):
         device="cuda",
         default_voice="murasame",
         tts_factory=FakeTts,
+        persona_root=tmp_path / "personas",
+        voices_root=tmp_path / "voices",
+        # ``configure`` re-reads no voice files, so readiness after it has to
+        # come from the registry the runtime was built with.
+        voices=_default_registry(ref),
     )
     assert runtime.status()["ready"] is False
 
@@ -279,13 +305,15 @@ def test_gsv_runtime_can_hot_configure_and_unload(tmp_path):
     assert unloaded["loaded"] is False
 
 
-def test_gsv_status_reports_missing_assets_without_importing_gsv():
+def test_gsv_status_reports_missing_assets_without_importing_gsv(tmp_path):
     runtime = GsvTtsRuntime(
         gpt_model="",
         sovits_model="",
         ref_audio="",
         ref_text="",
         tts_factory=lambda **kwargs: None,
+        persona_root=tmp_path / "personas",
+        voices_root=tmp_path / "voices",
     )
     status = runtime.status()
     assert status["ready"] is False
@@ -351,6 +379,9 @@ def test_gsv_seed_is_applied_under_the_lock_and_before_inference(tmp_path):
         default_voice="murasame",
         tts_factory=FakeTts,
         torch_module=RecordingTorch(on_seed=probe),
+        persona_root=tmp_path / "personas",
+        voices_root=tmp_path / "voices",
+        voices=_default_registry(ref),
     )
     holder["runtime"] = runtime
 
@@ -398,6 +429,9 @@ def test_gsv_request_seed_overrides_the_runtime_default(tmp_path):
         device="cpu",
         tts_factory=FakeTts,
         torch_module=torch,
+        persona_root=tmp_path / "personas",
+        voices_root=tmp_path / "voices",
+        voices=_default_registry(ref),
     )
 
     result = runtime.synthesize(GsvTtsRequest(text="你好", seed=7777))
@@ -443,6 +477,9 @@ def test_gsv_seed_none_keeps_the_unseeded_behaviour(tmp_path):
         seed=None,
         tts_factory=FakeTts,
         torch_module=torch,
+        persona_root=tmp_path / "personas",
+        voices_root=tmp_path / "voices",
+        voices=_default_registry(ref),
     )
 
     result = runtime.synthesize(GsvTtsRequest(text="你好"))
@@ -510,6 +547,9 @@ def test_gsv_reports_the_seed_it_used_over_http(tmp_path):
         device="cpu",
         tts_factory=FakeTts,
         torch_module=RecordingTorch(),
+        persona_root=tmp_path / "personas",
+        voices_root=tmp_path / "voices",
+        voices=_default_registry(ref),
     )
     with TestClient(create_gsv_tts_app(runtime)) as client:
         seeded = client.post("/v1/tts", json={"text": "你好", "seed": 4242})
@@ -531,6 +571,38 @@ def _persona_root(tmp_path: Path) -> Path:
     return tmp_path / "personas"
 
 
+def _voices_root(tmp_path: Path) -> Path:
+    """The templates root ``_Rig`` pins by default: a sibling of ``personas/``."""
+
+    return tmp_path / "voices"
+
+
+def _write_template(
+    tmp_path: Path, name: str, *, ref_text: str = "默认参考文本。"
+) -> str:
+    """Register a template directly under ``voices/`` and return its clip path.
+
+    Readiness is "the shared models *and* the default template resolve", and
+    every synthesis loads the engine, so a rig that will be asked to speak needs
+    one. Written as a template rather than a persona: templates are the only
+    thing that owns a reference clip now, and a persona would register a
+    character the test did not ask for.
+    """
+    directory = _voices_root(tmp_path) / name
+    directory.mkdir(parents=True, exist_ok=True)
+    clip = directory / "template-clip.wav"
+    clip.write_bytes(b"RIFFfake-voice-reference")
+    (_voices_root(tmp_path) / f"{name}.yaml").write_text(
+        yaml.safe_dump(
+            {"ref_audio": f"{name}/{clip.name}", "ref_text": ref_text},
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    return str(clip.resolve())
+
+
 def _write_persona(
     root: Path,
     character_id: str,
@@ -540,12 +612,18 @@ def _write_persona(
     gpt_model: str | None = None,
     sovits_model: str | None = None,
 ) -> Path:
-    """Write a real ``personas/<id>/`` tree on disk.
+    """Write a real ``personas/<id>/`` tree and the template it names.
 
-    ``ref_audio`` is created as a sibling wav and referenced *relatively*, so the
-    test exercises the same path resolution the shipped personas use. Passing
-    ``ref_audio=None`` writes a persona without a ``voice.yaml``, which is the
-    normal case for most characters.
+    A voice is two files now: the clip lives in a template under ``voices/`` and
+    the character's ``voice.yaml`` only names it. The template is keyed on the
+    character id so that ``voice: <id>`` is the single key these tests exercise,
+    and the clip sits in the template's own directory, referenced *relatively*
+    -- the shape the freeze route writes. Passing ``ref_audio=None`` writes a
+    persona without a ``voice.yaml`` (the normal case for most characters) and
+    therefore no template either.
+
+    The templates root is ``root``'s sibling, which is what ``_Rig`` pins as its
+    default ``voices_root``.
     """
     directory = root / character_id
     directory.mkdir(parents=True, exist_ok=True)
@@ -554,14 +632,23 @@ def _write_persona(
     )
     if ref_audio is None:
         return directory
-    (directory / ref_audio).write_bytes(b"RIFFfake-voice-reference")
-    document: dict[str, object] = {"ref_audio": ref_audio, "ref_text": ref_text}
+
+    templates = root.parent / "voices"
+    (templates / character_id).mkdir(parents=True, exist_ok=True)
+    (templates / character_id / ref_audio).write_bytes(b"RIFFfake-voice-reference")
+    document: dict[str, object] = {
+        "ref_audio": f"{character_id}/{ref_audio}",
+        "ref_text": ref_text,
+    }
     if gpt_model is not None:
         document["gpt_model"] = gpt_model
     if sovits_model is not None:
         document["sovits_model"] = sovits_model
+    (templates / f"{character_id}.yaml").write_text(
+        yaml.safe_dump(document, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
     (directory / "voice.yaml").write_text(
-        yaml.safe_dump(document, allow_unicode=True), encoding="utf-8"
+        yaml.safe_dump({"template": character_id}, sort_keys=False), encoding="utf-8"
     )
     return directory
 
@@ -617,6 +704,14 @@ class _Rig:
             "device": "cpu",
             "default_voice": "murasame",
             "tts_factory": _recording_engine(self.calls),
+            # Both roots are pinned to the tmp tree because the module defaults
+            # ("personas", "voices") are *relative*: they resolve against the
+            # cwd -- the repo root under pytest. A test that inherited them would
+            # read the developer's real trees instead of the one it just wrote,
+            # which is order-dependent on their data, and one that writes
+            # templates would write them into their workspace.
+            "persona_root": _persona_root(tmp_path),
+            "voices_root": _voices_root(tmp_path),
         }
         kwargs.update(overrides)
         self.runtime = GsvTtsRuntime(**kwargs)
@@ -638,14 +733,15 @@ def test_gsv_synthesize_clones_the_requested_personas_reference_audio(tmp_path):
     is the only path that turns the registry into audible per-character voices.
     """
     personas = _persona_root(tmp_path)
-    momo = _write_persona(
+    _write_template(tmp_path, "murasame")
+    _write_persona(
         personas, "momo", ref_audio="momo-ref.wav", ref_text="桃子的参考文本。"
     )
     rig = _Rig(tmp_path, persona_root=personas)
 
     result, infer = rig.synthesize(voice="momo")
 
-    expected = str((momo / "momo-ref.wav").resolve())
+    expected = str((_voices_root(tmp_path) / "momo" / "momo-ref.wav").resolve())
     assert infer["spk_audio_paths"] == expected
     assert infer["prompt_audio_paths"] == expected
     assert infer["prompt_audio_texts"] == "桃子的参考文本。"
@@ -657,16 +753,18 @@ def test_gsv_synthesize_falls_back_to_the_default_voice_for_unknown_ids(tmp_path
 
     Most characters have no ``voice.yaml`` yet. Raising here would mute every
     character that has not been given a voice instead of letting it speak in the
-    default voice.
+    default voice -- which is the default *template*, since that is where the
+    reference clip lives now.
     """
     personas = _persona_root(tmp_path)
+    default_clip = _write_template(tmp_path, "murasame")
     _write_persona(personas, "momo")  # persona.yaml only, no voice yet
     rig = _Rig(tmp_path, persona_root=personas)
 
     result, infer = rig.synthesize(voice="momo")
 
-    assert infer["spk_audio_paths"] == str(rig.ref)
-    assert infer["prompt_audio_texts"] == "全局参考文本。"
+    assert infer["spk_audio_paths"] == default_clip
+    assert infer["prompt_audio_texts"] == "默认参考文本。"
     assert result.voice == "murasame"
 
     with TestClient(create_gsv_tts_app(rig.runtime)) as client:
@@ -675,7 +773,7 @@ def test_gsv_synthesize_falls_back_to_the_default_voice_for_unknown_ids(tmp_path
     assert response.status_code == 200
     # The header must name the voice actually used, not the one requested.
     assert response.headers["x-tts-voice"] == "murasame"
-    assert rig.last_infer["spk_audio_paths"] == str(rig.ref)
+    assert rig.last_infer["spk_audio_paths"] == default_clip
 
 
 @pytest.mark.parametrize("payload", [{}, {"voice": ""}, {"voice": "   "}])
@@ -683,6 +781,7 @@ def test_gsv_synthesize_uses_the_runtime_default_when_no_voice_is_requested(
     tmp_path, payload
 ):
     personas = _persona_root(tmp_path)
+    default_clip = _write_template(tmp_path, "murasame")
     _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="桃子。")
     rig = _Rig(tmp_path, persona_root=personas)
 
@@ -691,13 +790,14 @@ def test_gsv_synthesize_uses_the_runtime_default_when_no_voice_is_requested(
 
     assert response.status_code == 200
     assert response.headers["x-tts-voice"] == "murasame"
-    assert rig.last_infer["spk_audio_paths"] == str(rig.ref)
-    assert rig.last_infer["prompt_audio_texts"] == "全局参考文本。"
+    assert rig.last_infer["spk_audio_paths"] == default_clip
+    assert rig.last_infer["prompt_audio_texts"] == "默认参考文本。"
 
 
 def test_gsv_voice_profile_overrides_models_only_when_it_pins_them(tmp_path):
     """Unset profile models inherit the runtime globals; set ones win."""
     personas = _persona_root(tmp_path)
+    _write_template(tmp_path, "murasame")
     _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="桃子。")
     _write_persona(
         personas,
@@ -719,31 +819,40 @@ def test_gsv_voice_profile_overrides_models_only_when_it_pins_them(tmp_path):
 
 
 def test_gsv_runtime_starts_with_an_empty_registry_when_persona_root_is_missing(tmp_path):
-    """A missing personas directory is not an error: the sidecar still serves."""
+    """A missing personas directory is not an error: the sidecar still starts.
+
+    It cannot synthesize -- readiness is "the default template resolves", and
+    nothing here defines one -- but that arrives as a reported reason rather than
+    a crash, and the request path still degrades instead of raising: this is the
+    one corner where the runtime-global reference is still what GSV would get.
+    """
     rig = _Rig(tmp_path, persona_root=tmp_path / "does-not-exist")
 
     assert rig.runtime.status()["voices"] == ["murasame"]
 
-    result, infer = rig.synthesize(voice="momo")
+    ready, reason = rig.runtime._asset_status()
+    assert ready is False
+    assert "murasame" in reason
 
-    assert infer["spk_audio_paths"] == str(rig.ref)
-    assert result.voice == "murasame"
+    voice, ref_audio, ref_text, _, _ = rig.runtime._resolve_voice("momo")
+
+    assert (voice, ref_audio, ref_text) == ("murasame", str(rig.ref), "全局参考文本。")
 
 
-def test_gsv_runtime_refuses_to_start_on_a_broken_voice_profile(tmp_path):
-    """A ``voice.yaml`` that exists but is unusable is a config error, not a skip.
+def test_gsv_runtime_refuses_to_start_on_a_broken_voice_asset(tmp_path):
+    """A template that exists but is unusable is a config error, not a skip.
 
     GSV cannot recover from an empty reference transcript at synthesis time
     (``cache_prompt_audio`` raises), so the only place an operator can see the
     mistake is at load. Swallowing it would surface as a failure per utterance.
     """
     personas = _persona_root(tmp_path)
-    broken = _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="   ")
+    _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="   ")
 
     with pytest.raises(VoiceProfileError) as excinfo:
         _Rig(tmp_path, persona_root=personas)
 
-    assert str(broken / "voice.yaml") in str(excinfo.value)
+    assert str(_voices_root(tmp_path) / "momo.yaml") in str(excinfo.value)
 
 
 def test_gsv_runtime_skips_personas_that_have_no_voice_profile(tmp_path):
@@ -780,6 +889,7 @@ def test_gsv_voice_reload_adds_profiles_without_rebuilding_the_engine(tmp_path):
     reference clip. New reference audio is cached lazily by ``infer_batched``.
     """
     personas = _persona_root(tmp_path)
+    _write_template(tmp_path, "murasame")
     _write_persona(personas, "momo")
     rig = _Rig(tmp_path, persona_root=personas)
 
@@ -799,7 +909,7 @@ def test_gsv_voice_reload_adds_profiles_without_rebuilding_the_engine(tmp_path):
     assert response.status_code == 200
     assert response.headers["x-tts-voice"] == "rin"
     assert rig.last_infer["spk_audio_paths"] == str(
-        (personas / "rin" / "rin.wav").resolve()
+        (_voices_root(tmp_path) / "rin" / "rin.wav").resolve()
     )
     assert len(rig.calls["init"]) == 1, "reload rebuilt the engine"
     assert len(rig.calls["gpt"]) == 1, "reload reloaded the GPT model"

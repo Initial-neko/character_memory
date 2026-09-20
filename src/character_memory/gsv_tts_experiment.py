@@ -16,7 +16,13 @@ from urllib.parse import quote
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
-from character_memory.voices import VoiceProfile, discover_voice_profiles
+from character_memory.voices import (
+    VoiceProfile,
+    discover_character_voices,
+    discover_templates,
+    resolve_voice_registry,
+    template_root,
+)
 
 
 DEFAULT_PORT = 9014
@@ -104,6 +110,16 @@ def _persona_root(persona_root: str | Path | None) -> str:
     return (os.getenv("GSV_TTS_PERSONA_ROOT") or "").strip() or DEFAULT_PERSONA_ROOT
 
 
+def _voices_root(voices_root: str | Path | None) -> str:
+    """Templates live outside the persona tree; same absolute-path rule applies."""
+
+    if voices_root is not None:
+        value = str(voices_root).strip()
+        if value:
+            return value
+    return str(template_root(None))
+
+
 def float_audio_to_wav(samples: np.ndarray, sample_rate: int) -> bytes:
     values = np.asarray(samples, dtype=np.float32).reshape(-1)
     values = np.nan_to_num(values, nan=0.0, posinf=1.0, neginf=-1.0)
@@ -143,6 +159,7 @@ class GsvTtsRuntime:
         torch_module: Any | None = None,
         voices: dict[str, VoiceProfile] | None = None,
         persona_root: str | Path | None = None,
+        voices_root: str | Path | None = None,
     ):
         self.gpt_model = str(gpt_model or "").strip()
         self.sovits_model = str(sovits_model or "").strip()
@@ -161,6 +178,7 @@ class GsvTtsRuntime:
         # torch when it is None.
         self._torch = torch_module
         self.persona_root = _persona_root(persona_root)
+        self.voices_root = _voices_root(voices_root)
         # An injected registry is authoritative: embedders and tests supply one
         # rather than depending on whatever happens to be on disk.
         self._voices: dict[str, VoiceProfile] = (
@@ -171,18 +189,23 @@ class GsvTtsRuntime:
         self._lock = threading.RLock()
 
     def _load_voices(self) -> dict[str, VoiceProfile]:
-        """Register ``<persona_root>/*/persona.yaml`` that declare a voice.
+        """Merge the template tree and the character reference tree.
 
-        Same glob shape as ``config.discover_character_profiles`` so the sidecar
-        and the app agree on what a persona is. A missing root, or a persona with
-        no ``voice.yaml``, contributes nothing: voice assets must never stop the
-        sidecar from starting. A ``voice.yaml`` that exists but is unusable
-        raises :class:`VoiceProfileError` instead, because GSV cannot recover
-        from a bad reference clip at synthesis time.
+        Templates own the reference clips; characters only name one. Both are
+        globbed the same way the app discovers personas, and a missing root
+        contributes nothing -- voice assets must never stop the sidecar.
+
+        A character that *has* a ``voice.yaml`` but names a template that does
+        not exist raises (``resolve_voice_registry``): that is a configuration
+        error the user needs to see. A character with no file is simply absent
+        and degrades to the default template at request time.
         """
-        root = Path(self.persona_root)
-        paths = sorted(root.glob("*/persona.yaml")) if root.exists() else []
-        return discover_voice_profiles(paths)
+        personas = Path(self.persona_root)
+        persona_paths = sorted(personas.glob("*/persona.yaml")) if personas.exists() else []
+        return resolve_voice_registry(
+            templates=discover_templates(self.voices_root),
+            character_voices=discover_character_voices(persona_paths),
+        )
 
     def reload_voices(self) -> dict:
         """Re-read the persona voice manifests in place.
@@ -209,17 +232,36 @@ class GsvTtsRuntime:
 
         Returns ``(voice, ref_audio, ref_text, gpt_model, sovits_model)``.
 
-        A name that is not registered -- including every character that has no
-        ``voice.yaml`` -- degrades to ``default_voice`` and the runtime-global
-        reference audio. It must not raise: the browser sends
-        ``voice: <character id>`` for *every* character, so rejecting unknown
-        ids would mute every character that has not been given a voice yet. The
-        returned ``voice`` is the one actually used, so ``X-TTS-Voice`` and
+        Three tiers, in order: the name as registered (which covers both a
+        template name and a character id, since the registry is merged); the
+        default template; and finally the runtime-global reference.
+
+        The first tier must not raise -- the browser sends ``voice: <character
+        id>`` for *every* character, so rejecting unknown ids would mute every
+        character that has not been given a voice yet. (A character that *has*
+        a voice.yaml but a dead reference is a different case and raised at
+        load time; see ``resolve_voice_registry``.)
+
+        The returned ``voice`` is the one actually used, so ``X-TTS-Voice`` and
         ``GsvTtsResult.voice`` never report a profile that was not applied.
         """
         name = str(requested or self.default_voice).strip() or self.default_voice
-        profile = self._voices.get(name)
+        # The registry is one flat namespace, and a character id is allowed to
+        # shadow a template name: ``resolve_voice_registry`` re-keys a
+        # character's profile onto its id, so the character wins the key. Reading
+        # the fallback out of that same map is deliberate -- the specific answer
+        # beats the general one -- and the consequence is that a character
+        # *named after* the default template becomes the fallback for every
+        # unknown name. That is accepted, not a bug to repair here with a second,
+        # template-only lookup: two lookup paths would let ``X-TTS-Voice`` report
+        # a profile the engine did not use.
+        profile = self._voices.get(name) or self._voices.get(self.default_voice)
         if profile is None:
+            # Even the default template is missing. Still must not raise: this
+            # is on the request path for every character, and ``_asset_status``
+            # already reports the sidecar as not ready, so it will not be asked
+            # to synthesize. ``self.ref_audio``/``self.ref_text`` survive only
+            # for this corner.
             return (
                 self.default_voice,
                 self.ref_audio,
@@ -257,20 +299,33 @@ class GsvTtsRuntime:
         return True, None
 
     def _asset_status(self) -> tuple[bool, str | None]:
+        """Ready when the shared base models and the default template both resolve.
+
+        The two model paths stay required: every template inherits them unless it
+        pins its own. The reference clip moved into the template, so the check
+        follows it there -- readiness is now "the default template loads", which
+        subsumes the old four-field check.
+        """
         required = {
             "GSV_TTS_GPT_MODEL": self.gpt_model,
             "GSV_TTS_SOVITS_MODEL": self.sovits_model,
-            "GSV_TTS_REF_AUDIO": self.ref_audio,
         }
         missing_config = [name for name, value in required.items() if not value]
-        if not self.ref_text:
-            missing_config.append("GSV_TTS_REF_TEXT")
         if missing_config:
             return False, f"Missing GSV configuration: {', '.join(missing_config)}"
 
         missing_files = [value for value in required.values() if value and not Path(value).is_file()]
         if missing_files:
             return False, f"GSV asset not found: {', '.join(missing_files)}"
+
+        profile = self._voices.get(self.default_voice)
+        if profile is None:
+            return False, (
+                f"Default template {self.default_voice!r} is not defined; create one in the "
+                "TTS Lab voice design page or pick an existing template in Settings Center."
+            )
+        if not Path(profile.ref_audio).is_file():
+            return False, f"Default template {self.default_voice!r} ref_audio not found: {profile.ref_audio}"
         return True, None
 
     def _factory(self):

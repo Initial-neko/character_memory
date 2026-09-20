@@ -818,25 +818,57 @@ def test_gsv_voice_profile_overrides_models_only_when_it_pins_them(tmp_path):
     assert pinned["sovits_model"] == "rin-sovits.pth"
 
 
-def test_gsv_runtime_starts_with_an_empty_registry_when_persona_root_is_missing(tmp_path):
+def test_gsv_runtime_without_a_default_template_refuses_the_request(tmp_path):
     """A missing personas directory is not an error: the sidecar still starts.
 
     It cannot synthesize -- readiness is "the default template resolves", and
-    nothing here defines one -- but that arrives as a reported reason rather than
-    a crash, and the request path still degrades instead of raising: this is the
-    one corner where the runtime-global reference is still what GSV would get.
+    nothing here defines one -- and that arrives as a reported reason rather
+    than a crash at startup. A request against it must then fail loudly. The
+    runtime-global ``ref_audio``/``ref_text`` pair used to answer this corner,
+    and it is reachable whenever the engine is already warm (``load()``
+    short-circuits on ``already_loaded``), so the "it will not be asked to
+    synthesize" reasoning behind that fallback was false: the operator got HTTP
+    200, the wrong voice, and a ``/health`` that said not ready.
     """
     rig = _Rig(tmp_path, persona_root=tmp_path / "does-not-exist")
 
-    assert rig.runtime.status()["voices"] == ["murasame"]
+    status = rig.runtime.status()
+    assert status["ready"] is False
+    assert "murasame" in status["reason"]
+    assert status["voices"] == ["murasame"]
 
-    ready, reason = rig.runtime._asset_status()
-    assert ready is False
-    assert "murasame" in reason
+    with TestClient(create_gsv_tts_app(rig.runtime)) as client:
+        response = client.post("/v1/tts", json={"text": "你好", "voice": "momo"})
 
-    voice, ref_audio, ref_text, _, _ = rig.runtime._resolve_voice("momo")
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "momo" in detail, detail
+    assert "murasame" in detail, detail
 
-    assert (voice, ref_audio, ref_text) == ("murasame", str(rig.ref), "全局参考文本。")
+
+def test_gsv_synthesize_refuses_after_the_default_template_clip_disappears(tmp_path):
+    """The ``already_loaded`` early return must not bypass readiness.
+
+    The engine stays warm across a registry change -- that is the point of
+    ``reload`` -- while the template it was warmed for can be renamed, or its
+    clip deleted. Checking readiness only on the cold path answered those
+    requests from a reference that no longer resolves, with ``/health`` already
+    reporting not ready.
+    """
+    personas = _persona_root(tmp_path)
+    clip = _write_template(tmp_path, "murasame")
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    result, _ = rig.synthesize(voice="murasame")
+    assert result.voice == "murasame"
+    assert rig.runtime.status()["loaded"] is True
+
+    Path(clip).unlink()
+
+    with pytest.raises(RuntimeError, match="murasame"):
+        rig.runtime.synthesize(GsvTtsRequest(text="你好", voice="murasame"))
+
+    assert rig.runtime.status()["ready"] is False
 
 
 def test_gsv_runtime_refuses_to_start_on_a_broken_voice_asset(tmp_path):

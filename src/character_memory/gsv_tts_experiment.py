@@ -17,6 +17,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from character_memory.voices import (
+    TEMPLATE_FILE_SUFFIX,
     VoiceProfile,
     discover_character_voices,
     discover_templates,
@@ -232,15 +233,25 @@ class GsvTtsRuntime:
 
         Returns ``(voice, ref_audio, ref_text, gpt_model, sovits_model)``.
 
-        Three tiers, in order: the name as registered (which covers both a
-        template name and a character id, since the registry is merged); the
-        default template; and finally the runtime-global reference.
+        Two tiers, in order: the name as registered (which covers both a
+        template name and a character id, since the registry is merged), then
+        the default template.
 
         The first tier must not raise -- the browser sends ``voice: <character
         id>`` for *every* character, so rejecting unknown ids would mute every
         character that has not been given a voice yet. (A character that *has*
         a voice.yaml but a dead reference is a different case and raised at
         load time; see ``resolve_voice_registry``.)
+
+        The second tier is the entire fallback, and it is a real profile with a
+        real clip. There is deliberately no third tier: the runtime-global
+        ``ref_audio``/``ref_text`` pair used to answer here, and it is no longer
+        a reference the settings page maintains. What it *was*, though, is the
+        proof that it must not come back -- because ``load()`` short-circuits on
+        ``already_loaded``, a warm engine reached this branch after its default
+        template went away and was handed that stale pair, which is HTTP 200
+        with the wrong voice while ``/health`` reported not ready. So a request
+        that resolves to nothing now raises, and names what is missing.
 
         The returned ``voice`` is the one actually used, so ``X-TTS-Voice`` and
         ``GsvTtsResult.voice`` never report a profile that was not applied.
@@ -257,17 +268,12 @@ class GsvTtsRuntime:
         # a profile the engine did not use.
         profile = self._voices.get(name) or self._voices.get(self.default_voice)
         if profile is None:
-            # Even the default template is missing. Still must not raise: this
-            # is on the request path for every character, and ``_asset_status``
-            # already reports the sidecar as not ready, so it will not be asked
-            # to synthesize. ``self.ref_audio``/``self.ref_text`` survive only
-            # for this corner.
-            return (
-                self.default_voice,
-                self.ref_audio,
-                self.ref_text,
-                self.gpt_model,
-                self.sovits_model,
+            template = Path(self.voices_root) / f"{self.default_voice}{TEMPLATE_FILE_SUFFIX}"
+            raise RuntimeError(
+                f"No voice profile for {name!r} and no default template "
+                f"{self.default_voice!r}: the template file {template} is missing or "
+                "unusable. Create the default template in the TTS Lab voice design page "
+                "or pick an existing template in Settings Center."
             )
         # A profile only overrides the models it pins; unset means "inherit".
         return (
@@ -435,15 +441,21 @@ class GsvTtsRuntime:
 
     def load(self) -> dict:
         with self._lock:
-            if self._tts is not None:
-                return {**self.status(), "already_loaded": True}
-
+            # Readiness is authoritative even for a warm engine, so it is
+            # checked *before* the ``already_loaded`` shortcut. The registry can
+            # change underneath a loaded engine (``/v1/voices/reload``, a
+            # template renamed, its clip deleted), and a hot engine must not be
+            # the reason a request reaches ``infer_batched`` with a reference
+            # that no longer resolves.
             deps_ready, deps_reason = self._dependency_status()
             assets_ready, assets_reason = self._asset_status()
             if not deps_ready:
                 raise RuntimeError(deps_reason or "GSV-TTS-Lite dependency unavailable")
             if not assets_ready:
                 raise RuntimeError(assets_reason or "GSV-TTS-Lite assets unavailable")
+
+            if self._tts is not None:
+                return {**self.status(), "already_loaded": True}
 
             started = time.perf_counter()
             try:

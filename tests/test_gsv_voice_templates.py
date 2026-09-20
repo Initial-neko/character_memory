@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from fastapi.testclient import TestClient
 
-from character_memory.gsv_tts_experiment import GsvTtsRuntime
+from character_memory.gsv_tts_experiment import GsvTtsRuntime, create_gsv_tts_app
 
 
 def _template(root: Path, name: str) -> None:
@@ -90,6 +91,28 @@ def test_asset_status_reports_a_missing_default_template(tmp_path):
 
     assert ready is False
     assert "ghost" in reason
+
+
+def test_a_missing_default_template_refuses_the_request_loudly(tmp_path):
+    """Asserted through the request path, not through ``_resolve_voice``.
+
+    Neither the requested name nor the default template resolves, and this is
+    what the operator actually meets. The old fallback would have answered from
+    the runtime-global reference -- a silent wrong voice, and reachable whenever
+    the engine was already warm. Failing loudly only helps if the message names
+    both the voice that was asked for and the template that would have served
+    it, since the real cause is a template that was never created.
+    """
+    runtime = _runtime(tmp_path, default_voice="ghost")
+
+    with TestClient(create_gsv_tts_app(runtime)) as client:
+        response = client.post("/v1/tts", json={"text": "你好", "voice": "momo"})
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "momo" in detail, detail
+    assert "ghost" in detail, detail
+    assert "missing" in detail, detail
 
 
 def test_a_character_with_no_voice_file_degrades_silently(tmp_path):

@@ -13,6 +13,7 @@ invalid one raises loudly.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -37,6 +38,10 @@ class VoiceProfile(BaseModel):
 
 class _VoiceDocument(BaseModel):
     """Raw shape of voice.yaml; voice_id is optional and defaults to the dir name.
+
+    A template under ``voices/`` shares this shape; only the *default* for a
+    missing ``voice_id`` differs (the file stem instead of a directory name),
+    which is each reader's own choice rather than a schema difference.
 
     ``created_at`` / ``instruct`` / ``model`` are provenance, written by the
     freeze route in ``tts_lab.py``. GSV never reads them, but a frozen
@@ -81,6 +86,108 @@ def _optional_str(value: str | None) -> str | None:
     if value is None:
         return None
     return value.strip() or None
+
+
+TEMPLATE_FILE_SUFFIX = ".yaml"
+
+
+def template_root(configured: str | Path | None = None) -> Path:
+    """Resolve the templates directory, preferring the argument over the env.
+
+    Mirrors ``gsv_tts_experiment._persona_root``: a relative glob resolves
+    against the *cwd*, which the sidecar does not control, so the start script
+    and the dev stack pin an absolute path through ``GSV_TTS_VOICES_ROOT``.
+    """
+
+    if configured is not None:
+        value = str(configured).strip()
+        if value:
+            return Path(value)
+    return Path((os.getenv("GSV_TTS_VOICES_ROOT") or "").strip() or "voices")
+
+
+def load_template(path: str | Path) -> VoiceProfile:
+    """Load a template document.
+
+    Same schema as :class:`VoiceProfile` plus the provenance fields, so the
+    reader is shared with the legacy per-character loader. Raises
+    :class:`VoiceProfileError` for anything unusable: GSV cannot recover from a
+    bad reference clip at synthesis time.
+
+    Sharing :class:`_VoiceDocument` with the per-character loader is deliberate,
+    and the freeze route round-trips its template writer through here for the
+    same reason the per-character round-trip exists: a reader/writer schema
+    drift shipped once already, and it failed silently.
+    """
+
+    path = Path(path)
+    if not path.is_file():
+        raise VoiceProfileError(f"{path}: template not found")
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise VoiceProfileError(f"{path}: unreadable template: {exc}") from exc
+
+    if raw is None:
+        raise VoiceProfileError(f"{path}: empty template; ref_audio and ref_text are required")
+    if not isinstance(raw, dict):
+        raise VoiceProfileError(f"{path}: expected a YAML mapping, got {type(raw).__name__}")
+
+    try:
+        document = _VoiceDocument.model_validate(raw)
+    except ValidationError as exc:
+        raise VoiceProfileError(
+            f"{path}: invalid voice profile: {_describe_validation_error(exc)}"
+        ) from exc
+
+    voice_id = (document.voice_id or "").strip() or path.stem
+
+    raw_audio = (document.ref_audio or "").strip()
+    if not raw_audio:
+        raise VoiceProfileError(f"{path}: ref_audio is required")
+    audio_path = Path(raw_audio)
+    if not audio_path.is_absolute():
+        audio_path = path.parent / audio_path
+    resolved_audio = audio_path.resolve()
+    if not resolved_audio.is_file():
+        raise VoiceProfileError(f"{path}: ref_audio not found: {resolved_audio}")
+
+    ref_text = (document.ref_text or "").strip()
+    if not ref_text:
+        raise VoiceProfileError(f"{path}: ref_text is empty; GSV needs a reference transcript")
+
+    return VoiceProfile(
+        voice_id=voice_id,
+        ref_audio=str(resolved_audio),
+        ref_text=ref_text,
+        gpt_model=_optional_str(document.gpt_model),
+        sovits_model=_optional_str(document.sovits_model),
+    )
+
+
+def discover_templates(root: str | Path | None = None) -> dict[str, VoiceProfile]:
+    """Build the ``{voice_id: profile}`` registry for every ``voices/*.yaml``.
+
+    A missing root contributes nothing. Duplicate voice ids are an error: one
+    template silently shadowing another is exactly what this registry prevents.
+    """
+
+    directory = template_root(root)
+    paths = sorted(directory.glob(f"*{TEMPLATE_FILE_SUFFIX}")) if directory.exists() else []
+
+    profiles: dict[str, VoiceProfile] = {}
+    sources: dict[str, Path] = {}
+    for path in paths:
+        profile = load_template(path)
+        previous = sources.get(profile.voice_id)
+        if previous is not None:
+            raise VoiceProfileError(
+                f"duplicate voice_id {profile.voice_id!r}: {previous} and {path}"
+            )
+        profiles[profile.voice_id] = profile
+        sources[profile.voice_id] = path
+    return profiles
 
 
 def load_voice_profile(persona_path: str | Path) -> VoiceProfile | None:

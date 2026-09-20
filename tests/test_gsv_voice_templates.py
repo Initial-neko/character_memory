@@ -199,3 +199,29 @@ def test_a_pre_template_voice_file_refuses_to_start_the_sidecar(tmp_path):
     # ... and the way out names the template root this runtime actually reads,
     # not the module-level default.
     assert str(tmp_path / "voices") in message
+
+
+def test_a_broken_unreferenced_template_names_itself_in_the_error(tmp_path):
+    """One bad template stops every voice, and the error has to say which one.
+
+    Narrowing that blast radius is not this unit's to do (spec §10: a template's
+    clip must exist at load, referenced or not). The whole cost of the behaviour
+    is legibility, so the failure has to name the offending file: with a healthy
+    default template and a stale experiment nobody references, "the sidecar will
+    not start" is the only symptom the operator gets.
+    """
+
+    _template(tmp_path / "voices", "murasame")
+    broken = tmp_path / "voices" / "old-experiment.yaml"
+    broken.write_text(
+        "ref_audio: old-experiment/missing.wav\nref_text: 旧实验。\n", encoding="utf-8"
+    )
+
+    from character_memory.voices import VoiceProfileError
+
+    with pytest.raises(VoiceProfileError) as excinfo:
+        _runtime(tmp_path, default_voice="murasame")
+
+    message = str(excinfo.value)
+    assert str(broken) in message
+    assert "ref_audio not found" in message

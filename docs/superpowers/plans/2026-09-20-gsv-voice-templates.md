@@ -730,7 +730,6 @@ from character_memory.voices import (
     discover_character_voices,
     discover_templates,
     load_character_voice,
-    load_voice_profile,
     resolve_voice_registry,
 )
 
@@ -808,15 +807,21 @@ def test_migrates_a_legacy_character_into_a_template_and_a_reference(tmp_path):
 def test_the_strict_reader_rejects_the_pre_migration_file(tmp_path):
     """Why this runs ahead of validation instead of behind it.
 
-    The old self-contained form is exactly what ``extra="forbid"`` refuses. If
-    validation ran first, the sidecar would fail on the very files this module
-    exists to move -- a start-up failure whose message points at the wrong thing.
+    The reader that has to run *after* migration is the character one:
+    ``_CharacterVoiceDocument`` is ``extra="forbid"`` with ``template`` required,
+    so it refuses the old self-contained form outright. If validation ran first,
+    the sidecar would fail on the very files this module exists to move -- a
+    start-up failure whose message points at the wrong thing.
+
+    ``load_voice_profile`` is deliberately *not* the reader tested here: it is
+    the legacy reader this migration reads *with*, so it must keep accepting the
+    old form. Testing it would assert the opposite of what is true.
     """
 
     persona = _legacy_character(tmp_path / "personas", "haru")
 
     with pytest.raises(VoiceProfileError, match="invalid voice profile"):
-        load_voice_profile(persona)
+        load_character_voice(persona)
 
 
 def test_migrates_the_legacy_env_into_a_template(tmp_path):
@@ -979,6 +984,33 @@ def test_a_colliding_env_name_does_not_overwrite_the_character_template(tmp_path
     assert template["ref_text"] == "你好，这是试听。"
     assert report.created_templates == ["haru"]
     assert any("already exists" in note for note in report.notes)
+
+
+def test_a_character_without_a_voice_file_is_silent(tmp_path):
+    """Most of a real persona tree has no ``voice.yaml`` at all.
+
+    A missing file must not reach the unreadable-file handler: ``read_text``
+    raises ``FileNotFoundError``, which *is* an ``OSError``, so without an
+    explicit ``is_file`` guard every voiceless character warns on every start --
+    and the one warning that matters gets lost in that noise.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    _legacy_character(personas, "haru")
+    voiceless = personas / "silent" / "persona.yaml"
+    voiceless.parent.mkdir(parents=True)
+    voiceless.write_text("id: silent\nname: silent\n", encoding="utf-8")
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
+    assert report.notes == []
+    assert report.migrated_characters == ["haru"]
 
 
 def test_a_malformed_character_does_not_stop_the_others(tmp_path):
@@ -1170,6 +1202,14 @@ def _migrate_character_clips(personas_root: Path, voices_root: Path, report: Mig
         character_id = persona_path.parent.name
         voice_path = persona_path.parent / CHARACTER_VOICE_FILENAME
 
+        if not voice_path.is_file():
+            # Never given a voice: the normal case, and the majority of a real
+            # persona tree. Guarded *before* the read, because ``read_text`` on a
+            # missing file raises ``FileNotFoundError`` -- an ``OSError`` -- and
+            # the handler below would then emit an "unreadable voice file" note
+            # for every voiceless character on every start.
+            continue
+
         # Read the raw document first: it is both the discriminator below and,
         # for a file that does need migrating, the only source of the provenance
         # fields. ``VoiceProfile`` does not carry them and they cannot be
@@ -1323,9 +1363,9 @@ def migrate_voices(
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_voice_migration.py -q --no-header`
-Expected: 11 passed
+Expected: 12 passed
 
-（计数随逐项幂等改过一次：原为 5 条，其中整目录闸门那条被逐项用例取代，另补了往返、顺序、续跑、碰撞、单点失败五类。）
+（计数随逐项幂等改过一次：原为 5 条，其中整目录闸门那条被逐项用例取代，另补了往返、顺序、续跑、碰撞、单点失败五类，外加「没 voice.yaml 的角色必须安静」一条。）
 
 - [ ] **Step 5: 提交**
 
@@ -1341,6 +1381,7 @@ git commit -m "Add one-shot migrations onto the template model"
 **Files:**
 - Modify: `src/character_memory/gsv_tts_experiment.py:93-104` (`_persona_root` 旁加 `_voices_root`)、`:173-203` (`_load_voices` / `_voice_ids`)、`:259-274` (`_asset_status`)
 - Modify: `src/character_memory/dev_stack.py:278`（钉 `GSV_TTS_VOICES_ROOT` 绝对路径）
+- Modify: `tests/test_gsv_tts_experiment.py`（Step 3d：8 处构造补全 tmp root，否则 `__init__` 里的迁移会写进真实树）
 - Test: `tests/test_gsv_voice_templates.py` (新建)
 
 **Interfaces:**
@@ -1759,6 +1800,26 @@ voices/
 
 **验证忽略真的生效时别被骗**：`git check-ignore -v voices/` 对一个「带尾斜杠且尚不存在」的路径会返回 rc=0 并印出一个空 pattern 行，看起来像「已忽略」。要问具体文件：`git check-ignore -v voices/murasame.yaml` —— 规则生效时它才给出真正的答案（rc=0 且印出 `voices/` 这条 pattern；未生效则 rc=1）。
 
+- [ ] **Step 3d: 让既有的 GSV 测试自洽（hermetic）——本任务最容易出事的一步**
+
+`tests/test_gsv_tts_experiment.py` 里有 8 处 `GsvTtsRuntime(...)` 构造，**没有一处给全两个 root**：`_Rig`（`:620` 附近）的默认 kwargs 只让调用方传 `persona_root`，`voices_root` 走兜底；另有 7 处独立构造（`:183` `:250` `:283` `:345` `:393` `:437` `:505`）两个都不传。
+
+而两个兜底都是**相对路径**（`DEFAULT_PERSONA_ROOT = "personas"`，新加的 `"voices"`），相对 cwd 解析；pytest 从仓库根跑，于是解析到**开发者真实的 `personas/` 与 `voices/`**。本任务之前构造函数只读，所以这个洞一直没咬人。**本任务之后它在 `__init__` 里跑迁移**，于是一次单测就会：
+
+- 把 tmp 树里的旧格式角色搬进**真实的 `voices/`** 并复制 WAV 进去（污染工作区；此后每次跑测试都读到它 → 顺序相关的、看起来像偶发的失败）；
+- 对那 7 处不传 `persona_root` 的构造，直接**改写真实 `personas/*/voice.yaml`**——跑一次测试就破坏用户数据。
+
+所以：
+
+1. `_Rig` 的默认 kwargs 加 `"voices_root": tmp_path / "voices"`——一处改动覆盖所有 `_Rig` 调用点。
+2. 7 处独立构造各加 `persona_root=tmp_path / "personas"`、`voices_root=tmp_path / "voices"`。
+3. 断言 `ready is True` 的构造（`:194`、`:272`、`:278`）：Task 4 之后 `_asset_status` 要求默认模板能解析，所以它们还必须让 `default_voice`（`"murasame"`）在注册表里存在。最省事、且不改动被测行为的是**注入注册表**：
+   ```python
+   voices={"murasame": VoiceProfile(voice_id="murasame", ref_audio=str(ref), ref_text="参考文本。")}
+   ```
+   注入的注册表是权威的，`__init__` 会跳过迁移（`if voices is None`），所以在构造上就是自洽的。
+4. 收尾自检：`git status --porcelain` 里**不得出现 `voices/`**，`personas/` 下不得有本任务之外的改动。出现了就说明还有代码在碰真实树——找出它并修掉，别 `rm` 了事。
+
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_gsv_voice_templates.py tests/test_gsv_tts_experiment.py tests/test_voices.py -q --no-header`
@@ -1767,7 +1828,7 @@ Expected: 新增 7 passed；既有测试若因 `_asset_status` 语义变更而�
 - [ ] **Step 5: 提交**
 
 ```bash
-git add .gitignore src/character_memory/gsv_tts_experiment.py src/character_memory/dev_stack.py tests/test_gsv_voice_templates.py
+git add .gitignore src/character_memory/gsv_tts_experiment.py src/character_memory/dev_stack.py tests/test_gsv_voice_templates.py tests/test_gsv_tts_experiment.py
 git commit -m "Load templates and character references into the GSV registry"
 ```
 

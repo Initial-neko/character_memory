@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TypeVar
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -88,6 +88,51 @@ def _optional_str(value: str | None) -> str | None:
     return value.strip() or None
 
 
+_DocumentT = TypeVar("_DocumentT", bound=BaseModel)
+
+
+def _read_document(
+    path: Path,
+    model: type[_DocumentT],
+    *,
+    unreadable: str,
+    empty: str,
+    non_mapping: str,
+) -> _DocumentT:
+    """Read, parse and validate one voice document at ``path``.
+
+    Every reader of this schema fails the same three ways -- unreadable,
+    empty, or not a mapping -- and each failure has to arrive as a
+    :class:`VoiceProfileError`. The *wording* differs per reader and is a
+    cross-module contract, so each caller passes its own clauses rather than
+    the helper inventing them: ``unreadable`` is the clause after the path,
+    ``empty`` the whole message for a null document, and ``non_mapping`` a
+    message template whose ``{kind}`` is filled with the type YAML produced.
+    Keeping the words at the call site is what lets this extraction leave
+    every existing message byte-identical.
+
+    Whether the file is missing stays with the caller: the three readers
+    disagree about it (raise, ``None``, ``None``).
+    """
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise VoiceProfileError(f"{path}: {unreadable}: {exc}") from exc
+
+    if raw is None:
+        raise VoiceProfileError(f"{path}: {empty}")
+    if not isinstance(raw, dict):
+        raise VoiceProfileError(f"{path}: {non_mapping.format(kind=type(raw).__name__)}")
+
+    try:
+        return model.model_validate(raw)
+    except ValidationError as exc:
+        raise VoiceProfileError(
+            f"{path}: invalid voice profile: {_describe_validation_error(exc)}"
+        ) from exc
+
+
 TEMPLATE_FILE_SUFFIX = ".yaml"
 
 
@@ -124,22 +169,13 @@ def load_template(path: str | Path) -> VoiceProfile:
     if not path.is_file():
         raise VoiceProfileError(f"{path}: template not found")
 
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise VoiceProfileError(f"{path}: unreadable template: {exc}") from exc
-
-    if raw is None:
-        raise VoiceProfileError(f"{path}: empty template; ref_audio and ref_text are required")
-    if not isinstance(raw, dict):
-        raise VoiceProfileError(f"{path}: expected a YAML mapping, got {type(raw).__name__}")
-
-    try:
-        document = _VoiceDocument.model_validate(raw)
-    except ValidationError as exc:
-        raise VoiceProfileError(
-            f"{path}: invalid voice profile: {_describe_validation_error(exc)}"
-        ) from exc
+    document = _read_document(
+        path,
+        _VoiceDocument,
+        unreadable="unreadable template",
+        empty="empty template; ref_audio and ref_text are required",
+        non_mapping="expected a YAML mapping, got {kind}",
+    )
 
     if document.voice_id is None:
         # Absent is normal: a template's identity is its filename.
@@ -209,30 +245,17 @@ def load_voice_profile(persona_path: str | Path) -> VoiceProfile | None:
     """
 
     persona_path = Path(persona_path)
-    voice_path = persona_path.parent / "voice.yaml"
+    voice_path = persona_path.parent / CHARACTER_VOICE_FILENAME
     if not voice_path.is_file():
         return None
 
-    try:
-        raw = yaml.safe_load(voice_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise VoiceProfileError(f"{voice_path}: unreadable voice profile: {exc}") from exc
-
-    if raw is None:
-        raise VoiceProfileError(
-            f"{voice_path}: empty voice profile; ref_audio and ref_text are required"
-        )
-    if not isinstance(raw, dict):
-        raise VoiceProfileError(
-            f"{voice_path}: expected a YAML mapping, got {type(raw).__name__}"
-        )
-
-    try:
-        document = _VoiceDocument.model_validate(raw)
-    except ValidationError as exc:
-        raise VoiceProfileError(
-            f"{voice_path}: invalid voice profile: {_describe_validation_error(exc)}"
-        ) from exc
+    document = _read_document(
+        voice_path,
+        _VoiceDocument,
+        unreadable="unreadable voice profile",
+        empty="empty voice profile; ref_audio and ref_text are required",
+        non_mapping="expected a YAML mapping, got {kind}",
+    )
 
     if document.voice_id is None:
         voice_id = persona_path.parent.name
@@ -292,3 +315,113 @@ def discover_voice_profiles(
         profiles[profile.voice_id] = profile
         sources[profile.voice_id] = Path(persona_path)
     return profiles
+
+
+CHARACTER_VOICE_FILENAME = "voice.yaml"
+
+
+class _CharacterVoiceDocument(BaseModel):
+    """Raw shape of a character's ``voice.yaml``: a reference and nothing else.
+
+    ``extra="forbid"`` is load-bearing twice over. It keeps the old
+    self-contained form (``ref_audio``/``ref_text``) from silently working,
+    which would let a character hold a clip again; and it keeps ``gpt_model``
+    out, because inheriting a base model is a template-level decision -- the
+    same clip under two characters must not resolve to two different models.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    template: str
+
+
+def load_character_voice(persona_path: str | Path) -> str | None:
+    """Return the template a character references, or ``None`` when it has none.
+
+    ``None`` is the normal case and means "this character was never given a
+    voice"; the caller degrades to the default template. A file that exists but
+    cannot be trusted raises: the user configured this character deliberately,
+    and silently falling back would make a wrong voice hard to notice.
+    """
+
+    persona_path = Path(persona_path)
+    voice_path = persona_path.parent / CHARACTER_VOICE_FILENAME
+    if not voice_path.is_file():
+        return None
+
+    document = _read_document(
+        voice_path,
+        _CharacterVoiceDocument,
+        unreadable="unreadable voice reference",
+        # A null document and a non-mapping one are the same complaint here:
+        # this file has exactly one thing to say, and neither says it.
+        empty="expected a YAML mapping with a 'template' key",
+        non_mapping="expected a YAML mapping with a 'template' key",
+    )
+
+    name = (document.template or "").strip()
+    if not name:
+        raise VoiceProfileError(f"{voice_path}: template is empty")
+    return name
+
+
+def discover_character_voices(
+    persona_paths: Iterable[str | Path],
+) -> dict[str, str]:
+    """Build ``{character_id: template_name}`` for every persona that names one.
+
+    The character id is the persona directory name -- the same anchor
+    ``discover_character_profiles`` uses -- because the sidecar globs
+    ``*/persona.yaml`` and has no other identifier to hand.
+    """
+
+    references: dict[str, str] = {}
+    for persona_path in persona_paths:
+        name = load_character_voice(persona_path)
+        if name is None:
+            continue
+        character_id = Path(persona_path).parent.name
+        previous = references.get(character_id)
+        if previous is not None:
+            raise VoiceProfileError(
+                f"duplicate character id {character_id!r}: two voice files claim it"
+            )
+        references[character_id] = name
+    return references
+
+
+def resolve_voice_registry(
+    *,
+    templates: dict[str, VoiceProfile],
+    character_voices: dict[str, str],
+    default: str,
+) -> dict[str, VoiceProfile]:
+    """Merge the template tree and the character tree into one registry.
+
+    The result maps both template names and character ids onto profiles, so a
+    request for either resolves in one lookup. A character overrides a template
+    of the same name, because the character is the more specific answer.
+
+    A character pointing at a template that does not exist raises: that is a
+    configuration error, not an unconfigured character. ``default`` is exempt --
+    it is allowed to name a template that was never created, since readiness
+    (``_asset_status``) reports that case separately. For the same reason this
+    function never consults ``default``: a missing default template is a
+    readiness answer, not a load-time failure.
+    """
+
+    registry: dict[str, VoiceProfile] = dict(templates)
+
+    for character_id, template_name in character_voices.items():
+        profile = templates.get(template_name)
+        if profile is None:
+            raise VoiceProfileError(
+                f"{character_id} references unknown template {template_name!r}"
+            )
+        # Re-key onto the character id so the browser's ``voice: <character id>``
+        # resolves directly. The profile is copied rather than shared: the
+        # character id is also what ``_resolve_voice`` reports back in
+        # ``X-TTS-Voice``, and the template's own entry has to keep its name.
+        registry[character_id] = profile.model_copy(update={"voice_id": character_id})
+
+    return registry

@@ -13,8 +13,11 @@ import pytest
 from character_memory.voices import (
     VoiceProfile,
     VoiceProfileError,
+    discover_character_voices,
     discover_templates,
+    load_character_voice,
     load_template,
+    resolve_voice_registry,
     template_root,
 )
 
@@ -109,3 +112,93 @@ def test_template_root_prefers_the_explicit_argument(tmp_path, monkeypatch):
 
     assert template_root(tmp_path / "explicit") == tmp_path / "explicit"
     assert template_root(None) == tmp_path / "from-env"
+
+
+# --- character references ---------------------------------------------------
+
+
+def _write_character(root: Path, character_id: str, document: dict | None) -> Path:
+    persona = root / character_id / "persona.yaml"
+    persona.parent.mkdir(parents=True, exist_ok=True)
+    persona.write_text(f"id: {character_id}\nname: {character_id}\n", encoding="utf-8")
+    if document is not None:
+        import yaml
+
+        (persona.parent / "voice.yaml").write_text(
+            yaml.safe_dump(document, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
+    return persona
+
+
+def test_load_character_voice_returns_none_without_a_file(tmp_path):
+    persona = _write_character(tmp_path, "haru", None)
+
+    assert load_character_voice(persona) is None
+
+
+def test_load_character_voice_reads_the_template_name(tmp_path):
+    persona = _write_character(tmp_path, "haru", {"template": "murasame"})
+
+    assert load_character_voice(persona) == "murasame"
+
+
+def test_load_character_voice_rejects_a_self_contained_profile(tmp_path):
+    """The old form has no writer any more; seeing one means migration did not run."""
+
+    persona = _write_character(
+        tmp_path, "haru", {"ref_audio": "voice/x.wav", "ref_text": "你好"}
+    )
+
+    with pytest.raises(VoiceProfileError, match="invalid voice profile"):
+        load_character_voice(persona)
+
+
+def test_load_character_voice_requires_a_non_empty_name(tmp_path):
+    persona = _write_character(tmp_path, "haru", {"template": "   "})
+
+    with pytest.raises(VoiceProfileError, match="template is empty"):
+        load_character_voice(persona)
+
+
+def test_resolve_voice_registry_maps_a_character_onto_its_template(tmp_path):
+    _write_template(tmp_path / "voices", "murasame")
+    personas = tmp_path / "personas"
+    persona = _write_character(personas, "haru", {"template": "murasame"})
+
+    registry = resolve_voice_registry(
+        templates=discover_templates(tmp_path / "voices"),
+        character_voices=discover_character_voices([persona]),
+        default="murasame",
+    )
+
+    assert registry["haru"].ref_text == "你好，今天天气不错。"
+    assert registry["haru"].voice_id == "haru"   # the character id wins
+    assert registry["murasame"].voice_id == "murasame"  # the template stays addressable
+
+
+def test_resolve_voice_registry_raises_when_a_referenced_template_is_missing(tmp_path):
+    """A character that *has* a voice file but a dead reference is a config error."""
+
+    personas = tmp_path / "personas"
+    persona = _write_character(personas, "haru", {"template": "ghost"})
+
+    with pytest.raises(VoiceProfileError, match="haru references unknown template 'ghost'"):
+        resolve_voice_registry(
+            templates={},
+            character_voices=discover_character_voices([persona]),
+            default="murasame",
+        )
+
+
+def test_resolve_voice_registry_lets_a_character_override_the_template_models(tmp_path):
+    _write_template(tmp_path / "voices", "murasame", gpt_model="base.ckpt")
+    personas = tmp_path / "personas"
+    persona = _write_character(personas, "haru", {"template": "murasame"})
+
+    registry = resolve_voice_registry(
+        templates=discover_templates(tmp_path / "voices"),
+        character_voices=discover_character_voices([persona]),
+        default="murasame",
+    )
+
+    assert registry["haru"].gpt_model == "base.ckpt"

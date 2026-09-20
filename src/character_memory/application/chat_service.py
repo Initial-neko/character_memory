@@ -7,6 +7,7 @@ import threading
 
 from character_memory.application.clock import Clock
 from character_memory.domain.models import Event, EventType
+from character_memory.voice_message_fields import voice_fields
 
 
 logger = logging.getLogger("character_memory.application.chat")
@@ -286,6 +287,10 @@ class ChatService:
                     "image_label": event.metadata.get("image_label"),
                     "media_id": event.metadata.get("media_id"),
                     "media_name": event.metadata.get("media_name"),
+                    # Deliberately distinct keys from "media_id"/"media_name"
+                    # above, which drive image rendering. None for every
+                    # non-voice message.
+                    **voice_fields(event.metadata),
                     "source_event_type": event.metadata.get("source_event_type"),
                     "source_event_id": source_event_id,
                     "has_trace": source_event_id in trace_sources,

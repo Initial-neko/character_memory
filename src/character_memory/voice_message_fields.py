@@ -1,9 +1,11 @@
 """Canonical metadata keys for a persisted VOICE_MESSAGE.
 
-Three sites read these keys: the direct history payload, the group history
-payload, and the state-transition service. They share this one definition so a
-rename cannot drift between them -- a drifted key fails silently, dropping the
-audio reference on reload instead of raising.
+Four payload builders read these keys -- history_web's paged direct history,
+group_web's group history, api.message_payload (the legacy direct history and
+the character summaries) and ChatService.history -- and two runtime action loops
+write them, both through voice_pending_fields(). They share this one definition
+so a rename cannot drift between them: metadata carries no schema validation, so
+a drifted key drops the audio reference on reload instead of raising.
 """
 
 from __future__ import annotations

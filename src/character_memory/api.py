@@ -28,6 +28,7 @@ from character_memory.media import MediaStorage
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
 from character_memory.stickers import StickerTagSuggestion, import_sticker_bundle, load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
+from character_memory.voice_message_fields import voice_fields
 
 
 logger = logging.getLogger("character_memory.api")
@@ -311,6 +312,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "image_id": character_image_id,
             "media_id": media_id,
             "image": image,
+            # Deliberately a distinct key from "media_id" above, which drives
+            # image rendering. None for every non-voice message.
+            **voice_fields(event.metadata),
             "source_event_type": source_event_type,
             "source_event_id": source_event_id,
             "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,

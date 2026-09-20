@@ -9,6 +9,7 @@ EXPECTED_CORE_MIGRATIONS = [
     "core/003-mental-state-history",
     "core/004-runtime-trace-extraction",
     "core/005-indexes",
+    "core/006-memory-candidate-indexes",
 ]
 
 

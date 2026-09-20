@@ -369,7 +369,10 @@
       if (input.type === "checkbox") value = input.checked;
       else if (input.type === "number") value = input.value === "" ? null : Number(input.value);
       else value = input.value;
-      if (JSON.stringify(value) !== JSON.stringify(current[name])) values[name] = value;
+
+      const existing = current[name];
+      const equivalentBlank = value === "" && (existing === "" || existing === null || existing === undefined);
+      if (!equivalentBlank && JSON.stringify(value) !== JSON.stringify(existing)) values[name] = value;
     });
     return values;
   }
@@ -426,7 +429,7 @@
       } else if (result.changed) {
         const restart = result.restart_required || [];
         if (restart.length) {
-          showNotice(`配置已保存。以下字段需要重启对应 Runtime 才完全生效：${restart.join(", ")}。不需要重启整个 stack。`);
+          showNotice(`配置已保存。以下字段需要重启对应 Runtime 才完全生效：${restart.join(", ")}。无需重启整个 stack。`);
         } else {
           showNotice("配置已保存并已热生效，无需重启整个 stack。");
         }

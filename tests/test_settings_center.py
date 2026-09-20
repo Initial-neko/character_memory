@@ -648,6 +648,7 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     stack = Path("src/character_memory/dev_stack.py").read_text(encoding="utf-8")
     media = Path("src/character_memory/media_server.py").read_text(encoding="utf-8")
     settings_store = Path("src/character_memory/settings_store.py").read_text(encoding="utf-8")
+    registry = Path("src/character_memory/tts_registry.py").read_text(encoding="utf-8")
     settings_server = Path("src/character_memory/settings_server.py").read_text(encoding="utf-8")
     settings_js = Path("src/character_memory/web/settings.js").read_text(encoding="utf-8")
     chat = Path("src/character_memory/web/index.html").read_text(encoding="utf-8")
@@ -658,13 +659,14 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert 'choices=("dev", "chat", "settings", "tts")' in stack
     assert '"character_memory.settings_server"' in stack
     assert 'settings.tts_provider' in media
-    assert 'selected in {"kokoro", "edge", "gsv"}' in media
-    assert '"qwen3"' not in media
-    assert '"edge"' in media
-    assert '{"value": "edge", "label": "Microsoft Edge TTS (online)"}' in settings_store
-    assert '{"value": "gsv", "label": "GSV-TTS-Lite (local)"}' in settings_store
-    assert '"Qwen3-TTS 0.6B"' not in settings_store
-    assert 'FORMAL_TTS_PROVIDER_IDS = ("kokoro", "sherpa", "edge", "gsv")' in settings_server
+    assert 'FORMAL_TTS_PROVIDER_SET' in media
+    assert '"qwen3"' not in registry
+    assert 'id="edge"' in registry
+    assert 'label="Microsoft Edge TTS (online)"' in registry
+    assert 'id="gsv"' in registry
+    assert 'label="GSV-TTS-Lite (local)"' in registry
+    assert 'FORMAL_TTS_PROVIDERS' in settings_store
+    assert 'FORMAL_TTS_PROVIDER_IDS' in settings_server
     assert '/v1/providers/{provider_id}' in settings_server
     assert "health check did not pass" in settings_server
     assert "tts-health-status" in settings_js
@@ -674,6 +676,6 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert 'Cloud (Provider managed)' in settings_js
     assert "runtime_apply" in settings_js
     assert "需重启对应 TTS Runtime" in settings_js
-    assert "zh-CN-XiaoxiaoNeural" in settings_store
+    assert "zh-CN-XiaoxiaoNeural" in registry
     assert 'http://127.0.0.1:8003/settings' in chat
     assert 'http://127.0.0.1:8003/settings' in lab

@@ -121,4 +121,4 @@ def test_non_hot_local_device_change_is_explicitly_restart_required(page, settin
     page.locator("#setting-tts_device").select_option("cuda")
     page.locator("#saveSettings").click()
     expect(page.locator("#notice")).to_contain_text("重启对应 Runtime")
-    expect(page.locator("#notice")).not_to_contain_text("重启整个 stack")
+    expect(page.locator("#notice")).to_contain_text("无需重启整个 stack")

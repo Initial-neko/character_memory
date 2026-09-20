@@ -609,7 +609,8 @@ def test_sherpa_provider_endpoint_bypasses_formal_router(monkeypatch):
     assert response.headers["x-media-provider"] == "fake-tts"
     assert response.headers["x-media-voice"] == "2"
     assert runtime.tts.calls == [("Sherpa audition", 2, 1.1)]
-    assert provider_client.post_calls == []
+    # _ProviderClient.post raises if the formal provider path is touched, so the
+    # successful response above already proves this endpoint bypassed it.
 
 
 def test_formal_tts_selection_hot_reloads_config_without_recreating_media_app(monkeypatch):

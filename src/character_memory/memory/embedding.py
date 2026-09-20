@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import hashlib
 import logging
+import os
+from pathlib import Path
 import time
 
 import httpx
@@ -49,6 +51,10 @@ class SentenceTransformerEmbedding(EmbeddingProvider):
 
     def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5"):
         started = time.perf_counter()
+        # Setup and runtime must resolve the same cache in a fresh shell.
+        # An explicit deployment HF_HOME still wins.
+        project_root = Path(__file__).resolve().parents[3]
+        os.environ.setdefault("HF_HOME", str(project_root / "models" / "huggingface"))
         import_started = time.perf_counter()
         from sentence_transformers import SentenceTransformer
 

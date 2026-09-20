@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import os
+from pathlib import Path
 import sys
 from types import ModuleType
 
@@ -19,6 +21,7 @@ def test_vector_memory_roundtrip(tmp_path):
 
 def test_embedding_runtime_is_strict_local_only(monkeypatch):
     calls = []
+    monkeypatch.delenv("HF_HOME", raising=False)
 
     class FakeSentenceTransformer:
         def __init__(self, model_name, **kwargs):
@@ -35,6 +38,7 @@ def test_embedding_runtime_is_strict_local_only(monkeypatch):
     assert calls == [
         ("BAAI/bge-small-zh-v1.5", {"local_files_only": True})
     ]
+    assert Path(os.environ["HF_HOME"]).as_posix().endswith("models/huggingface")
 
 
 def test_memory_candidate_set_is_bounded_but_keeps_old_important_memory(tmp_path):

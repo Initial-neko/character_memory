@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
 
 DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"
 
 
 def main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    os.environ.setdefault("HF_HOME", str(root / "models" / "huggingface"))
     parser = argparse.ArgumentParser(description="Prefetch Character Memory's local embedding model.")
     parser.add_argument("--model", default=os.getenv("CHARACTER_EMBEDDING_MODEL", DEFAULT_MODEL))
     args = parser.parse_args()

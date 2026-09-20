@@ -136,10 +136,55 @@ def test_migrates_the_legacy_env_into_a_template(tmp_path):
     )
 
     assert report.created_templates == ["murasame"]
+    # The clip is copied in and referenced relatively, the same shape the
+    # character migration writes, so the template owns its audio and survives the
+    # legacy path being moved or cleaned up.
+    assert (voices / "murasame" / "ref.wav").read_bytes() == b"RIFF-env"
+    assert audio.exists()
     template = yaml.safe_load((voices / "murasame.yaml").read_text(encoding="utf-8"))
-    assert template["ref_audio"] == str(audio)
+    assert template["ref_audio"] == "murasame/ref.wav"
     assert template["ref_text"] == "参考文本"
     assert template["gpt_model"] is None      # inherits the shared base model
+
+    # Round trip through the reader, not just the raw YAML: a relative ref only
+    # becomes a real file again via the reader's resolution branch, which resolves
+    # it against the *template's* directory.
+    assert set(discover_templates(voices)) == {"murasame"}
+    assert Path(discover_templates(voices)["murasame"].ref_audio).is_file()
+
+
+def test_a_relative_legacy_env_reference_still_resolves_after_migration(tmp_path, monkeypatch):
+    """The env pair has really been configured with a relative path.
+
+    The 2026-09-19 spike runbook writes ``.pytest-tmp/gsv-spike/qwen3_ref.wav``,
+    so this is not hypothetical. The trap is that the two sides resolve a
+    relative path against different bases: the migration checks ``is_file()``
+    from the cwd, the reader resolves against the *template's* directory. Record
+    the env string verbatim and the result is a template the reader rejects --
+    and the repair never comes, because the next run finds the target present and
+    refuses to rewrite it.
+    """
+
+    monkeypatch.chdir(tmp_path)
+    voices = tmp_path / "voices"
+    (tmp_path / "spike").mkdir()
+    (tmp_path / "spike" / "qwen3_ref.wav").write_bytes(b"RIFF-env")
+
+    report = migrate_voices(
+        personas_root=tmp_path / "personas",
+        voices_root=voices,
+        legacy_env={
+            "GSV_TTS_REF_AUDIO": "spike/qwen3_ref.wav",
+            "GSV_TTS_REF_TEXT": "参考文本",
+            "GSV_TTS_VOICE": "murasame",
+        },
+        default_template="murasame",
+    )
+
+    assert report.created_templates == ["murasame"]
+    # ``discover_templates`` is the call the sidecar's startup makes; it raises if
+    # any template is unusable, so this is the start-up path, not a proxy for it.
+    assert Path(discover_templates(voices)["murasame"].ref_audio).is_file()
 
 
 def test_the_legacy_env_adopts_the_default_template_name_when_unnamed(tmp_path):
@@ -279,6 +324,134 @@ def test_a_colliding_env_name_does_not_overwrite_the_character_template(tmp_path
     assert template["ref_text"] == "你好，这是试听。"
     assert report.created_templates == ["haru"]
     assert any("already exists" in note for note in report.notes)
+
+
+def test_a_failed_env_template_write_is_a_note_rather_than_a_crash(tmp_path):
+    """The env side gets the same isolation the character side has.
+
+    A blocked write here used to travel out of ``migrate_voices`` into the
+    sidecar's constructor, i.e. no sidecar at all -- the exact failure mode this
+    module exists to remove.
+    """
+
+    voices = tmp_path / "voices"
+    audio = tmp_path / "ref.wav"
+    audio.write_bytes(b"RIFF-env")
+    voices.mkdir(parents=True)
+    (voices / "murasame").write_text("not a directory\n", encoding="utf-8")
+
+    report = migrate_voices(
+        personas_root=tmp_path / "personas",
+        voices_root=voices,
+        legacy_env={
+            "GSV_TTS_REF_AUDIO": str(audio),
+            "GSV_TTS_REF_TEXT": "参考文本",
+            "GSV_TTS_VOICE": "murasame",
+        },
+        default_template="murasame",
+    )
+
+    assert report.created_templates == []
+    assert any("murasame" in note and "failed" in note for note in report.notes)
+
+
+def test_an_unsafe_voice_id_is_noted_and_the_character_keeps_its_old_file(tmp_path):
+    """``voice_id`` comes from a file and becomes a path, so it is checked.
+
+    ``../escape`` would write outside ``voices/``. Refused with a note, and the
+    character's ``voice.yaml`` stays in the old form: turning it into a reference
+    to a template that was never written would be the stranded state this module
+    runs ahead of validation to avoid.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    persona = _legacy_character(personas, "haru")
+    voice_file = persona.parent / "voice.yaml"
+    document = yaml.safe_load(voice_file.read_text(encoding="utf-8"))
+    document["voice_id"] = "../escape"
+    voice_file.write_text(
+        yaml.safe_dump(document, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    before = voice_file.read_bytes()
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
+    assert report.created_templates == []
+    assert report.migrated_characters == []
+    assert any("not usable as a file name" in note for note in report.notes)
+    assert voice_file.read_bytes() == before
+    assert not (tmp_path / "escape.yaml").exists()
+    assert not (voices / "escape.yaml").exists()
+
+
+def test_a_failed_write_does_not_strand_the_other_characters(tmp_path):
+    """An unwritable template is one character's problem, not the whole tree's.
+
+    The failure is injected where it really happens rather than mocked: the copy
+    step creates ``voices/<voice_id>/``, and a *file* sitting at that path makes
+    the ``mkdir`` raise -- the same ``OSError`` class as a locked, read-only or
+    full disk.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    _legacy_character(personas, "a-haru")
+    _legacy_character(personas, "b-momo")
+    voices.mkdir(parents=True)
+    (voices / "a-haru").write_text("not a directory\n", encoding="utf-8")
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
+    assert report.created_templates == ["b-momo"]
+    assert report.migrated_characters == ["b-momo"]
+    assert any("a-haru" in note and "failed" in note for note in report.notes)
+    # Nothing was written for a-haru, so it keeps the old file instead of a
+    # reference to a template that is not on disk.
+    assert "template" not in yaml.safe_load(
+        (personas / "a-haru" / "voice.yaml").read_text(encoding="utf-8")
+    )
+
+
+def test_a_failed_reference_rewrite_still_reports_the_template_it_wrote(tmp_path):
+    """The template write and the reference write are separate steps for this case.
+
+    A template that landed has to appear in the report even when the reference
+    rewrite then failed, or a caller counting ``created_templates`` disagrees with
+    the disk. The blocker is real: a directory squatting on the temporary name the
+    atomic write uses, which is what a crashed editor session leaves behind.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    persona = _legacy_character(personas, "a-haru")
+    (persona.parent / "voice.yaml.tmp").mkdir()
+    _legacy_character(personas, "b-momo")
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
+    assert report.created_templates == ["a-haru", "b-momo"]
+    assert report.migrated_characters == ["b-momo"]
+    assert any("a-haru" in note and "failed" in note for note in report.notes)
+    assert (voices / "a-haru" / "abcdef0123456789.wav").is_file()
+    assert "template" not in yaml.safe_load(
+        (personas / "a-haru" / "voice.yaml").read_text(encoding="utf-8")
+    )
 
 
 def test_a_character_without_a_voice_file_is_silent(tmp_path):

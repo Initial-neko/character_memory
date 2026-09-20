@@ -24,7 +24,8 @@ the original per-persona audio directory all stay where they are, which is what
 keeps this reversible. The one file it does rewrite is the character's own
 ``voice.yaml`` -- it has to, since the old self-contained form is precisely what
 the strict reader refuses to load. That rewrite is the migration's whole point,
-not a side effect, and ``_write_reference`` is atomic so it cannot land half-written.
+not a side effect. Every write here -- template, copied audio, reference -- goes
+through a temporary name and a replace, so none of them can land half-written.
 """
 
 from __future__ import annotations
@@ -67,14 +68,21 @@ def _copy_audio(source: Path, voices_root: Path, name: str) -> str:
     """Copy a clip into the template's own directory and return the bare filename.
 
     Copied rather than moved: the persona tree is the user's, and a migration
-    that empties it is not reversible.
+    that empties it is not reversible. Written under a temporary name and
+    replaced, like the two YAML writers: a copy killed halfway would otherwise
+    leave a truncated WAV that every later run skips (the file exists) and the
+    reader accepts (it only asks ``is_file``), so the voice would clone from
+    broken audio for good.
     """
 
     target_dir = voices_root / name
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / source.name
-    if not target.exists():
-        shutil.copy2(source, target)
+    if target.exists():
+        return source.name
+    temp = target.with_suffix(".wav.tmp")
+    shutil.copy2(source, temp)
+    temp.replace(target)
     return source.name
 
 
@@ -156,32 +164,40 @@ def _migrate_character_clips(personas_root: Path, voices_root: Path, report: Mig
             report.notes.append(
                 f"{character_id}: template {profile.voice_id!r} already exists; left as it is"
             )
-            _write_reference(voice_path, profile.voice_id)
-            report.migrated_characters.append(character_id)
-            continue
+        else:
+            try:
+                filename = _copy_audio(Path(profile.ref_audio), voices_root, profile.voice_id)
+                _write_template(
+                    voices_root,
+                    profile.voice_id,
+                    {
+                        "voice_id": profile.voice_id,
+                        "ref_audio": f"{profile.voice_id}/{filename}",
+                        "ref_text": profile.ref_text,
+                        "gpt_model": profile.gpt_model,
+                        "sovits_model": profile.sovits_model,
+                        **{key: raw[key] for key in ("created_at", "instruct", "model") if key in raw},
+                    },
+                )
+            except OSError as exc:
+                # A locked or unwritable file must not strand every character
+                # after it: the rest of the tree still has to be reachable.
+                report.notes.append(f"{character_id}: failed ({exc})")
+                continue
+            # Recorded as soon as the template is on disk, before the reference
+            # rewrite below. If that rewrite fails, the template still exists and
+            # the report has to agree with the disk.
+            report.created_templates.append(profile.voice_id)
 
         try:
-            filename = _copy_audio(Path(profile.ref_audio), voices_root, profile.voice_id)
-            _write_template(
-                voices_root,
-                profile.voice_id,
-                {
-                    "voice_id": profile.voice_id,
-                    "ref_audio": f"{profile.voice_id}/{filename}",
-                    "ref_text": profile.ref_text,
-                    "gpt_model": profile.gpt_model,
-                    "sovits_model": profile.sovits_model,
-                    **{key: raw[key] for key in ("created_at", "instruct", "model") if key in raw},
-                },
-            )
             _write_reference(voice_path, profile.voice_id)
         except OSError as exc:
-            # A locked or unwritable file must not strand every character after
-            # it: the rest of the tree still has to be reachable afterwards.
+            # The two writes are separate steps so that this one -- the file a
+            # user is most likely to be holding open, since it is the one they
+            # would edit -- cannot take the remaining characters down with it.
             report.notes.append(f"{character_id}: failed ({exc})")
             continue
 
-        report.created_templates.append(profile.voice_id)
         report.migrated_characters.append(character_id)
 
 
@@ -211,20 +227,36 @@ def _migrate_legacy_env(
         report.notes.append(f"legacy voice name {name!r} is not usable as a file name")
         return
     if (voices_root / f"{name}.yaml").exists():
+        # Recorded, not silent: the target existing can also mean a character owns
+        # the name, in which case the legacy voice was *not* migrated and nothing
+        # else would say so. Either way it is never overwritten.
         report.notes.append(f"legacy env template {name!r} already exists; left as it is")
         return
 
-    _write_template(
-        voices_root,
-        name,
-        {
-            "voice_id": name,
-            "ref_audio": ref_audio,
-            "ref_text": ref_text,
-            "gpt_model": None,      # inherits the shared base model
-            "sovits_model": None,
-        },
-    )
+    try:
+        # Copied in and referenced relatively, the same shape the character
+        # migration writes. Recording the env string as given is a trap: the
+        # existence check above resolves a relative path against the *cwd*, while
+        # the reader resolves it against the *template's* directory -- so a
+        # relative env value would produce a template the reader rejects, and the
+        # branch above would then refuse to rewrite it on every later run.
+        filename = _copy_audio(Path(ref_audio), voices_root, name)
+        _write_template(
+            voices_root,
+            name,
+            {
+                "voice_id": name,
+                "ref_audio": f"{name}/{filename}",
+                "ref_text": ref_text,
+                "gpt_model": None,      # inherits the shared base model
+                "sovits_model": None,
+            },
+        )
+    except OSError as exc:
+        # Same reason as the character side: an unwritable ``voices/`` must not
+        # become a sidecar that will not start.
+        report.notes.append(f"legacy env template {name!r}: failed ({exc})")
+        return
     report.created_templates.append(name)
 
 

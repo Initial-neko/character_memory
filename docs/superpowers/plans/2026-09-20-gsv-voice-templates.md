@@ -305,10 +305,24 @@ from character_memory.voices import (
 )
 
 
-def _write_character(root: Path, character_id: str, document: dict | None) -> Path:
+def _write_character(
+    root: Path,
+    character_id: str,
+    document: dict | None,
+    *,
+    persona_id: str | None = None,
+) -> Path:
+    """``character_id`` names the directory; ``persona_id`` fills the ``id`` field.
+
+    They are separate parameters because they are separate things in the app, and
+    one case below depends on them disagreeing.
+    """
+
     persona = root / character_id / "persona.yaml"
     persona.parent.mkdir(parents=True, exist_ok=True)
-    persona.write_text(f"id: {character_id}\nname: {character_id}\n", encoding="utf-8")
+    persona.write_text(
+        f"id: {persona_id or character_id}\nname: {character_id}\n", encoding="utf-8"
+    )
     if document is not None:
         import yaml
 
@@ -373,7 +387,6 @@ def test_resolve_voice_registry_raises_when_a_referenced_template_is_missing(tmp
         resolve_voice_registry(
             templates={},
             character_voices=discover_character_voices([persona]),
-            default="murasame",
         )
 
 
@@ -391,6 +404,55 @@ def test_resolve_voice_registry_inherits_the_template_models(tmp_path):
     )
 
     assert registry["haru"].gpt_model == "base.ckpt"
+
+
+def test_discover_character_voices_keys_on_the_persona_id(tmp_path):
+    """The browser sends ``voice: <profile["id"]>`` -- the ``id`` field, not the
+    directory name. A registry keyed on the directory would never match that
+    request and the character would fall back to the default template in
+    silence, which is the failure this whole layer exists to prevent."""
+
+    personas = tmp_path / "personas"
+    persona = _write_character(
+        personas, "haru", {"template": "murasame"}, persona_id="haruka"
+    )
+
+    assert discover_character_voices([persona]) == {"haruka": "murasame"}
+
+
+def test_a_character_without_a_voice_file_stays_out_of_the_registry(tmp_path):
+    """The other half of spec 5.2: never given a voice is normal, not an error."""
+
+    personas = tmp_path / "personas"
+    persona = _write_character(personas, "haru", None)
+
+    assert discover_character_voices([persona]) == {}
+
+
+def test_load_character_voice_rejects_a_document_that_is_not_a_mapping(tmp_path):
+    """A list is the realistic typo (a stray ``- ``), and it must not read as
+    'no voice configured' -- that would be the silent fallback this forbids."""
+
+    persona = _write_character(tmp_path, "haru", None)
+    (persona.parent / "voice.yaml").write_text("- murasame\n", encoding="utf-8")
+
+    with pytest.raises(VoiceProfileError, match="expected a YAML mapping with a 'template' key"):
+        load_character_voice(persona)
+
+
+def test_discover_character_voices_rejects_two_personas_claiming_one_id(tmp_path):
+    """Two directories may declare the same ``id``, and the app keeps whichever
+    it finds first while dropping the rest. A voice cannot be attached to an id
+    two personas claim: whichever one won, the other would be silently wrong."""
+
+    personas = tmp_path / "personas"
+    first = _write_character(personas, "haru", {"template": "murasame"})
+    second = _write_character(
+        personas, "haru-alt", {"template": "murasame"}, persona_id="haru"
+    )
+
+    with pytest.raises(VoiceProfileError, match="duplicate character id 'haru'"):
+        discover_character_voices([first, second])
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -482,22 +544,58 @@ def load_character_voice(persona_path: str | Path) -> str | None:
     return name
 
 
+def _character_id(persona_path: Path) -> str:
+    """Resolve a character's id exactly as ``discover_character_profiles`` does.
+
+    The ``id`` field wins and the directory name is the fallback. It has to be
+    the *same expression* as ``config.py:180``, because the browser asks for a
+    voice by ``profile["id"]`` -- that field, not the directory. A registry
+    anchored on the directory name answers a question nobody asks for any
+    persona whose two disagree, and the character drops to the default template
+    without a word.
+
+    An unreadable persona document degrades to the directory name rather than
+    raising: whether a persona is usable is the persona loader's call to make
+    (``discover_character_profiles`` drops it), and this function has no
+    standing to fail the whole voice registry over it.
+    """
+
+    try:
+        data = yaml.safe_load(persona_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        data = None
+    if not isinstance(data, dict):
+        data = {}
+    return str(data.get("id") or persona_path.parent.name).strip()
+
+
 def discover_character_voices(
     persona_paths: Iterable[str | Path],
 ) -> dict[str, str]:
     """Build ``{character_id: template_name}`` for every persona that names one.
 
-    The character id is the persona directory name -- the same anchor
-    ``discover_character_profiles`` uses -- because the sidecar globs
-    ``*/persona.yaml`` and has no other identifier to hand.
+    ``persona_paths`` are ``*/persona.yaml`` paths, the same set the app
+    discovers. The key is the character's id per :func:`_character_id`, which is
+    what the browser sends; a character with no ``voice.yaml`` is simply absent,
+    and one whose ``voice.yaml`` is unusable raises from
+    :func:`load_character_voice` before this function has an id to key on.
     """
 
     references: dict[str, str] = {}
     for persona_path in persona_paths:
+        persona_path = Path(persona_path)
         name = load_character_voice(persona_path)
         if name is None:
             continue
-        character_id = Path(persona_path).parent.name
+        character_id = _character_id(persona_path)
+        if not character_id:
+            # Reachable only when the ``id`` field is present but blank, since
+            # the directory name is the fallback. ``discover_character_profiles``
+            # drops that character entirely, so there is nothing for a voice to
+            # attach to -- and failing loud beats registering an unreachable key.
+            raise VoiceProfileError(
+                f"{persona_path}: persona id is empty; omit it to default to the directory name"
+            )
         previous = references.get(character_id)
         if previous is not None:
             raise VoiceProfileError(
@@ -544,7 +642,7 @@ def resolve_voice_registry(
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_voices_templates.py -q --no-header`
-Expected: 15 passed（Task 1 遗留 8 条 + 本任务新增 7 条；早先写的「14」是把本文件的模板侧用例少算了一条）
+Expected: 19 passed（Task 1 遗留 8 条 + 本任务 11 条。计数四度改过，每次都记在这里免得下一个人以为是自己数错：先写「14」（漏算本文件的模板侧用例），改「15」；id 锚点从目录名改为 `id` 字段时补两条（id 定 key、无 voice.yaml 不进注册表）；审查又指出角色侧三条新错误串与重复 id 分支全无覆盖，再补两条（非 mapping 文档、两个 persona 抢同一个 id））
 
 - [ ] **Step 5: 提交**
 
@@ -1324,6 +1422,20 @@ Task 1 的审查发现计划漏了这一步：全局约束要求 `GSV_TTS_VOICES
         gsv_env.setdefault("GSV_TTS_VOICES_ROOT", str(ROOT / "voices"))
 ```
 
+- [ ] **Step 3c: 先把 `voices/` 加进 `.gitignore`**
+
+这一步原先在 Task 12。挪到这里，因为**本任务是 `voices/` 第一次能在磁盘上真实出现的地方**：`migrate_if_needed` 在 `GsvTtsRuntime.__init__` 里跑，而 Task 4 之后每一步 UI 验证（设置页、drawer、TTS Lab）都要起 stack——每次都会真的建出 `voices/` 并复制 WAV 进去。全局约束要求 `voices/` 整体 gitignore，而一条全局约束应当在违反它的可能性出现**之前**就位，不是等到最后。
+
+在 `.gitignore` 的 `personas/character-*/` 规则附近加：
+
+```
+# Voice templates own the reference clips; they are local assets, not source.
+# personas/<id>/voice.yaml stays tracked -- that is configuration, not audio.
+voices/
+```
+
+**验证忽略真的生效时别被骗**：`git check-ignore -v voices/` 对一个「带尾斜杠且尚不存在」的路径会返回 rc=0 并印出一个空 pattern 行，看起来像「已忽略」。要问具体文件：`git check-ignore -v voices/murasame.yaml` —— 规则生效时它才给出真正的答案（rc=0 且印出 `voices/` 这条 pattern；未生效则 rc=1）。
+
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_gsv_voice_templates.py tests/test_gsv_tts_experiment.py tests/test_voices.py -q --no-header`
@@ -1332,7 +1444,7 @@ Expected: 新增 7 passed；既有测试若因 `_asset_status` 语义变更而�
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/character_memory/gsv_tts_experiment.py src/character_memory/dev_stack.py tests/test_gsv_voice_templates.py
+git add .gitignore src/character_memory/gsv_tts_experiment.py src/character_memory/dev_stack.py tests/test_gsv_voice_templates.py
 git commit -m "Load templates and character references into the GSV registry"
 ```
 
@@ -3064,22 +3176,13 @@ git commit -m "Offer saving a template and warn before overwriting a shared one"
 ### Task 12: 文档与 `.gitignore`
 
 **Files:**
-- Modify: `.gitignore`
 - Modify: `docs/current/GSV_TTS_EXPERIMENT.md`
 - Modify: `src/character_memory/voices.py`（模块 docstring）
 - Modify: `scripts/start-gsv-tts.sh`（钉 `GSV_TTS_VOICES_ROOT` 绝对路径）
 
-- [ ] **Step 1: 加 gitignore 规则**
+> `.gitignore` 的 `voices/` 规则已在 Task 4 Step 3c 落地（那里是 `voices/` 第一次能在磁盘上真实出现的地方）。本任务不再重复。
 
-在 `.gitignore` 的 `personas/character-*/` 规则附近加：
-
-```
-# Voice templates own the reference clips; they are local assets, not source.
-# personas/<id>/voice.yaml stays tracked -- that is configuration, not audio.
-voices/
-```
-
-- [ ] **Step 2: 启动脚本钉绝对路径**
+- [ ] **Step 1: 启动脚本钉绝对路径**
 
 `scripts/start-gsv-tts.sh` 里，紧挨既有的 `GSV_TTS_PERSONA_ROOT` 导出处加：
 
@@ -3089,9 +3192,9 @@ voices/
 export GSV_TTS_VOICES_ROOT="${GSV_TTS_VOICES_ROOT:-$(cd "$(dirname "$0")/.." && pwd)/voices}"
 ```
 
-- [ ] **Step 3: 文档**
+- [ ] **Step 2: 文档**
 
-**(a)** `src/character_memory/voices.py` 的模块 docstring 现在只描述了 per-character 的世界（「`voice.yaml` sits next to a character's `persona.yaml`」）。Task 1 让这个模块变成两棵树——模板与角色引用——但没人认领这段 docstring，所以它现在是错的。改写为：模块同时承载模板（`voices/<名>.yaml`，持有参考音频与文本，是声音的唯一载体）与角色引用（`personas/<id>/voice.yaml`，只有一行 `template: <名>`）；保留「缺失静默降级、非法大声报错」这条原则，并说明两棵树在加载期合并成一个注册表。
+**(a)** `src/character_memory/voices.py` 的模块 docstring 现在只描述了 per-character 的世界（「`voice.yaml` sits next to a character's `persona.yaml`」）。Task 1 让这个模块变成两棵树——模板与角色引用——但没人认领这段 docstring，所以它现在是错的。改写为：模块同时承载模板（`voices/<名>.yaml`，持有参考音频与文本，是声音的唯一载体）与角色引用（`personas/<id>/voice.yaml`，只有一行 `template: <名>`）；保留「缺失静默降级、非法大声报错」这条原则，并说明两棵树在加载期合并成一个注册表。**另需写明一件不显然的事**：本模块为了给角色引用定 key，会读一次 `persona.yaml` 的 `id` 字段（`_character_id`，逻辑与 `config.py:180` 同一行）——即这个模块读的不只是 voice 文档。不写下来，下一个人会觉得越界。
 
 **(b)** `docs/current/GSV_TTS_EXPERIMENT.md` 加一节说明：
 - 音色现在是模板（`voices/<名>.yaml`），角色只引用（`personas/<id>/voice.yaml: template: <名>`）
@@ -3100,17 +3203,17 @@ export GSV_TTS_VOICES_ROOT="${GSV_TTS_VOICES_ROOT:-$(cd "$(dirname "$0")/.." && 
 - 迁移**必须跑在严格校验之前**，以及为什么
 - **`tts_voice` 改不了默认音色**（spec §6.3）：它是跨 provider 字段（kokoro 的音色名、sherpa 的 speaker id、gsv 的音色名），本次不动。在 gsv 路径上，浏览器总会发 `voice: <角色id>`，sidecar 解析失败后落到**默认模板**——所以决定「没配声音的角色用什么」的是 `GSV_TTS_VOICE`，不是 `tts_voice`。写进文档，免得将来有人改错了地方还查不出原因。
 
-- [ ] **Step 4: 全量测试**
+- [ ] **Step 3: 全量测试**
 
 Run: `uv run pytest -q --no-header`
 Expected: **0 failed**，且 skipped 只有 5 条（`RUN_PLAYWRIGHT=1` 门控的那几条）。
 
 别拿一个固定数字当预期：本任务是最后一个，前面 Task 3-11 各自都在加用例，任何写死的总数到这一步都是错的（本计划早先写的「基线 480」在 Task 2 结束时实测已是 486 passed / 5 skipped）。要盯的是**没有 failed、skipped 不多不少**。
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 4: 提交**
 
 ```bash
-git add .gitignore scripts/start-gsv-tts.sh docs/current/GSV_TTS_EXPERIMENT.md src/character_memory/voices.py
+git add scripts/start-gsv-tts.sh docs/current/GSV_TTS_EXPERIMENT.md src/character_memory/voices.py
 git commit -m "Document the template model and pin the voices root"
 ```
 

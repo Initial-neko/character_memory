@@ -60,6 +60,27 @@ def test_load_template_rejects_empty_ref_text(tmp_path):
         load_template(path)
 
 
+def test_load_template_distinguishes_absent_voice_id_from_an_empty_one(tmp_path):
+    """Absent means "derive it", explicitly empty is malformed.
+
+    A template's identity is its file stem, so omitting ``voice_id`` is a
+    normal, supported shape and must keep loading. Spelling the key out and
+    leaving it blank is a different document -- a malformed one -- and has to
+    be as loud here as it is in ``load_voice_profile``. Both readers share
+    ``_VoiceDocument``; disagreeing about one field is exactly the silent
+    reader/writer drift this module has already shipped once.
+    """
+
+    empty = _write_template(tmp_path, "blank", voice_id="   ")
+    with pytest.raises(VoiceProfileError, match="voice_id is empty"):
+        load_template(empty)
+
+    absent = _write_template(tmp_path, "haru")
+    profile = load_template(absent)
+
+    assert profile.voice_id == "haru"
+
+
 def test_load_template_rejects_unknown_fields(tmp_path):
     """A typo must stay loud: sovits_mdoel would otherwise inherit the global model."""
 

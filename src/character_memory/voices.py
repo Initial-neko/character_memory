@@ -141,7 +141,18 @@ def load_template(path: str | Path) -> VoiceProfile:
             f"{path}: invalid voice profile: {_describe_validation_error(exc)}"
         ) from exc
 
-    voice_id = (document.voice_id or "").strip() or path.stem
+    if document.voice_id is None:
+        # Absent is normal: a template's identity is its filename.
+        voice_id = path.stem
+    else:
+        voice_id = document.voice_id.strip()
+    if not voice_id:
+        # Explicitly empty is a malformed document, not a missing one -- the
+        # same line the per-character loader draws. Two readers sharing
+        # ``_VoiceDocument`` must not disagree about one field.
+        raise VoiceProfileError(
+            f"{path}: voice_id is empty; omit it to default to the template file name"
+        )
 
     raw_audio = (document.ref_audio or "").strip()
     if not raw_audio:

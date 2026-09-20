@@ -1,0 +1,16 @@
+.voice-editable { cursor: pointer; }
+.voice-editable:hover { text-decoration: underline dotted; }
+
+.voice-panel { display: flex; flex-direction: column; gap: 14px; }
+.voice-panel-status { display: flex; align-items: center; gap: 8px; }
+.voice-panel-badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid currentColor; }
+.voice-panel-badge[data-status="set"] { color: #3f9c5a; }
+.voice-panel-badge[data-status="unset"] { color: #888; }
+.voice-panel-badge[data-status="missing"],
+.voice-panel-badge[data-status="error"] { color: #c0392b; }
+.voice-panel-current { font-weight: 600; }
+.voice-panel-error { color: #c0392b; margin: 0; }
+.voice-panel-shared { color: #b7791f; margin: 0; }
+.voice-panel-picker { display: flex; flex-direction: column; gap: 6px; }
+.voice-panel-actions { display: flex; align-items: center; gap: 12px; }
+.voice-panel-result { margin: 0; color: #888; }

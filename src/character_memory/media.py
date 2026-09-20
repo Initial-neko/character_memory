@@ -15,6 +15,8 @@ _MIME_TO_EXT = {
     "image/png": ".png",
     "image/gif": ".gif",
     "image/webp": ".webp",
+    "audio/wav": ".wav",
+    "audio/mpeg": ".mp3",
 }
 
 
@@ -30,11 +32,11 @@ class MediaAsset(BaseModel):
 
 
 class MediaStorage:
-    """Small local image store for chat and generated visual assets.
+    """Small local media store for chat and generated visual assets (images and voice clips).
 
     The browser sends a base64 data URL so FastAPI does not need multipart
     dependencies. Generated provider bytes are normalized through the same gate.
-    Raw image bytes never go into SQLite or Runtime Trace.
+    Raw media bytes never go into SQLite or Runtime Trace.
     """
 
     def __init__(self, root: str | Path, *, max_bytes: int = 8 * 1024 * 1024):
@@ -49,8 +51,16 @@ class MediaStorage:
             return "image/jpeg"
         if data.startswith((b"GIF87a", b"GIF89a")):
             return "image/gif"
+        # RIFF carries both WebP and WAV; only bytes 8:12 separate them.
         if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
             return "image/webp"
+        if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WAVE":
+            return "audio/wav"
+        # Edge TTS emits MP3 either with an ID3v2 tag or as a bare MPEG frame.
+        if data.startswith(b"ID3"):
+            return "audio/mpeg"
+        if len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
+            return "audio/mpeg"
         return None
 
     def save_bytes(
@@ -64,12 +74,12 @@ class MediaStorage:
     ) -> MediaAsset:
         data = bytes(payload or b"")
         if not data:
-            raise ValueError("image is empty")
+            raise ValueError("media is empty")
         if len(data) > self.max_bytes:
-            raise ValueError(f"image exceeds {self.max_bytes // (1024 * 1024)} MiB limit")
+            raise ValueError(f"media exceeds {self.max_bytes // (1024 * 1024)} MiB limit")
         mime_type = self._sniff_mime(data)
         if mime_type is None:
-            raise ValueError("unsupported image format; use JPEG, PNG, GIF or WebP")
+            raise ValueError("unsupported media format; use JPEG, PNG, GIF, WebP, WAV or MP3")
         media_id = uuid.uuid4().hex
         storage_name = f"{media_id}{_MIME_TO_EXT[mime_type]}"
         self.root.mkdir(parents=True, exist_ok=True)
@@ -97,11 +107,11 @@ class MediaStorage:
     ) -> tuple[MediaAsset, str]:
         match = _DATA_URL_RE.match((data_url or "").strip())
         if match is None:
-            raise ValueError("image must be a base64 data URL")
+            raise ValueError("media must be a base64 data URL")
         try:
             data = base64.b64decode(match.group(2), validate=True)
         except ValueError as exc:
-            raise ValueError("image base64 is invalid") from exc
+            raise ValueError("media base64 is invalid") from exc
         asset = self.save_bytes(
             character_id=character_id,
             original_name=original_name,

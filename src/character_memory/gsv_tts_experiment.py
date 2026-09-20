@@ -181,7 +181,12 @@ class GsvTtsRuntime:
         self.persona_root = _persona_root(persona_root)
         self.voices_root = _voices_root(voices_root)
         # An injected registry is authoritative: embedders and tests supply one
-        # rather than depending on whatever happens to be on disk.
+        # rather than depending on whatever happens to be on disk. With no
+        # template tree to read, every injected name counts as a template --
+        # nothing else can tell them apart, and only the Settings Center
+        # selector reads the distinction (``_voice_ids``). ``_load_voices``
+        # overwrites this from the tree it actually found.
+        self._templates: dict[str, VoiceProfile] = dict(voices or {})
         self._voices: dict[str, VoiceProfile] = (
             dict(voices) if voices is not None else self._load_voices()
         )
@@ -203,13 +208,26 @@ class GsvTtsRuntime:
         """
         personas = Path(self.persona_root)
         persona_paths = sorted(personas.glob("*/persona.yaml")) if personas.exists() else []
+        templates = discover_templates(self.voices_root)
+        # The template-only map is kept alongside the merged one because
+        # ``status()["voices"]`` feeds the Settings Center selector, and
+        # ``GSV_TTS_VOICE`` must name a template: a character id is resolvable on
+        # the request path but is not a valid value for the setting, and it can
+        # shadow a template name in the merged registry.
+        self._templates = templates
         return resolve_voice_registry(
-            templates=discover_templates(self.voices_root),
-            character_voices=discover_character_voices(persona_paths),
+            templates=templates,
+            character_voices=discover_character_voices(
+                persona_paths, voices_root=self.voices_root
+            ),
         )
 
     def reload_voices(self) -> dict:
-        """Re-read the persona voice manifests in place.
+        """Re-read the template tree and the character references in place.
+
+        Both trees feed one registry, so they are reloaded together: refreshing
+        only one of them would leave a template that is newer than the
+        characters pointing at it.
 
         Deliberately does not touch the engine: the GPT/SoVITS weights and the
         warm speaker cache stay resident, and a newly added reference clip is
@@ -220,8 +238,15 @@ class GsvTtsRuntime:
             return self.status()
 
     def _voice_ids(self) -> list[str]:
-        """Registered ids, plus ``default_voice`` -- which need not be registered."""
-        voices = list(self._voices)
+        """Template names, plus ``default_voice`` -- which need not be registered.
+
+        Templates only, not the merged registry's keys: this list is the Settings
+        Center ``GSV_TTS_VOICE`` selector, and that setting must name a template
+        (spec §6.2). A character id resolves on the request path but is not a
+        legal value here, and offering it would let an id that shadows a
+        template mean something different from the template it hides.
+        """
+        voices = list(self._templates)
         if self.default_voice not in voices:
             voices.append(self.default_voice)
         return voices

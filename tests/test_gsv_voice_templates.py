@@ -12,13 +12,22 @@ from character_memory.gsv_tts_experiment import GsvTtsRuntime, create_gsv_tts_ap
 
 
 def _template(root: Path, name: str) -> None:
+    """Write a template the way production does: clip beside it, named relatively.
+
+    Relative is the write contract -- the freeze route puts the clip in the
+    template's own directory and names it from there -- so that is the form the
+    readers' anchor (the document's parent) has to be tested against. The
+    absolute form stays covered by ``tests/test_voices_templates.py``; writing
+    both here would leave neither shape pinned.
+    """
+
     audio = root / name / "clip.wav"
     audio.parent.mkdir(parents=True, exist_ok=True)
     audio.write_bytes(b"RIFF")
     root.mkdir(parents=True, exist_ok=True)
     (root / f"{name}.yaml").write_text(
         yaml.safe_dump(
-            {"ref_audio": str(audio), "ref_text": f"{name} 的参考文本"},
+            {"ref_audio": f"{name}/{audio.name}", "ref_text": f"{name} 的参考文本"},
             allow_unicode=True,
             sort_keys=False,
         ),
@@ -187,3 +196,6 @@ def test_a_pre_template_voice_file_refuses_to_start_the_sidecar(tmp_path):
     assert str(voice_file) in message
     assert "no longer read" in message
     assert "template" in message
+    # ... and the way out names the template root this runtime actually reads,
+    # not the module-level default.
+    assert str(tmp_path / "voices") in message

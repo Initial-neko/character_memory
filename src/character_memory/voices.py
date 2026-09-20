@@ -337,13 +337,20 @@ class _CharacterVoiceDocument(BaseModel):
     template: str
 
 
-def load_character_voice(persona_path: str | Path) -> str | None:
+def load_character_voice(
+    persona_path: str | Path, *, voices_root: str | Path | None = None
+) -> str | None:
     """Return the template a character references, or ``None`` when it has none.
 
     ``None`` is the normal case and means "this character was never given a
     voice"; the caller degrades to the default template. A file that exists but
     cannot be trusted raises: the user configured this character deliberately,
     and silently falling back would make a wrong voice hard to notice.
+
+    ``voices_root`` is the caller's own template directory and is used *only* to
+    name the fix in the pre-template error. A reader that says "put a template
+    under voices" while its caller reads somewhere else sends the operator to a
+    directory nothing will ever look at, so the caller passes what it reads.
     """
 
     persona_path = Path(persona_path)
@@ -371,7 +378,7 @@ def load_character_voice(persona_path: str | Path) -> str | None:
         if "ref_audio" in str(exc) or "ref_text" in str(exc):
             raise VoiceProfileError(
                 f"{exc}; this is the pre-template form, which is no longer read -- "
-                f"move the clip into a template under {template_root()} and leave "
+                f"move the clip into a template under {template_root(voices_root)} and leave "
                 f"only 'template: <name>' in this file"
             ) from exc
         raise
@@ -409,6 +416,8 @@ def _character_id(persona_path: Path) -> str:
 
 def discover_character_voices(
     persona_paths: Iterable[str | Path],
+    *,
+    voices_root: str | Path | None = None,
 ) -> dict[str, str]:
     """Build ``{character_id: template_name}`` for every persona that names one.
 
@@ -417,6 +426,7 @@ def discover_character_voices(
     what the browser sends; a character with no ``voice.yaml`` is simply absent,
     and one whose ``voice.yaml`` is unusable raises from
     :func:`load_character_voice` before this function has an id to key on.
+    ``voices_root`` is passed straight through to that reader.
 
     The line between raising and skipping is *discoverability*: raise when a
     character the app will show could get the wrong voice (the duplicate id
@@ -426,7 +436,7 @@ def discover_character_voices(
     references: dict[str, str] = {}
     for persona_path in persona_paths:
         persona_path = Path(persona_path)
-        name = load_character_voice(persona_path)
+        name = load_character_voice(persona_path, voices_root=voices_root)
         if name is None:
             continue
         character_id = _character_id(persona_path)

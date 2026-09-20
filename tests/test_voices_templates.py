@@ -168,14 +168,19 @@ def test_load_character_voice_rejects_a_self_contained_profile(tmp_path):
     persona = _write_character(
         tmp_path, "haru", {"ref_audio": "voice/x.wav", "ref_text": "你好"}
     )
+    voices_root = tmp_path / "explicit-voices"
 
     with pytest.raises(VoiceProfileError) as excinfo:
-        load_character_voice(persona)
+        load_character_voice(persona, voices_root=voices_root)
 
     message = str(excinfo.value)
     assert "invalid voice profile" in message
     assert str(persona.parent / "voice.yaml") in message
     assert "template" in message and "no longer read" in message
+    # The advice has to name the directory *this* reader was given. Falling back
+    # to the module-level default points at a different tree whenever the caller
+    # passed its own root -- which is what the sidecar does.
+    assert str(voices_root) in message
 
 
 def test_load_character_voice_requires_a_non_empty_name(tmp_path):

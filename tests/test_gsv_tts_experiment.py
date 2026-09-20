@@ -611,6 +611,7 @@ def _write_persona(
     ref_text: str = "参考文本。",
     gpt_model: str | None = None,
     sovits_model: str | None = None,
+    template: str | None = None,
 ) -> Path:
     """Write a real ``personas/<id>/`` tree and the template it names.
 
@@ -622,6 +623,10 @@ def _write_persona(
     persona without a ``voice.yaml`` (the normal case for most characters) and
     therefore no template either.
 
+    ``template=`` points the character at a template that already exists instead
+    of writing one of its own, which is the only shape where the character id
+    and the template name differ.
+
     The templates root is ``root``'s sibling, which is what ``_Rig`` pins as its
     default ``voices_root``.
     """
@@ -630,6 +635,11 @@ def _write_persona(
     (directory / "persona.yaml").write_text(
         f"id: {character_id}\nname: {character_id}\n", encoding="utf-8"
     )
+    if template is not None:
+        (directory / "voice.yaml").write_text(
+            yaml.safe_dump({"template": template}, sort_keys=False), encoding="utf-8"
+        )
+        return directory
     if ref_audio is None:
         return directory
 
@@ -704,13 +714,16 @@ class _Rig:
             "device": "cpu",
             "default_voice": "murasame",
             "tts_factory": _recording_engine(self.calls),
-            # Both roots are pinned to the tmp tree because the module defaults
-            # ("personas", "voices") are *relative*: they resolve against the
-            # cwd -- the repo root under pytest. A test that inherited them would
-            # read the developer's real trees instead of the one it just wrote,
-            # which is order-dependent on their data, and one that writes
-            # templates would write them into their workspace.
-            "persona_root": _persona_root(tmp_path),
+            # The voices root is pinned to the tmp tree because the module
+            # default ("voices") is *relative*: it resolves against the cwd --
+            # the repo root under pytest. A test that inherited it would read
+            # the developer's real tree instead of the one it just wrote, which
+            # is order-dependent on their data, and one that writes templates
+            # would write them into their workspace.
+            #
+            # ``persona_root`` is deliberately *not* defaulted here: the caller
+            # passes the tree it wrote, and the one test that means to read
+            # ``GSV_TTS_PERSONA_ROOT`` instead must reach the environment.
             "voices_root": _voices_root(tmp_path),
         }
         kwargs.update(overrides)
@@ -913,6 +926,28 @@ def test_gsv_status_lists_every_registered_voice_and_always_the_default(tmp_path
     assert registered_default.runtime.status()["voices"].count("momo") == 1
 
 
+def test_gsv_status_offers_template_names_not_character_ids(tmp_path):
+    """``GSV_TTS_VOICE`` must name a template, so the selector must list only those.
+
+    A character id is a perfectly good *request* voice (the browser sends one for
+    every character), but it is not a valid value for the setting -- and since a
+    character can shadow a template of the same name in the merged registry,
+    offering ids here would let the two mean different things. Spec §6.2.
+    """
+    personas = _persona_root(tmp_path)
+    default_clip = _write_template(tmp_path, "murasame")
+    _write_persona(personas, "momo", template="murasame")
+
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    assert rig.runtime.status()["voices"] == ["murasame"]
+
+    # ... while the character id still resolves on the request path.
+    result, infer = rig.synthesize(voice="momo")
+    assert result.voice == "momo"
+    assert infer["spk_audio_paths"] == default_clip
+
+
 def test_gsv_voice_reload_adds_profiles_without_rebuilding_the_engine(tmp_path):
     """Reload re-reads files; it must not touch VRAM.
 
@@ -965,11 +1000,18 @@ def test_gsv_configure_request_model_does_not_accept_a_voices_field():
 
 
 def test_gsv_runtime_reads_the_persona_root_from_the_environment(tmp_path, monkeypatch):
-    """The stack and start script point the sidecar at an absolute personas dir."""
-    personas = _persona_root(tmp_path)
+    """The stack and start script point the sidecar at an absolute personas dir.
+
+    The directory the env names is deliberately *not* ``_Rig``'s own: if the rig
+    supplied a persona root of its own, this would hold whether or not the
+    environment was ever consulted, which is exactly how the env branch lost its
+    coverage once already.
+    """
+    personas = tmp_path / "env-personas"
     _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="桃子。")
     monkeypatch.setenv("GSV_TTS_PERSONA_ROOT", str(personas))
 
     rig = _Rig(tmp_path)
 
+    assert rig.runtime.persona_root == str(personas)
     assert "momo" in rig.runtime.status()["voices"]

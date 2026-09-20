@@ -1352,6 +1352,7 @@ def test_gsv_payload_fills_a_default_template_name_when_unset():
     payload = build_gsv_payload({})
 
     assert payload["voice"] == "murasame"
+```
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -2989,6 +2990,7 @@ git commit -m "Offer saving a template and warn before overwriting a shared one"
 **Files:**
 - Modify: `.gitignore`
 - Modify: `docs/current/GSV_TTS_EXPERIMENT.md`
+- Modify: `src/character_memory/voices.py`（模块 docstring）
 - Modify: `scripts/start-gsv-tts.sh`（钉 `GSV_TTS_VOICES_ROOT` 绝对路径）
 
 - [ ] **Step 1: 加 gitignore 规则**
@@ -3013,7 +3015,9 @@ export GSV_TTS_VOICES_ROOT="${GSV_TTS_VOICES_ROOT:-$(cd "$(dirname "$0")/.." && 
 
 - [ ] **Step 3: 文档**
 
-`docs/current/GSV_TTS_EXPERIMENT.md` 加一节说明：
+**(a)** `src/character_memory/voices.py` 的模块 docstring 现在只描述了 per-character 的世界（「`voice.yaml` sits next to a character's `persona.yaml`」）。Task 1 让这个模块变成两棵树——模板与角色引用——但没人认领这段 docstring，所以它现在是错的。改写为：模块同时承载模板（`voices/<名>.yaml`，持有参考音频与文本，是声音的唯一载体）与角色引用（`personas/<id>/voice.yaml`，只有一行 `template: <名>`）；保留「缺失静默降级、非法大声报错」这条原则，并说明两棵树在加载期合并成一个注册表。
+
+**(b)** `docs/current/GSV_TTS_EXPERIMENT.md` 加一节说明：
 - 音色现在是模板（`voices/<名>.yaml`），角色只引用（`personas/<id>/voice.yaml: template: <名>`）
 - 设置页 GSV 段从 5 个字段减到 3 个
 - legacy env 与旧的每角色参考音频由一次性迁移搬到 `voices/`，`.env` 里的旧键不再生效、可删
@@ -3028,7 +3032,7 @@ Expected: 全 passed（基线 480 + 新增约 75 条用例，含参数化）
 - [ ] **Step 5: 提交**
 
 ```bash
-git add .gitignore scripts/start-gsv-tts.sh docs/current/GSV_TTS_EXPERIMENT.md
+git add .gitignore scripts/start-gsv-tts.sh docs/current/GSV_TTS_EXPERIMENT.md src/character_memory/voices.py
 git commit -m "Document the template model and pin the voices root"
 ```
 

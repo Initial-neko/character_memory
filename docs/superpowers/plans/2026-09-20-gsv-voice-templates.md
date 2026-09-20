@@ -494,7 +494,7 @@ def _read_document(path, model, *, unreadable, empty) -> BaseModel:
 - `raw is None` 与「不是 mapping」的两种分支（各调用方文案不同，用参数传）
 - `model_validate` + `ValidationError` 包装
 
-三个调用方各自只留**真正属于自己**的部分：读哪个路径、缺省 `voice_id` 从哪来（模板是 `path.stem`、角色是父目录名）、以及返回什么（`VoiceProfile` 还是模板名字符串）。文件不存在时的行为也不同（`load_template` 抛错、`load_voice_profile` 返回 `None`、`load_character_voice` 返回 `None`），这部分**留在各调用方**，不进 helper。
+三个调用方各自只留**真正属于自己**的部分：读哪个路径、缺省 `voice_id` 从哪来（模板是 `path.stem`；角色不是文件名也不是目录名，而是 persona 的 `id` 字段，目录名只作缺 `id` 时的 fallback——见 Step 3 的 `_character_id`）、以及返回什么（`VoiceProfile` 还是模板名字符串）。文件不存在时的行为也不同（`load_template` 抛错、`load_voice_profile` 返回 `None`、`load_character_voice` 返回 `None`），这部分**留在各调用方**，不进 helper。
 
 **硬约束：既有错误文案逐字节不变。** 回归闸门是
 
@@ -513,12 +513,11 @@ logger = logging.getLogger("character_memory.voices")
 
 命名沿用仓库约定 `character_memory.<模块名>`（Task 4 会在 `gsv_tts_experiment.py` 加同形的 logger）。
 
+`CHARACTER_VOICE_FILENAME` 定义在文件顶部 `TEMPLATE_FILE_SUFFIX` **旁边**，不要放进下面的追加块：`load_voice_profile` 在追加块之前就已经用了这个常量（`voices.py:253`），留在末尾读起来是前向引用（Task 2 审查 Minor 6 指出的就是这个）。整个模块只定义一次。
+
 追加到 `src/character_memory/voices.py` 末尾：
 
 ```python
-CHARACTER_VOICE_FILENAME = "voice.yaml"
-
-
 class _CharacterVoiceDocument(BaseModel):
     """Raw shape of a character's ``voice.yaml``: a reference and nothing else.
 

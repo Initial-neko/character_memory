@@ -689,10 +689,14 @@ git commit -m "Resolve character voice references against the template registry"
 **Interfaces:**
 - Consumes: Task 1 的 `discover_templates` / `template_root`；既有 `load_voice_profile` / `discover_voice_profiles`（legacy 读者）
 - Produces:
-  - `MigrationReport` (dataclass: `created_templates: list[str]`, `migrated_characters: list[str]`, `skipped: bool`)
-  - `migrate_voices(*, personas_root, voices_root, legacy_env: dict[str, str]) -> MigrationReport`
+  - `MigrationReport` (dataclass: `created_templates: list[str]`, `migrated_characters: list[str]`, `notes: list[str]`)
+  - `migrate_voices(*, personas_root, voices_root, legacy_env: dict[str, str], default_template: str) -> MigrationReport`
 
-**硬约束（spec §8）**：迁移**必须跑在严格校验之前**——它读的正是新 reader 会拒掉的旧格式。所以本模块用 legacy 读者，且只能由「`voices/` 为空」触发。
+**硬约束（spec §8）**：迁移**必须跑在严格校验之前**——它读的正是新 reader 会拒掉的旧格式。所以本模块用 legacy 读者。
+
+**触发方式是逐项幂等，不是「`voices/` 为空」**（Task 3 审查 Important 1，用户裁决）：每个角色、每个模板各自判断「我是否已经在盘上了」。整目录闸门有个卡死场景——只要 `voices/` 里先有了任意一个 yaml（用户手工建过模板、从备份恢复过 persona、或上一轮迁移写到一半断了），角色侧迁移就永久跳过，那些角色停在旧格式，而严格 reader 直接拒收旧格式，于是 sidecar 起不来、报错还看不出原因。逐项判断让半迁移的树下次能续完，而「绝不覆盖用户手建的东西」这条原意反而更严格地成立。
+
+**为什么没有 `skipped` 字段**：逐项之后，一个全局「跳过了吗」不再有意义（一次运行里可能有的迁移了、有的跳过了）。空转由「`created_templates` 与 `migrated_characters` 都空」表达，逐项的跳过理由全部进 `notes`。
 
 - [ ] **Step 1: 写失败的测试**
 
@@ -703,26 +707,32 @@ git commit -m "Resolve character voice references against the template registry"
 
 Both migrations run before any strict reader sees the tree: migration B reads
 the old self-contained character files, which the new reader rejects by design.
-Running validation first would fail on the very files this needs to move.
+Running validation first would fail on the very files this needs to move --
+``test_the_strict_reader_rejects_the_pre_migration_file`` pins that, because it
+is the only reason this module runs ahead of validation instead of behind it.
+
+Both are **per item**: each character and each template decides for itself
+whether it is already on disk. A single "is ``voices/`` empty" gate would strand
+every remaining character the moment any template existed, and the strict reader
+rejects the format those stranded characters are still in.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from character_memory.voice_migration import migrate_voices
-
-
-def _character(root: Path, character_id: str, document: dict) -> Path:
-    persona = root / character_id / "persona.yaml"
-    persona.parent.mkdir(parents=True, exist_ok=True)
-    persona.write_text(f"id: {character_id}\nname: {character_id}\n", encoding="utf-8")
-    (persona.parent / "voice.yaml").write_text(
-        yaml.safe_dump(document, allow_unicode=True, sort_keys=False), encoding="utf-8"
-    )
-    return persona
+from character_memory.voices import (
+    VoiceProfileError,
+    discover_character_voices,
+    discover_templates,
+    load_character_voice,
+    load_voice_profile,
+    resolve_voice_registry,
+)
 
 
 def _legacy_character(root: Path, character_id: str) -> Path:
@@ -755,12 +765,18 @@ def _legacy_character(root: Path, character_id: str) -> Path:
 def test_migrates_a_legacy_character_into_a_template_and_a_reference(tmp_path):
     personas = tmp_path / "personas"
     voices = tmp_path / "voices"
-    _legacy_character(personas, "haru")
+    persona = _legacy_character(personas, "haru")
 
-    report = migrate_voices(personas_root=personas, voices_root=voices, legacy_env={})
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
 
     assert report.migrated_characters == ["haru"]
     assert report.created_templates == ["haru"]
+    assert report.notes == []
 
     template = yaml.safe_load((voices / "haru.yaml").read_text(encoding="utf-8"))
     assert template["ref_text"] == "你好，这是试听。"
@@ -773,6 +789,34 @@ def test_migrates_a_legacy_character_into_a_template_and_a_reference(tmp_path):
     # ...and the character is now a reference.
     reference = yaml.safe_load((personas / "haru" / "voice.yaml").read_text(encoding="utf-8"))
     assert reference == {"template": "haru"}
+
+    # Nothing wrote a file the strict readers cannot read back. This is the
+    # cross-boundary round trip the migration owes the rest of the system: two
+    # modules, two trees, and the schema drift between them shipped silently once.
+    assert load_character_voice(persona) == "haru"
+    registry = resolve_voice_registry(
+        templates=discover_templates(voices),
+        character_voices=discover_character_voices([persona]),
+    )
+    assert registry["haru"].voice_id == "haru"
+    assert registry["haru"].ref_text == "你好，这是试听。"
+    # The writer emits a *relative* ref_audio; only the reader's resolution
+    # branch makes it a real file again.
+    assert Path(registry["haru"].ref_audio).is_file()
+
+
+def test_the_strict_reader_rejects_the_pre_migration_file(tmp_path):
+    """Why this runs ahead of validation instead of behind it.
+
+    The old self-contained form is exactly what ``extra="forbid"`` refuses. If
+    validation ran first, the sidecar would fail on the very files this module
+    exists to move -- a start-up failure whose message points at the wrong thing.
+    """
+
+    persona = _legacy_character(tmp_path / "personas", "haru")
+
+    with pytest.raises(VoiceProfileError, match="invalid voice profile"):
+        load_voice_profile(persona)
 
 
 def test_migrates_the_legacy_env_into_a_template(tmp_path):
@@ -788,6 +832,7 @@ def test_migrates_the_legacy_env_into_a_template(tmp_path):
             "GSV_TTS_REF_TEXT": "参考文本",
             "GSV_TTS_VOICE": "murasame",
         },
+        default_template="character-default",
     )
 
     assert report.created_templates == ["murasame"]
@@ -795,6 +840,32 @@ def test_migrates_the_legacy_env_into_a_template(tmp_path):
     assert template["ref_audio"] == str(audio)
     assert template["ref_text"] == "参考文本"
     assert template["gpt_model"] is None      # inherits the shared base model
+
+
+def test_the_legacy_env_adopts_the_default_template_name_when_unnamed(tmp_path):
+    """An unnamed legacy pair belonged to whatever ``default_voice`` resolved to.
+
+    Inventing a name here (``"default"``) creates a template nothing ever
+    resolves to, while the *real* default template stays missing -- permanently
+    "not ready" in Settings Center with a voice configured that no request can
+    reach. The env pair is the default voice's own reference clip, so it has to
+    land under the default voice's name.
+    """
+
+    voices = tmp_path / "voices"
+    audio = tmp_path / "ref.wav"
+    audio.write_bytes(b"RIFF-env")
+
+    report = migrate_voices(
+        personas_root=tmp_path / "personas",
+        voices_root=voices,
+        legacy_env={"GSV_TTS_REF_AUDIO": str(audio), "GSV_TTS_REF_TEXT": "参考文本"},
+        default_template="murasame",
+    )
+
+    assert report.created_templates == ["murasame"]
+    assert (voices / "murasame.yaml").is_file()
+    assert not (voices / "default.yaml").exists()
 
 
 def test_legacy_env_without_a_ref_text_is_not_migrated(tmp_path):
@@ -808,30 +879,156 @@ def test_legacy_env_without_a_ref_text_is_not_migrated(tmp_path):
         personas_root=tmp_path / "personas",
         voices_root=voices,
         legacy_env={"GSV_TTS_REF_AUDIO": str(audio), "GSV_TTS_REF_TEXT": "  "},
+        default_template="murasame",
     )
 
     assert report.created_templates == []
     assert not voices.exists()
 
 
-def test_a_non_empty_voices_directory_skips_both_migrations(tmp_path):
-    """Migrations run once. A later run must never overwrite what the user made."""
+def test_a_character_already_on_the_template_model_is_left_alone(tmp_path):
+    """The steady state on every start after the first, and it has to be silent.
+
+    A note per character per start is noise, not information. The file must also
+    come out byte-identical: a migration that rewrites its own output on every
+    boot is one interrupted write away from an empty ``voice.yaml``.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    _legacy_character(personas, "haru")
+    migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+    before = (personas / "haru" / "voice.yaml").read_bytes()
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
+    assert report.created_templates == []
+    assert report.migrated_characters == []
+    assert report.notes == []
+    assert (personas / "haru" / "voice.yaml").read_bytes() == before
+
+
+def test_a_handmade_template_is_never_overwritten(tmp_path):
+    """A template already on disk wins, even when a character is asking for it.
+
+    The character still has to become a reference in the same pass: leaving it
+    in the old format is precisely the stranded state the strict reader refuses,
+    so "skip the whole character" would recreate the failure this test exists for.
+    """
 
     personas = tmp_path / "personas"
     voices = tmp_path / "voices"
     _legacy_character(personas, "haru")
     voices.mkdir(parents=True)
-    (voices / "handmade.yaml").write_text("ref_text: x\n", encoding="utf-8")
+    (voices / "haru.yaml").write_text("ref_text: handwritten\n", encoding="utf-8")
 
     report = migrate_voices(
         personas_root=personas,
         voices_root=voices,
-        legacy_env={"GSV_TTS_REF_AUDIO": "a.wav", "GSV_TTS_REF_TEXT": "t"},
+        legacy_env={},
+        default_template="murasame",
     )
 
-    assert report.skipped is True
+    assert (voices / "haru.yaml").read_text(encoding="utf-8") == "ref_text: handwritten\n"
+    assert report.created_templates == []
+    assert report.migrated_characters == ["haru"]
+    assert any("already exists" in note for note in report.notes)
+    assert yaml.safe_load((personas / "haru" / "voice.yaml").read_text(encoding="utf-8")) == {
+        "template": "haru"
+    }
+    # A template that was left as it is had no audio copied for it either.
+    assert not (voices / "haru").exists()
+
+
+def test_a_colliding_env_name_does_not_overwrite_the_character_template(tmp_path):
+    """``GSV_TTS_VOICE`` names a character that just migrated.
+
+    The character's own clip is the more specific fact; the env pair is a
+    leftover from before templates existed. Silently replacing the template would
+    move every other character on it onto the legacy voice as well.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    _legacy_character(personas, "haru")
+    env_audio = tmp_path / "env.wav"
+    env_audio.write_bytes(b"RIFF-env")
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={
+            "GSV_TTS_REF_AUDIO": str(env_audio),
+            "GSV_TTS_REF_TEXT": "env 文本",
+            "GSV_TTS_VOICE": "haru",
+        },
+        default_template="murasame",
+    )
+
+    template = yaml.safe_load((voices / "haru.yaml").read_text(encoding="utf-8"))
+    assert template["ref_text"] == "你好，这是试听。"
+    assert report.created_templates == ["haru"]
+    assert any("already exists" in note for note in report.notes)
+
+
+def test_a_malformed_character_does_not_stop_the_others(tmp_path):
+    """One unreadable ``voice.yaml`` must not strand every character after it."""
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    broken = _legacy_character(personas, "a-broken")
+    (broken.parent / "voice.yaml").write_text("- not a mapping\n", encoding="utf-8")
+    _legacy_character(personas, "b-good")
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
+    assert report.migrated_characters == ["b-good"]
+    assert report.created_templates == ["b-good"]
+    assert any("a-broken" in note for note in report.notes)
+
+
+def test_a_missing_reference_clip_is_noted_and_skipped(tmp_path):
+    """A persona pointing at a clip that is gone cannot become a template.
+
+    A note rather than a raise: the file is on disk, it is simply not usable,
+    and one such character is not a reason to abort the upgrade for the rest.
+    """
+
+    personas = tmp_path / "personas"
+    voices = tmp_path / "voices"
+    persona = _legacy_character(personas, "haru")
+    (persona.parent / "voice" / "abcdef0123456789.wav").unlink()
+
+    report = migrate_voices(
+        personas_root=personas,
+        voices_root=voices,
+        legacy_env={},
+        default_template="murasame",
+    )
+
     assert report.created_templates == []
     assert report.migrated_characters == []
+    assert any("haru" in note and "ref_audio not found" in note for note in report.notes)
+    # Nothing was created for this character, so it has nothing to point at and
+    # keeps its old file -- rather than a reference to a template that is not there.
+    assert "template" not in (
+        yaml.safe_load((persona.parent / "voice.yaml").read_text(encoding="utf-8")) or {}
+    )
 
 
 def test_both_migrations_run_together_without_colliding(tmp_path):
@@ -849,10 +1046,12 @@ def test_both_migrations_run_together_without_colliding(tmp_path):
             "GSV_TTS_REF_TEXT": "参考文本",
             "GSV_TTS_VOICE": "murasame",
         },
+        default_template="character-default",
     )
 
     assert sorted(report.created_templates) == ["haru", "murasame"]
     assert report.migrated_characters == ["haru"]
+    assert report.notes == []
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -867,7 +1066,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'character_memory.voice
 ```python
 """One-shot migrations onto the template model.
 
-Two independent moves, both triggered the same way and both run at most once:
+Two independent moves:
 
 A. The legacy ``GSV_TTS_REF_AUDIO``/``GSV_TTS_REF_TEXT`` env pair becomes a
    template, so the settings page can drop those two fields.
@@ -879,9 +1078,19 @@ files, which the new strict reader rejects (``extra="forbid"``). Running
 validation before migration would fail on the very files this module exists to
 move, so callers must migrate first and validate second.
 
-Nothing here deletes anything. The legacy env keys and the old WAVs stay where
-they are: the migration only adds files, which keeps it reversible and keeps it
-from touching user configuration.
+**Per item, not "while ``voices/`` is empty".** Each character and each template
+decides for itself whether it is already on disk, which is what lets an
+interrupted run -- or a tree someone built templates into by hand -- finish on
+the next start. Nothing already on disk is overwritten, and every refusal is
+recorded in :attr:`MigrationReport.notes` rather than raised: one unusable
+character must not strand all the others.
+
+What it does *not* do: delete anything. The legacy env keys, the old WAVs and
+the original per-persona audio directory all stay where they are, which is what
+keeps this reversible. The one file it does rewrite is the character's own
+``voice.yaml`` -- it has to, since the old self-contained form is precisely what
+the strict reader refuses to load. That rewrite is the migration's whole point,
+not a side effect, and ``_write_reference`` is atomic so it cannot land half-written.
 """
 
 from __future__ import annotations
@@ -893,6 +1102,7 @@ import shutil
 import yaml
 
 from character_memory.voices import (
+    CHARACTER_VOICE_FILENAME,
     VoiceProfileError,
     load_voice_profile,
     template_root,
@@ -903,7 +1113,6 @@ from character_memory.voices import (
 class MigrationReport:
     created_templates: list[str] = field(default_factory=list)
     migrated_characters: list[str] = field(default_factory=list)
-    skipped: bool = False
     notes: list[str] = field(default_factory=list)
 
 
@@ -935,58 +1144,111 @@ def _copy_audio(source: Path, voices_root: Path, name: str) -> str:
     return source.name
 
 
+def _write_reference(voice_path: Path, name: str) -> None:
+    """Rewrite a character's ``voice.yaml`` as a one-line reference, atomically."""
+
+    temp = voice_path.with_suffix(".yaml.tmp")
+    temp.write_text(yaml.safe_dump({"template": name}, sort_keys=False), encoding="utf-8")
+    temp.replace(voice_path)
+
+
+def _is_safe_name(name: str) -> bool:
+    """Whether a user-supplied voice id may become a file and a directory name.
+
+    ``voice_id`` comes from a file and the legacy ``GSV_TTS_VOICE`` from the
+    environment; both are arbitrary strings. ``a/b`` would be written into a
+    directory that does not exist, ``../x`` outside ``voices/``. One refused
+    name is a note, not a crash.
+    """
+
+    return bool(name) and Path(name).name == name and name not in {".", ".."}
+
+
 def _migrate_character_clips(personas_root: Path, voices_root: Path, report: MigrationReport) -> None:
     paths = sorted(personas_root.glob("*/persona.yaml")) if personas_root.exists() else []
     for persona_path in paths:
         character_id = persona_path.parent.name
+        voice_path = persona_path.parent / CHARACTER_VOICE_FILENAME
+
+        # Read the raw document first: it is both the discriminator below and,
+        # for a file that does need migrating, the only source of the provenance
+        # fields. ``VoiceProfile`` does not carry them and they cannot be
+        # reconstructed -- the VoiceDesign run that produced this clip is gone.
+        # The drawer shows them (spec 11), so losing them here would be a silent,
+        # permanent loss.
+        try:
+            raw = yaml.safe_load(voice_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            report.notes.append(f"{character_id}: unreadable voice file ({exc})")
+            continue
+        if not isinstance(raw, dict):
+            raw = {}
+
+        if "template" in raw:
+            # Already a reference, so an earlier run did this character. That is
+            # the normal state on every start after the first, and one note per
+            # character per start would be noise rather than information.
+            continue
+
         try:
             profile = load_voice_profile(persona_path)
         except VoiceProfileError as exc:
-            # Already a reference, or unusable. Either way this migration has
-            # nothing to move; the strict reader gets to report it later.
+            # Neither a reference nor a legacy profile. The strict reader gets to
+            # report it; this migration has nothing to move.
             report.notes.append(f"{character_id}: skipped ({exc})")
             continue
         if profile is None:
             continue
 
-        # Read the raw document too. VoiceProfile does not carry the provenance
-        # fields, and they cannot be reconstructed -- the VoiceDesign run that
-        # produced this clip is gone. The drawer shows them (spec 11), so losing
-        # them here would be a silent, permanent loss.
+        if not _is_safe_name(profile.voice_id):
+            report.notes.append(
+                f"{character_id}: voice_id {profile.voice_id!r} is not usable as a file name"
+            )
+            continue
+
+        if (voices_root / f"{profile.voice_id}.yaml").exists():
+            # Someone got there first: the user built this template by hand, or an
+            # earlier run wrote it and then failed. Never overwrite it -- but the
+            # character still has to become a reference, because the old format is
+            # exactly what the strict reader refuses to load.
+            report.notes.append(
+                f"{character_id}: template {profile.voice_id!r} already exists; left as it is"
+            )
+            _write_reference(voice_path, profile.voice_id)
+            report.migrated_characters.append(character_id)
+            continue
+
         try:
-            raw = yaml.safe_load((persona_path.parent / "voice.yaml").read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
-            raw = {}
-        if not isinstance(raw, dict):
-            raw = {}
-
-        audio_source = Path(profile.ref_audio)
-        filename = _copy_audio(audio_source, voices_root, profile.voice_id)
-        _write_template(
-            voices_root,
-            profile.voice_id,
-            {
-                "voice_id": profile.voice_id,
-                "ref_audio": f"{profile.voice_id}/{filename}",
-                "ref_text": profile.ref_text,
-                "gpt_model": profile.gpt_model,
-                "sovits_model": profile.sovits_model,
-                **{key: raw[key] for key in ("created_at", "instruct", "model") if key in raw},
-            },
-        )
-
-        reference = persona_path.parent / "voice.yaml"
-        temp = reference.with_suffix(".yaml.tmp")
-        temp.write_text(
-            yaml.safe_dump({"template": profile.voice_id}, sort_keys=False), encoding="utf-8"
-        )
-        temp.replace(reference)
+            filename = _copy_audio(Path(profile.ref_audio), voices_root, profile.voice_id)
+            _write_template(
+                voices_root,
+                profile.voice_id,
+                {
+                    "voice_id": profile.voice_id,
+                    "ref_audio": f"{profile.voice_id}/{filename}",
+                    "ref_text": profile.ref_text,
+                    "gpt_model": profile.gpt_model,
+                    "sovits_model": profile.sovits_model,
+                    **{key: raw[key] for key in ("created_at", "instruct", "model") if key in raw},
+                },
+            )
+            _write_reference(voice_path, profile.voice_id)
+        except OSError as exc:
+            # A locked or unwritable file must not strand every character after
+            # it: the rest of the tree still has to be reachable afterwards.
+            report.notes.append(f"{character_id}: failed ({exc})")
+            continue
 
         report.created_templates.append(profile.voice_id)
         report.migrated_characters.append(character_id)
 
 
-def _migrate_legacy_env(voices_root: Path, legacy_env: dict[str, str], report: MigrationReport) -> None:
+def _migrate_legacy_env(
+    voices_root: Path,
+    legacy_env: dict[str, str],
+    report: MigrationReport,
+    default_template: str,
+) -> None:
     ref_audio = str(legacy_env.get("GSV_TTS_REF_AUDIO") or "").strip()
     ref_text = str(legacy_env.get("GSV_TTS_REF_TEXT") or "").strip()
     if not ref_audio or not ref_text:
@@ -997,7 +1259,19 @@ def _migrate_legacy_env(voices_root: Path, legacy_env: dict[str, str], report: M
         report.notes.append(f"legacy reference audio not found: {ref_audio}")
         return
 
-    name = str(legacy_env.get("GSV_TTS_VOICE") or "").strip() or "default"
+    # The legacy pair *was* the voice ``GSV_TTS_VOICE`` named, so an unnamed pair
+    # belonged to whatever ``default_voice`` resolved to -- not to a name invented
+    # here. ``or "default"`` was wrong twice over: it created a template nothing
+    # ever resolves to, and it left the *real* default template missing, which is
+    # "not ready" on every start.
+    name = str(legacy_env.get("GSV_TTS_VOICE") or "").strip() or default_template
+    if not _is_safe_name(name):
+        report.notes.append(f"legacy voice name {name!r} is not usable as a file name")
+        return
+    if (voices_root / f"{name}.yaml").exists():
+        report.notes.append(f"legacy env template {name!r} already exists; left as it is")
+        return
+
     _write_template(
         voices_root,
         name,
@@ -1017,31 +1291,41 @@ def migrate_voices(
     personas_root: str | Path,
     voices_root: str | Path | None,
     legacy_env: dict[str, str],
+    default_template: str,
 ) -> MigrationReport:
-    """Run both migrations if the template tree is still empty.
+    """Run both migrations, one item at a time, each item at most once.
 
-    A non-empty ``voices/`` means a previous run already happened (or the user
-    built templates by hand); either way the migrations are done and must not
-    overwrite anything.
+    Item by item, not "only while ``voices/`` is empty". A run that was
+    interrupted, or a user who built a template by hand before the first start,
+    must not strand the remaining characters in the old format: the strict reader
+    rejects that format outright, so a stranded character is not cosmetic -- the
+    sidecar will not start, and the message does not say why.
+
+    Nothing already on disk is overwritten, and every skip and refusal is
+    recorded in ``notes``, which is the only thing that explains a character that
+    came out voiceless. An empty ``created_templates``/``migrated_characters``
+    pair means there was nothing left to do.
+
+    ``default_template`` names the template built from the legacy env pair when
+    ``GSV_TTS_VOICE`` never named one. It is the caller's ``default_voice``:
+    inventing a name here would create a template nothing resolves to.
     """
 
     personas_root = Path(personas_root)
     voices_root = template_root(voices_root)
     report = MigrationReport()
 
-    if voices_root.exists() and any(voices_root.glob("*.yaml")):
-        report.skipped = True
-        return report
-
     _migrate_character_clips(personas_root, voices_root, report)
-    _migrate_legacy_env(voices_root, legacy_env, report)
+    _migrate_legacy_env(voices_root, legacy_env, report, default_template)
     return report
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_voice_migration.py -q --no-header`
-Expected: 5 passed
+Expected: 11 passed
+
+（计数随逐项幂等改过一次：原为 5 条，其中整目录闸门那条被逐项用例取代，另补了往返、顺序、续跑、碰撞、单点失败五类。）
 
 - [ ] **Step 5: 提交**
 
@@ -1382,12 +1666,16 @@ def _voices_root(voices_root: str | Path | None) -> str:
 
 ```python
     def migrate_if_needed(self) -> MigrationReport:
-        """Move legacy voices onto the template model, at most once.
+        """Move legacy voices onto the template model, one item at a time.
 
-        MUST run before the first ``_load_voices``: migration B reads the old
-        self-contained character files, which the strict readers reject. Doing
-        this afterwards would mean validating first and failing on the files
-        this is meant to move.
+        MUST run before the first ``_load_voices``: the character migration reads
+        the old self-contained files, which the strict readers reject. Doing this
+        afterwards would mean validating first and failing on the files this is
+        meant to move.
+
+        Not gated on "``voices/`` is empty": a half-migrated tree (an interrupted
+        run, or a template the user made by hand) must still be able to finish,
+        and each item decides for itself whether it is already on disk.
         """
         with self._lock:
             report = migrate_voices(
@@ -1398,23 +1686,31 @@ def _voices_root(voices_root: str | Path | None) -> str:
                     "GSV_TTS_REF_TEXT": self.ref_text,
                     "GSV_TTS_VOICE": self.default_voice,
                 },
+                # The env pair *was* the default voice's reference clip, so an
+                # unnamed pair has to land under the default voice's name: any
+                # other name is a template nothing resolves to, which leaves the
+                # default template missing and GSV permanently "not ready".
+                default_template=self.default_voice,
             )
-            if not report.skipped:
-                # ``MigrationReport.notes`` is the only record of what the
-                # migration declined to touch, and it is exactly what an
-                # operator needs when a character comes out voiceless after an
-                # upgrade. Without this the field is written and never read.
-                for note in report.notes:
-                    logger.warning("GSV voice migration: %s", note)
-                if report.created_templates:
-                    logger.info(
-                        "GSV voice migration created %d template(s) and migrated %d "
-                        "character(s): %s",
-                        len(report.created_templates),
-                        len(report.migrated_characters),
-                        ", ".join(report.created_templates),
-                    )
-                self._voices = self._load_voices()
+            # Logged unconditionally: with per-item migration there is no
+            # "this run was skipped" flag to hide behind, and ``notes`` is the
+            # only record of what was declined -- exactly what an operator needs
+            # when a character comes out voiceless after an upgrade. Without
+            # this the field is written and never read.
+            for note in report.notes:
+                logger.warning("GSV voice migration: %s", note)
+            if report.created_templates:
+                logger.info(
+                    "GSV voice migration created %d template(s) and migrated %d "
+                    "character(s): %s",
+                    len(report.created_templates),
+                    len(report.migrated_characters),
+                    ", ".join(report.created_templates),
+                )
+            # Unconditional, because the migration now runs on every start: a
+            # run that changed nothing still has to leave a usable registry
+            # behind for a direct caller of this method.
+            self._voices = self._load_voices()
             return report
 ```
 

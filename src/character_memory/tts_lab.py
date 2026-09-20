@@ -682,24 +682,62 @@ class VoiceDesignArtifactStore:
             return self._entries.get(str(token or "").strip())
 
 
+_TEMPLATE_NAME_MAX = 64
+_WINDOWS_RESERVED = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def validate_template_name(raw: str) -> str:
+    """Validate a user-chosen template name.
+
+    Unlike ``character_id`` -- whose safety comes from a whitelist lookup -- a
+    template name is new, so it needs explicit rules. Each one below maps to a
+    real failure: the name becomes ``voices/<name>.yaml`` and ``voices/<name>/``,
+    so a separator escapes the tree and a Windows reserved word fails the write
+    in a way that is hard to read.
+    """
+
+    name = str(raw or "").strip()
+    if not name:
+        raise ValueError("模板名不能为空")
+    if len(name) > _TEMPLATE_NAME_MAX:
+        raise ValueError(f"模板名 too long (max {_TEMPLATE_NAME_MAX})")
+    if "/" in name or "\\" in name:
+        raise ValueError("模板名不能包含路径分隔符")
+    if name in {".", ".."} or ".." in name:
+        raise ValueError("模板名不能包含 '..'")
+    if Path(name).is_absolute() or (len(name) > 1 and name[1] == ":"):
+        raise ValueError("模板名不能是绝对路径")
+    if name.upper().split(".")[0] in _WINDOWS_RESERVED:
+        raise ValueError(f"{name} 是 Windows 保留名，请换一个")
+    if name != name.rstrip(". "):
+        raise ValueError("模板名不能以 '.' 或空格结尾")
+    return name
+
+
 def _template_name_for(character_id: str, persona_dir: Path) -> str:
     """The name a character's frozen template is filed under.
 
     ``character_id`` is what the user sees, and it is the right name almost
-    always -- but it is not necessarily a *filename*. ``persona.yaml`` may
-    declare any string, and ``discover_character_profiles`` answers "is this a
-    character the app shows", not "is this safe to join onto a directory":
-    ``id: ../../escaped`` is discoverable (and the persona directory it lives in
-    is what the clip is written beside). So the id is used only when it names a
-    single path segment, and the directory name -- which came from a glob of
-    ``*/persona.yaml`` and therefore cannot contain a separator -- is the
-    fallback.
+    always -- but it is not necessarily a *filename*, and the freeze route names
+    files with it. ``discover_character_profiles`` answers "is this a character
+    the app shows", not "is this safe to join onto a directory": ``persona.yaml``
+    may declare ``id: ../../escaped`` and still be discoverable. So the id must
+    pass the same rule a typed name does, and the persona directory name -- which
+    came from a glob of ``*/persona.yaml`` and therefore cannot contain a
+    separator -- is the fallback for one that does not.
     """
 
-    name = str(character_id or "").strip()
-    if not name or name != Path(name).name:
+    try:
+        return validate_template_name(character_id)
+    except ValueError:
         return persona_dir.name
-    return name
 
 
 def _write_voice_template(voices_root: Path, name: str, artifact: VoiceDesignArtifact) -> str:
@@ -875,6 +913,20 @@ class VoiceDesignFreezeRequest(BaseModel):
 
     character_id: str = Field(min_length=1, max_length=128)
     artifact_id: str = Field(min_length=1, max_length=128)
+
+
+class VoiceDesignSaveTemplateRequest(BaseModel):
+    """Save-as-template names the audition and the name to file it under.
+
+    Same reasoning as :class:`VoiceDesignFreezeRequest`: the transcript comes
+    from the audition, never from the client, so it cannot drift from the audio
+    it describes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=128)
 
 
 def create_tts_lab_app(
@@ -1139,6 +1191,47 @@ def create_tts_lab_app(
             "ref_audio": ref_audio,
             "ref_text": artifact.text,
             "shared_with": shared_with,
+            "activated": activated,
+            "reason": reason,
+        }
+
+    @app.post("/v1/voice-design/save-template")
+    def voice_design_save_template(req: VoiceDesignSaveTemplateRequest):
+        """Save an auditioned voice as a reusable template, with no character involved."""
+
+        try:
+            name = validate_template_name(req.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        artifact = voice_artifacts.get(req.artifact_id)
+        if artifact is None:
+            raise HTTPException(
+                status_code=404,
+                detail="This auditioned voice is no longer available; generate it again before saving.",
+            )
+
+        voices_root = template_root(None)
+        template_path = voices_root / f"{name}.yaml"
+        if template_path.exists():
+            # A name the user typed colliding is a mistake, not an intended
+            # overwrite. Re-freezing a character is the deliberate overwrite path.
+            raise HTTPException(
+                status_code=409,
+                detail=f"模板 {name} 已存在；换个名字，或直接固化到角色以覆盖。",
+            )
+
+        # Same writer the freeze route uses: one place decides how a template is
+        # persisted, so the two paths cannot drift into two shapes.
+        ref_audio = _write_voice_template(voices_root, name, artifact)
+
+        activated, reason = _reload_voices(voice_reloader_tool)
+
+        return {
+            "ok": True,
+            "template": name,
+            "ref_audio": ref_audio,
+            "ref_text": artifact.text,
             "activated": activated,
             "reason": reason,
         }

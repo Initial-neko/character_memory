@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from character_memory.domain.models import Event, EventType, Memory
 from character_memory.media import MediaAsset
@@ -421,6 +422,31 @@ class SQLiteStore:
             )
             self._maybe_commit()
             return event.model_copy(update={"id": cur.lastrowid})
+
+    def get_event(self, event_id: int) -> Event | None:
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+            if row is None:
+                return None
+            if row["event_time_epoch"] is None:
+                logger.warning("storage.event skipped_invalid_time event_id=%s value=%r", event_id, row["event_time"])
+                return None
+            return self._event_from_row(row)
+
+    def update_event_metadata(self, event_id: int, metadata: dict[str, Any]) -> bool:
+        """Replace an event's metadata document.
+
+        The whole document is replaced, not merged: callers read the current
+        metadata, merge their keys, and pass the result. event_time_epoch is
+        deliberately untouched, because every read filters on it being non-NULL.
+        """
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE events SET metadata_json=? WHERE id=?",
+                (json.dumps(metadata, ensure_ascii=False), event_id),
+            )
+            self._maybe_commit()
+            return cur.rowcount > 0
 
     def add_media_asset(self, asset: MediaAsset) -> MediaAsset:
         with self._lock:

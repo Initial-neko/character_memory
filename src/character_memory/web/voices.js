@@ -130,13 +130,18 @@
 
   function wireEntryPoint() {
     // Sibling of the avatar panel, which is opened from the header avatar.
-    if (!CM.dom.characterName || CM.dom.characterName.dataset.voiceWired) return;
-    CM.dom.characterName.dataset.voiceWired = "1";
-    CM.dom.characterName.classList.add("voice-editable");
-    CM.dom.characterName.title = "设置声线";
-    CM.dom.characterName.addEventListener("click", () => {
-      if (!CM.isGroupConversation()) open().catch(console.error);
-    });
+    if (!CM.dom.characterName) return;
+    if (!CM.dom.characterName.dataset.voiceWired) {
+      CM.dom.characterName.dataset.voiceWired = "1";
+      CM.dom.characterName.classList.add("voice-editable");
+      CM.dom.characterName.addEventListener("click", () => {
+        if (!CM.isGroupConversation()) open().catch(console.error);
+      });
+    }
+    // group_settings.js renames the group from this same element and owns the
+    // title while a group is open, so a group is left entirely alone -- not
+    // even to clear the attribute, which would erase its tooltip.
+    if (!CM.isGroupConversation()) CM.dom.characterName.title = "设置声线";
   }
 
   CM.on("conversationChanged", wireEntryPoint);

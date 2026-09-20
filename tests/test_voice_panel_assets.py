@@ -142,3 +142,16 @@ def test_the_lab_posts_to_the_path_the_lab_registers():
 
     assert '"/v1/voice-design/save-template"' in lab
     assert '"/v1/voice-design/save-template"' in source
+
+
+def test_the_panel_leaves_the_group_rename_tooltip_alone():
+    """group_settings.js renames the group from this same header element.
+
+    Setting the title unconditionally would clobber "点击修改群名称" the first
+    time a group is opened, and clearing it would erase that tooltip instead.
+    """
+
+    source = (WEB / "voices.js").read_text(encoding="utf-8")
+
+    assert 'if (!CM.isGroupConversation()) CM.dom.characterName.title = "设置声线";' in source
+    assert "removeAttribute" not in source

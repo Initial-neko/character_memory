@@ -31,6 +31,28 @@ def test_voice_message_is_expressive():
     assert ActionType.VOICE_MESSAGE in EXPRESSIVE_ACTIONS
 
 
+def test_the_expressive_set_holds_exactly_these_actions():
+    """Membership, not just VOICE_MESSAGE's presence.
+
+    Every other assertion here is one-sided, so widening the set -- adding
+    NO_REPLY, say -- would quietly open all four action gates at once and the
+    suite would stay green. A symmetric difference names the offender instead
+    of dumping the whole set.
+    """
+    expected = {
+        ActionType.REPLY,
+        ActionType.MINIMAL_RESPONSE,
+        ActionType.PROACTIVE_MESSAGE,
+        ActionType.MESSAGE,
+        ActionType.VOICE_MESSAGE,
+        ActionType.EMOJI,
+        ActionType.STICKER,
+        ActionType.IMAGE,
+    }
+
+    assert EXPRESSIVE_ACTIONS ^ expected == set()
+
+
 def test_every_action_gate_consults_the_shared_set():
     """Identity, not equality: two equal sets would drift apart on the next edit,
     and the drift is silent -- the action just stops producing a message. Four

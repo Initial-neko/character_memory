@@ -40,10 +40,11 @@ class ActionType(str, Enum):
     GENERATE_IMAGE = "GENERATE_IMAGE"
 
 
-# Actions that produce a visible outward message. Both chat modes consult this
-# one set. It used to be duplicated verbatim in runtime/person_runtime.py and
-# application/group_conversation_service.py, where editing one copy silently
-# dropped the action in the other chat mode.
+# Actions that produce a visible outward message. All four action gates --
+# runtime/person_runtime.py, application/group_conversation_service.py,
+# application/proactive_service.py and eval/runner.py -- consult this one set.
+# It used to be duplicated verbatim in each of them, where editing one copy
+# silently dropped the action in the other three.
 EXPRESSIVE_ACTIONS = frozenset({
     ActionType.REPLY,
     ActionType.MINIMAL_RESPONSE,

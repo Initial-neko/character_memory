@@ -8,12 +8,10 @@
   let groupStream = null;
   let groupStreamId = null;
   let historyState = {groupId:null, messages:[], hasMore:false, nextBeforeId:null, loadingOlder:false};
-  const sidebar = document.querySelector(".sidebar");
-  const sidebarFoot = document.querySelector(".sidebar-foot");
-  const section = document.createElement("section");
-  section.className = "group-section";
-  section.innerHTML = `<div class="group-section-head"><span>Groups</span><span class="group-section-actions"><button class="group-archive-list-button" type="button" title="查看已归档群聊">归档</button><button class="group-create-button" type="button" title="创建群聊">＋</button></span></div><nav class="group-list" aria-label="Groups"></nav>`;
-  sidebar?.insertBefore(section, sidebarFoot || null);
+  const section = document.getElementById("sidebarGroups");
+  if (!section) throw new Error("sidebar group slot is missing");
+  section.classList.add("group-section");
+  section.innerHTML = `<div class="group-section-head"><span>群聊</span><span class="group-section-actions"><button class="group-archive-list-button" type="button" title="查看已归档群聊">归档</button><button class="group-create-button" type="button" title="创建群聊">＋</button></span></div><nav class="group-list" aria-label="群聊"></nav>`;
   const list = section.querySelector(".group-list");
   const createButton = section.querySelector(".group-create-button");
   const archiveListButton = section.querySelector(".group-archive-list-button");

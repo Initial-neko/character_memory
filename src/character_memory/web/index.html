@@ -23,14 +23,25 @@
 </head>
 <body>
   <div class="workspace">
-    <aside class="sidebar">
-      <div class="brand"><div class="brand-mark">CM</div><div><strong>Character Memory</strong><span>Persistent AI Person</span></div></div>
-      <nav id="characterList" class="character-list" aria-label="Characters"></nav>
-      <div class="sidebar-foot">Phase 1 · Prove the Person</div>
+    <aside class="sidebar" aria-label="主导航">
+      <header class="sidebar-brand-row">
+        <div class="brand"><div class="brand-mark">CM</div><div class="brand-copy"><strong>Character Memory</strong><span>Persistent AI Person</span></div></div>
+        <button id="sidebarCollapseButton" class="sidebar-collapse-toggle" type="button" aria-label="收起侧边栏" aria-expanded="true">‹</button>
+      </header>
+      <div class="sidebar-body">
+        <section id="sidebarSpace" class="sidebar-section sidebar-space-slot" aria-label="空间"></section>
+        <section id="sidebarCharacters" class="sidebar-section sidebar-character-section" aria-label="人物">
+          <nav id="characterList" class="character-list" aria-label="人物"></nav>
+          <div id="characterActions" class="sidebar-character-actions"></div>
+          <button id="sidebarCharacterMore" class="sidebar-rail-more hidden" type="button" title="展开并查看更多人物" aria-label="查看更多人物">⋯</button>
+        </section>
+        <section id="sidebarGroups" class="sidebar-section sidebar-group-slot" aria-label="群聊"></section>
+      </div>
     </aside>
 
     <main class="chat-shell">
       <header class="topbar">
+        <button id="sidebarMobileButton" class="sidebar-mobile-toggle" type="button" aria-label="打开侧边栏" aria-expanded="false">☰</button>
         <div class="character-heading"><div id="headerAvatar" class="header-avatar">R</div><div class="character-heading-copy"><h1 id="characterName">Rin</h1><p id="characterIdentity">Persistent AI Person</p></div></div>
         <div class="topbar-actions"><span id="nowText" class="now"></span><button id="voiceCallButton" class="ghost-button voice-call-button" type="button" title="语音/视频通话">📞</button><button id="conversationSearchButton" class="ghost-button search-button" type="button" title="搜索聊天（可切换当前/全局）">🔎 <span class="search-label">搜索</span></button><a id="settingsLink" class="ghost-button desktop-only-control" href="http://127.0.0.1:8003/settings" target="_blank" rel="noreferrer" title="Settings Center">⚙ Settings</a><button id="runtimeButton" class="ghost-button desktop-only-control" type="button">Runtime</button></div>
       </header>

@@ -3,7 +3,7 @@
 .visual-check { display:flex; align-items:center; gap:8px; margin-top:12px; }
 .visual-check input { width:auto; }
 .visual-grid { display:grid; grid-template-columns:minmax(280px,.8fr) minmax(0,1.2fr); gap:16px; margin-top:16px; align-items:start; }
-.visual-preview-wrap { min-height:320px; border:1px solid #30363d; border-radius:10px; background:#0d1117; display:grid; place-items:center; overflow:hidden; }
+.visual-preview-wrap { min-height:320px; border:1px solid var(--ui-line); border-radius:var(--ui-r-md); background:var(--ui-bg); display:grid; place-items:center; overflow:hidden; }
 .visual-preview { width:100%; max-height:560px; object-fit:contain; display:block; }
 .visual-provider-status { min-height:100px; margin-bottom:12px; }
 #imageGenResult { min-height:220px; max-height:520px; overflow:auto; }

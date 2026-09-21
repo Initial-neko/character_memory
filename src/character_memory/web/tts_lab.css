@@ -1,3 +1,7 @@
+/* TTS Workbench layout. ui.css (dark) owns tokens and components; this file
+ * used to paint white cards with #d7dbe3 borders on top of dev.css's dark
+ * ground, which left near-white body text on a white card. */
+
 .tts-lab-controls {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, .5fr) auto;
@@ -35,10 +39,10 @@
 }
 
 .tts-compare-card {
-  border: 1px solid #d7dbe3;
-  border-radius: 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
   padding: 12px;
-  background: #fff;
+  background: var(--ui-surface);
 }
 
 .tts-compare-card h3 {
@@ -49,28 +53,24 @@
   min-height: 116px;
 }
 
-@media (max-width: 820px) {
-  .tts-lab-controls {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (max-width: 560px) {
-  .tts-lab-controls {
-    grid-template-columns: 1fr;
-  }
-}
-
 .voice-design-card { border-style: dashed; }
-.voice-design-grid { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(320px,.8fr); gap: 16px; margin-top: 8px; }
+.voice-design-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); gap: 16px; margin-top: 8px; }
 .voice-design-inputs, .voice-design-output { display: grid; gap: 10px; }
 .voice-design-inputs label, .voice-design-options label { display: grid; gap: 6px; }
-.voice-design-options { display: grid; grid-template-columns: minmax(160px,1fr) minmax(160px,.7fr); gap: 12px; }
+.voice-design-options { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(160px, .7fr); gap: 12px; }
 .voice-design-output audio { width: 100%; }
 .voice-design-output .result { min-height: 120px; }
-.voice-design-freeze { display: grid; gap: 10px; border-top: 1px dashed #d7dbe3; padding-top: 12px; margin-top: 4px; }
+.voice-design-freeze { display: grid; gap: 10px; border-top: 1px dashed var(--ui-line); padding-top: 12px; margin-top: 4px; }
 .voice-design-freeze label { display: grid; gap: 6px; }
 .voice-design-freeze select { width: 100%; }
 .voice-design-freeze .result { min-height: 76px; }
-@media (max-width: 900px) { .voice-design-grid { grid-template-columns: 1fr; } }
-@media (max-width: 560px) { .voice-design-options { grid-template-columns: 1fr; } }
+
+@media (max-width: 900px) {
+  .tts-lab-controls { grid-template-columns: 1fr 1fr; }
+  .voice-design-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .tts-lab-controls { grid-template-columns: 1fr; }
+  .voice-design-options { grid-template-columns: 1fr; }
+}

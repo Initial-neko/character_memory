@@ -1,3 +1,11 @@
+/* Group conversation: the sidebar's group list, the create form, the archived
+ * list, and the group message chrome.
+ *
+ * Every border here was `rgba(0,0,0,.09...15)`, every hover `rgba(0,0,0,.06)`,
+ * and the one filled button was `#111`. On the light drawer those literals
+ * looked like a different product from the rest of the chat; they are tokens
+ * now, which also makes the whole file usable if the drawer ever goes dark. */
+
 .group-section {
   margin-top: 18px;
   min-height: 0;
@@ -8,7 +16,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 12px 8px;
-  color: var(--muted, #777);
+  color: var(--ui-muted);
   font-size: 12px;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -27,7 +35,7 @@
   color: inherit;
   cursor: pointer;
   line-height: 1;
-  border-radius: 7px;
+  border-radius: var(--ui-r-sm);
 }
 
 .group-create-button {
@@ -45,7 +53,7 @@
 }
 
 .group-create-button:hover,
-.group-archive-list-button:hover { background: rgba(0,0,0,.06); }
+.group-archive-list-button:hover { background: var(--ui-hover); }
 
 .group-list {
   display: flex;
@@ -63,17 +71,17 @@
   border: 0;
   background: transparent;
   display: grid;
-  grid-template-columns: 38px minmax(0,1fr);
+  grid-template-columns: 38px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   text-align: left;
   padding: 8px 38px 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--ui-r-md);
   cursor: pointer;
 }
 
 .group-item:hover,
-.group-item.active { background: rgba(0,0,0,.065); }
+.group-item.active { background: var(--ui-hover); }
 
 .group-more-button {
   position: absolute;
@@ -84,9 +92,9 @@
   height: 27px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--ui-r-sm);
   background: transparent;
-  color: var(--muted, #777);
+  color: var(--ui-muted);
   cursor: pointer;
   opacity: 0;
   transition: opacity .12s ease, background .12s ease;
@@ -94,7 +102,7 @@
 
 .group-item-wrap:hover .group-more-button,
 .group-item-wrap:focus-within .group-more-button { opacity: 1; }
-.group-more-button:hover { background: rgba(0,0,0,.07); }
+.group-more-button:hover { background: var(--ui-hover); }
 
 .group-context-menu {
   position: absolute;
@@ -103,23 +111,24 @@
   z-index: 24;
   min-width: 94px;
   padding: 5px;
-  border: 1px solid rgba(0,0,0,.1);
-  border-radius: 9px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow-pop);
 }
 
 .group-context-menu button {
   width: 100%;
+  min-height: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--ui-r-xs);
   background: transparent;
   padding: 8px 10px;
   text-align: left;
-  color: #444;
+  color: var(--ui-text);
   cursor: pointer;
 }
-.group-context-menu button:hover { background: rgba(0,0,0,.055); }
+.group-context-menu button:hover { background: var(--ui-hover); }
 .group-empty-hint { padding: 6px 12px; }
 
 .group-avatar {
@@ -128,7 +137,7 @@
   border-radius: 12px;
   display: grid;
   place-items: center;
-  background: rgba(0,0,0,.08);
+  background: var(--ui-surface-sunken);
   font-weight: 700;
 }
 
@@ -141,20 +150,20 @@
   white-space: nowrap;
 }
 .group-name { font-weight: 650; }
-.group-members { margin-top: 3px; font-size: 12px; color: var(--muted, #777); }
+.group-members { margin-top: 3px; font-size: 12px; color: var(--ui-muted); }
 
 body.group-mode .character-item.active { background: transparent; }
-body.group-mode .character-item.active:hover { background: rgba(0,0,0,.04); }
+body.group-mode .character-item.active:hover { background: var(--ui-hover); }
 body.group-mode .sticker-trigger { opacity: .45; }
 
 body.group-mode #characterName.group-name-editable {
   cursor: pointer;
-  text-decoration: underline dotted rgba(0,0,0,.32) 1px;
+  text-decoration: underline dotted var(--ui-faint) 1px;
   text-underline-offset: 5px;
 }
 body.group-mode #characterName.group-name-editable::after {
   content: " ✎";
-  color: var(--muted, #777);
+  color: var(--ui-muted);
   font-size: .58em;
   font-weight: 500;
   vertical-align: middle;
@@ -163,15 +172,11 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
 
 .group-create-form { display: grid; gap: 16px; }
 .group-create-form label { display: grid; gap: 7px; font-weight: 650; }
-.group-create-form input[type="text"] {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border: 1px solid rgba(0,0,0,.15);
-  border-radius: 9px;
-  font: inherit;
-}
-.group-member-picker { display: grid; gap: 8px; }
+.group-create-form input[type="text"] { width: 100%; box-sizing: border-box; }
+
+/* The create form and the rename/add-members form each wrap the same rows. */
+.group-member-picker,
+.group-member-options { display: grid; gap: 8px; }
 .group-member-option {
   display: flex !important;
   grid-template-columns: none !important;
@@ -179,13 +184,11 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
   align-items: center;
   gap: 9px !important;
   padding: 9px 10px;
-  border-radius: 9px;
-  background: rgba(0,0,0,.035);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface-soft);
   font-weight: 500 !important;
 }
 .group-create-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.group-create-actions button { padding: 9px 14px; border-radius: 9px; border: 1px solid rgba(0,0,0,.13); cursor: pointer; }
-.group-create-actions .primary { background: #111; color: #fff; border-color: #111; }
 
 .group-archive-list { display: grid; gap: 9px; }
 .group-archive-card {
@@ -194,32 +197,25 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
   justify-content: space-between;
   gap: 14px;
   padding: 12px;
-  border: 1px solid rgba(0,0,0,.09);
-  border-radius: 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
 }
 .group-archive-copy { min-width: 0; display: grid; gap: 3px; }
 .group-archive-copy strong,
 .group-archive-copy span,
 .group-archive-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-archive-copy span,
-.group-archive-copy small { color: var(--muted, #777); }
+.group-archive-copy small { color: var(--ui-muted); }
 .group-archive-copy span { font-size: 12px; }
 .group-archive-copy small { font-size: 10px; }
-.group-archive-card > button {
-  flex: 0 0 auto;
-  border: 1px solid rgba(0,0,0,.13);
-  border-radius: 8px;
-  padding: 7px 11px;
-  background: #fff;
-  cursor: pointer;
-}
-.group-archive-card > button:hover { background: rgba(0,0,0,.04); }
+.group-archive-card > button { flex: 0 0 auto; }
 
 .group-turn-debug {
   display: inline-flex;
+  min-height: 0;
   border: 0;
   background: transparent;
-  color: var(--muted, #888);
+  color: var(--ui-muted);
   font-size: 11px;
   cursor: pointer;
   padding: 0;
@@ -227,7 +223,7 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
 
 .message-row.group-assistant .group-speaker-name {
   font-size: 12px;
-  color: var(--muted, #777);
+  color: var(--ui-muted);
   margin: 0 0 4px 2px;
   font-weight: 650;
 }
@@ -248,7 +244,7 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
 }
 
 .group-pending-note {
-  color: var(--muted, #777);
+  color: var(--ui-muted);
   font-size: 12px;
   text-align: center;
   padding: 8px 0;

@@ -1,10 +1,22 @@
+/* Voice UI: the composer's mic button, and the full-screen call card.
+ *
+ * The call card is a deliberate dark island -- #171a22 with a fixed set of
+ * near-white text colours -- because it is a full-screen overlay that must read
+ * the same over any page theme. Several of those literals are pinned by
+ * tests/test_chat_shell_ui_cleanup.py and tests/test_voice_v0_web.py as a
+ * contrast contract, so they stay literal on purpose. Everything that sits on
+ * the ordinary page surface uses tokens. */
+
 .voice-call-button { min-width: 42px; }
-.voice-call-button.active { box-shadow: inset 0 0 0 1px rgba(184,66,66,.25); }
-.voice-input-button { min-width: 38px !important; width: 38px; padding: 0 !important; border-radius: 50% !important; background: #f1f1f2 !important; color: #202123 !important; flex: 0 0 38px; }
-.voice-input-button:hover { background: #e7e7e9 !important; }
-.voice-input-button.recording { background: #b84242 !important; color: #fff !important; animation: voice-record-pulse 1.2s ease-in-out infinite; }
-.voice-input-button.transcribing { background: #dedfe3 !important; color: #555a64 !important; }
-@keyframes voice-record-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(184,66,66,.12); } 50% { box-shadow: 0 0 0 7px rgba(184,66,66,.08); } }
+.voice-call-button.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-danger) 25%, transparent); }
+.voice-input-button { min-width: 38px !important; width: 38px; padding: 0 !important; border-radius: 50% !important; background: var(--ui-surface-sunken) !important; color: var(--ui-text) !important; flex: 0 0 38px; }
+.voice-input-button:hover { background: var(--ui-line) !important; }
+.voice-input-button.recording { background: var(--ui-danger) !important; color: var(--ui-accent-text) !important; animation: voice-record-pulse 1.2s ease-in-out infinite; }
+.voice-input-button.transcribing { background: var(--ui-line-strong) !important; color: var(--ui-muted) !important; }
+@keyframes voice-record-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ui-danger) 14%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--ui-danger) 9%, transparent); }
+}
 .voice-call-overlay { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 24px; overflow-y: auto; overscroll-behavior: contain; background: rgba(10, 12, 18, .48); backdrop-filter: blur(3px); }
 .voice-call-overlay.hidden { display: none; }
 .voice-call-card { width: min(860px, calc(100vw - 48px)); height: min(740px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr); overflow: hidden; border-radius: 24px; background: #171a22; color: #f6f7fb; box-shadow: 0 24px 80px rgba(0, 0, 0, .42); }

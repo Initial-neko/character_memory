@@ -414,7 +414,7 @@
 
   function showCreateGroup() {
     CM.openDrawer("创建群聊", "选择 2～4 个已经存在的人物");
-    CM.dom.drawerBody.innerHTML = `<div class="group-create-form"><label>群名称<input type="text" data-group-name maxlength="80" value="新群聊"></label><div><strong>选择成员</strong><div class="group-member-picker">${CM.state.characters.map(profile => `<label class="group-member-option"><input type="checkbox" data-group-member value="${CM.escapeHtml(profile.id)}"><span>${CM.escapeHtml(profile.name)} · ${CM.escapeHtml(profile.identity || profile.tagline || "")}</span></label>`).join("")}</div></div><div class="group-create-error error hidden" data-group-create-error></div><div class="group-create-actions"><button type="button" data-group-create-cancel>取消</button><button type="button" class="primary" data-group-create-confirm>创建群聊</button></div></div>`;
+    CM.dom.drawerBody.innerHTML = `<div class="group-create-form"><label>群名称<input type="text" data-group-name maxlength="80" value="新群聊"></label><div><strong>选择成员</strong><div class="group-member-picker">${CM.state.characters.map(profile => `<label class="group-member-option"><input type="checkbox" data-group-member value="${CM.escapeHtml(profile.id)}"><span>${CM.escapeHtml(profile.name)} · ${CM.escapeHtml(profile.identity || profile.tagline || "")}</span></label>`).join("")}</div></div><div class="error hidden" data-group-create-error></div><div class="group-create-actions"><button type="button" data-group-create-cancel>取消</button><button type="button" class="primary" data-group-create-confirm>创建群聊</button></div></div>`;
   }
 
   async function createGroupFromDrawer() {

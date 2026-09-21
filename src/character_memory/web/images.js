@@ -71,7 +71,7 @@
     panel.innerHTML = `<div class="image-draft-preview"><img src="${CM.escapeHtml(draft.data_url)}" alt="图片预览"></div>
       <div class="image-draft-meta">${sourceLabel}${sizeText}</div>
       <textarea id="imageCaption" rows="2" maxlength="12000" placeholder="可以补一句话，也可以只发图片"></textarea>
-      <div class="image-draft-actions"><button type="button" data-image-cancel>取消</button><button class="image-send" type="button" data-image-send>发送图片</button></div>`;
+      <div class="image-draft-actions"><button type="button" data-image-cancel>取消</button><button class="primary" type="button" data-image-send>发送图片</button></div>`;
     document.getElementById("imageCaption")?.focus();
   }
 

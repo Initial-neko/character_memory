@@ -1,3 +1,5 @@
+/* Character-list extras: the unread dot, the preview line, the proactive badge. */
+
 .character-name-line {
   display: flex;
   align-items: center;
@@ -10,9 +12,9 @@
   width: 9px;
   height: 9px;
   flex: 0 0 9px;
-  border-radius: 999px;
-  background: #ef4444;
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.12);
+  border-radius: var(--ui-r-pill);
+  background: var(--ui-danger);
+  box-shadow: 0 0 0 2px var(--ui-danger-bg);
 }
 
 .character-preview {

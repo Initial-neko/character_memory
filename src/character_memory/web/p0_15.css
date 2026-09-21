@@ -1,3 +1,5 @@
+/* Avatar manager layout. Buttons, fields and alerts come from ui.css. */
+
 .character-avatar,
 .header-avatar,
 .avatar,
@@ -26,12 +28,12 @@ body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
   width: 17px;
   height: 17px;
   border-radius: 50%;
-  background: #202123;
-  color: #fff;
+  background: var(--ui-accent);
+  color: var(--ui-accent-text);
   display: grid;
   place-items: center;
   font-size: 9px;
-  border: 2px solid #fff;
+  border: 2px solid var(--ui-surface);
 }
 
 .avatar-manager { display: grid; gap: 16px; }
@@ -40,83 +42,63 @@ body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
   align-items: center;
   gap: 13px;
   padding: 13px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
 }
 .avatar-manager-current-preview {
   width: 64px;
   height: 64px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: #ececef;
+  background: var(--ui-surface-sunken);
   display: grid;
   place-items: center;
   font-weight: 700;
   font-size: 18px;
 }
 .avatar-manager-current-preview.large { width: 96px; height: 96px; margin: 0 auto; }
-.avatar-manager-current p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.avatar-manager-current p { margin: 4px 0 0; color: var(--ui-muted); font-size: 12px; line-height: 1.55; }
 
 .avatar-planning-note,
 .avatar-search-plan {
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
   padding: 11px 12px;
-  background: #fafafb;
+  background: var(--ui-surface-soft);
 }
 .avatar-planning-note { display: grid; gap: 4px; }
 .avatar-planning-note strong,
 .avatar-search-plan strong { font-size: 12px; }
 .avatar-planning-note span,
 .avatar-search-plan span,
-.avatar-search-plan p { color: var(--muted); font-size: 11px; line-height: 1.55; }
+.avatar-search-plan p { color: var(--ui-muted); font-size: 11px; line-height: 1.55; }
 .avatar-search-plan { margin-bottom: 12px; }
-.avatar-search-plan p { margin: 5px 0 7px; color: var(--text); }
+.avatar-search-plan p { margin: 5px 0 7px; color: var(--ui-text); }
 .avatar-search-plan > span { display: block; margin-top: 3px; }
 .avatar-search-plan details { margin-top: 8px; }
-.avatar-search-plan summary { cursor: pointer; color: var(--muted); font-size: 10px; }
+.avatar-search-plan summary { cursor: pointer; color: var(--ui-muted); font-size: 10px; }
 .avatar-search-plan details div { display: grid; gap: 5px; margin-top: 7px; }
 .avatar-search-plan code {
   display: block;
   padding: 6px 8px;
-  border-radius: 7px;
-  background: #f0f1f3;
+  border-radius: var(--ui-r-xs);
+  background: var(--ui-surface-sunken);
+  font-family: var(--ui-mono);
   font-size: 10px;
   white-space: normal;
   word-break: break-word;
 }
-.avatar-plan-fallback { color: #8b5b00 !important; }
+.avatar-plan-fallback { color: var(--ui-warn) !important; }
 
-.avatar-search-field { display: grid; gap: 7px; font-size: 12px; font-weight: 650; }
-.avatar-search-field input {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 11px 12px;
-  outline: none;
-}
-.avatar-search-field input:focus { border-color: #969aa3; box-shadow: 0 0 0 3px rgba(0,0,0,.04); }
-.avatar-manager-actions { display: flex; justify-content: flex-end; }
-.avatar-manager-actions button,
-.avatar-candidate-actions button,
-.avatar-selected-success button {
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 9px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-.avatar-manager-actions .primary,
-.avatar-candidate-actions button {
-  background: #202123;
-  color: #fff;
-  border-color: #202123;
-}
-.avatar-manager-actions button:disabled,
-.avatar-candidate-actions button:disabled { opacity: .5; cursor: default; }
+/* The source select and its generate button share one row and one control
+ * height. Without this rule the two sat at different baselines, because an
+ * unstyled select and an unstyled button are not the same height. */
+.avatar-search-field { margin-bottom: 2px; }
+.avatar-generation-controls { align-items: end; gap: 10px; }
+.avatar-provider-field { min-width: 220px; flex: 1 1 220px; max-width: 320px; }
 
 .avatar-results { min-height: 64px; }
-.avatar-search-summary { color: var(--muted); font-size: 11px; margin: 2px 0 10px; }
+.avatar-search-summary { color: var(--ui-muted); font-size: 11px; margin: 2px 0 10px; }
 .avatar-candidate-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -124,14 +106,14 @@ body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
 }
 .avatar-candidate {
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
   overflow: hidden;
-  background: #fff;
+  background: var(--ui-surface);
 }
 .avatar-candidate-image {
   aspect-ratio: 1 / 1;
-  background: #f0f1f3;
+  background: var(--ui-surface-sunken);
   overflow: hidden;
 }
 .avatar-candidate-image img { width: 100%; height: 100%; display: block; object-fit: cover; }
@@ -144,7 +126,7 @@ body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
   text-overflow: ellipsis;
 }
 .avatar-candidate-copy strong { font-size: 11px; }
-.avatar-candidate-copy span { margin-top: 3px; font-size: 10px; color: var(--muted); }
+.avatar-candidate-copy span { margin-top: 3px; font-size: 10px; color: var(--ui-muted); }
 .avatar-candidate-actions {
   display: flex;
   justify-content: space-between;
@@ -152,15 +134,44 @@ body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
   gap: 8px;
   padding: 6px 9px 9px;
 }
-.avatar-candidate-actions a { color: var(--muted); font-size: 10px; text-decoration: none; }
+.avatar-candidate-actions a { color: var(--ui-muted); font-size: 10px; text-decoration: none; }
 .avatar-candidate-actions a:hover { text-decoration: underline; }
-.avatar-candidate-actions button { padding: 6px 9px; font-size: 10px; }
+.avatar-candidate-actions button {
+  min-height: var(--ui-control-h-sm);
+  padding: 6px 9px;
+  font-size: 10px;
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: var(--ui-accent-text);
+}
+
+/* An AI-generated candidate. It used to live in p0_16.css, which is the search
+ * file -- every other .avatar-* class is here, so this one is too. */
+.avatar-generated-candidate {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  padding: 10px;
+  background: var(--ui-surface);
+}
+.avatar-generated-candidate img {
+  display: block;
+  width: min(100%, 420px);
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--ui-r-md);
+  margin: auto;
+}
 
 .avatar-selected-success { text-align: center; padding: 24px 8px; }
 .avatar-selected-success h3 { margin: 13px 0 5px; }
-.avatar-selected-success p { color: var(--muted); font-size: 12px; }
+.avatar-selected-success p { color: var(--ui-muted); font-size: 12px; }
 .avatar-selected-success button { margin-top: 10px; }
 
 @media (max-width: 720px) {
   .avatar-candidate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .avatar-generation-controls { align-items: stretch; flex-direction: column; }
+  .avatar-provider-field { max-width: none; }
 }

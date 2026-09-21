@@ -1,16 +1,21 @@
+/* Voice panel layout. Buttons, selects, alerts and badges come from ui.css. */
+
 .voice-editable { cursor: pointer; }
 .voice-editable:hover { text-decoration: underline dotted; }
 
-.voice-panel { display: flex; flex-direction: column; gap: 14px; }
-.voice-panel-status { display: flex; align-items: center; gap: 8px; }
-.voice-panel-badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid currentColor; }
-.voice-panel-badge[data-status="set"] { color: #3f9c5a; }
-.voice-panel-badge[data-status="unset"] { color: #888; }
-.voice-panel-badge[data-status="missing"],
-.voice-panel-badge[data-status="error"] { color: #c0392b; }
-.voice-panel-current { font-weight: 600; }
-.voice-panel-error { color: #c0392b; margin: 0; }
-.voice-panel-shared { color: #b7791f; margin: 0; }
-.voice-panel-picker { display: flex; flex-direction: column; gap: 6px; }
-.voice-panel-actions { display: flex; align-items: center; gap: 12px; }
-.voice-panel-result { margin: 0; color: #888; }
+.voice-panel { display: grid; gap: 14px; }
+.voice-panel-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.voice-panel-current { font-size: 12px; color: var(--ui-text); }
+.voice-panel-picker { max-width: 440px; }
+
+.voice-panel-actions { gap: 14px; }
+.voice-panel-link {
+  font-size: 12px;
+  color: var(--ui-link);
+  text-decoration: none;
+  border-bottom: 1px solid var(--ui-line-strong);
+  padding-bottom: 1px;
+}
+.voice-panel-link:hover { border-bottom-color: currentColor; }
+
+.voice-panel-result[data-state="error"] { color: var(--ui-danger); }

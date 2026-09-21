@@ -96,13 +96,13 @@
         <div><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><p>${profile.avatar_url ? "当前头像已保存到本地。之后更好的聊天图片/自拍也可以替换它。" : "当前还没有头像，将继续使用首字母。"}</p></div>
       </section>
       <div class="avatar-planning-note"><strong>同一个视觉身份，两种取图方式</strong><span>搜索会把 LLM 规划后的短关键词发给搜索引擎；AI 生成会让 LLM 先编译角色视觉提示词，再交给所选图像 Provider。普通聊天不会暴露裸 ImageGen 控制台。</span></div>
-      <label class="avatar-search-field"><span>补充偏好（可选）</span><input type="text" data-avatar-hint maxlength="600" value="" placeholder="例如：更温暖、自然近景、保持经典造型"></label>
-      <div class="avatar-manager-actions"><button class="primary" type="button" data-avatar-search>让角色决定并搜索</button></div>
-      <div class="avatar-generation-controls">
-        <label><span>AI 生成来源</span><select data-avatar-provider>${providerOptions()}</select></label>
+      <label class="ui-field avatar-search-field"><span>补充偏好（可选）</span><input type="text" data-avatar-hint maxlength="600" value="" placeholder="例如：更温暖、自然近景、保持经典造型"></label>
+      <div class="ui-actions"><button class="primary" type="button" data-avatar-search>让角色决定并搜索</button></div>
+      <div class="ui-field-row avatar-generation-controls">
+        <label class="ui-field avatar-provider-field"><span>AI 生成来源</span><select data-avatar-provider>${providerOptions()}</select></label>
         <button type="button" data-avatar-generate ${configured ? "" : "disabled"}>生成一个候选头像</button>
       </div>
-      <div data-avatar-results class="avatar-results"><p class="muted">生成结果先作为候选保存，不会自动替换当前头像。</p></div>
+      <div data-avatar-results class="avatar-results"><p class="ui-hint">生成结果先作为候选保存，不会自动替换当前头像。</p></div>
     </div>`;
   }
 

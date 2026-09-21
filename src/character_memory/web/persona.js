@@ -15,7 +15,7 @@
     <label class="builder-field"><span>你想认识一个什么样的人？</span><textarea id="personaDescription" rows="7" placeholder="比如：有点冷，但熟悉以后会明显变得话多；很独立，不会什么都顺着我……"></textarea></label>
     <div class="builder-grid"><label class="builder-field"><span>名字（可选）</span><input id="personaName" placeholder="Miko"></label><label class="builder-field"><span>年龄（可选）</span><input id="personaAge" type="number" min="1" max="120" placeholder="24"></label></div>
     <div class="builder-examples"><span>试试这些方向</span>${examples.map((text, index) => `<button type="button" data-persona-example="${index}">${CM.escapeHtml(text)}</button>`).join("")}</div>
-    <div class="builder-actions"><button class="primary-builder-button" id="generatePersona" type="button">AI 帮我生成</button></div><div id="personaDraftArea"></div>
+    <div class="builder-actions"><button class="primary" id="generatePersona" type="button">AI 帮我生成</button></div><div id="personaDraftArea"></div>
   </div>`;
 
   const behaviorEditor = (label, key, value) => `<label class="builder-field"><span>${label}</span><textarea rows="3" data-draft-field="${key}">${CM.escapeHtml(value || "")}</textarea></label>`;
@@ -38,7 +38,7 @@
         ${behaviorEditor("聊天方式", "conversation", draft.conversation)}${behaviorEditor("表达方式", "expression", draft.expression)}${behaviorEditor("追问方式", "questions", draft.questions)}${behaviorEditor("沉默方式", "silence", draft.silence)}${behaviorEditor("主动方式", "initiative", draft.initiative)}${behaviorEditor("分歧处理", "disagreement", draft.disagreement)}${behaviorEditor("关心方式", "care", draft.care)}
         <label class="builder-field"><span>边界（每行一条）</span><textarea rows="5" data-draft-list="boundaries">${CM.escapeHtml((draft.boundaries || []).join("\n"))}</textarea></label>
       </details>
-      <div class="builder-actions split"><button id="regeneratePersona" type="button">重新生成</button><button class="primary-builder-button" id="createPersona" type="button">创建人物</button></div>
+      <div class="builder-actions split"><button id="regeneratePersona" type="button">重新生成</button><button class="primary" id="createPersona" type="button">创建人物</button></div>
     </div>`;
   }
 

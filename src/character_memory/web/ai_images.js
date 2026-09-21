@@ -229,7 +229,7 @@
     <textarea data-ai-image-instruction rows="4" maxlength="1600" placeholder="例如：画一张 Rin 在图书馆窗边看雨的日常场景，安静一点，不要像棚拍。"></textarea>
     <div class="ai-image-actions">
       <button type="button" class="secondary" data-ai-image-rewrite>润色 Prompt</button>
-      <button type="button" data-ai-image-generate>生成图片</button>
+      <button type="button" class="primary" data-ai-image-generate>生成图片</button>
       <button type="button" class="secondary" data-ai-image-copy hidden>复制 Prompt</button>
     </div>
     <div class="ai-image-status" data-ai-image-status>生成后会进入图片草稿，你确认后再发送；群聊中可选择一个成员作为视觉参考。</div>

@@ -63,7 +63,7 @@
   function showImportDialog(file) {
     importFile = file;
     panel.classList.remove("hidden");
-    panel.innerHTML = `<div class="sticker-import-card"><div class="sticker-import-title">导入全局表情包</div><div class="sticker-import-file">${CM.escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div><div class="sticker-import-help">导入后所有人物和群聊都能使用。推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>；只有图片时可让 Vision 自动补标签。</div><label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>只补缺失标签，不覆盖已有标注</small></span></label><div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="sticker-import-confirm" data-sticker-import-confirm>导入</button></div></div>`;
+    panel.innerHTML = `<div class="sticker-import-card"><div class="sticker-import-title">导入全局表情包</div><div class="sticker-import-file">${CM.escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div><div class="sticker-import-help">导入后所有人物和群聊都能使用。推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>；只有图片时可让 Vision 自动补标签。</div><label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>只补缺失标签，不覆盖已有标注</small></span></label><div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="primary" data-sticker-import-confirm>导入</button></div></div>`;
   }
 
   function importError(payload, status) {

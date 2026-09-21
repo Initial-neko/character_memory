@@ -1,87 +1,72 @@
+/* Persona builder.
+ *
+ * It renders into the chat drawer, which is a light surface, but it was styled
+ * against a dark one: white-on-white borders (rgba(255,255,255,.12)) and a
+ * #9ca3af muted fallback. Everything here is a token now. */
+
 .create-character-button {
   margin: 10px 14px 0;
   padding: 10px 12px;
-  border: 1px dashed rgba(255,255,255,.16);
-  border-radius: 12px;
-  background: rgba(255,255,255,.035);
-  color: inherit;
+  border: 1px dashed var(--ui-line-strong);
+  border-radius: var(--ui-r-lg);
+  background: transparent;
+  color: var(--ui-muted);
   cursor: pointer;
   text-align: left;
 }
-.create-character-button:hover { background: rgba(255,255,255,.065); }
+.create-character-button:hover { background: var(--ui-hover); color: var(--ui-text); }
 
 .persona-builder { display: grid; gap: 16px; }
-.builder-intro { line-height: 1.7; color: var(--muted, #9ca3af); }
+.builder-intro { line-height: 1.7; color: var(--ui-muted); }
 .builder-field { display: grid; gap: 7px; }
-.builder-field > span { font-size: 12px; color: var(--muted, #9ca3af); }
+.builder-field > span { font-size: 12px; font-weight: 600; color: var(--ui-muted); }
 .builder-field input,
-.builder-field textarea {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 12px;
-  background: rgba(255,255,255,.04);
-  color: inherit;
-  padding: 11px 12px;
-  font: inherit;
-  resize: vertical;
-}
-.builder-field input:focus,
-.builder-field textarea:focus { outline: 1px solid rgba(255,255,255,.28); }
+.builder-field textarea { width: 100%; resize: vertical; }
 .builder-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
 .builder-examples { display: flex; flex-wrap: wrap; gap: 8px; }
-.builder-examples > span { width: 100%; font-size: 12px; color: var(--muted, #9ca3af); }
+.builder-examples > span { width: 100%; font-size: 12px; color: var(--ui-muted); }
 .builder-examples button {
-  border: 0;
-  border-radius: 999px;
-  padding: 7px 10px;
-  background: rgba(255,255,255,.06);
-  color: inherit;
-  cursor: pointer;
+  min-height: 0;
+  padding: 7px 11px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-pill);
+  background: var(--ui-surface-soft);
+  color: var(--ui-muted);
   font-size: 12px;
 }
-.builder-examples button:hover { background: rgba(255,255,255,.10); }
+.builder-examples button:hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-text); }
+
 .builder-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .builder-actions.split { justify-content: space-between; margin-top: 16px; }
-.builder-actions button {
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 10px;
-  background: rgba(255,255,255,.05);
-  color: inherit;
-  padding: 9px 13px;
-  cursor: pointer;
-}
 .builder-actions button:disabled { opacity: .55; cursor: progress; }
-.builder-actions .primary-builder-button {
-  background: #f2f2f2;
-  color: #111;
-  border-color: #f2f2f2;
-}
+
 .persona-card {
   margin-top: 4px;
   padding: 16px;
-  border: 1px solid rgba(255,255,255,.10);
-  border-radius: 16px;
-  background: rgba(255,255,255,.025);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-surface-soft);
 }
 .persona-card-head { display: flex; gap: 12px; align-items: center; }
 .persona-card-head h3 { margin: 0 0 4px; font-size: 20px; }
-.persona-card-head p { margin: 0; color: var(--muted, #9ca3af); }
+.persona-card-head p { margin: 0; color: var(--ui-muted); }
 .persona-avatar-large {
   width: 46px;
   height: 46px;
+  flex: 0 0 auto;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: rgba(255,255,255,.09);
+  background: var(--ui-surface-sunken);
   font-weight: 700;
 }
 .persona-description { line-height: 1.75; margin: 16px 0; white-space: pre-wrap; }
 .persona-section { margin-top: 14px; }
 .persona-section h4 { margin: 0 0 7px; font-size: 13px; }
 .persona-section ul { margin: 0; padding-left: 20px; line-height: 1.7; }
-.advanced-persona { margin-top: 18px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 12px; }
-.advanced-persona summary { cursor: pointer; color: var(--muted, #9ca3af); margin-bottom: 12px; }
+.advanced-persona { margin-top: 18px; border-top: 1px solid var(--ui-line); padding-top: 12px; }
+.advanced-persona > summary { cursor: pointer; color: var(--ui-muted); margin-bottom: 12px; }
 .advanced-persona[open] { display: grid; gap: 12px; }
 .quiet-read { opacity: .62; }
 

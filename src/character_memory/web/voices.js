@@ -9,6 +9,19 @@
     error: "配置有误",
   };
 
+  // A schema rejection is one long pydantic sentence with four complaints in
+  // it, and the unusable-template list is a path per template. Both used to be
+  // dumped as bare red text; an alert box with a wrapping lane is the minimum
+  // for them to be read rather than scrolled past.
+  const STATUS_TONE = { set: "is-ok", unset: "", missing: "is-error", error: "is-error" };
+
+  function alertHtml(tone, title, lines) {
+    const body = lines.length === 1
+      ? `<p>${CM.escapeHtml(lines[0])}</p>`
+      : `<ul>${lines.map(line => `<li>${CM.escapeHtml(line)}</li>`).join("")}</ul>`;
+    return `<div class="ui-alert ${tone}"><strong>${CM.escapeHtml(title)}</strong>${body}</div>`;
+  }
+
   // The TTS Lab is a separate origin. There is no base helper for it -- the
   // repo hardcodes cross-origin links the same way index.html links Settings
   // Center -- so a literal with a name is clearer than an inline URL.
@@ -54,40 +67,38 @@
     const used = snapshot.templates.find(item => item.name === entry?.template)?.used_by || [];
     const others = used.filter(id => id !== characterId);
 
-    const errorLine = entry?.error
-      ? `<p class="voice-panel-error">${CM.escapeHtml(entry.error)}</p>`
-      : "";
+    const errorLine = entry?.error ? alertHtml("is-error", "这个角色的声线配置有误", [entry.error]) : "";
     // Overwriting a template changes everyone pointing at it, so say so before
     // the user picks one -- this is the drawer half of the freeze warning.
     const sharedLine = others.length
-      ? `<p class="voice-panel-shared">另有 ${others.length} 个角色（${CM.escapeHtml(others.join("、"))}）在用这个声音。</p>`
+      ? alertHtml("is-warn", "这是一条共享声线", [`另有 ${others.length} 个角色（${others.join("、")}）在用这个声音，保存模板会同时改变他们的声音。`])
       : "";
     const hint = status === "unset"
-      ? `<p class="muted">当前使用默认声线。到声音合成页设计一个，或用下面的下拉选一个已有模板。</p>`
+      ? `<p class="ui-hint">当前使用默认声线。到声音合成页设计一个，或用下面的下拉选一个已有模板。</p>`
       : "";
     const errorsLine = snapshot.errors.length
-      ? `<p class="voice-panel-error">有模板不可用：${CM.escapeHtml(snapshot.errors.join("；"))}</p>`
+      ? alertHtml("is-error", "有模板不可用", snapshot.errors)
       : "";
 
     CM.dom.drawerBody.innerHTML = `
       <section class="voice-panel">
         <div class="voice-panel-status">
-          <span class="voice-panel-badge" data-status="${CM.escapeHtml(status)}">${CM.escapeHtml(STATUS_COPY[status] || status)}</span>
-          <span class="voice-panel-current">${CM.escapeHtml(entry?.template || "—")}</span>
+          <span class="ui-badge ${STATUS_TONE[status] ?? ""}" data-status="${CM.escapeHtml(status)}">${CM.escapeHtml(STATUS_COPY[status] || status)}</span>
+          ${entry?.template ? `<span class="voice-panel-current ui-mono">${CM.escapeHtml(entry.template)}</span>` : ""}
         </div>
         ${errorLine}
         ${errorsLine}
-        <label class="voice-panel-picker">
+        <label class="ui-field voice-panel-picker">
           <span>选择声线模板</span>
           <select data-voice-template>${optionsHtml(entry?.template, names)}</select>
         </label>
         ${sharedLine}
         ${hint}
-        <div class="voice-panel-actions">
+        <div class="ui-actions voice-panel-actions">
           <button type="button" class="primary" data-voice-save>保存</button>
           <a class="voice-panel-link" href="${LAB_BASE}/tts" target="_blank" rel="noopener noreferrer">去声音合成页造一个</a>
         </div>
-        <p class="voice-panel-result" data-voice-result></p>
+        <p class="voice-panel-result ui-hint" data-voice-result></p>
       </section>`;
 
     const save = CM.dom.drawerBody.querySelector("[data-voice-save]");
@@ -95,6 +106,7 @@
     const result = CM.dom.drawerBody.querySelector("[data-voice-result]");
     save.addEventListener("click", async () => {
       save.disabled = true;
+      result.dataset.state = "busy";
       result.textContent = "保存中…";
       try {
         const chosen = select.value || null;
@@ -105,6 +117,7 @@
         const snapshot = await refresh();
         render(characterId, snapshot.characters[characterId], snapshot);
       } catch (error) {
+        result.dataset.state = "error";
         result.textContent = `保存失败：${error.message}`;
       } finally {
         save.disabled = false;

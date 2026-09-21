@@ -96,12 +96,15 @@
   background: transparent;
   color: var(--ui-muted);
   cursor: pointer;
-  opacity: 0;
+  opacity: .45;
   transition: opacity .12s ease, background .12s ease;
 }
 
+/* Dimmed rather than hidden: archiving a group lives behind this button, and a
+ * hover-only trigger is invisible on a touch screen. Matches the character row. */
 .group-item-wrap:hover .group-more-button,
-.group-item-wrap:focus-within .group-more-button { opacity: 1; }
+.group-item-wrap:focus-within .group-more-button,
+.group-more-button:focus-visible { opacity: 1; }
 .group-more-button:hover { background: var(--ui-hover); }
 
 .group-context-menu {
@@ -251,7 +254,6 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
 }
 
 @media (max-width: 720px) {
-  .group-more-button { opacity: 1; }
   .group-message-sticker { max-width: 96px; max-height: 96px; }
   .group-message-image { max-width: 72vw; }
 }

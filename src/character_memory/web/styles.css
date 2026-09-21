@@ -21,9 +21,11 @@ button,textarea { font:inherit; }
 .character-archive-list-button { border:0; background:transparent; color:inherit; cursor:pointer; height:24px; min-height:0; padding:0 7px; border-radius:var(--ui-r-sm); font:inherit; font-size:11px; letter-spacing:0; text-transform:none; }
 .character-archive-list-button:hover { background:var(--ui-hover); }
 .character-item-wrap { position:relative; min-width:0; }
-.character-item { padding-right:38px; }
-.character-more-button { position:absolute; right:7px; top:50%; transform:translateY(-50%); width:27px; height:27px; padding:0; border:0; border-radius:var(--ui-r-sm); background:transparent; color:var(--ui-muted); cursor:pointer; opacity:0; transition:opacity .12s ease, background .12s ease; }
-.character-item-wrap:hover .character-more-button, .character-item-wrap:focus-within .character-more-button { opacity:1; }
+/* Always visible, dimmed at rest: an action that only exists on hover is not
+ * discoverable, and on a touch screen it does not exist at all. This is the
+ * only way to archive a character, so it has to be findable without guessing. */
+.character-more-button { position:absolute; right:7px; top:50%; transform:translateY(-50%); width:27px; height:27px; padding:0; border:0; border-radius:var(--ui-r-sm); background:transparent; color:var(--ui-muted); cursor:pointer; opacity:.45; transition:opacity .12s ease, background .12s ease; }
+.character-item-wrap:hover .character-more-button, .character-item-wrap:focus-within .character-more-button, .character-more-button:focus-visible { opacity:1; }
 .character-more-button:hover { background:var(--ui-hover); }
 .character-context-menu { position:absolute; right:7px; top:calc(50% + 18px); z-index:24; min-width:94px; padding:5px; border:1px solid var(--ui-line); border-radius:var(--ui-r-sm); background:var(--ui-surface); box-shadow:var(--ui-shadow-pop); }
 .character-context-menu button { width:100%; min-height:0; border:0; border-radius:var(--ui-r-xs); background:transparent; padding:8px 10px; text-align:left; color:var(--ui-text); cursor:pointer; }
@@ -36,16 +38,36 @@ button,textarea { font:inherit; }
 .character-archive-card button { min-height:0; padding:6px 12px; border-radius:var(--ui-r-sm); }
 .character-archive-empty { color:var(--ui-muted); font-size:12px; padding:10px; }
 .character-list { display:grid; gap:4px; overflow:auto; }
-.character-item { width:100%; border:0; background:transparent; border-radius:var(--ui-r-md); padding:10px; display:grid; grid-template-columns:38px minmax(0,1fr); gap:10px; text-align:left; cursor:pointer; color:var(--ui-text); }
+/* The 38px right padding is the lane the row's ⋯ button sits in. It used to be
+ * a separate `padding-right` declaration above this one, which this shorthand
+ * silently overwrote -- so the unread dot ran under the button. */
+.character-item { width:100%; border:0; background:transparent; border-radius:var(--ui-r-md); padding:10px 38px 10px 10px; display:grid; grid-template-columns:38px minmax(0,1fr); gap:10px; text-align:left; cursor:pointer; color:var(--ui-text); }
 .character-item:hover { background:var(--ui-hover); }.character-item.active { background:var(--ui-surface); box-shadow:0 1px 2px rgba(0,0,0,.05); }
 .character-avatar { width:38px; height:38px; border-radius:50%; background:var(--ui-surface-sunken); display:grid; place-items:center; font-weight:650; font-size:13px; }
 .character-copy { min-width:0; }.character-name { display:block; font-size:13px; font-weight:600; margin:1px 0 3px; }.character-pending { color:var(--ui-muted); font-size:10px; font-weight:500; }.character-tagline { display:block; color:var(--ui-muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sidebar-foot { margin-top:auto; padding:12px 10px 3px; color:var(--ui-faint); font-size:10px; }
 .chat-shell { grid-column:2; min-height:100vh; display:flex; flex-direction:column; background:var(--ui-surface); }
-.topbar { position:sticky; top:0; z-index:10; min-height:68px; padding:12px 24px; border-bottom:1px solid var(--ui-line); background:color-mix(in srgb, var(--ui-surface) 94%, transparent); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:space-between; }
-.character-heading { display:flex; align-items:center; gap:11px; min-width:0; }.header-avatar { width:38px; height:38px; border-radius:50%; background:var(--ui-surface-sunken); display:grid; place-items:center; font-size:13px; font-weight:650; }
-.topbar h1 { margin:0; font-size:16px; }.topbar p { margin:3px 0 0; color:var(--ui-muted); font-size:11px; max-width:620px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.topbar-actions { display:flex; align-items:center; gap:10px; }.now { color:var(--ui-muted); font-size:11px; }.ghost-button { border-radius:var(--ui-r-sm); padding:8px 12px; }.icon-button { width:34px; min-width:34px; height:34px; padding:0; border-radius:50%; font-size:22px; }
+/* The heading shrinks; the actions never do. Two rules here are load-bearing:
+ * `.character-heading-copy` needs `min-width:0`, because a nowrap tagline whose
+ * wrapper cannot shrink keeps its min-content width, overflows the flex box and
+ * paints underneath the buttons; and the avatar needs an explicit flex basis,
+ * because as a plain flex item it was the first thing to collapse to nothing.
+ * `.topbar-actions` plus `margin-left:auto` keeps the buttons on the right when
+ * they wrap to their own line. */
+.topbar { position:sticky; top:0; z-index:10; min-height:68px; padding:12px 24px; border-bottom:1px solid var(--ui-line); background:color-mix(in srgb, var(--ui-surface) 94%, transparent); backdrop-filter:blur(12px); display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 16px; }
+.character-heading { display:flex; align-items:center; gap:11px; flex:1 1 260px; min-width:0; }
+.character-heading-copy { min-width:0; }
+.header-avatar { width:38px; height:38px; flex:0 0 38px; border-radius:50%; background:var(--ui-surface-sunken); display:grid; place-items:center; font-size:13px; font-weight:650; }
+.topbar h1 { margin:0; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.topbar p { margin:3px 0 0; color:var(--ui-muted); font-size:11px; max-width:620px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.topbar-actions { position:relative; display:flex; align-items:center; gap:10px; flex:0 0 auto; margin-left:auto; }.now { color:var(--ui-muted); font-size:11px; }.ghost-button { border-radius:var(--ui-r-sm); padding:8px 12px; }.icon-button { width:34px; min-width:34px; height:34px; padding:0; border-radius:50%; font-size:22px; }
+
+/* The diagnostic controls that used to crowd the topbar, behind one trigger. */
+.topbar-more-button { font-size:15px; font-weight:700; letter-spacing:1px; line-height:1; }
+.topbar-menu { position:absolute; right:0; top:calc(100% + 8px); z-index:26; min-width:150px; display:grid; gap:2px; padding:6px; border:1px solid var(--ui-line); border-radius:var(--ui-r-md); background:var(--ui-surface); box-shadow:var(--ui-shadow-pop); }
+.topbar-menu.hidden { display:none; }
+.topbar-menu button { width:100%; border:0; border-radius:var(--ui-r-sm); padding:8px 10px; background:transparent; color:var(--ui-text); text-align:left; }
+.topbar-menu button:hover:not(:disabled) { background:var(--ui-surface-sunken); border-color:transparent; }
 .chat { width:min(820px,100%); flex:1; margin:0 auto; padding:24px 24px 150px; }
 .date-separator { text-align:center; color:var(--ui-faint); font-size:11px; margin:22px 0; }
 .message-row { display:flex; gap:11px; margin:16px 0; align-items:flex-start; }.message-row.user { flex-direction:row-reverse; }

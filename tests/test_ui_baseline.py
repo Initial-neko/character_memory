@@ -66,6 +66,82 @@ def test_every_class_the_markup_uses_is_styled_somewhere():
     assert {name for name in used if _TOKEN.match(name)} - defined - HOOKS == set()
 
 
+_AT_RULE = re.compile(r"@(?:media|supports|keyframes|layer)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}", re.S)
+_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+
+
+def _uncommented(css: str) -> str:
+    """Comments out of the way: a comma inside one would split a selector."""
+    return _COMMENT.sub("", css)
+
+
+def _targets(selectors: str, selector: str) -> bool:
+    """True when one comma-separated part of `selectors` is `selector`.
+
+    Exact, not a substring: `.character-item` also appears inside
+    `.character-item-wrap`, and matching that would hand back the wrong rule.
+    A trailing pseudo-class is allowed so `:hover`/`:focus-visible` variants of
+    a base rule are still recognisable.
+    """
+    return any(part.strip() == selector or part.strip().startswith(f"{selector}:")
+               for part in selectors.split(","))
+
+
+def _rule(css: str, selector: str) -> str:
+    """The body of the base rule for `selector`, ignoring responsive overrides.
+
+    Media blocks are stripped first so a mobile restatement of the same
+    selector cannot shadow the rule an assertion is about.
+    """
+    rules = re.findall(r"([^{}]+)\{([^{}]*)\}", _AT_RULE.sub("", _uncommented(css)))
+    matching = [body for selectors, body in rules if _targets(selectors, selector)]
+    assert matching, f"no rule for {selector}"
+    return matching[0]
+
+
+def _declaration(body: str, prop: str) -> str | None:
+    match = re.search(rf"(?:^|;)\s*{re.escape(prop)}\s*:\s*([^;]+)", body)
+    return match.group(1).strip() if match else None
+
+
+def test_topbar_shares_its_row_with_the_character_heading():
+    """The topbar must never win its width fight against the avatar.
+
+    Every rule pinned here is one whose absence produced the same visible bug:
+    the nowrap tagline kept its min-content width and painted underneath the
+    buttons, and the avatar -- a plain flex item -- was the first thing to
+    collapse to zero.
+    """
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    assert 'class="character-heading-copy"' in html
+    assert "/static/topbar_menu.js" in html
+
+    css = (WEB / "styles.css").read_text(encoding="utf-8")
+    copy = _rule(css, ".character-heading-copy")
+    assert _declaration(copy, "min-width") == "0", "the tagline cannot shrink without this"
+    assert _declaration(_rule(css, ".header-avatar"), "flex") == "0 0 38px", "the avatar must not collapse"
+    assert _declaration(_rule(css, ".topbar-actions"), "flex") == "0 0 auto"
+
+
+def test_character_row_reserves_the_lane_its_menu_button_sits_in():
+    """A shorthand that overwrites the button's lane puts the unread dot under it.
+
+    `.character-item` used to set `padding-right:38px` in one rule and
+    `padding:10px` in a later one, so the lane was 10px and the two collided.
+    """
+    css = (WEB / "styles.css").read_text(encoding="utf-8")
+    assert "38px" in _declaration(_rule(css, ".character-item"), "padding")
+
+
+def test_row_menus_are_not_hover_only():
+    """Archiving a character has no other entry point, so it cannot be hidden."""
+    chat = _rule((WEB / "styles.css").read_text(encoding="utf-8"), ".character-more-button")
+    groups = _rule((WEB / "p0_11.css").read_text(encoding="utf-8"), ".group-more-button")
+    for body in (chat, groups):
+        opacity = _declaration(body, "opacity")
+        assert opacity not in (None, "0"), "a hover-only trigger is invisible on touch"
+
+
 def _luminance(value: str) -> float:
     value = value.lstrip("#")
     if len(value) == 3:

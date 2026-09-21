@@ -30,7 +30,7 @@
 
     <main class="chat-shell">
       <header class="topbar">
-        <div class="character-heading"><div id="headerAvatar" class="header-avatar">R</div><div><h1 id="characterName">Rin</h1><p id="characterIdentity">Persistent AI Person</p></div></div>
+        <div class="character-heading"><div id="headerAvatar" class="header-avatar">R</div><div class="character-heading-copy"><h1 id="characterName">Rin</h1><p id="characterIdentity">Persistent AI Person</p></div></div>
         <div class="topbar-actions"><span id="nowText" class="now"></span><button id="voiceCallButton" class="ghost-button voice-call-button" type="button" title="语音/视频通话">📞</button><button id="conversationSearchButton" class="ghost-button search-button" type="button" title="搜索聊天（可切换当前/全局）">🔎 <span class="search-label">搜索</span></button><a id="settingsLink" class="ghost-button desktop-only-control" href="http://127.0.0.1:8003/settings" target="_blank" rel="noreferrer" title="Settings Center">⚙ Settings</a><button id="runtimeButton" class="ghost-button desktop-only-control" type="button">Runtime</button></div>
       </header>
       <section id="chat" class="chat" aria-live="polite"></section>
@@ -108,5 +108,6 @@
   <script src="/static/visual_capture.js" defer></script>
   <script src="/static/voice.js" defer></script>
   <script src="/static/dictation.js" defer></script>
+  <script src="/static/topbar_menu.js" defer></script>
 </body>
 </html>

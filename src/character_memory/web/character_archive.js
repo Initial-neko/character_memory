@@ -7,14 +7,30 @@
 
   // The sidebar "Characters" heading is the only always-present anchor for a
   // list-level action, so the archive drawer hangs off it the way the group
-  // archive list hangs off its section head.
+  // archive list hangs off its section head. It reads "已归档" rather than
+  // "归档": it sits inside the heading, so a bare verb looked like a label for
+  // the list below it instead of a way to see the archived ones.
   if (sidebarTitle) {
     const actions = document.createElement("span");
     actions.className = "character-section-actions";
-    actions.innerHTML = '<button class="character-archive-list-button" type="button" title="查看已归档角色">归档</button>';
+    actions.innerHTML = '<button class="character-archive-list-button" type="button" title="查看已归档角色">已归档</button>';
     sidebarTitle.appendChild(actions);
   }
   const archiveListButton = sidebarTitle?.querySelector(".character-archive-list-button");
+
+  function renderArchiveListButton() {
+    if (!archiveListButton) return;
+    archiveListButton.textContent = archived.length ? `已归档 (${archived.length})` : "已归档";
+  }
+
+  // One read at startup so the heading can say how many are archived. Without
+  // it the count would only appear after the drawer had been opened once, which
+  // is exactly the state a first-time user cannot reach.
+  async function refreshArchiveCount() {
+    const data = await CM.api("/v1/characters?archived=true");
+    archived = data.characters || [];
+    renderArchiveListButton();
+  }
 
   function closeMenus(exceptId = null) {
     CM.dom.characterList?.querySelectorAll("[data-character-menu]").forEach(menu => {
@@ -45,6 +61,7 @@
       if (fallback) await CM.switchCharacter(fallback.id);
     }
     await reloadCharacters();
+    await refreshArchiveCount().catch(console.error);
   }
 
   function renderArchivedDrawer() {
@@ -65,6 +82,7 @@
       const data = await CM.api("/v1/characters?archived=true");
       archived = data.characters || [];
       renderArchivedDrawer();
+      renderArchiveListButton();
     } catch (error) {
       CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
     }
@@ -76,6 +94,7 @@
     archived = archived.filter(item => item.id !== characterId);
     await reloadCharacters();
     renderArchivedDrawer();
+    renderArchiveListButton();
   }
 
   CM.dom.characterList?.addEventListener("click", event => {
@@ -107,5 +126,9 @@
     if (!event.target.closest(".character-item-wrap")) closeMenus();
   });
 
-  CM.registerFeature("characterArchive", {showArchived, archiveCharacter, restoreCharacter});
+  // A failure here is not worth a message: the heading simply keeps its
+  // count-less label, and opening the drawer reports the real error.
+  refreshArchiveCount().catch(() => {});
+
+  CM.registerFeature("characterArchive", {showArchived, archiveCharacter, restoreCharacter, refreshArchiveCount});
 })();

@@ -1,93 +1,68 @@
 # Documentation
 
-本目录区分 **当前事实源文档**、**研究参考** 与 **历史交付记录**，避免 P0.x 迭代说明和今天的实现混在同一层级。
+The documentation tree is intentionally small and role-based. A reader should not need to understand old milestones or an AI tool's workflow to learn how the current project works.
 
-## 目录规则
+## Layout
 
 ```text
 docs/
 ├─ README.md
-├─ current/           当前实现与产品 contract
-├─ research/          研究论文、外部参考与方向性材料
-└─ archive/
-   └─ milestones/     历史 P0.x delivery notes
+├─ current/       Maintained architecture and runtime contracts
+├─ research/      External references and exploratory research
+└─ archive/       Historical milestone notes that are still worth keeping
 ```
 
-优先级：
+Source code and tests are the final implementation authority. `docs/current/` is the maintained explanation of that implementation.
 
-```text
-当前源码 HEAD
-  > docs/current/
-  > config.example.yaml / pyproject.toml
-  > docs/research/
-  > docs/archive/
-```
+## Start here
 
-如果 `docs/archive/` 与当前代码冲突，以当前代码和 `docs/current/` 为准。Archive 的价值是解释“为什么曾经这样设计”，不是继续充当 API 或运行说明。
+### Architecture and runtime
 
-## Current
+- [Architecture](current/ARCHITECTURE.md)
+- [Product design](current/DESIGN.md)
+- [Codebase layout](current/CODEBASE_LAYOUT.md)
+- [Person runtime](current/PERSON_RUNTIME.md)
+- [Conversation runtime](current/CONVERSATION_RUNTIME.md)
+- [Memory](current/MEMORY.md)
+- [Technical debt](current/TECH_DEBT.md)
 
-- [`current/ARCHITECTURE.md`](current/ARCHITECTURE.md) — 当前五服务开发栈、存储、Provider、并发和多模态边界。
-- [`current/DESIGN.md`](current/DESIGN.md) — Persistent AI Person 的产品原则。
-- [`current/CODEBASE_LAYOUT.md`](current/CODEBASE_LAYOUT.md) — 源码目录和模块职责导航。
-- [`current/TECH_DEBT.md`](current/TECH_DEBT.md) — V1 真实技术债、已处理项与明确延后项。
-- [`current/MOBILE_ACCESS.md`](current/MOBILE_ACCESS.md) — Android/iOS 通过 Tailscale Serve 私有 HTTPS 接入聊天、ASR/TTS 与摄像头的 V1 部署路径。
-- [`current/PERSON_RUNTIME.md`](current/PERSON_RUNTIME.md) — PersonReaction、Action、Mental State、Direct/Group 自主 ImageGen。
-- [`current/CONVERSATION_RUNTIME.md`](current/CONVERSATION_RUNTIME.md) — Direct/Group、异步接受、SSE、supersession、Search/Mention/Archive。
-- [`current/MEMORY.md`](current/MEMORY.md) — Event/Memory/Recall/Admission baseline。
-- [`current/VISUAL_CAPTURE.md`](current/VISUAL_CAPTURE.md) — Camera/Screen Share、关键帧选择、transient Vision context。
-- [`current/VISUAL_GENERATION.md`](current/VISUAL_GENERATION.md) — SELFIE/SCENE、自主 ImageGen、显式生图工具与 Provider。
-- [`current/STICKERS.md`](current/STICKERS.md) — 内置/全局/legacy Sticker、Web import、AI tagging 与 runtime retrieval。
-- [`current/MEDIA_RUNTIME.md`](current/MEDIA_RUNTIME.md) — SenseVoice ASR、正式 TTS 路由与 Windows runtime 边界。
-- [`current/DEV_CONSOLE.md`](current/DEV_CONSOLE.md) — `:8002/dev` 的统一开发测试入口。
-- [`current/SETTINGS_CENTER.md`](current/SETTINGS_CENTER.md) — `:8003/settings` 的配置、`.env` Secret、迁移与 backup contract。
-- [`current/TTS_PROVIDER_LAB.md`](current/TTS_PROVIDER_LAB.md) — `:9002` Provider Runtime + Lab，多 TTS Provider 试听与当前边界。
-- [`current/QWEN3_TTS_EXPERIMENT.md`](current/QWEN3_TTS_EXPERIMENT.md) — `:9013` Qwen3-TTS 0.6B 实验 sidecar 与当前产品边界。
-- [`current/QWEN3_VOICE_DESIGN_TOOL.md`](current/QWEN3_VOICE_DESIGN_TOOL.md) — `:9002` Voice Design Workbench + `:9015` Qwen3-TTS 1.7B 本地 sidecar 接口契约。
-- [`current/GSV_TTS_EXPERIMENT.md`](current/GSV_TTS_EXPERIMENT.md) — `:9014` GSV-TTS-Lite sidecar、正式聊天路由、环境变量与当前边界。
-- [`current/AVATAR_SEARCH.md`](current/AVATAR_SEARCH.md) — Avatar Search 与隐私边界。
-- [`current/EVALS.md`](current/EVALS.md) — Eval 与 regression 方向。
+### Media and multimodal
 
-## Current runtime inventory
+- [Media runtime](current/MEDIA_RUNTIME.md)
+- [Voice messages](current/VOICE_MESSAGES.md)
+- [TTS Workbench / Provider Runtime](current/TTS_PROVIDER_LAB.md)
+- [GSV-TTS-Lite](current/GSV_TTS_EXPERIMENT.md)
+- [Qwen3-TTS experiment](current/QWEN3_TTS_EXPERIMENT.md)
+- [Qwen3 Voice Design tool](current/QWEN3_VOICE_DESIGN_TOOL.md)
+- [Visual capture](current/VISUAL_CAPTURE.md)
+- [Visual generation](current/VISUAL_GENERATION.md)
+- [Avatar search](current/AVATAR_SEARCH.md)
+- [Stickers](current/STICKERS.md)
 
-当前 `character-stack` 编排：
+### Operations and validation
 
-```text
-:8000 Character Runtime
-:8001 Media Runtime
-:8002 Dev Console
-:8003 Settings Center
-:9002 TTS Provider Runtime + Workbench
-```
-
-Sidecar：CosyVoice `:9012` 为可选实验；GSV-TTS-Lite `:9014` 在其隔离 runtime 存在时由 `character-stack` 编排并可处于未配置/未加载状态；Qwen3-TTS 0.6B `:9013` 仅保留手动实验。Qwen3-TTS 1.7B VoiceDesign `:9015` 只由 TTS Workbench 调用，不由正常 `character-stack` 启动，也不是正式聊天 Provider。
+- [Settings Center](current/SETTINGS_CENTER.md)
+- [Dev Console](current/DEV_CONSOLE.md)
+- [Mobile access](current/MOBILE_ACCESS.md)
+- [Evals](current/EVALS.md)
 
 ## Research
 
-- [`research/REFERENCES.md`](research/REFERENCES.md) — 当前方向使用过的论文/系统参考。研究资料不会自动变成产品 contract。
+[research/REFERENCES.md](research/REFERENCES.md) collects external systems and papers used as references. Research material is not automatically a product contract.
 
 ## Archive
 
-[`archive/milestones/`](archive/milestones/) 保存 P0.x 历史交付说明。
+`archive/` contains historical delivery notes. They are useful for understanding how the project evolved, but they may describe old ports, old providers, old non-goals, or old runtime behavior.
 
-这些文件中常见的以下内容尤其容易过时：
+Historical notes never override current code or `docs/current/`.
 
-- “当前不做 Vision / Voice / Avatar / ImageGen”之类的阶段边界；
-- 同步 `/v1/chat` 作为 WebUI 主链路；
-- polling/SSE 的旧行为；
-- 旧 TTS baseline、旧 voice 名称、旧模型准备命令；
-- `uv sync --extra ...` 的局部环境安装方式；
-- 旧前端 override 链与旧 CSS/JS 名称；
-- 旧模型 ID、旧 Provider、旧端口或启动方式。
+## Documentation policy
 
-保留它们是为了追溯设计演进，而不是让后来开发者猜哪个版本才是真的。
+When a feature changes durable behavior:
 
-## 更新约定
+1. update the relevant `docs/current/` document in the same PR;
+2. keep `README.md` focused on project overview, setup, architecture, and stable entry points;
+3. use the PR/issue for implementation plans, checklists, review logs, and handoff notes;
+4. do not add tool-specific documentation trees or generated task ledgers to `docs/`.
 
-新增功能如果改变长期 contract，应优先更新 `docs/current/`，而不是只新建一个 `P0_XX_*.md`。
-
-如果确实需要 milestone 说明：
-
-1. 当前 contract 同步更新到 `docs/current/`；
-2. delivery note 直接放 `docs/archive/milestones/`；
-3. README 只保留稳定入口和能力摘要，不堆叠版本流水账。
+Git history already preserves superseded implementation plans. The working tree should describe the project people can run today.

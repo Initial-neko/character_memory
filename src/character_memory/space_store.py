@@ -113,8 +113,39 @@ class SpaceRepository:
                     PRIMARY KEY(character_id, local_date)
                 );
 
+                CREATE TABLE IF NOT EXISTS space_opportunity_state(
+                    character_id TEXT PRIMARY KEY,
+                    last_opportunity_at TEXT,
+                    last_opportunity_at_epoch INTEGER,
+                    next_opportunity_at TEXT NOT NULL,
+                    next_opportunity_at_epoch INTEGER NOT NULL,
+                    last_status TEXT,
+                    last_post_id INTEGER,
+                    updated_at TEXT NOT NULL,
+                    updated_at_epoch INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS space_opportunity_runs(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    character_id TEXT NOT NULL,
+                    scheduled_for TEXT NOT NULL,
+                    scheduled_for_epoch INTEGER NOT NULL,
+                    started_at TEXT NOT NULL,
+                    started_at_epoch INTEGER NOT NULL,
+                    completed_at TEXT,
+                    completed_at_epoch INTEGER,
+                    status TEXT NOT NULL,
+                    post_id INTEGER,
+                    source TEXT NOT NULL DEFAULT 'SCHEDULED',
+                    error TEXT NOT NULL DEFAULT ''
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_space_daily_runs_schedule
                     ON space_daily_runs(local_date,status,scheduled_for_epoch);
+                CREATE INDEX IF NOT EXISTS idx_space_opportunity_state_due
+                    ON space_opportunity_state(next_opportunity_at_epoch,character_id);
+                CREATE INDEX IF NOT EXISTS idx_space_opportunity_runs_character
+                    ON space_opportunity_runs(character_id,started_at_epoch DESC,id DESC);
                 CREATE INDEX IF NOT EXISTS idx_space_posts_created
                     ON space_posts(created_at_epoch DESC,id DESC);
                 CREATE INDEX IF NOT EXISTS idx_space_posts_character_created
@@ -135,6 +166,10 @@ class SpaceRepository:
             self.store.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
                 ("space/002-daily-runs", datetime.now().astimezone().isoformat()),
+            )
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
+                ("space/003-interval-opportunities", datetime.now().astimezone().isoformat()),
             )
             self.store._maybe_commit()
 

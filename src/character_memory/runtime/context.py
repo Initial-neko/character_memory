@@ -68,8 +68,8 @@ def compile_context(
         resource_actions += " / GENERATE_IMAGE"
     allowed = {
         EventType.USER_MESSAGE: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；也可以完全不回复",
-        EventType.TIME_TICK: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；只有确实想主动表达时才发送",
-        EventType.PROACTIVE_INTENT: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；也可以放弃或延后",
+        EventType.TIME_TICK: f"0~3 个 MESSAGE / EMOJI{resource_actions}；只有确实想主动表达时才发送",
+        EventType.PROACTIVE_INTENT: f"0~3 个 MESSAGE / EMOJI{resource_actions}；也可以放弃或延后",
     }.get(event.event_type, f"0~3 个 MESSAGE / EMOJI{resource_actions}；也可以没有对外表达")
     generate_contract = ""
     if effective_generate_image:

@@ -82,6 +82,15 @@ class DevSpaceConfigRequest(BaseModel):
     max_posts_per_day: int = Field(ge=0, le=200)
     audience_size: int = Field(ge=0, le=10)
     poll_seconds: float = Field(ge=10.0, le=3600.0)
+    observation_enabled: bool = True
+    image_search_enabled: bool = True
+    image_generation_enabled: bool = True
+    voice_post_enabled: bool = True
+    link_preview_enabled: bool = True
+    observation_chance: float = Field(default=0.30, ge=0.0, le=1.0)
+    media_chance: float = Field(default=0.40, ge=0.0, le=1.0)
+    voice_chance: float = Field(default=0.15, ge=0.0, le=1.0)
+    max_images_per_post: int = Field(default=9, ge=1, le=9)
     rearm: bool = True
 
 
@@ -267,6 +276,15 @@ def create_dev_app(
                 "space_max_posts_per_day": req.max_posts_per_day,
                 "space_audience_size": req.audience_size,
                 "space_scheduler_poll_seconds": req.poll_seconds,
+                "space_observation_enabled": req.observation_enabled,
+                "space_image_search_enabled": req.image_search_enabled,
+                "space_image_generation_enabled": req.image_generation_enabled,
+                "space_voice_post_enabled": req.voice_post_enabled,
+                "space_link_preview_enabled": req.link_preview_enabled,
+                "space_observation_chance": req.observation_chance,
+                "space_media_chance": req.media_chance,
+                "space_voice_chance": req.voice_chance,
+                "space_max_images_per_post": req.max_images_per_post,
             }
         )
         runtime = request_character(

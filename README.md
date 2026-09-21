@@ -198,3 +198,7 @@ Browser Smoke 在 CI 的独立 job 中安装 Playwright/Chromium，不放入默�
 6. **慢能力隔离。** ASR/TTS、ImageGen 等不能因为失败而破坏已经成立的文本主链路。
 7. **先测量再复杂化。** 不因为“以后可能需要”提前引入 Redis、Celery、向量数据库、LangGraph 或大型前端框架。
 8. **历史文档不是当前 contract。** 当前 HEAD 与 `docs/current/` 优先。
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

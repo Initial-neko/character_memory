@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from character_memory.app import build_model
 from character_memory.config import Settings, load_settings
 from character_memory.resource_metrics import collect_resource_snapshot
+from character_memory.settings_store import SettingsStore
 from character_memory.web_assets import attach_static_assets
 
 
@@ -73,6 +74,14 @@ class DevImageGenRequest(BaseModel):
 class DevAvatarFromMediaRequest(BaseModel):
     character_id: str = Field(min_length=1, max_length=64)
     media_id: str = Field(min_length=1, max_length=80)
+
+
+class DevSpaceConfigRequest(BaseModel):
+    enabled: bool
+    interval_minutes: float = Field(ge=10.0, le=10080.0)
+    audience_size: int = Field(ge=0, le=10)
+    poll_seconds: float = Field(ge=10.0, le=3600.0)
+    rearm: bool = True
 
 
 def create_dev_app(
@@ -244,6 +253,39 @@ def create_dev_app(
             "GET",
             "/v1/space/dev/status",
             operation="space-status",
+            timeout=10.0,
+        )
+
+
+    @app.post("/v1/dev/space/config")
+    def dev_space_config(req: DevSpaceConfigRequest):
+        persisted = SettingsStore(config_path).save_values(
+            {
+                "space_autonomy_enabled": req.enabled,
+                "space_opportunity_interval_minutes": req.interval_minutes,
+                "space_audience_size": req.audience_size,
+                "space_scheduler_poll_seconds": req.poll_seconds,
+            }
+        )
+        runtime = request_character(
+            "POST",
+            "/v1/space/dev/config",
+            operation="space-config",
+            json=req.model_dump(),
+            timeout=10.0,
+        )
+        return {
+            "persisted": persisted,
+            "runtime": runtime,
+        }
+
+    @app.post("/v1/dev/space/due/{character_id}")
+    def dev_space_force_due(character_id: str):
+        safe_id = quote(character_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/space/dev/due/{safe_id}",
+            operation="space-force-due",
             timeout=10.0,
         )
 

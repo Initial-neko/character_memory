@@ -103,6 +103,15 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                     {"value": "cuda", "label": "CUDA"},
                 ],
             },
+            {
+                "name": "voice_silence_ms",
+                "label": "Voice Call Pause (ms)",
+                "type": "number",
+                "min": 200,
+                "max": 3000,
+                "step": 50,
+                "help": "语音通话里停顿多久算说完。调大=更容忍思考中的停顿，调小=接话更快。",
+            },
         ],
     },
     {

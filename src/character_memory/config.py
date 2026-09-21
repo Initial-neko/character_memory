@@ -11,6 +11,12 @@ from character_memory.envfile import effective_env_value
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_PATTERN
 
 
+# Single source of truth for the voice-call endpointing default. The Media
+# Runtime serves this to the browser, and it also falls back to it when a caller
+# stubs settings with an object that predates the field.
+DEFAULT_VOICE_SILENCE_MS = 900
+
+
 class Settings(BaseModel):
     # Secret fields remain in the runtime model for backward compatibility, but
     # Settings Center migrates their persisted values out of config.yaml and into
@@ -35,6 +41,13 @@ class Settings(BaseModel):
     tts_voice: str = "zf_001"
     tts_speed: float = Field(default=1.0, ge=0.5, le=2.0)
     tts_device: str = Field(default="cpu", pattern=r"^(cpu|cuda)$")
+
+    # Voice-call endpointing. The browser closes an utterance after this much
+    # silence, so this single number decides where one spoken sentence stops and
+    # the next begins. Too short and a normal pause between clauses ships the
+    # first half as its own chat turn; too long and the reply feels sluggish.
+    # 450 ms was the old hardcoded value and cut people off mid-sentence.
+    voice_silence_ms: int = Field(default=DEFAULT_VOICE_SILENCE_MS, ge=200, le=3000)
 
     # Search is deliberately separate from the LLM runtime. Avatar discovery
     # uses image search only; web_search/web_fetch remain reserved.

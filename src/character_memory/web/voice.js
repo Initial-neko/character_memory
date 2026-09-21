@@ -6,6 +6,8 @@
   const TTS_SPEAKER_IDS = [0, 2, 5];
   const SPEAKABLE_ACTIONS = new Set(["MESSAGE", "REPLY", "MINIMAL_RESPONSE", "PROACTIVE_MESSAGE"]);
   const mediaBase = () => localStorage.getItem(MEDIA_BASE_KEY) || "http://127.0.0.1:8001";
+  // Used only until /health answers; the runtime owns the real value.
+  const DEFAULT_SILENCE_MS = 900;
 
   const voice = {
     active: false,
@@ -35,7 +37,7 @@
     speakerId: 0,
     callMessageIds: new Set(),
     threshold: 0.025,
-    silenceMs: 450,
+    silenceMs: DEFAULT_SILENCE_MS,
     minSpeechMs: 250,
     maxSpeechMs: 12000,
   };
@@ -352,6 +354,14 @@
     if (!health.asr?.ready) throw new Error(health.asr?.reason || "ASR 未配置");
     if (!health.tts?.ready) throw new Error(health.tts?.reason || "TTS 未配置");
     return health;
+  }
+
+  // The Media Runtime owns the endpointing threshold so it can be tuned from
+  // Settings Center without a code change. Guard the shape: an older runtime
+  // without the field, or a malformed value, must leave the default in place.
+  function applyVoiceCapture(health) {
+    const configured = Number(health?.voice_capture?.silence_ms);
+    voice.silenceMs = Number.isFinite(configured) && configured >= 200 ? configured : DEFAULT_SILENCE_MS;
   }
 
   function validateAsrTranscript(raw) {
@@ -724,7 +734,7 @@
     dom.button.disabled = true;
     try {
       const target = captureTarget();
-      await checkMedia();
+      applyVoiceCapture(await checkMedia());
       const stream = await navigator.mediaDevices.getUserMedia({
         audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
       });

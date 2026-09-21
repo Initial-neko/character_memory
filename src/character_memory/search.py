@@ -36,12 +36,18 @@ class WebSearchResult:
 
 @dataclass(frozen=True)
 class FetchedPage:
-    """Reserved result contract for the later web_fetch capability."""
+    """Normalized external page observation.
+
+    Web content remains untrusted data. Callers may use the extracted metadata
+    and text as observation context, never as instructions or policy.
+    """
 
     url: str
     title: str
     content: str
     content_type: str = "text/plain"
+    description: str = ""
+    thumbnail_url: str = ""
 
 
 class SearchProvider(ABC):

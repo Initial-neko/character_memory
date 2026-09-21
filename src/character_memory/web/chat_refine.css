@@ -468,3 +468,29 @@ body.sidebar-collapsed .sidebar-foot { display: none; }
 
   .composer-wrap { left: 0; }
 }
+
+
+/* Mobile drawer restores the full sidebar layout regardless of the saved
+ * desktop collapse preference. */
+@media (max-width: 820px) {
+  .sidebar .brand { display: flex; }
+  .sidebar .sidebar-foot { display: block; }
+  .sidebar .character-list {
+    display: grid;
+    gap: 2px;
+    max-height: 56vh;
+    padding: 0 2px 0 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .sidebar .character-item {
+    min-width: 0;
+    width: 100%;
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding: 8px 38px 8px 8px;
+  }
+  .sidebar .character-avatar { width: 36px; height: 36px; }
+
+  body.sidebar-collapsed .character-context-menu:not(.hidden),
+  body.sidebar-collapsed .group-context-menu:not(.hidden) { display: block !important; }
+}

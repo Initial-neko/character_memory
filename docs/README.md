@@ -23,6 +23,7 @@ Source code and tests are the final implementation authority. `docs/current/` is
 - [Codebase layout](current/CODEBASE_LAYOUT.md)
 - [Person runtime](current/PERSON_RUNTIME.md)
 - [Conversation runtime](current/CONVERSATION_RUNTIME.md)
+- [Character Space](current/CHARACTER_SPACE.md)
 - [Memory](current/MEMORY.md)
 - [Technical debt](current/TECH_DEBT.md)
 

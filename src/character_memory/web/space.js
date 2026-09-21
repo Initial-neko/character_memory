@@ -57,13 +57,52 @@
     return `<span class="${className}">${CM.escapeHtml(CM.initialFor(profile))}</span>`;
   }
 
-  function mediaHtml(post) {
-    const media = post.media || null;
-    if (!media?.url) return "";
-    if (String(media.mime_type || "").startsWith("image/")) {
-      return `<div class="space-media"><img src="${CM.escapeHtml(media.url)}" alt="${CM.escapeHtml(media.label || "动态图片")}" loading="lazy"></div>`;
+  function attachmentsHtml(post) {
+    let attachments = Array.isArray(post.attachments) ? post.attachments : [];
+    if (!attachments.length && post.media?.url) {
+      attachments = [{
+        kind: String(post.media.mime_type || "").startsWith("audio/") ? "AUDIO" : "IMAGE",
+        source: post.media.source || "LEGACY",
+        media: post.media,
+      }];
     }
-    return `<a class="space-media-link" href="${CM.escapeHtml(media.url)}" target="_blank" rel="noreferrer">查看附件 · ${CM.escapeHtml(media.label || "媒体")}</a>`;
+
+    const images = attachments.filter(item => item.kind === "IMAGE" && item.media?.url).slice(0, 9);
+    const audio = attachments.find(item => item.kind === "AUDIO" && item.media?.url);
+    const link = attachments.find(item => item.kind === "LINK_PREVIEW" && item.url);
+    const parts = [];
+
+    if (images.length) {
+      const cells = images.map((item, index) => {
+        const media = item.media || {};
+        const label = item.title || media.label || `动态图片 ${index + 1}`;
+        return `<button class="space-media-cell" type="button" data-space-image="${CM.escapeHtml(media.url)}" title="${CM.escapeHtml(label)}"><img class="space-media-image" src="${CM.escapeHtml(media.url)}" alt="${CM.escapeHtml(label)}" loading="lazy"></button>`;
+      }).join("");
+      parts.push(`<div class="space-media-grid" data-count="${images.length}">${cells}</div>`);
+    }
+
+    if (audio) {
+      const media = audio.media || {};
+      const duration = Number(audio.duration_ms || 0);
+      const seconds = duration > 0 ? ` · ${Math.max(1, Math.round(duration / 1000))}s` : "";
+      const transcript = audio.transcript
+        ? `<div class="space-voice-transcript">${CM.escapeHtml(audio.transcript)}</div>`
+        : "";
+      parts.push(`<div class="space-voice-attachment"><div class="space-voice-head"><strong>语音动态</strong><span>${CM.escapeHtml(seconds)}</span></div><audio controls preload="none" src="${CM.escapeHtml(media.url)}"></audio>${transcript}</div>`);
+    }
+
+    if (link) {
+      const thumbnail = link.thumbnail_url
+        ? `<img class="space-link-thumb" src="${CM.escapeHtml(link.thumbnail_url)}" alt="" loading="lazy">`
+        : "";
+      const title = link.title || link.url;
+      const description = link.description ? `<div class="space-link-description">${CM.escapeHtml(link.description)}</div>` : "";
+      let domain = "";
+      try { domain = new URL(link.url).hostname; } catch (_) { domain = ""; }
+      parts.push(`<a class="space-link-preview" href="${CM.escapeHtml(link.url)}" target="_blank" rel="noreferrer">${thumbnail}<span class="space-link-copy"><strong>${CM.escapeHtml(title)}</strong>${description}<small>${CM.escapeHtml(domain)}</small></span></a>`);
+    }
+
+    return parts.join("");
   }
 
   function likesHtml(post) {
@@ -98,7 +137,7 @@
             <time class="space-time">${CM.escapeHtml(CM.fmtDate(post.created_at))} ${CM.escapeHtml(CM.fmtTime(post.created_at))}</time>
           </div>
           ${post.content ? `<div class="space-content">${CM.escapeHtml(post.content)}</div>` : ""}
-          ${mediaHtml(post)}
+          ${attachmentsHtml(post)}
           ${likesHtml(post)}
           ${commentsHtml(post)}
         </div>
@@ -155,6 +194,13 @@
     setOpen(false);
     window.scrollTo({top:0, behavior:"auto"});
   }
+
+  feed.addEventListener("click", event => {
+    const button = event.target.closest("[data-space-image]");
+    if (!button) return;
+    const url = button.dataset.spaceImage;
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  });
 
   nav.addEventListener("click", () => open(null).catch(console.error));
   characterEntry.addEventListener("click", () => {

@@ -80,3 +80,7 @@ td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
   .topbar { align-items: flex-start; flex-direction: column; }
   .service-links { justify-content: flex-start; }
 }
+
+
+/* Space interval presets are behavior hooks as well as compact controls. */
+.space-preset { min-width: 64px; }

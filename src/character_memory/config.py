@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from character_memory.envfile import effective_env_value
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_PATTERN
@@ -92,17 +92,17 @@ class Settings(BaseModel):
     # persisted settings so the test-stage behavior can be tuned from Settings
     # Center without editing source code.
     space_autonomy_enabled: bool = True
-    space_daily_window_start_hour: int = Field(default=18, ge=0, le=23)
-    # End hour is exclusive; 24 means midnight at the end of the same local day.
-    space_daily_window_end_hour: int = Field(default=22, ge=1, le=24)
+    # Interval between autonomous Space opportunities for one active character.
+    # 1440 keeps the production default at roughly once per 24 hours; shorter
+    # values are intentionally supported for test soak runs.
+    space_opportunity_interval_minutes: float = Field(default=1440.0, ge=10.0, le=10080.0)
     space_audience_size: int = Field(default=5, ge=0, le=10)
     space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 
-    @model_validator(mode="after")
-    def validate_space_window(self):
-        if self.space_daily_window_end_hour <= self.space_daily_window_start_hour:
-            raise ValueError("space_daily_window_end_hour must be greater than space_daily_window_start_hour")
-        return self
+    # Legacy V2 fields remain loadable so existing config.yaml files do not need
+    # a destructive migration. The interval scheduler no longer consumes them.
+    space_daily_window_start_hour: int = Field(default=18, ge=0, le=23)
+    space_daily_window_end_hour: int = Field(default=22, ge=1, le=24)
 
 
 def load_settings(path: str = "config.yaml") -> Settings:

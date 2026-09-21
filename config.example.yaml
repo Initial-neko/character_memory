@@ -67,14 +67,13 @@ recall_limit: 8
 proactive_wake_enabled: true
 proactive_wake_minutes: 60
 
-# Character Space autonomous social life. These are intentionally configurable
-# during testing. One character still receives at most one persisted daily
-# opportunity; the model may decide not to post.
+# Character Space autonomous social life. The model may decide not to post on
+# any opportunity. Production default is one opportunity every 24H; test soak
+# runs can shorten this to 60/30/10 minutes from Dev Console.
 space_autonomy_enabled: true
-space_daily_window_start_hour: 18
-space_daily_window_end_hour: 22   # exclusive; must be greater than start
-space_audience_size: 5            # 0 disables automatic distribution; hard max 10
-space_scheduler_poll_seconds: 60  # check latency only; does not add opportunities
+space_opportunity_interval_minutes: 1440  # 1440=24H, 60=1H, 30=30min, 10=10min
+space_audience_size: 5                    # 0 disables automatic distribution; hard max 10
+space_scheduler_poll_seconds: 60          # check latency only; does not change interval
 
 
 # GSV-TTS-Lite runtime assets are intentionally NOT stored in config.yaml.

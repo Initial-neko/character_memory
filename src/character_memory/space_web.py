@@ -36,6 +36,14 @@ class CreateSpaceCommentRequest(BaseModel):
         return self
 
 
+class SpaceDevConfigRequest(BaseModel):
+    enabled: bool | None = None
+    interval_minutes: float | None = Field(default=None, ge=10.0, le=10080.0)
+    audience_size: int | None = Field(default=None, ge=0, le=10)
+    poll_seconds: float | None = Field(default=None, ge=10.0, le=3600.0)
+    rearm: bool = True
+
+
 def attach_space_routes(app):
     """Attach Character Space without initializing the LLM runtime."""
 
@@ -52,11 +60,13 @@ def attach_space_routes(app):
         repository,
         poll_seconds=float(getattr(access.settings, "space_scheduler_poll_seconds", 60.0)),
     )
-    scheduler_enabled = autonomy_enabled(access)
+    scheduler_capable = bool(getattr(access.settings, "api_key", ""))
 
-    if scheduler_enabled:
+    if scheduler_capable:
         @app.on_event("startup")
         def _start_space_autonomy():
+            # Keep the scheduler thread alive even while autonomy is disabled so
+            # Dev/Settings can hot-enable it without restarting Character Runtime.
             scheduler.start()
 
         @app.on_event("shutdown")
@@ -255,8 +265,35 @@ def attach_space_routes(app):
     @app.get("/v1/space/dev/status")
     def space_dev_status():
         payload = scheduler.status()
-        payload["enabled"] = scheduler_enabled
+        payload["scheduler_capable"] = scheduler_capable
         return payload
+
+    @app.post("/v1/space/dev/config")
+    def space_dev_config(req: SpaceDevConfigRequest):
+        return scheduler.apply_runtime_config(
+            enabled=req.enabled,
+            interval_minutes=req.interval_minutes,
+            audience_size=req.audience_size,
+            poll_seconds=req.poll_seconds,
+            rearm=req.rearm,
+            now=datetime.now().astimezone(),
+        )
+
+    @app.post("/v1/space/dev/due/{character_id}")
+    def space_dev_force_due(character_id: str):
+        require_known(character_id, active=True)
+        try:
+            return {
+                "character_id": character_id,
+                "state": scheduler.force_due(
+                    character_id,
+                    now=datetime.now().astimezone(),
+                ),
+            }
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/space/dev/opportunity/{character_id}")
     def space_dev_opportunity(character_id: str):

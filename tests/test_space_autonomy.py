@@ -105,8 +105,7 @@ def _access(tmp_path, ids=("c00", "c01", "c02"), model=None):
         settings=SimpleNamespace(
             api_key="test-key",
             space_autonomy_enabled=True,
-            space_daily_window_start_hour=18,
-            space_daily_window_end_hour=22,
+            space_opportunity_interval_minutes=1440.0,
             space_audience_size=5,
             space_scheduler_poll_seconds=60.0,
         ),
@@ -182,33 +181,41 @@ def test_space_autonomy_runs_view_reaction_comment_and_author_reply(tmp_path):
     store.close()
 
 
-def test_daily_scheduler_runs_once_but_dev_opportunity_does_not_consume_it(tmp_path):
+def test_interval_scheduler_runs_again_after_one_hour_and_manual_dev_does_not_consume_it(tmp_path):
     access, store, model = _access(tmp_path, ids=("c00",))
+    access.settings.space_opportunity_interval_minutes = 60
     repository = SpaceRepository(store)
-    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=60)
-    now = datetime(2026, 9, 21, 23, 30, tzinfo=timezone.utc)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    start = datetime(2026, 9, 21, 20, 0, tzinfo=timezone.utc)
 
-    first = scheduler.run_once(now)
-    second = scheduler.run_once(now)
+    # First status arms the new character one interval into the future.
+    status = scheduler.status(start)
+    assert status["interval_minutes"] == 60
+    assert status["characters"][0]["next_opportunity_at"].startswith("2026-09-21T21:00")
 
+    assert scheduler.run_once(start) == []
+    first = scheduler.run_once(datetime(2026, 9, 21, 21, 0, tzinfo=timezone.utc))
     assert len(first) == 1
-    assert second == []
     assert model.opportunities == 1
-    run = repository.get_daily_run("c00", "2026-09-21")
-    assert run["status"] == "POSTED"
-    daily_post_id = run["post_id"]
 
+    # Manual Dev testing is independent from the formal next opportunity.
+    before = repository.get_opportunity_state("c00")["next_opportunity_at"]
     manual = scheduler.service.run_opportunity(
         "c00",
-        now=now,
+        now=datetime(2026, 9, 21, 21, 10, tzinfo=timezone.utc),
         cascade=True,
         source="DEV",
     )
     assert manual["posted"] is True
     assert model.opportunities == 2
-    assert repository.get_daily_run("c00", "2026-09-21")["post_id"] == daily_post_id
-    store.close()
+    assert repository.get_opportunity_state("c00")["next_opportunity_at"] == before
 
+    assert scheduler.run_once(datetime(2026, 9, 21, 21, 59, tzinfo=timezone.utc)) == []
+    second = scheduler.run_once(datetime(2026, 9, 21, 22, 0, tzinfo=timezone.utc))
+    assert len(second) == 1
+    assert model.opportunities == 3
+    assert len(repository.list_opportunity_runs(character_id="c00")) == 2
+    store.close()
 
 def test_dev_console_exposes_space_autonomy_controls():
     from pathlib import Path
@@ -225,37 +232,46 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="runSpaceAudience"',
         'id="refreshSpaceStatus"',
         'id="spacePostId"',
+        'id="spaceIntervalMinutes"',
+        'id="spaceAudienceSize"',
+        'id="spacePollSeconds"',
+        'id="applySpaceConfig"',
+        'id="forceSpaceDue"',
+        'data-minutes="60"',
     ]:
         assert token in html
     for token in [
         "/v1/dev/space/status",
         "/v1/dev/space/opportunity/",
         "/v1/dev/space/audience/",
+        "/v1/dev/space/config",
+        "/v1/dev/space/due/",
     ]:
         assert token in script
         assert token in server
 
 
-def test_space_behavior_uses_webui_configurable_window_and_audience_size(tmp_path):
+def test_space_behavior_uses_configurable_interval_and_audience_size(tmp_path):
     access, store, _ = _access(tmp_path, ids=("c00", "c01", "c02"))
-    access.settings.space_daily_window_start_hour = 6
-    access.settings.space_daily_window_end_hour = 7
+    access.settings.space_opportunity_interval_minutes = 30
     access.settings.space_audience_size = 1
 
     repository = SpaceRepository(store)
-    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=30)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=20)
     now = datetime(2026, 9, 21, 5, 0, tzinfo=timezone.utc)
 
-    scheduled = scheduler.scheduled_for("c00", now)
-    assert scheduled.hour == 6
-    assert 0 <= scheduled.minute <= 59
+    status = scheduler.status(now)
+    assert status["interval_minutes"] == 30
+    assert status["characters"][0]["next_opportunity_at"].startswith("2026-09-21T05:30")
+    assert status["audience_size"] == 1
+    assert status["poll_seconds"] == 20
 
     post = repository.create_post("c00", "测试配置化 Audience", now)
-    audience = scheduler.service.select_audience(post.id, "c00")
-    assert len(audience) == 1
+    assert len(scheduler.service.select_audience(post.id, "c00")) == 1
 
+    scheduler.apply_runtime_config(interval_minutes=60, audience_size=2, poll_seconds=10, now=now)
     status = scheduler.status(now)
-    assert status["window"] == "06:00-07:00 local time"
-    assert status["audience_size"] == 1
-    assert status["poll_seconds"] == 30
+    assert status["interval_minutes"] == 60
+    assert status["audience_size"] == 2
+    assert status["characters"][0]["next_opportunity_at"].startswith("2026-09-21T06:00")
     store.close()

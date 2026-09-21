@@ -96,8 +96,55 @@
     try {
       const data = await jsonFetch("/v1/dev/space/status");
       $("spaceStatus").textContent = pretty(data);
+      if ($("spaceEnabled")) $("spaceEnabled").checked = Boolean(data.enabled);
+      if ($("spaceIntervalMinutes")) $("spaceIntervalMinutes").value = String(data.interval_minutes ?? 1440);
+      if ($("spaceAudienceSize")) $("spaceAudienceSize").value = String(data.audience_size ?? 5);
+      if ($("spacePollSeconds")) $("spacePollSeconds").value = String(data.poll_seconds ?? 60);
     } catch (error) {
       $("spaceStatus").textContent = `ERROR: ${error.message}`;
+    }
+  }
+
+  async function applySpaceConfig() {
+    const button = $("applySpaceConfig");
+    button.disabled = true;
+    $("spaceResult").textContent = "正在保存并热应用 Space 测试配置...";
+    try {
+      const data = await jsonFetch("/v1/dev/space/config", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          enabled: $("spaceEnabled").checked,
+          interval_minutes: Number($("spaceIntervalMinutes").value || 1440),
+          audience_size: Number($("spaceAudienceSize").value || 0),
+          poll_seconds: Number($("spacePollSeconds").value || 60),
+          rearm: true,
+        }),
+      });
+      $("spaceResult").textContent = pretty(data);
+      await refreshSpaceStatus();
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function forceSpaceDue() {
+    const button = $("forceSpaceDue");
+    const characterId = $("spaceCharacter").value;
+    button.disabled = true;
+    $("spaceResult").textContent = `正在让 ${characterId} 的 next opportunity 到期...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/space/due/${encodeURIComponent(characterId)}`, {
+        method: "POST",
+      });
+      $("spaceResult").textContent = pretty(data);
+      await refreshSpaceStatus();
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
     }
   }
 
@@ -105,7 +152,7 @@
     const button = $("runSpaceOpportunity");
     const characterId = $("spaceCharacter").value;
     button.disabled = true;
-    $("spaceResult").textContent = "正在执行 Daily Space Opportunity...";
+    $("spaceResult").textContent = "正在执行一次手动 Space Opportunity...";
     try {
       const data = await jsonFetch(`/v1/dev/space/opportunity/${encodeURIComponent(characterId)}`, {
         method: "POST",
@@ -443,6 +490,13 @@
   $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); });
   $("runLlm").addEventListener("click", runLlm);
   $("runSpaceOpportunity").addEventListener("click", runSpaceOpportunity);
+  $("forceSpaceDue").addEventListener("click", forceSpaceDue);
+  $("applySpaceConfig").addEventListener("click", applySpaceConfig);
+  document.querySelectorAll(".space-preset").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("spaceIntervalMinutes").value = button.dataset.minutes || "1440";
+    });
+  });
   $("runSpaceAudience").addEventListener("click", runSpaceAudience);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);
   $("runTts").addEventListener("click", runTts);

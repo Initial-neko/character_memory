@@ -7,6 +7,7 @@ import threading
 
 from character_memory.domain.models import ActionType, DailyLifePlan, Event, EventType
 from character_memory.space_store import SpaceRepository
+from character_memory.time_utils import epoch_us
 
 
 logger = logging.getLogger("character_memory.space_autonomy")
@@ -77,10 +78,11 @@ class SpaceAutonomyService:
 {now.isoformat()}
 
 # Character Space Opportunity
-这是今天一次“要不要公开发动态”的机会，不是发帖 KPI。
+这是一次“要不要公开发动态”的 Opportunity，不是发帖 KPI。
+系统可能在测试阶段按较短间隔再次给你 Opportunity；这不代表必须提高发帖频率。
 不要为了完成任务、维持活跃、取悦用户而发动态。
-只根据这个人物今天已经真实存在的经历、记忆和状态判断。
-不要凭空创造今天没有发生过的新事件。
+只根据这个人物已经真实存在的经历、记忆和状态判断。
+不要凭空创造没有发生过的新事件。
 
 本次只判断 Space 动态：
 - events 必须返回 []，不要在这里额外编造生活事件。
@@ -108,7 +110,7 @@ class SpaceAutonomyService:
         plan = bundle.model.structured_for_session(
             prompt,
             DailyLifePlan,
-            f"space-opportunity:{character_id}:{now.date().isoformat()}:{source.lower()}",
+            f"space-opportunity:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}",
         )
         content = str(plan.social_post or "").strip()
         if not content:
@@ -296,7 +298,7 @@ class SpaceAutonomyService:
 
 
 class SpaceAutonomyScheduler:
-    """One restart-safe daily Space opportunity per active character."""
+    """Restart-safe interval scheduler for autonomous Space opportunities."""
 
     def __init__(
         self,
@@ -310,118 +312,167 @@ class SpaceAutonomyScheduler:
         self.service = SpaceAutonomyService(access, repository)
         self.poll_seconds = max(10.0, float(poll_seconds))
         self._stop = threading.Event()
+        self._wake = threading.Event()
         self._thread: threading.Thread | None = None
 
-    def scheduled_for(self, character_id: str, now: datetime) -> datetime:
-        local_date = now.date().isoformat()
-        start_hour = int(getattr(self.access.settings, "space_daily_window_start_hour", 18))
-        end_hour = int(getattr(self.access.settings, "space_daily_window_end_hour", 22))
-        window_minutes = max(1, (end_hour - start_hour) * 60)
-        seed = hashlib.sha256(f"{local_date}:{character_id}".encode("utf-8")).digest()
-        offset = int.from_bytes(seed[:4], "big") % window_minutes
-        return now.replace(
-            hour=start_hour,
-            minute=0,
-            second=0,
-            microsecond=0,
-        ) + timedelta(minutes=offset)
+    def interval_minutes(self) -> float:
+        return max(
+            10.0,
+            min(
+                10080.0,
+                float(getattr(self.access.settings, "space_opportunity_interval_minutes", 1440.0)),
+            ),
+        )
+
+    def _state_for(self, character_id: str, now: datetime) -> dict:
+        return self.repository.ensure_opportunity_state(
+            character_id,
+            now,
+            self.interval_minutes(),
+        )
 
     def status(self, now: datetime | None = None) -> dict:
         now = now or datetime.now().astimezone()
-        date_key = now.date().isoformat()
-        runs = {
-            item["character_id"]: item
-            for item in self.repository.list_daily_runs(date_key)
-        }
         items = []
         for profile in self.service._active_profiles():
             character_id = profile["id"]
-            scheduled = self.scheduled_for(character_id, now)
-            run = runs.get(character_id)
+            state = self._state_for(character_id, now)
             items.append(
                 {
                     "character_id": character_id,
                     "name": profile.get("name") or character_id,
-                    "scheduled_for": scheduled.isoformat(),
-                    "due": now >= scheduled and run is None,
-                    "run": run,
+                    "last_opportunity_at": state.get("last_opportunity_at"),
+                    "next_opportunity_at": state.get("next_opportunity_at"),
+                    "last_status": state.get("last_status"),
+                    "last_post_id": state.get("last_post_id"),
+                    "due": epoch_us(now) >= int(state["next_opportunity_at_epoch"]),
                 }
             )
         return {
             "enabled": autonomy_enabled(self.access),
-            "date": date_key,
+            "interval_minutes": self.interval_minutes(),
             "poll_seconds": self.poll_seconds,
-            "window": (
-                f"{int(getattr(self.access.settings, 'space_daily_window_start_hour', 18)):02d}:00-"
-                f"{int(getattr(self.access.settings, 'space_daily_window_end_hour', 22)):02d}:00 local time"
-            ),
             "audience_size": min(
                 MAX_AUTONOMOUS_AUDIENCE,
                 max(0, int(getattr(self.access.settings, "space_audience_size", 5))),
             ),
             "characters": items,
+            "recent_runs": self.repository.list_opportunity_runs(limit=30),
         }
+
+    def apply_runtime_config(
+        self,
+        *,
+        enabled: bool | None = None,
+        interval_minutes: float | None = None,
+        audience_size: int | None = None,
+        poll_seconds: float | None = None,
+        rearm: bool = True,
+        now: datetime | None = None,
+    ) -> dict:
+        now = now or datetime.now().astimezone()
+        if enabled is not None:
+            self.access.settings.space_autonomy_enabled = bool(enabled)
+        if interval_minutes is not None:
+            self.access.settings.space_opportunity_interval_minutes = max(
+                10.0, min(10080.0, float(interval_minutes))
+            )
+        if audience_size is not None:
+            self.access.settings.space_audience_size = max(
+                0, min(MAX_AUTONOMOUS_AUDIENCE, int(audience_size))
+            )
+        if poll_seconds is not None:
+            self.poll_seconds = max(10.0, min(3600.0, float(poll_seconds)))
+            self.access.settings.space_scheduler_poll_seconds = self.poll_seconds
+
+        if rearm:
+            next_at = now + timedelta(minutes=self.interval_minutes())
+            for profile in self.service._active_profiles():
+                self.repository.set_next_opportunity(profile["id"], next_at, now)
+
+        self._wake.set()
+        return self.status(now)
+
+    def force_due(self, character_id: str, *, now: datetime | None = None) -> dict:
+        now = now or datetime.now().astimezone()
+        self.service._require_active(character_id)
+        self._state_for(character_id, now)
+        state = self.repository.set_next_opportunity(character_id, now, now)
+        self._wake.set()
+        return state
 
     def run_once(self, now: datetime | None = None) -> list[dict]:
         now = now or datetime.now().astimezone()
-        date_key = now.date().isoformat()
+        if not autonomy_enabled(self.access):
+            return []
         outcomes = []
+        interval = self.interval_minutes()
         for profile in self.service._active_profiles():
             character_id = profile["id"]
-            scheduled = self.scheduled_for(character_id, now)
-            if now < scheduled:
+            state = self._state_for(character_id, now)
+            if epoch_us(now) < int(state["next_opportunity_at_epoch"]):
                 continue
-            if self.repository.get_daily_run(character_id, date_key) is not None:
-                continue
-            if not self.repository.claim_daily_run(character_id, date_key, scheduled, now):
+            run_id = self.repository.claim_due_opportunity(
+                character_id,
+                now,
+                interval,
+                source="SCHEDULED",
+            )
+            if run_id is None:
                 continue
             try:
                 result = self.service.run_opportunity(
                     character_id,
                     now=now,
                     cascade=True,
-                    source="DAILY",
+                    source="SCHEDULED",
                 )
                 status = "POSTED" if result["posted"] else "NO_POST"
                 post_id = (result.get("post") or {}).get("id")
-                self.repository.finish_daily_run(
+                self.repository.finish_opportunity_run(
+                    run_id,
                     character_id,
-                    date_key,
                     datetime.now().astimezone(),
                     status=status,
                     post_id=post_id,
                 )
-                outcomes.append(result)
+                outcomes.append({**result, "run_id": run_id})
             except Exception as exc:
-                self.repository.finish_daily_run(
+                self.repository.finish_opportunity_run(
+                    run_id,
                     character_id,
-                    date_key,
                     datetime.now().astimezone(),
                     status="FAILED",
                     error=str(exc),
                 )
                 logger.exception(
-                    "space.daily failed character=%s date=%s error=%s",
+                    "space.opportunity failed character=%s run_id=%s error=%s",
                     character_id,
-                    date_key,
+                    run_id,
                     exc,
                 )
         return outcomes
 
     def _loop(self) -> None:
-        logger.info("space.scheduler start poll_seconds=%.0f", self.poll_seconds)
+        logger.info(
+            "space.scheduler start poll_seconds=%.0f interval_minutes=%.1f",
+            self.poll_seconds,
+            self.interval_minutes(),
+        )
         while not self._stop.is_set():
             try:
                 self.run_once()
             except Exception:
                 logger.exception("space.scheduler loop_error")
-            self._stop.wait(self.poll_seconds)
+            self._wake.wait(self.poll_seconds)
+            self._wake.clear()
         logger.info("space.scheduler stop")
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop.clear()
+        self._wake.clear()
         self._thread = threading.Thread(
             target=self._loop,
             name="character-space-autonomy",
@@ -431,9 +482,9 @@ class SpaceAutonomyScheduler:
 
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=1.0)
-
 
 def autonomy_enabled(access) -> bool:
     return bool(

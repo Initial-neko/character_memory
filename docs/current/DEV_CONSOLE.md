@@ -90,11 +90,14 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 支持：
 
 - 选择一个未归档 Character；
-- `触发 Daily Life`：立即执行一次 Space Opportunity，并在发帖时继续跑 Audience / 点赞 / 评论 / 作者回复；
+- 直接调整并持久化 `Autonomous Space / Opportunity Interval / Audience / Scheduler Poll`；
+- 快捷档 `10min / 30min / 1H / 6H / 24H`；
+- `立即手动触发一次`：立即跑一次完整 Space Opportunity，不改变正式 next time；
+- `让选中角色立即到期`：把 next opportunity 设为现在，用真实后台 Scheduler 验证；
 - 指定 Post ID 后 `再次模拟 Audience`；
-- 查看当天正式调度时间和 `space_daily_runs` 状态。
+- 查看每个人的 last/next opportunity、last status，以及最近 opportunity run history。
 
-Dev 手动触发不会占用当天正式的 Daily Opportunity，因此可以反复验收。
+配置会写回 `config.yaml`，同时热应用到当前 Character Runtime。测试时可设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。
 
 ### TTS
 

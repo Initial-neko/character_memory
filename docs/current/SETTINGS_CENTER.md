@@ -45,15 +45,14 @@ Settings Center exposes a dedicated **Character Space** card for the current tes
 
 ```yaml
 space_autonomy_enabled: true
-space_daily_window_start_hour: 18
-space_daily_window_end_hour: 22
+space_opportunity_interval_minutes: 1440
 space_audience_size: 5
 space_scheduler_poll_seconds: 60
 ```
 
-The end hour is exclusive and must be greater than the start hour. Audience size accepts `0..10`; `0` means the character may still autonomously post but the post is not automatically distributed to other characters. The hard audience ceiling remains 10.
+The interval accepts `10..10080` minutes. `1440` is the normal 24H default; `60` is the recommended 1H soak-test preset. Audience size accepts `0..10`; `0` means the character may still autonomously post but the post is not automatically distributed to other characters. The hard audience ceiling remains 10.
 
-These fields persist in `config.yaml` and currently require Character Runtime restart. Changing the poll interval changes scheduler latency only; it never changes the once-per-character-per-day durable opportunity rule.
+These fields persist in `config.yaml`. Settings Center changes still report a Character Runtime restart requirement; Dev Console can persist the same values and hot-apply them immediately for testing. Changing the poll interval changes scheduler latency only; it never changes the Opportunity interval.
 
 ## 3. Formal TTS selection
 

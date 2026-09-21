@@ -89,6 +89,8 @@ def test_manual_wake_uses_time_tick_and_existing_direct_sse(page, wake_server):
     page.set_default_timeout(10000)
     page.goto(wake_server, wait_until="domcontentloaded")
     expect(page.locator("#characterList .character-item").first).to_be_visible()
+    expect(page.locator("#topbarMoreButton")).to_be_visible()
+    page.locator("#topbarMoreButton").click()
     expect(page.locator("#wakeButton")).to_be_visible()
     page.wait_for_function("() => Boolean(CM.state.directStream && CM.state.directStream.readyState === EventSource.OPEN)")
 

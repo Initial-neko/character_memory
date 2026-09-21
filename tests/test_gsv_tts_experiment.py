@@ -21,7 +21,7 @@ from character_memory.gsv_tts_experiment import (
     _env_seed,
     create_gsv_tts_app,
 )
-from character_memory.voices import VoiceProfile, VoiceProfileError
+from character_memory.voices import VoiceProfile
 
 
 class RecordingTorch:
@@ -926,20 +926,25 @@ def test_gsv_synthesize_refuses_after_the_default_template_clip_disappears(tmp_p
     assert rig.runtime.status()["ready"] is False
 
 
-def test_gsv_runtime_refuses_to_start_on_a_broken_voice_asset(tmp_path):
+def test_gsv_runtime_reports_a_broken_voice_asset_without_dying_of_it(tmp_path):
     """A template that exists but is unusable is a config error, not a skip.
 
     GSV cannot recover from an empty reference transcript at synthesis time
-    (``cache_prompt_audio`` raises), so the only place an operator can see the
-    mistake is at load. Swallowing it would surface as a failure per utterance.
+    (``cache_prompt_audio`` raises), so the operator has to meet the mistake
+    before a request is made -- and they still do: readiness is false, the
+    reason names the file, and every request refuses with that same sentence.
+    What changed is that the mistake no longer takes the process with it, which
+    it cannot be allowed to do because dev_stack runs this sidecar beside the
+    rest of the stack and tears all of it down when this one exits.
     """
     personas = _persona_root(tmp_path)
     _write_persona(personas, "momo", ref_audio="momo.wav", ref_text="   ")
 
-    with pytest.raises(VoiceProfileError) as excinfo:
-        _Rig(tmp_path, persona_root=personas)
+    status = _Rig(tmp_path, persona_root=personas).runtime.status()
 
-    assert str(_voices_root(tmp_path) / "momo.yaml") in str(excinfo.value)
+    assert status["ready"] is False
+    assert str(_voices_root(tmp_path) / "momo.yaml") in status["reason"]
+    assert "ref_text" in status["reason"]
 
 
 def test_gsv_runtime_skips_personas_that_have_no_voice_profile(tmp_path):

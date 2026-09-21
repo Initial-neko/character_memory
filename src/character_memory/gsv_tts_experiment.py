@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from character_memory.voices import (
     TEMPLATE_FILE_SUFFIX,
     VoiceProfile,
+    VoiceProfileError,
     discover_character_voices,
     discover_templates,
     resolve_voice_registry,
@@ -184,9 +185,12 @@ class GsvTtsRuntime:
         # selector reads the distinction (``_voice_ids``). ``_load_voices``
         # overwrites this from the tree it actually found.
         self._templates: dict[str, VoiceProfile] = dict(voices or {})
-        self._voices: dict[str, VoiceProfile] = (
-            dict(voices) if voices is not None else self._load_voices()
-        )
+        self._voices_error: str | None = None
+        if voices is not None:
+            self._voices: dict[str, VoiceProfile] = dict(voices)
+        else:
+            self._voices = {}
+            self._rebuild_voices()
         self._load_ms: float | None = None
         self._load_error: str | None = None
         self._lock = threading.RLock()
@@ -219,6 +223,27 @@ class GsvTtsRuntime:
             ),
         )
 
+    def _rebuild_voices(self) -> None:
+        """Rebuild the registry, recording an unusable tree instead of dying of it.
+
+        Spec §10: a template that does not parse is ``ready: false`` with a
+        reason, and **the stack still starts**. dev_stack runs this process
+        beside the rest of the stack and tears all of it down when this one
+        exits, so an operator's stale experiment file used to cost them the
+        whole console. The failure is reported through ``/health`` instead --
+        the readers stay strict, so nothing is silently skipped or downgraded,
+        and ``/v1/tts`` refuses with the same sentence ``/health`` reports.
+        """
+        try:
+            self._voices = self._load_voices()
+        except VoiceProfileError as exc:
+            self._voices = {}
+            self._templates = {}
+            self._voices_error = str(exc)
+            print(f"gsv-tts voices unavailable: {exc}", flush=True)
+        else:
+            self._voices_error = None
+
     def reload_voices(self) -> dict:
         """Re-read the template tree and the character references in place.
 
@@ -231,7 +256,12 @@ class GsvTtsRuntime:
         encoded lazily by ``infer_batched`` on its first use.
         """
         with self._lock:
-            self._voices = self._load_voices()
+            self._rebuild_voices()
+            if self._voices_error:
+                # Same external contract as before: the route turns this into a
+                # 400 naming the file. The registry is left unready either way,
+                # so the refusal and ``/health`` cannot disagree about it.
+                raise VoiceProfileError(self._voices_error)
             return self.status()
 
     def _voice_ids(self) -> list[str]:
@@ -290,6 +320,13 @@ class GsvTtsRuntime:
         # a profile the engine did not use.
         profile = self._voices.get(name) or self._voices.get(self.default_voice)
         if profile is None:
+            if self._voices_error:
+                # Say what actually failed. "missing or unusable" would send the
+                # operator hunting for a file the loader already read and named.
+                raise RuntimeError(
+                    f"No voice profile for {name!r}: the voice tree did not load. "
+                    f"{self._voices_error}"
+                )
             template = Path(self.voices_root) / f"{self.default_voice}{TEMPLATE_FILE_SUFFIX}"
             raise RuntimeError(
                 f"No voice profile for {name!r} and no default template "
@@ -334,6 +371,12 @@ class GsvTtsRuntime:
         follows it there -- readiness is now "the default template loads", which
         subsumes the old four-field check.
         """
+        if self._voices_error:
+            # The tree failed to load whole. Reported verbatim: it already names
+            # the offending file, and the "not defined" reason below would send
+            # the operator looking for a file that is sitting right there.
+            return False, self._voices_error
+
         required = {
             "GSV_TTS_GPT_MODEL": self.gpt_model,
             "GSV_TTS_SOVITS_MODEL": self.sovits_model,

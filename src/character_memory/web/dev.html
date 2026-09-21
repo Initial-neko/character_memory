@@ -10,6 +10,19 @@
   <link rel="stylesheet" href="/static/visual_capture.css" />
 </head>
 <body>
+  <div id="bootWarning" class="boot-warning" hidden>
+    页面脚本没有加载成功，下面的控件不会响应。按 F5 刷新；如果一直失败，确认 Dev Console :8002 是否在运行。
+  </div>
+  <script>
+    // dev.js marks <body> once it has wired every control. Without that mark the
+    // page still renders -- showing the markup's placeholder values -- and looks
+    // alive while every button silently does nothing, so say so instead.
+    window.setTimeout(function () {
+      if (document.body.dataset.devBooted !== "1") {
+        document.getElementById("bootWarning").hidden = false;
+      }
+    }, 3000);
+  </script>
   <main class="shell">
     <header class="topbar">
       <div>
@@ -86,6 +99,7 @@
           <button class="secondary" id="refreshSpaceStatus" type="button">刷新调度状态</button>
         </div>
         <p class="subtle">“手动触发”不改变正式 next opportunity；“立即到期”则用于测试真实 Scheduler：把选中角色的 next opportunity 设为现在，后台线程会按 Poll 周期自动执行。</p>
+        <p class="subtle" id="spaceStatusAge">尚未读取调度状态。</p>
         <pre id="spaceStatus" class="result">等待读取 Space 调度状态...</pre>
         <pre id="spaceResult" class="result">等待测试...</pre>
       </article>

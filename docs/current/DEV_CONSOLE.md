@@ -200,6 +200,17 @@ config.yaml   non-sensitive config
 
 Settings Center 负责 legacy secret migration、config backup 和 restart-required policy。Dev Console 不复制这套逻辑。
 
+### 4.1 页面新鲜度与脚本加载失败
+
+Dev Console 的 HTML 与 `/static/*` 都返回 `cache-control: no-cache` + ETag，浏览器每次使用前都必须回服务器确认，所以普通 F5 拿到的就是当前配置，不需要强制刷新。这一层没有 Service Worker，也没有代理缓存。
+
+真正的失败模式是脚本没有加载成功（例如页面正好在 stack 重启的窗口里加载，`/static/dev.js` 打到了已经停掉的端口）。这种页面仍然渲染，但显示的是 markup 里的占位值——例如 Interval 停在 `1440` 而不是运行中的值——并且所有控件都不响应。它不会自愈，必须重新加载。为了让这种情况不再伪装成"页面正常"：
+
+- `dev.js` 初始化完成后在 `<body>` 上设置 `data-dev-booted="1"`；
+- `dev.html` 的内联脚本在 3 秒后检查该标记，缺失就显示红色横幅「页面脚本没有加载成功」；
+- Space 状态区显示 `读取时间 HH:MM:SS`，一眼能看出这份数据是什么时候读的；
+- 页面从 bfcache 恢复（`pageshow` 且 `persisted`）时重新拉取 Space 状态与角色列表，避免恢复出 stack 重启前的旧配置。
+
 ## 5. Image provider diagnostics
 
 `GET /v1/visual/providers` 返回：

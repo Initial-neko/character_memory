@@ -96,6 +96,7 @@
     try {
       const data = await jsonFetch("/v1/dev/space/status");
       $("spaceStatus").textContent = pretty(data);
+      if ($("spaceStatusAge")) $("spaceStatusAge").textContent = `读取时间 ${new Date().toLocaleTimeString()}`;
       if ($("spaceEnabled")) $("spaceEnabled").checked = Boolean(data.enabled);
       if ($("spaceIntervalMinutes")) $("spaceIntervalMinutes").value = String(data.interval_minutes ?? 1440);
       if ($("spaceMaxPostsPerDay")) $("spaceMaxPostsPerDay").value = String(data.max_posts_per_day ?? 0);
@@ -520,4 +521,19 @@
   loadSpaceCharacters();
   refreshSpaceStatus();
   scheduleResourceRefresh();
+
+  // Every control above is wired, so the failure banner in the markup can stand
+  // down. Anything that stops this line from running leaves the page looking
+  // alive while nothing responds, which is exactly what the banner is for.
+  document.body.dataset.devBooted = "1";
+
+  // Chrome restores a page from bfcache without re-running it, so a console
+  // reactivated after a stack restart would keep showing the config it was
+  // loaded with. Re-read state whenever the page is shown again.
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) {
+      refreshSpaceStatus();
+      loadSpaceCharacters();
+    }
+  });
 })();

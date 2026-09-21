@@ -264,9 +264,19 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="spacePollSeconds"',
         'id="applySpaceConfig"',
         'id="forceSpaceDue"',
+        'id="spaceStatusAge"',
         'data-minutes="60"',
     ]:
         assert token in html
+
+    # A console that lost its script renders the markup's placeholder values and
+    # looks alive while nothing responds. The page has to say so, and dev.js has
+    # to be the thing that clears the warning.
+    assert 'id="bootWarning"' in html
+    assert 'class="boot-warning"' in html
+    assert "dataset.devBooted" in html
+    assert 'document.body.dataset.devBooted = "1"' in script
+    assert '.boot-warning' in (web / "dev.css").read_text(encoding="utf-8")
     for token in [
         "/v1/dev/space/status",
         "/v1/dev/space/opportunity/",

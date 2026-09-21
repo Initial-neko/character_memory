@@ -44,8 +44,10 @@ def attach_space_routes(app):
     if access is None:
         raise RuntimeError("create_api() must expose app.state.character_memory before space routes are attached")
 
+    repository = SpaceRepository(access.read_store)
+
     def repo() -> SpaceRepository:
-        return SpaceRepository(access.store())
+        return repository
 
     def profiles_by_id() -> dict[str, dict]:
         return {item["id"]: item for item in access.character_profiles()}

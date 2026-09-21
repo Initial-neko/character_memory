@@ -3,12 +3,50 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from character_memory.time_utils import epoch_us, parse_datetime
 
 
 MAX_COMMENTERS_PER_POST = 10
+MAX_IMAGES_PER_POST = 9
+
+
+class SpaceAttachmentInput(BaseModel):
+    kind: str = Field(min_length=1, max_length=32)
+    source: str = Field(default="UNKNOWN", max_length=32)
+    media_id: str | None = Field(default=None, max_length=120)
+    url: str | None = Field(default=None, max_length=2000)
+    title: str | None = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=1600)
+    thumbnail_url: str | None = Field(default=None, max_length=2000)
+    transcript: str | None = Field(default=None, max_length=4000)
+    duration_ms: int | None = Field(default=None, ge=0, le=60 * 60 * 1000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def normalize_attachment(self):
+        self.kind = str(self.kind or "").strip().upper()
+        self.source = str(self.source or "UNKNOWN").strip().upper() or "UNKNOWN"
+        if self.kind not in {"IMAGE", "AUDIO", "LINK_PREVIEW"}:
+            raise ValueError("unsupported Space attachment kind")
+        self.media_id = str(self.media_id or "").strip() or None
+        self.url = str(self.url or "").strip() or None
+        self.title = str(self.title or "").strip() or None
+        self.description = str(self.description or "").strip() or None
+        self.thumbnail_url = str(self.thumbnail_url or "").strip() or None
+        self.transcript = str(self.transcript or "").strip() or None
+        if self.kind in {"IMAGE", "AUDIO"} and self.media_id is None:
+            raise ValueError(f"{self.kind} attachment requires media_id")
+        if self.kind == "LINK_PREVIEW" and self.url is None:
+            raise ValueError("LINK_PREVIEW attachment requires url")
+        return self
+
+
+class SpaceAttachment(SpaceAttachmentInput):
+    id: int
+    post_id: int
+    order_index: int
 
 
 class SpacePost(BaseModel):
@@ -17,6 +55,7 @@ class SpacePost(BaseModel):
     content: str
     created_at: datetime
     media_id: str | None = None
+    post_type: str = "TEXT"
     source_event_id: int | None = None
     visibility: str = "ACTIVE_CHARACTERS"
 
@@ -69,6 +108,23 @@ class SpaceRepository:
                     media_id TEXT,
                     source_event_id INTEGER,
                     visibility TEXT NOT NULL DEFAULT 'ACTIVE_CHARACTERS'
+                );
+
+                CREATE TABLE IF NOT EXISTS space_post_attachments(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    post_id INTEGER NOT NULL,
+                    order_index INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'UNKNOWN',
+                    media_id TEXT,
+                    url TEXT,
+                    title TEXT,
+                    description TEXT,
+                    thumbnail_url TEXT,
+                    transcript TEXT,
+                    duration_ms INTEGER,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    UNIQUE(post_id, order_index)
                 );
 
                 CREATE TABLE IF NOT EXISTS space_comments(
@@ -146,6 +202,8 @@ class SpaceRepository:
                     ON space_opportunity_state(next_opportunity_at_epoch,character_id);
                 CREATE INDEX IF NOT EXISTS idx_space_opportunity_runs_character
                     ON space_opportunity_runs(character_id,started_at_epoch DESC,id DESC);
+                CREATE INDEX IF NOT EXISTS idx_space_post_attachments_post
+                    ON space_post_attachments(post_id,order_index,id);
                 CREATE INDEX IF NOT EXISTS idx_space_posts_created
                     ON space_posts(created_at_epoch DESC,id DESC);
                 CREATE INDEX IF NOT EXISTS idx_space_posts_character_created
@@ -171,6 +229,39 @@ class SpaceRepository:
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
                 ("space/003-interval-opportunities", datetime.now().astimezone().isoformat()),
             )
+            # Multi-media Space V1. Legacy media_id remains readable/writable,
+            # but new posts use ordered attachments so 1~9 images, voice and
+            # link previews can share one post without widening space_posts.
+            self.store._ensure_column_locked("space_posts", "post_type", "TEXT NOT NULL DEFAULT 'TEXT'")
+            rows = self.store.conn.execute(
+                "SELECT p.id,p.media_id,m.mime_type,m.source FROM space_posts p "
+                "LEFT JOIN media_assets m ON m.id=p.media_id "
+                "WHERE p.media_id IS NOT NULL AND trim(p.media_id)<>'' "
+                "AND NOT EXISTS(SELECT 1 FROM space_post_attachments a WHERE a.post_id=p.id)"
+            ).fetchall()
+            for row in rows:
+                mime = str(row["mime_type"] or "")
+                kind = "AUDIO" if mime.startswith("audio/") else "IMAGE"
+                self.store.conn.execute(
+                    "INSERT INTO space_post_attachments(post_id,order_index,kind,source,media_id,metadata_json) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (
+                        int(row["id"]),
+                        0,
+                        kind,
+                        str(row["source"] or "LEGACY").upper(),
+                        str(row["media_id"]),
+                        "{}",
+                    ),
+                )
+                self.store.conn.execute(
+                    "UPDATE space_posts SET post_type=? WHERE id=?",
+                    ("VOICE" if kind == "AUDIO" else "IMAGE", int(row["id"])),
+                )
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
+                ("space/004-multimedia-attachments", datetime.now().astimezone().isoformat()),
+            )
             self.store._maybe_commit()
 
     @staticmethod
@@ -181,6 +272,7 @@ class SpaceRepository:
             content=str(row["content"]),
             created_at=parse_datetime(row["created_at"]),
             media_id=row["media_id"],
+            post_type=str(row["post_type"] or "TEXT"),
             source_event_id=row["source_event_id"],
             visibility=str(row["visibility"]),
         )
@@ -205,6 +297,67 @@ class SpaceRepository:
             created_at=parse_datetime(row["created_at"]),
         )
 
+    @staticmethod
+    def _attachment_from_row(row) -> SpaceAttachment:
+        import json
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        return SpaceAttachment(
+            id=int(row["id"]),
+            post_id=int(row["post_id"]),
+            order_index=int(row["order_index"]),
+            kind=str(row["kind"]),
+            source=str(row["source"]),
+            media_id=row["media_id"],
+            url=row["url"],
+            title=row["title"],
+            description=row["description"],
+            thumbnail_url=row["thumbnail_url"],
+            transcript=row["transcript"],
+            duration_ms=row["duration_ms"],
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _derive_post_type(content: str, attachments: list[SpaceAttachmentInput]) -> str:
+        kinds = [item.kind for item in attachments]
+        unique = set(kinds)
+        if not attachments:
+            return "TEXT"
+        if unique == {"IMAGE"}:
+            return "IMAGE" if len(kinds) == 1 else "IMAGE_SET"
+        if unique == {"AUDIO"}:
+            return "VOICE"
+        if unique == {"LINK_PREVIEW"}:
+            return "LINK"
+        return "MIXED"
+
+    @staticmethod
+    def _validate_attachments(attachments: list[SpaceAttachmentInput]) -> list[SpaceAttachmentInput]:
+        normalized = [SpaceAttachmentInput.model_validate(item) for item in attachments]
+        image_count = sum(1 for item in normalized if item.kind == "IMAGE")
+        audio_count = sum(1 for item in normalized if item.kind == "AUDIO")
+        link_count = sum(1 for item in normalized if item.kind == "LINK_PREVIEW")
+        if image_count > MAX_IMAGES_PER_POST:
+            raise ValueError(f"a space post may have at most {MAX_IMAGES_PER_POST} images")
+        if audio_count > 1:
+            raise ValueError("a space post may have at most one audio attachment")
+        if link_count > 1:
+            raise ValueError("a space post may have at most one link preview")
+        if len(normalized) > MAX_IMAGES_PER_POST + 2:
+            raise ValueError("too many Space attachments")
+        return normalized
+
+    def list_attachments(self, post_id: int) -> list[SpaceAttachment]:
+        with self.store._lock:
+            rows = self.store.conn.execute(
+                "SELECT * FROM space_post_attachments WHERE post_id=? ORDER BY order_index,id",
+                (int(post_id),),
+            ).fetchall()
+        return [self._attachment_from_row(row) for row in rows]
+
     def create_post(
         self,
         character_id: str,
@@ -212,27 +365,69 @@ class SpaceRepository:
         now: datetime,
         *,
         media_id: str | None = None,
+        attachments: list[SpaceAttachmentInput] | None = None,
         source_event_id: int | None = None,
         visibility: str = "ACTIVE_CHARACTERS",
     ) -> SpacePost:
+        import json
         clean_content = str(content or "").strip()
         clean_media = str(media_id or "").strip() or None
-        if not clean_content and clean_media is None:
-            raise ValueError("space post requires content or media")
+        normalized = self._validate_attachments(list(attachments or []))
+        if clean_media is not None and not any(item.media_id == clean_media for item in normalized):
+            normalized.insert(
+                0,
+                SpaceAttachmentInput(kind="IMAGE", source="LEGACY", media_id=clean_media),
+            )
+            normalized = self._validate_attachments(normalized)
+        if not clean_content and not normalized:
+            raise ValueError("space post requires content or attachment")
+        post_type = self._derive_post_type(clean_content, normalized)
         stamp = epoch_us(now)
+        legacy_media = next((item.media_id for item in normalized if item.kind in {"IMAGE", "AUDIO"}), clean_media)
         with self.store._lock:
             cur = self.store.conn.execute(
-                "INSERT INTO space_posts(character_id,content,created_at,created_at_epoch,media_id,source_event_id,visibility) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (character_id, clean_content, now.isoformat(), stamp, clean_media, source_event_id, visibility),
+                "INSERT INTO space_posts(character_id,content,created_at,created_at_epoch,media_id,post_type,source_event_id,visibility) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    character_id,
+                    clean_content,
+                    now.isoformat(),
+                    stamp,
+                    legacy_media,
+                    post_type,
+                    source_event_id,
+                    visibility,
+                ),
             )
+            post_id = int(cur.lastrowid)
+            for index, item in enumerate(normalized):
+                self.store.conn.execute(
+                    "INSERT INTO space_post_attachments("
+                    "post_id,order_index,kind,source,media_id,url,title,description,thumbnail_url,transcript,duration_ms,metadata_json"
+                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        post_id,
+                        index,
+                        item.kind,
+                        item.source,
+                        item.media_id,
+                        item.url,
+                        item.title,
+                        item.description,
+                        item.thumbnail_url,
+                        item.transcript,
+                        item.duration_ms,
+                        json.dumps(item.metadata, ensure_ascii=False),
+                    ),
+                )
             self.store._maybe_commit()
         return SpacePost(
-            id=int(cur.lastrowid),
+            id=post_id,
             character_id=character_id,
             content=clean_content,
             created_at=now,
-            media_id=clean_media,
+            media_id=legacy_media,
+            post_type=post_type,
             source_event_id=source_event_id,
             visibility=visibility,
         )

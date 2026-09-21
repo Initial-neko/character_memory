@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Character Memory TTS Workbench</title>
+  <link rel="stylesheet" href="/static/ui.css" />
   <link rel="stylesheet" href="/static/dev.css" />
   <link rel="stylesheet" href="/static/tts_lab.css" />
 </head>
@@ -31,7 +32,7 @@
           <h2>试听文本</h2>
           <p class="subtle">建议用同一句中文逐个对比音色、咬字、停顿与长句稳定性。</p>
         </div>
-        <div class="actions"><button id="compareReady">生成全部可用 Provider</button></div>
+        <div class="actions"><button class="primary" id="compareReady">生成全部可用 Provider</button></div>
       </div>
       <textarea id="ttsLabText" rows="6">刚才其实想了很久，不过后来觉得，有些事情可能没有想象中那么复杂。嗯，今天应该还挺顺利的。</textarea>
       <div class="tts-lab-controls">
@@ -44,7 +45,7 @@
         <label>Speed
           <input id="ttsLabSpeed" type="number" min="0.5" max="2" step="0.05" value="1.0" />
         </label>
-        <button id="generateTtsLab">Generate</button>
+        <button class="primary" id="generateTtsLab">Generate</button>
       </div>
       <div id="singleResult" class="tts-lab-single">
         <audio id="ttsLabAudio" controls></audio>
@@ -96,7 +97,7 @@
             </label>
           </div>
           <div class="actions">
-            <button id="generateVoiceDesign" disabled>生成 Voice Design</button>
+            <button class="primary" id="generateVoiceDesign" disabled>生成 Voice Design</button>
           </div>
         </div>
         <div class="voice-design-output">
@@ -108,7 +109,7 @@
             <label for="voiceDesignCharacter">固化到角色</label>
             <select id="voiceDesignCharacter"></select>
             <div class="actions">
-              <button id="freezeVoiceDesign" disabled>固化到该角色</button>
+              <button class="primary" id="freezeVoiceDesign" disabled>固化到该角色</button>
             </div>
             <pre id="voiceDesignFreezeStatus" class="result">尚未固化。</pre>
           </div>

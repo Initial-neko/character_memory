@@ -1,0 +1,385 @@
+/* Shared UI baseline for every Character Memory page.
+ *
+ * Load this first, before any page stylesheet, so page CSS can still override
+ * it. Four pages used to disagree about what a button is: the chat drawer had
+ * no rule at all for `button.primary`, the Settings Center painted ink #171a21,
+ * the Dev Console painted GitHub green #238636, and the sticker/image/persona
+ * panels carried a private warm-brown palette (#302b28, #e5ded9, #f5f3f1).
+ * Everything here is a token or a component built from tokens, so a page can
+ * change the whole surface without re-deciding radii and greys.
+ *
+ * Theme: light by default. `<html data-theme="dark">` switches the Dev Console
+ * and the TTS Workbench, which keep a dark diagnostic identity on purpose.
+ *
+ * Rule of thumb for page CSS: layout only. If you are about to write a border
+ * colour, a radius or a button padding, use the token instead.
+ */
+
+/* --- tokens ---------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+
+  --ui-font: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ui-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --ui-bg: #f7f7f8;
+  --ui-surface: #fff;
+  --ui-surface-soft: #fafafb;
+  --ui-surface-sunken: #f1f1f2;
+  --ui-control-bg: #fff;
+  --ui-hover: rgba(0, 0, 0, .045);
+  --ui-line: #e5e5e7;
+  --ui-line-strong: #d7d8dc;
+
+  --ui-text: #202123;
+  --ui-muted: #7b7f87;
+  --ui-faint: #a0a3aa;
+
+  /* Ink-filled primary action, matching the composer's send button. */
+  --ui-accent: #202123;
+  --ui-accent-hover: #35363a;
+  --ui-accent-text: #fff;
+  --ui-link: #202123;
+  --ui-focus: rgba(32, 33, 35, .12);
+
+  --ui-danger: #b42318;
+  --ui-danger-bg: #fff1f0;
+  --ui-danger-line: #f7cdc9;
+  --ui-warn: #8b5b00;
+  --ui-warn-bg: #fff8e6;
+  --ui-warn-line: #f2dda6;
+  --ui-ok: #067647;
+  --ui-ok-bg: #ecfdf3;
+  --ui-ok-line: #abe9c4;
+  --ui-mark-bg: #fff2b8;
+
+  --ui-r-xs: 6px;
+  --ui-r-sm: 8px;
+  --ui-r-md: 10px;
+  --ui-r-lg: 14px;
+  --ui-r-pill: 999px;
+
+  --ui-control-h: 36px;
+  --ui-control-h-sm: 30px;
+  --ui-control-h-lg: 40px;
+  --ui-shadow-pop: 0 18px 45px rgba(25, 30, 40, .16);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ui-bg: #0d1117;
+  --ui-surface: #161b22;
+  --ui-surface-soft: #21262d;
+  --ui-surface-sunken: #0d1117;
+  --ui-control-bg: #0d1117;
+  --ui-hover: rgba(255, 255, 255, .06);
+  --ui-line: #30363d;
+  --ui-line-strong: #484f58;
+
+  --ui-text: #e6edf3;
+  --ui-muted: #8b949e;
+  --ui-faint: #6e7681;
+
+  --ui-accent: #238636;
+  --ui-accent-hover: #2ea043;
+  --ui-accent-text: #fff;
+  --ui-link: #58a6ff;
+  --ui-focus: rgba(88, 166, 255, .12);
+
+  --ui-danger: #f85149;
+  --ui-danger-bg: rgba(248, 81, 73, .1);
+  --ui-danger-line: rgba(248, 81, 73, .4);
+  --ui-warn: #d29922;
+  --ui-warn-bg: rgba(210, 153, 34, .1);
+  --ui-warn-line: rgba(210, 153, 34, .4);
+  --ui-ok: #3fb950;
+  --ui-ok-bg: rgba(63, 185, 80, .1);
+  --ui-ok-line: rgba(63, 185, 80, .45);
+  --ui-mark-bg: rgba(210, 153, 34, .3);
+
+  --ui-shadow-pop: 0 18px 45px rgba(0, 0, 0, .45);
+}
+
+/* Legacy token names.
+ *
+ * Twelve feature stylesheets were written against these names -- some with a
+ * hardcoded fallback because the name was never defined at all (`--panel`,
+ * `--panel-soft`). Defining them here keeps those files working and repaints
+ * their fallbacks onto the shared palette in one move. */
+:root {
+  --bg: var(--ui-bg);
+  --surface: var(--ui-surface);
+  --sidebar: var(--ui-surface-sunken);
+  --line: var(--ui-line);
+  --text: var(--ui-text);
+  --muted: var(--ui-muted);
+  --primary: var(--ui-accent);
+  --panel: var(--ui-surface);
+  --panel-soft: var(--ui-surface-sunken);
+}
+
+/* --- base ------------------------------------------------------------------ */
+
+body {
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
+}
+
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+
+:where(a) { color: var(--ui-link); }
+
+/* --- page chrome ----------------------------------------------------------- */
+
+/* The Dev Console and the Settings Center each grew their own copy of these,
+ * one on #8b949e and one on #6b7280. Same component, one token now. */
+.eyebrow {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ui-muted);
+}
+.subtle { color: var(--ui-muted); }
+
+.service-links { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.service-links a,
+.secondary-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ui-control-h);
+  padding: 7px 11px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-size: 13px;
+  text-decoration: none;
+}
+.service-links a:hover,
+.secondary-link:hover { background: var(--ui-surface-soft); border-color: var(--ui-line-strong); }
+
+/* --- buttons --------------------------------------------------------------- */
+
+/* One button vocabulary. `primary` is the filled action, `secondary` the
+ * neutral one, and a bare <button> is neutral too -- the old dev/settings
+ * stylesheets made a bare button the loudest thing on the page, which is why
+ * "刷新状态" and "生成一个候选头像" looked like competing primaries. */
+button,
+.ui-btn {
+  min-height: var(--ui-control-h);
+  padding: 8px 13px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+button:hover:not(:disabled),
+.ui-btn:hover:not(:disabled) { background: var(--ui-surface-soft); border-color: var(--ui-line-strong); }
+
+button:focus-visible,
+.ui-btn:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible { outline: none; border-color: var(--ui-line-strong); box-shadow: 0 0 0 3px var(--ui-focus); }
+
+button:disabled,
+.ui-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+button.primary,
+.ui-btn.is-primary {
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: var(--ui-accent-text);
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled),
+.ui-btn.is-primary:hover:not(:disabled) { background: var(--ui-accent-hover); border-color: var(--ui-accent-hover); }
+
+button.secondary,
+.ui-btn.is-neutral { background: var(--ui-surface); color: var(--ui-text); }
+
+button.danger,
+.ui-btn.is-danger { background: var(--ui-surface); border-color: var(--ui-danger-line); color: var(--ui-danger); }
+button.danger:hover:not(:disabled) { background: var(--ui-danger-bg); }
+
+button.ghost,
+.ui-btn.is-ghost { background: transparent; border-color: transparent; color: var(--ui-muted); min-height: 0; padding: 4px 6px; }
+button.ghost:hover:not(:disabled) { background: var(--ui-hover); border-color: transparent; }
+
+button.compact,
+.ui-btn.is-sm { min-height: var(--ui-control-h-sm); padding: 5px 10px; font-size: 12px; border-radius: var(--ui-r-sm); }
+.ui-btn.is-lg { min-height: var(--ui-control-h-lg); padding: 10px 16px; }
+
+/* --- form controls --------------------------------------------------------- */
+
+/* `:where()` keeps this at zero specificity: any page rule that styles its own
+ * control still wins, so this is purely the floor that was missing. */
+:where(select, input[type="text"], input[type="number"], input[type="search"], input[type="password"], input[type="url"], textarea) {
+  min-height: var(--ui-control-h);
+  padding: 8px 11px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-control-bg);
+  color: var(--ui-text);
+}
+
+:where(select, input, textarea):focus { border-color: var(--ui-muted); box-shadow: 0 0 0 3px var(--ui-focus); }
+
+:where(select) {
+  padding-right: 30px;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+:where(input[type="checkbox"]) { min-height: 0; accent-color: var(--ui-accent); }
+
+.ui-field { display: grid; gap: 6px; font-size: 12px; font-weight: 600; }
+.ui-field > span { color: var(--ui-muted); }
+.ui-field > :where(select, input, textarea) { width: 100%; font-weight: 400; }
+.ui-field-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.ui-check { display: flex; align-items: center; gap: 8px; min-height: var(--ui-control-h); font-size: 12px; font-weight: 500; }
+
+/* The Settings Center's form field. The Dev Console never had one, which is
+ * how the two pages ended up with different label sizes and control heights. */
+.field { display: grid; gap: 6px; }
+.field > label { font-size: 12px; font-weight: 600; color: var(--ui-muted); }
+.field > :where(select, input, textarea) { width: 100%; }
+.field.wide { grid-column: 1 / -1; }
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; min-height: var(--ui-control-h); font-size: 12px; }
+
+/* --- text ------------------------------------------------------------------ */
+
+.muted,
+.ui-muted { color: var(--ui-muted); }
+.ui-hint { margin: 0; color: var(--ui-muted); font-size: 12px; line-height: 1.55; }
+.ui-mono { font-family: var(--ui-mono); }
+
+/* --- alerts ---------------------------------------------------------------- */
+
+/* Long validation errors used to be a bare red paragraph. They arrive here as
+ * one line of text with three or four pydantic complaints in it, so the alert
+ * needs a box, room to wrap, and a monospace lane for the field names. */
+.ui-alert {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface-soft);
+  color: var(--ui-text);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.ui-alert > strong { font-size: 12px; font-weight: 650; }
+.ui-alert > p { margin: 0; }
+.ui-alert > ul { margin: 0; padding-left: 16px; }
+.ui-alert > ul > li { margin: 2px 0; }
+
+.ui-alert.is-error { border-color: var(--ui-danger-line); background: var(--ui-danger-bg); color: var(--ui-danger); }
+.ui-alert.is-warn { border-color: var(--ui-warn-line); background: var(--ui-warn-bg); color: var(--ui-warn); }
+.ui-alert.is-ok { border-color: var(--ui-ok-line); background: var(--ui-ok-bg); color: var(--ui-ok); }
+.ui-alert.is-quiet { border-color: var(--ui-line); background: var(--ui-surface-soft); color: var(--ui-muted); }
+
+/* The chat shell's original error box, kept so existing markup renders as an
+ * alert instead of a floating red paragraph. */
+.error {
+  padding: 10px 12px;
+  border: 1px solid var(--ui-danger-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* --- badges ---------------------------------------------------------------- */
+
+.ui-badge,
+.badge,
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-pill);
+  background: var(--ui-surface-soft);
+  color: var(--ui-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.ui-badge.is-ok, .badge.ok { border-color: var(--ui-ok-line); background: var(--ui-ok-bg); color: var(--ui-ok); }
+/* `unknown` is a state, not the absence of one: the runtime cards start in it
+ * and settings.js toggles it back on when a health check has no answer. It
+ * reads neutral, but it is named so it does not silently follow a base restyle. */
+.ui-badge.is-unknown, .badge.unknown { border-color: var(--ui-line); background: var(--ui-surface-soft); color: var(--ui-muted); }
+.ui-badge.is-warn, .badge.warn { border-color: var(--ui-warn-line); background: var(--ui-warn-bg); color: var(--ui-warn); }
+.ui-badge.is-error, .badge.bad, .badge.error { border-color: var(--ui-danger-line); background: var(--ui-danger-bg); color: var(--ui-danger); }
+
+/* --- surfaces -------------------------------------------------------------- */
+
+.card,
+.ui-card {
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-surface);
+  padding: 16px;
+}
+.ui-card.is-quiet { background: var(--ui-surface-soft); padding: 11px 12px; border-radius: var(--ui-r-md); }
+.ui-panel { display: grid; gap: 14px; }
+
+pre, .ui-pre {
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+  font-family: var(--ui-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
+.ui-empty { padding: 48px 0; color: var(--ui-muted); text-align: center; font-size: 13px; }
+
+/* Page-level status banner: the Settings Center's save/reload result. */
+.notice {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid var(--ui-ok-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-ok-bg);
+  color: var(--ui-ok);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.notice.error { border-color: var(--ui-danger-line); background: var(--ui-danger-bg); color: var(--ui-danger); }
+
+/* --- layout helpers -------------------------------------------------------- */
+
+.ui-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ui-actions.is-end { justify-content: flex-end; }
+.ui-actions.is-between { justify-content: space-between; }
+
+.ui-stack { display: grid; gap: 14px; }
+.ui-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

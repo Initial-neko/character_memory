@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Character Memory Dev Console</title>
+  <link rel="stylesheet" href="/static/ui.css" />
   <link rel="stylesheet" href="/static/dev.css" />
   <link rel="stylesheet" href="/static/dev_visual.css" />
   <link rel="stylesheet" href="/static/visual_capture.css" />
@@ -46,7 +47,7 @@
         <textarea id="llmSystem" rows="3" placeholder="可选；留空则直接发送用户 Prompt"></textarea>
         <label for="llmPrompt">Prompt</label>
         <textarea id="llmPrompt" rows="7">请只回复：LLM 接口正常。</textarea>
-        <div class="actions"><button id="runLlm">Run LLM</button><span id="llmLatency" class="metric-inline">-</span></div>
+        <div class="actions"><button class="primary" id="runLlm">Run LLM</button><span id="llmLatency" class="metric-inline">-</span></div>
         <pre id="llmResult" class="result">等待请求...</pre>
       </article>
 
@@ -58,7 +59,7 @@
           <label>Speaker ID<input id="speakerId" type="number" min="0" value="0" /></label>
           <label>Speed<input id="ttsSpeed" type="number" min="0.5" max="2" step="0.1" value="1.0" /></label>
         </div>
-        <div class="actions"><button id="runTts">Generate</button><span id="ttsLatency" class="metric-inline">-</span></div>
+        <div class="actions"><button class="primary" id="runTts">Generate</button><span id="ttsLatency" class="metric-inline">-</span></div>
         <audio id="ttsAudio" controls></audio>
         <pre id="ttsResult" class="result">等待请求...</pre>
       </article>
@@ -69,8 +70,8 @@
           <div class="actions"><span id="visualCandidateCount" class="metric-inline">0 candidates</span><span class="pill">real vision</span></div>
         </div>
         <div class="visual-dev-controls">
-          <button id="visualCamera" type="button">📷 前置摄像头</button>
-          <button id="visualScreen" type="button">🖥 选择窗口 / Tab / 屏幕</button>
+          <button class="primary" id="visualCamera" type="button">📷 前置摄像头</button>
+          <button class="primary" id="visualScreen" type="button">🖥 选择窗口 / Tab / 屏幕</button>
           <button id="visualStop" type="button" class="secondary" disabled>停止采集</button>
           <button id="visualSample" type="button" class="secondary">立即采样</button>
           <button id="visualSelect" type="button" class="secondary">选择关键帧</button>
@@ -93,7 +94,7 @@
         <textarea id="visionSystem" rows="2">只根据提供的图像回答；如果看不清就明确说看不清，不要猜测画面中不存在的内容。</textarea>
         <label for="visionPrompt">Vision Prompt</label>
         <textarea id="visionPrompt" rows="4">请按时间顺序看看这些关键帧，简洁说明你看到了什么，以及画面是否发生了明显变化。</textarea>
-        <div class="actions"><button id="runVision">Run Vision Test</button><span id="visionLatency" class="metric-inline">-</span></div>
+        <div class="actions"><button class="primary" id="runVision">Run Vision Test</button><span id="visionLatency" class="metric-inline">-</span></div>
         <pre id="visionResult" class="result">等待视觉测试...</pre>
       </article>
 
@@ -112,7 +113,7 @@
         <label class="visual-check"><input id="imageUseAvatar" type="checkbox" checked /> Provider 支持时使用当前头像作为 identity reference</label>
         <div class="actions">
           <button id="rewriteImagePrompt" class="secondary">Rewrite Prompt</button>
-          <button id="runImageGen">Generate Image</button>
+          <button class="primary" id="runImageGen">Generate Image</button>
           <button id="copyImagePrompt" class="secondary" hidden>复制 Prompt</button>
           <button id="refreshImageProviders" class="secondary">刷新 Provider</button>
           <button id="useImageAsAvatar" class="secondary" hidden>设为当前头像</button>
@@ -135,7 +136,7 @@
           <label class="file-button">选择 WAV<input id="asrFile" type="file" accept="audio/wav,.wav" /></label>
           <button id="recordAsr" class="secondary">开始录音</button>
           <button id="stopAsr" class="secondary" disabled>停止录音</button>
-          <button id="runAsr" disabled>Transcribe</button>
+          <button class="primary" id="runAsr" disabled>Transcribe</button>
         </div>
         <div class="audio-meta">
           <span id="asrSource">尚未选择音频</span>
@@ -149,7 +150,7 @@
       <article class="card wide">
         <div class="card-title-row"><h2>Media Live Smoke</h2><span class="pill">real inference</span></div>
         <p class="subtle">真实执行 TTS → WAV → ASR。它不是 mock；失败时会显示 Media Runtime 的原始状态码与 detail。</p>
-        <div class="actions"><button id="runMediaSmoke">Run Media Smoke</button><span id="mediaSmokeLatency" class="metric-inline">-</span></div>
+        <div class="actions"><button class="primary" id="runMediaSmoke">Run Media Smoke</button><span id="mediaSmokeLatency" class="metric-inline">-</span></div>
         <pre id="mediaSmokeResult" class="result">等待请求...</pre>
       </article>
 

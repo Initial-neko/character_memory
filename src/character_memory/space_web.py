@@ -5,21 +5,29 @@ from datetime import datetime
 from pydantic import BaseModel, Field, model_validator
 
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
-from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
+from character_memory.space_store import (
+    MAX_COMMENTERS_PER_POST,
+    MAX_IMAGES_PER_POST,
+    SpaceAttachmentInput,
+    SpaceRepository,
+)
 
 
 class CreateSpacePostRequest(BaseModel):
     character_id: str = Field(min_length=1, max_length=64)
     content: str = Field(default="", max_length=4000)
+    # Legacy single-media input remains accepted while new clients use ordered
+    # attachments. It is normalized into the attachment table by SpaceRepository.
     media_id: str | None = Field(default=None, max_length=120)
+    attachments: list[SpaceAttachmentInput] = Field(default_factory=list, max_length=11)
     source_event_id: int | None = None
 
     @model_validator(mode="after")
     def require_content_or_media(self):
         self.content = self.content.strip()
         self.media_id = (self.media_id or "").strip() or None
-        if not self.content and self.media_id is None:
-            raise ValueError("content or media_id is required")
+        if not self.content and self.media_id is None and not self.attachments:
+            raise ValueError("content or attachment is required")
         return self
 
 
@@ -118,9 +126,26 @@ def attach_space_routes(app):
             "url": f"/v1/media/{asset.id}",
         }
 
+    def attachment_payload(item) -> dict:
+        payload = item.model_dump(mode="json")
+        payload["media"] = media_payload(item.media_id)
+        return payload
+
+    def validate_attachment(character_id: str, item: SpaceAttachmentInput) -> None:
+        if item.kind == "LINK_PREVIEW":
+            return
+        asset = access.store().get_media_asset(item.media_id)
+        if asset is None or access.media_storage.asset_path(asset) is None:
+            raise HTTPException(status_code=400, detail=f"media not found: {item.media_id}")
+        if item.kind == "IMAGE" and not str(asset.mime_type).startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"IMAGE attachment requires image media: {item.media_id}")
+        if item.kind == "AUDIO" and not str(asset.mime_type).startswith("audio/"):
+            raise HTTPException(status_code=400, detail=f"AUDIO attachment requires audio media: {item.media_id}")
+
     def post_payload(repository: SpaceRepository, post) -> dict:
         comments = repository.list_comments(post.id)
         likes = repository.list_reactions(post.id, "LIKE")
+        attachments = repository.list_attachments(post.id)
         commenter_ids = []
         for comment in comments:
             if comment.character_id not in commenter_ids:
@@ -133,6 +158,10 @@ def attach_space_routes(app):
             "created_at": post.created_at.isoformat(),
             "media_id": post.media_id,
             "media": media_payload(post.media_id),
+            "post_type": post.post_type,
+            "attachments": [attachment_payload(item) for item in attachments],
+            "image_count": sum(1 for item in attachments if item.kind == "IMAGE"),
+            "max_images": MAX_IMAGES_PER_POST,
             "source_event_id": post.source_event_id,
             "visibility": post.visibility,
             "comments": [
@@ -196,6 +225,8 @@ def attach_space_routes(app):
             asset = access.store().get_media_asset(req.media_id)
             if asset is None or access.media_storage.asset_path(asset) is None:
                 raise HTTPException(status_code=400, detail="media not found")
+        for attachment in req.attachments:
+            validate_attachment(req.character_id, attachment)
         repository = repo()
         try:
             post = repository.create_post(
@@ -203,6 +234,7 @@ def attach_space_routes(app):
                 req.content,
                 datetime.now().astimezone(),
                 media_id=req.media_id,
+                attachments=req.attachments,
                 source_event_id=req.source_event_id,
             )
         except ValueError as exc:

@@ -17,7 +17,9 @@ from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService
+from character_memory.space_media import SpaceMediaIntent, SpaceObservationDecision, SpacePostPlan
 from character_memory.space_store import SpaceRepository
+from character_memory.world_observation import WorldObservation, WorldObservationBundle
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -55,13 +57,17 @@ class SpaceModel(PersonModel):
         return PersonReaction(actions=[])
 
     def structured_for_session(self, prompt, schema, session_id):
+        if schema is SpaceObservationDecision:
+            return SpaceObservationDecision(should_explore=False)
+        if schema is SpacePostPlan:
+            self.opportunities += 1
+            return SpacePostPlan(
+                should_post=True,
+                text="今天想安静一点，晚点再做别的。",
+                media=[],
+            )
         assert schema is DailyLifePlan
-        self.opportunities += 1
-        return DailyLifePlan(
-            events=[],
-            social_post="今天想安静一点，晚点再做别的。",
-            image_prompt=None,
-        )
+        return DailyLifePlan()
 
     def plan_day(self, context):
         return DailyLifePlan()
@@ -106,8 +112,23 @@ def _access(tmp_path, ids=("c00", "c01", "c02"), model=None):
             api_key="test-key",
             space_autonomy_enabled=True,
             space_opportunity_interval_minutes=1440.0,
+            space_max_posts_per_day=0,
             space_audience_size=5,
             space_scheduler_poll_seconds=60.0,
+            search_provider="searchapi",
+            search_api_key="",
+            search_country="jp",
+            search_language="zh-cn",
+            search_safe_search="strict",
+            space_observation_enabled=True,
+            space_image_search_enabled=True,
+            space_image_generation_enabled=True,
+            space_voice_post_enabled=True,
+            space_link_preview_enabled=True,
+            space_observation_chance=0.30,
+            space_media_chance=0.40,
+            space_voice_chance=0.15,
+            space_max_images_per_post=9,
         ),
         read_store=store,
         store=lambda: store,
@@ -177,6 +198,85 @@ def test_space_autonomy_runs_view_reaction_comment_and_author_reply(tmp_path):
     assert any(
         item.event_type == EventType.SPACE_COMMENT_RECEIVED
         for item in store.list_events("c00")
+    )
+    store.close()
+
+
+class ObservationSpaceModel(SpaceModel):
+    def structured_for_session(self, prompt, schema, session_id):
+        if schema is SpaceObservationDecision:
+            return SpaceObservationDecision(
+                should_explore=True,
+                query="最近有意思的独立游戏新闻",
+            )
+        if schema is SpacePostPlan:
+            self.opportunities += 1
+            return SpacePostPlan(
+                should_post=True,
+                text="这个小项目的想法还挺可爱的。",
+                media=[
+                    SpaceMediaIntent(
+                        kind="LINK_PREVIEW",
+                        observation_index=0,
+                    )
+                ],
+            )
+        return super().structured_for_session(prompt, schema, session_id)
+
+
+class FakeObservationService:
+    def available(self):
+        return True
+
+    def observe(self, query, *, limit=4, fetch_first=True):
+        assert query == "最近有意思的独立游戏新闻"
+        return WorldObservationBundle(
+            query=query,
+            observations=[
+                WorldObservation(
+                    source_type="WEB_PAGE",
+                    query=query,
+                    title="Tiny Aquarium Devlog",
+                    url="https://example.org/aquarium",
+                    source_domain="example.org",
+                    snippet="开发者分享了一个小型模拟生态项目。",
+                    thumbnail_url="https://example.org/cover.jpg",
+                )
+            ],
+        )
+
+    def search_images(self, query, *, limit=9):
+        return []
+
+    def close(self):
+        pass
+
+
+def test_autonomous_space_can_observe_web_and_publish_real_link_preview(tmp_path):
+    access, store, _ = _access(tmp_path, ids=("c00",), model=ObservationSpaceModel())
+    access.settings.search_api_key = "configured-for-test"
+    access.settings.space_observation_chance = 1.0
+    access.settings.space_media_chance = 1.0
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    fake_observation = FakeObservationService()
+    service.observation_service = fake_observation
+    service.media_executor.observation_service = fake_observation
+    now = datetime(2026, 9, 22, 7, 0, tzinfo=timezone.utc)
+
+    outcome = service.run_opportunity("c00", now=now, cascade=False, source="DEV")
+
+    assert outcome["posted"] is True
+    assert outcome["observation"]["searched"] is True
+    post_id = outcome["post"]["id"]
+    attachments = repository.list_attachments(post_id)
+    assert len(attachments) == 1
+    assert attachments[0].kind == "LINK_PREVIEW"
+    assert attachments[0].url == "https://example.org/aquarium"
+    assert attachments[0].title == "Tiny Aquarium Devlog"
+    assert any(
+        event.event_type == EventType.WORLD_OBSERVATION
+        for event in store.list_events("c00")
     )
     store.close()
 
@@ -265,6 +365,17 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="applySpaceConfig"',
         'id="forceSpaceDue"',
         'id="spaceStatusAge"',
+        'id="spaceObservationEnabled"',
+        'id="spaceImageSearchEnabled"',
+        'id="spaceImageGenerationEnabled"',
+        'id="spaceVoicePostEnabled"',
+        'id="spaceLinkPreviewEnabled"',
+        'id="spaceObservationChance"',
+        'id="spaceMediaChance"',
+        'id="spaceVoiceChance"',
+        'id="spaceMaxImagesPerPost"',
+        'id="spaceMediaNaturalPreset"',
+        'id="spaceMediaStressPreset"',
         'data-minutes="60"',
     ]:
         assert token in html

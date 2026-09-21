@@ -9,6 +9,7 @@ from character_memory.api import create_api
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import RealClock
 from character_memory.async_web import attach_async_routes
+from character_memory.avatar_web import attach_avatar_routes
 from character_memory.config import Settings, discover_character_profiles, load_persona, resolve_sticker_dir
 from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, PersonReaction
 from character_memory.group_web import attach_group_routes
@@ -127,6 +128,10 @@ bundle = SimpleNamespace(
 )
 
 app = create_api(bundle=bundle)
+# The sidebar's avatar module reads /v1/character-profiles on load. Without this
+# the route 404s in every browser run and the console-error check these tests
+# rely on can never be clean, which is the one thing that makes it useful.
+attach_avatar_routes(app)
 attach_history_routes(app)
 attach_group_routes(app, str(ROOT / "config.example.yaml"))
 attach_search_routes(app)

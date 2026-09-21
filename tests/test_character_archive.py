@@ -6,6 +6,7 @@ that the definition file comes out of an archive byte-identical.
 """
 
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -180,12 +181,57 @@ def test_character_archive_frontend_contract_and_syntax():
         "/restore",
     ]:
         assert token in script
-    # The row's archive control is a labelled button rather than a "···" that
-    # opened a one-item menu; the "···" trigger was too easy to miss entirely.
-    for token in ["character-archive-button", "character-archive-card", "character-archive-list-button"]:
+    # The row's archive control lives behind the row's "···" menu, so both the
+    # trigger and the menu it opens have to be styled.
+    for token in ["character-more-button", "character-context-menu", "character-archive-card", "character-archive-list-button"]:
         assert token in css
 
     node = shutil.which("node")
     if node:
         checked = subprocess.run([node, "--check", str(script_path)], capture_output=True, text=True)
         assert checked.returncode == 0, checked.stderr
+
+
+def test_every_hook_the_archive_module_reads_is_still_emitted_by_the_shell():
+    """The module's selectors are cross-file contracts, and one broke silently.
+
+    It found its sidebar anchor with ``querySelector(".sidebar-title")`` behind
+    an ``if`` guard. A later sidebar redesign deleted that element, so no button
+    was ever created and the archive drawer became unreachable from the sidebar
+    -- no error, no warning, just an entry that was not there. Checking every
+    selector this module reads against what the rest of the web sources emit
+    turns the next such rename into a failing test instead.
+
+    Selectors the module renders itself are skipped: a name that appears in its
+    own markup is not a promise anyone else has to keep, which is why the shared
+    key module exists in the first place.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    web = root / "src" / "character_memory" / "web"
+    script = (web / "character_archive.js").read_text(encoding="utf-8")
+    shell = "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(web.glob("*.js")) + sorted(web.glob("*.html"))
+        if path.name != "character_archive.js"
+    )
+
+    def hook_name(selector: str) -> str:
+        return selector.strip("[]").lstrip(".#")
+
+    read = {
+        hook_name(value)
+        for value in re.findall(r'(?:querySelector|querySelectorAll|closest)\(\s*"([^"]+)"', script)
+        # Built at runtime (``CSS.escape``, template literals) -- not a literal
+        # anyone can check, and not the kind of hook that broke.
+        if "${" not in value
+    }
+    rendered_here: set[str] = set()
+    for attribute in re.findall(r'class="([^"]*)"', script) + re.findall(r'className\s*=\s*"([^"]*)"', script):
+        rendered_here.update(attribute.split())
+    for attribute in re.findall(r"(data-[\w-]+)\s*=", script):
+        rendered_here.add(attribute)
+
+    assert read, "the module queries the DOM; the extraction above has gone stale"
+    missing = sorted(hook for hook in read - rendered_here if hook not in shell)
+    assert missing == [], f"no web source emits these any more: {missing}"

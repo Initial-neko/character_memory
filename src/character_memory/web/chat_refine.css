@@ -27,7 +27,12 @@
 
 .character-item { padding: 8px 34px 8px 8px; grid-template-columns: 36px minmax(0, 1fr); gap: 9px; }
 .character-avatar { width: 36px; height: 36px; }
-.character-more-button { right: 5px; opacity: 0; }
+/* No `opacity` here on purpose. This sheet loads last, so restating the trigger
+ * as `opacity: 0` silently undid styles.css -- and that rule's whole reason for
+ * existing is that a trigger which only exists on hover does not exist on a
+ * touch screen, with archiving the only thing behind it. The base sheet's
+ * dimmed-at-rest value is the one that should stand; this only moves it. */
+.character-more-button { right: 5px; }
 .character-item-wrap:hover .character-more-button,
 .character-item-wrap:focus-within .character-more-button,
 .character-more-button:focus-visible { opacity: 1; }

@@ -123,38 +123,88 @@ def test_topbar_shares_its_row_with_the_character_heading():
     assert _declaration(_rule(css, ".topbar-actions"), "flex") == "0 0 auto"
 
 
-def test_character_row_reserves_a_lane_wide_enough_for_its_archive_button():
-    """A shorthand that overwrites the button's lane puts the unread dot under it.
+def _web_rules(path):
+    """Every selector/body pair in a sheet, media-nested rules included."""
+
+    return re.findall(r"([^{}]+)\{([^{}]*)\}", _uncommented(path.read_text(encoding="utf-8")))
+
+
+# The row's "···" trigger is absolutely positioned inside the row's right
+# padding, so that lane has to hold it. Three sheets restate the row -- the base
+# one for the mobile block, chat_refine.css for every width -- and any of them
+# can win, so all of them are checked against the widest placement.
+TRIGGER_LANE = 34  # right:7px plus a 27px trigger
+
+
+def test_no_sheet_gives_the_character_row_a_lane_narrower_than_its_trigger():
+    """A shorthand that drops the lane puts the copy and the unread dot under it.
 
     `.character-item` used to set `padding-right:38px` in one rule and
     `padding:10px` in a later one, so the lane was 10px and the two collided.
+    Every restatement is a chance to lose it again, so they are all checked.
     """
-    css = (WEB / "styles.css").read_text(encoding="utf-8")
-    padding = _declaration(_rule(css, ".character-item"), "padding").split()
-    assert len(padding) == 4, "the lane has to be part of the shorthand"
-    top, right, bottom, left = (int(value.removesuffix("px")) for value in padding)
-    assert top == bottom
-    assert right >= 56, "the lane the archive button sits in"
-    assert right > left
+    offenders = []
+    for path in sorted(WEB.glob("*.css")):
+        for selectors, body in _web_rules(path):
+            # Only the row's own rule: a layout-mode variant (the collapsed
+            # rail) hides the trigger outright and reserves no lane for it.
+            if not _targets(selectors.strip(), ".character-item"):
+                continue
+            padding = _declaration(body, "padding")
+            if not padding:
+                continue
+            parts = padding.split()
+            if len(parts) != 4:
+                offenders.append((path.name, padding))
+                continue
+            if int(parts[1].removesuffix("px")) < TRIGGER_LANE:
+                offenders.append((path.name, padding))
+    assert offenders == [], f"the lane has to be in the shorthand, and wide enough: {offenders}"
 
-    mobile = _AT_RULE.findall(css)
-    assert any("58px" in block for block in mobile), "the mobile rule must keep the lane"
+
+def test_no_stylesheet_hides_the_character_row_trigger_at_rest():
+    """It is the only way to archive, so no sheet may take it off the screen.
+
+    styles.css dims the trigger at rest for exactly this reason -- on a touch
+    screen a control that only exists on hover does not exist -- and
+    chat_refine.css, which loads last, restated it as ``opacity: 0`` and undid
+    that without a word. A sheet may still hide it in a state the user can see
+    or leave (hover, focus, the collapsed rail); it may not hide it outright.
+    """
+    stateful = (":hover", ":focus", "collapsed")
+    offenders = []
+    for path in sorted(WEB.glob("*.css")):
+        for selectors, body in _web_rules(path):
+            if ".character-more-button" not in selectors:
+                continue
+            if any(marker in selectors for marker in stateful):
+                continue
+            if _declaration(body, "opacity") == "0" or _declaration(body, "display") == "none":
+                offenders.append(path.name)
+    assert offenders == [], f"these sheets hide the trigger at rest: {offenders}"
 
 
-def test_archiving_a_character_is_a_labelled_button_not_a_hover_trigger():
-    """It has no other entry point, so it cannot be hidden or unnamed.
+def test_archiving_a_character_stays_findable_behind_its_row_trigger():
+    """The trigger has to be reachable by keyboard, not only by pointer.
 
-    The row used to carry a "···" at 45% opacity that opened a menu holding
-    this one action. It was invisible enough that the action could not be
-    found, so the trigger is now the action.
+    The archive action lives in the row's "···" menu, and a menu that cannot be
+    opened without a pointer is not reachable at all for keyboard users -- the
+    same failure as hover-only, one input device over.
     """
     app = (WEB / "app.js").read_text(encoding="utf-8")
-    assert 'class="character-archive-button"' in app
-    assert 'data-character-more' not in app
+    assert 'class="character-more-button"' in app
+    assert 'data-character-more' in app
+    assert 'class="character-context-menu hidden"' in app
+    assert 'data-character-archive' in app, "the menu has to hold the action"
 
-    button = _rule((WEB / "styles.css").read_text(encoding="utf-8"), ".character-archive-button")
-    assert _declaration(button, "opacity") in (None, "1")
-    assert _declaration(button, "border"), "an unstyled button does not read as one"
+    css = (WEB / "styles.css").read_text(encoding="utf-8")
+    keyboard = [
+        body
+        for selectors, body in _web_rules(WEB / "styles.css")
+        if ":focus-visible" in selectors and _targets(selectors, ".character-more-button")
+    ]
+    assert keyboard, "the trigger has to be reachable without a pointer"
+    assert _declaration(keyboard[0], "opacity") == "1"
 
     # The group row keeps its "···" menu, but still must not be hover-only.
     groups = _rule((WEB / "p0_11.css").read_text(encoding="utf-8"), ".group-more-button")

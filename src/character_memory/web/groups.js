@@ -129,13 +129,16 @@
     const speaker = message.role === "assistant" ? `<div class="group-speaker-name">${CM.escapeHtml(message.actor_name || message.actor_id)}</div>` : "";
     const avatar = groupMessageAvatar(message);
     const sticker = message.sticker || (message.sticker_id ? {id:message.sticker_id,label:message.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset`} : null);
-    const hideStoredResourceText = (message.action === "STICKER" && sticker) || (message.action === "IMAGE" && message.image);
+    const isVoiceMessage = message.action === "VOICE_MESSAGE";
+    const hideStoredResourceText = isVoiceMessage || (message.action === "STICKER" && sticker) || (message.action === "IMAGE" && message.image);
     const text = hideStoredResourceText ? "" : String(message.content || "").trim();
     const textHtml = text ? `<div class="bubble">${CM.escapeHtml(text)}</div>` : "";
     const stickerHtml = sticker?.url ? `<div class="sticker-bubble"><img class="group-message-sticker" src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>` : "";
     const imageHtml = message.image?.url ? `<div class="image-bubble"><img class="group-message-image" src="${CM.escapeHtml(message.image.url)}" alt="${CM.escapeHtml(message.image.label || "图片")}" loading="lazy"><div class="image-caption">${CM.escapeHtml(message.image.label || "图片")}</div></div>` : "";
-    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${speaker}${textHtml}${stickerHtml}${imageHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${turnButton(message)}</div></div>`;
+    const voiceHtml = CM.voiceMessageHtml(message);
+    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${speaker}${textHtml}${stickerHtml}${imageHtml}${voiceHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${turnButton(message)}</div></div>`;
     row.querySelectorAll(".sticker-bubble img").forEach(img => img.addEventListener("error", () => img.closest(".sticker-bubble")?.classList.add("broken"), {once:true}));
+    CM.bindVoiceMessage(row);
     CM.dom.chat.appendChild(row);
   }
 
@@ -208,6 +211,10 @@
       sticker:stickerId ? {id:stickerId,label:metadata.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(stickerId)}/asset`} : null,
       image_id:imageId,
       image:imageId ? {id:imageId,label:metadata.image_label || "图片",url:`/v1/images/${encodeURIComponent(raw.actor_id)}/${encodeURIComponent(imageId)}/asset`} : null,
+      voice_status:metadata.voice_status || null,
+      voice_media_id:metadata.voice_media_id || null,
+      voice_duration_ms:metadata.voice_duration_ms ?? null,
+      voice_error:metadata.voice_error || null,
       source_conversation_event_id:metadata.source_conversation_event_id,
     };
   }

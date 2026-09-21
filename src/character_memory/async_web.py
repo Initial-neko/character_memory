@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import json
+import os
 import logging
 import time
 
@@ -90,7 +91,14 @@ def attach_async_routes(app):
         raise RuntimeError("create_api() must expose app.state.character_memory before async routes are attached")
 
     hub = ConversationEventHub()
-    scheduler = ReactionScheduler(access.get_bundle, access.character_profiles, hub)
+    from character_memory.application.voice_message_materializer import VoiceMessageMaterializer
+    materializer = VoiceMessageMaterializer(
+        access.store,
+        access.media_storage,
+        hub,
+        media_base=os.getenv("CHARACTER_MEDIA_BASE", "http://127.0.0.1:8001"),
+    )
+    scheduler = ReactionScheduler(access.get_bundle, access.character_profiles, hub, voice_materializer=materializer)
     access.stream_hub = hub
     access.reaction_scheduler = scheduler
 

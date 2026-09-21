@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from character_memory.envfile import effective_env_value
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_PATTERN
@@ -87,6 +87,22 @@ class Settings(BaseModel):
     # It is not a durable background-job system and does not wake group chats.
     proactive_wake_enabled: bool = True
     proactive_wake_minutes: float = Field(default=60.0, ge=1.0, le=1440.0)
+
+    # Character Space autonomous social life. These are deliberately ordinary
+    # persisted settings so the test-stage behavior can be tuned from Settings
+    # Center without editing source code.
+    space_autonomy_enabled: bool = True
+    space_daily_window_start_hour: int = Field(default=18, ge=0, le=23)
+    # End hour is exclusive; 24 means midnight at the end of the same local day.
+    space_daily_window_end_hour: int = Field(default=22, ge=1, le=24)
+    space_audience_size: int = Field(default=5, ge=0, le=10)
+    space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
+
+    @model_validator(mode="after")
+    def validate_space_window(self):
+        if self.space_daily_window_end_hour <= self.space_daily_window_start_hour:
+            raise ValueError("space_daily_window_end_hour must be greater than space_daily_window_start_hour")
+        return self
 
 
 def load_settings(path: str = "config.yaml") -> Settings:

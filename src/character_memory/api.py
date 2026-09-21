@@ -494,6 +494,14 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         proactive_stop.set()
         if proactive_thread is not None and proactive_thread.is_alive():
             proactive_thread.join(timeout=1.0)
+        # Feature modules may own background workers that still use the shared
+        # SQLite/model bundle. Stop them before the core closes those resources.
+        feature_state = getattr(app.state, "character_memory", None)
+        space_scheduler = getattr(feature_state, "space_scheduler", None) if feature_state is not None else None
+        if space_scheduler is not None:
+            stop_space = getattr(space_scheduler, "stop", None)
+            if callable(stop_space):
+                stop_space()
         if own_bundle:
             if app_bundle is not None:
                 app_bundle.close()

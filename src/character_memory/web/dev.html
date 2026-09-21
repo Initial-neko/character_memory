@@ -51,6 +51,25 @@
         <pre id="llmResult" class="result">等待请求...</pre>
       </article>
 
+      <article class="card wide" id="spaceAutonomyCard">
+        <div class="card-title-row">
+          <div><h2>Character Space Autonomy</h2><p class="subtle">测试阶段可立即触发一次 Daily Space Opportunity；手动触发不会消耗当天正式机会。</p></div>
+          <span class="pill">social life</span>
+        </div>
+        <div class="visual-provider-row">
+          <label>Character<select id="spaceCharacter"><option value="rin">rin</option></select></label>
+          <label>Post ID<input id="spacePostId" type="number" min="1" placeholder="自动填入最近测试动态" /></label>
+        </div>
+        <div class="actions">
+          <button class="primary" id="runSpaceOpportunity" type="button">触发 Daily Life</button>
+          <button class="secondary" id="runSpaceAudience" type="button">再次模拟 Audience</button>
+          <button class="secondary" id="refreshSpaceStatus" type="button">刷新调度状态</button>
+        </div>
+        <p class="subtle">“触发 Daily Life”会完整跑：角色判断发/不发 → 若发则 Audience → 看见 → 点赞/评论 → 作者可回复。“再次模拟 Audience”只针对指定 Post ID 再跑一次观看/互动。</p>
+        <pre id="spaceStatus" class="result">等待读取 Space 调度状态...</pre>
+        <pre id="spaceResult" class="result">等待测试...</pre>
+      </article>
+
       <article class="card">
         <div class="card-title-row"><h2>TTS</h2><span class="pill">media</span></div>
         <label for="ttsText">Text</label>

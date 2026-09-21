@@ -98,6 +98,23 @@ class SpaceRepository:
                     PRIMARY KEY(post_id, character_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS space_daily_runs(
+                    character_id TEXT NOT NULL,
+                    local_date TEXT NOT NULL,
+                    scheduled_for TEXT NOT NULL,
+                    scheduled_for_epoch INTEGER NOT NULL,
+                    started_at TEXT NOT NULL,
+                    started_at_epoch INTEGER NOT NULL,
+                    completed_at TEXT,
+                    completed_at_epoch INTEGER,
+                    status TEXT NOT NULL,
+                    post_id INTEGER,
+                    error TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(character_id, local_date)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_space_daily_runs_schedule
+                    ON space_daily_runs(local_date,status,scheduled_for_epoch);
                 CREATE INDEX IF NOT EXISTS idx_space_posts_created
                     ON space_posts(created_at_epoch DESC,id DESC);
                 CREATE INDEX IF NOT EXISTS idx_space_posts_character_created
@@ -114,6 +131,10 @@ class SpaceRepository:
             self.store.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
                 ("space/001-core", datetime.now().astimezone().isoformat()),
+            )
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
+                ("space/002-daily-runs", datetime.now().astimezone().isoformat()),
             )
             self.store._maybe_commit()
 
@@ -229,7 +250,7 @@ class SpaceRepository:
     def list_comments(self, post_id: int) -> list[SpaceComment]:
         with self.store._lock:
             rows = self.store.conn.execute(
-                "SELECT * FROM space_comments WHERE post_id=? ORDER BY created_at_epoch,character_id",
+                "SELECT * FROM space_comments WHERE post_id=? ORDER BY created_at_epoch,id",
                 (int(post_id),),
             ).fetchall()
         return [self._comment_from_row(row) for row in rows]
@@ -348,3 +369,85 @@ class SpaceRepository:
             )
             for row in rows
         ]
+
+
+    def get_daily_run(self, character_id: str, local_date: str) -> dict[str, Any] | None:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM space_daily_runs WHERE character_id=? AND local_date=?",
+                (character_id, local_date),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def claim_daily_run(
+        self,
+        character_id: str,
+        local_date: str,
+        scheduled_for: datetime,
+        now: datetime,
+    ) -> bool:
+        """Atomically claim one character/date opportunity.
+
+        The composite primary key makes the scheduler restart-safe. Dev/manual
+        opportunities deliberately bypass this table so testing never consumes
+        the real daily opportunity.
+        """
+        with self.store._lock:
+            cur = self.store.conn.execute(
+                "INSERT OR IGNORE INTO space_daily_runs("
+                "character_id,local_date,scheduled_for,scheduled_for_epoch,"
+                "started_at,started_at_epoch,status,error"
+                ") VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    character_id,
+                    local_date,
+                    scheduled_for.isoformat(),
+                    epoch_us(scheduled_for),
+                    now.isoformat(),
+                    epoch_us(now),
+                    "RUNNING",
+                    "",
+                ),
+            )
+            self.store._maybe_commit()
+            return cur.rowcount > 0
+
+    def finish_daily_run(
+        self,
+        character_id: str,
+        local_date: str,
+        now: datetime,
+        *,
+        status: str,
+        post_id: int | None = None,
+        error: str = "",
+    ) -> None:
+        normalized = str(status or "").strip().upper()
+        if normalized not in {"POSTED", "NO_POST", "FAILED"}:
+            raise ValueError("invalid Space daily run status")
+        with self.store._lock:
+            self.store.conn.execute(
+                "UPDATE space_daily_runs SET completed_at=?,completed_at_epoch=?,status=?,post_id=?,error=? "
+                "WHERE character_id=? AND local_date=?",
+                (
+                    now.isoformat(),
+                    epoch_us(now),
+                    normalized,
+                    post_id,
+                    str(error or "")[:2000],
+                    character_id,
+                    local_date,
+                ),
+            )
+            self.store._maybe_commit()
+
+    def list_daily_runs(self, local_date: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM space_daily_runs"
+        args: list[Any] = []
+        if local_date:
+            sql += " WHERE local_date=?"
+            args.append(local_date)
+        sql += " ORDER BY scheduled_for_epoch,character_id"
+        with self.store._lock:
+            rows = self.store.conn.execute(sql, args).fetchall()
+        return [dict(row) for row in rows]

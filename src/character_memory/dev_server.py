@@ -238,6 +238,34 @@ def create_dev_app(
     def dev_characters():
         return request_character("GET", "/v1/characters", operation="characters", timeout=10.0)
 
+    @app.get("/v1/dev/space/status")
+    def dev_space_status():
+        return request_character(
+            "GET",
+            "/v1/space/dev/status",
+            operation="space-status",
+            timeout=10.0,
+        )
+
+    @app.post("/v1/dev/space/opportunity/{character_id}")
+    def dev_space_opportunity(character_id: str):
+        safe_id = quote(character_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/space/dev/opportunity/{safe_id}",
+            operation="space-opportunity",
+            timeout=300.0,
+        )
+
+    @app.post("/v1/dev/space/audience/{post_id}")
+    def dev_space_audience(post_id: int):
+        return request_character(
+            "POST",
+            f"/v1/space/dev/audience/{int(post_id)}",
+            operation="space-audience",
+            timeout=300.0,
+        )
+
     @app.get("/v1/dev/visual/providers")
     def dev_visual_providers():
         return request_character("GET", "/v1/visual/providers", operation="visual-providers", timeout=10.0)

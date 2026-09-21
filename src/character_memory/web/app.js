@@ -85,6 +85,67 @@
     setTimeout(() => d.drawerBackdrop.classList.add("hidden"), 180);
   };
 
+  CM.voicePlayer = {audio:null, button:null, messageId:null};
+
+  CM.voiceMessageHtml = message => {
+    if (message.action !== "VOICE_MESSAGE") return "";
+    const status = message.voice_status || "pending";
+    const durationMs = Number(message.voice_duration_ms || 0);
+    const seconds = durationMs > 0 ? Math.max(1, Math.round(durationMs / 1000)) : 0;
+    const width = Math.min(260, 92 + Math.min(seconds || 1, 34) * 5);
+    const mediaUrl = message.voice_media_id ? `/v1/media/${encodeURIComponent(message.voice_media_id)}` : "";
+    if (status === "failed") {
+      return `<div class="voice-message voice-failed"><div class="voice-bubble voice-disabled">⚠ 语音生成失败</div><div class="voice-tools"><button type="button" data-voice-text>文本</button></div><div class="voice-transcript hidden" data-voice-transcript>${CM.escapeHtml(message.content || "")}</div></div>`;
+    }
+    if (status !== "ready" || !mediaUrl) {
+      return `<div class="voice-message voice-pending"><div class="voice-bubble voice-disabled"><span class="voice-glyph">)))</span><span>语音生成中…</span></div></div>`;
+    }
+    return `<div class="voice-message" data-voice-message="${CM.escapeHtml(message.id)}">
+      <button class="voice-bubble" type="button" data-voice-play data-audio-url="${CM.escapeHtml(mediaUrl)}" style="--voice-width:${width}px" aria-label="播放语音消息">
+        <span class="voice-glyph" aria-hidden="true">)))</span><span class="voice-duration">${seconds || "?"}"</span>
+      </button>
+      <div class="voice-tools"><button type="button" data-voice-text>文本</button><button type="button" data-voice-translation>翻译</button></div>
+      <div class="voice-transcript hidden" data-voice-transcript>${CM.escapeHtml(message.content || "")}</div>
+      <div class="voice-translation hidden" data-voice-translation-panel>暂无翻译</div>
+    </div>`;
+  };
+
+  CM.stopVoiceMessage = () => {
+    const current = CM.voicePlayer;
+    if (current.audio) {
+      current.audio.pause();
+      current.audio.currentTime = 0;
+    }
+    current.button?.classList.remove("playing");
+    CM.voicePlayer = {audio:null, button:null, messageId:null};
+  };
+
+  CM.bindVoiceMessage = row => {
+    row.querySelector("[data-voice-play]")?.addEventListener("click", event => {
+      const button = event.currentTarget;
+      const messageId = row.dataset.messageId || "";
+      if (CM.voicePlayer.messageId === messageId && CM.voicePlayer.audio) {
+        if (CM.voicePlayer.audio.paused) {
+          CM.voicePlayer.audio.play().catch(console.warn);
+          button.classList.add("playing");
+        } else {
+          CM.voicePlayer.audio.pause();
+          button.classList.remove("playing");
+        }
+        return;
+      }
+      CM.stopVoiceMessage();
+      const audio = new Audio(button.dataset.audioUrl);
+      CM.voicePlayer = {audio, button, messageId};
+      button.classList.add("playing");
+      audio.addEventListener("ended", () => CM.stopVoiceMessage(), {once:true});
+      audio.addEventListener("error", () => { button.classList.remove("playing"); button.classList.add("broken"); }, {once:true});
+      audio.play().catch(error => { button.classList.remove("playing"); console.warn("voice message playback failed", error); });
+    });
+    row.querySelector("[data-voice-text]")?.addEventListener("click", () => row.querySelector("[data-voice-transcript]")?.classList.toggle("hidden"));
+    row.querySelector("[data-voice-translation]")?.addEventListener("click", () => row.querySelector("[data-voice-translation-panel]")?.classList.toggle("hidden"));
+  };
+
   CM.addMessage = message => {
     const d = CM.dom;
     const row = document.createElement("article");
@@ -97,14 +158,17 @@
       ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮开发详情">···</button>` : "";
     const sticker = message.sticker || (message.sticker_id ? {id:message.sticker_id,label:message.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset`} : null);
     const image = message.image || null;
-    const hideStoredResourceText = (message.action === "STICKER" && sticker) || (message.action === "IMAGE" && image);
+    const isVoiceMessage = message.action === "VOICE_MESSAGE";
+    const hideStoredResourceText = isVoiceMessage || (message.action === "STICKER" && sticker) || (message.action === "IMAGE" && image);
     const text = hideStoredResourceText ? "" : String(message.content || "").trim();
     const textHtml = text ? `<div class="bubble">${CM.escapeHtml(text)}</div>` : "";
     const stickerHtml = sticker?.url ? `<div class="sticker-bubble"><img src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>` : "";
     const imageHtml = image?.url ? `<div class="image-bubble"><img src="${CM.escapeHtml(image.url)}" alt="${CM.escapeHtml(image.label || "图片")}" loading="lazy"><div class="image-caption">${CM.escapeHtml(image.label || "图片")}</div></div>` : "";
+    const voiceHtml = CM.voiceMessageHtml(message);
     const proactive = message.proactive || message.action === "PROACTIVE_MESSAGE";
-    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${textHtml}${stickerHtml}${imageHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${proactive ? '<span class="proactive-badge">主动消息</span>' : ""}${thought}${trace}</div></div>`;
+    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${textHtml}${stickerHtml}${imageHtml}${voiceHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${proactive ? '<span class="proactive-badge">主动消息</span>' : ""}${thought}${trace}</div></div>`;
     row.querySelectorAll(".sticker-bubble img").forEach(img => img.addEventListener("error", () => img.closest(".sticker-bubble")?.classList.add("broken"), {once:true}));
+    CM.bindVoiceMessage(row);
     d.chat.appendChild(row);
     return row;
   };
@@ -113,7 +177,7 @@
     const d = CM.dom;
     const beforeHeight = document.body.scrollHeight;
     const beforeY = window.scrollY;
-    const signature = `${CM.state.characterId}|${CM.state.directHistory.hasMore}|${CM.state.pendingCharacters.has(CM.state.characterId)}|` + messages.map(m => `${m.id}:${m.event_time}:${m.content}:${m.sticker_id || ""}:${m.image_id || m.media_id || ""}`).join("|");
+    const signature = `${CM.state.characterId}|${CM.state.directHistory.hasMore}|${CM.state.pendingCharacters.has(CM.state.characterId)}|` + messages.map(m => `${m.id}:${m.event_time}:${m.content}:${m.sticker_id || ""}:${m.image_id || m.media_id || ""}:${m.voice_status || ""}:${m.voice_media_id || ""}`).join("|");
     if (signature === CM.state.lastRenderedSignature && d.chat.children.length) return;
     d.chat.innerHTML = "";
     if (!messages.length) {
@@ -231,6 +295,10 @@
       sticker:stickerId ? {id:stickerId,label:metadata.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(stickerId)}/asset`} : null,
       image_id:imageId,
       image:imageId ? {id:imageId,label:metadata.image_label || "图片",url:`/v1/images/${encodeURIComponent(raw.character_id)}/${encodeURIComponent(imageId)}/asset`} : null,
+      voice_status:metadata.voice_status || null,
+      voice_media_id:metadata.voice_media_id || null,
+      voice_duration_ms:metadata.voice_duration_ms ?? null,
+      voice_error:metadata.voice_error || null,
       source_event_type:metadata.source_event_type,
       source_event_id:metadata.source_event_id,
       has_trace:Boolean(metadata.source_event_id),

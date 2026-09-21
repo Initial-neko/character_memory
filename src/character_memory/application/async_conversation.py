@@ -121,12 +121,14 @@ class ReactionScheduler:
         *,
         quiet_seconds: float = 0.5,
         max_burst_seconds: float = 1.5,
+        voice_materializer=None,
     ):
         self.get_bundle = get_bundle
         self.character_profiles = character_profiles
         self.hub = hub
         self.quiet_seconds = quiet_seconds
         self.max_burst_seconds = max_burst_seconds
+        self.voice_materializer = voice_materializer
         self._guard = threading.Lock()
         self._states: dict[str, _PendingState] = {}
         self._group_locks: dict[str, threading.RLock] = {}
@@ -368,18 +370,17 @@ class ReactionScheduler:
                         commit_guard=lambda: self._latest_direct_user_id(bundle.store, character_id, conversation_id) == watermark,
                     )
                 for response_event in self._direct_response_events(bundle.store, character_id, watermark):
-                    self.hub.publish(
-                        channel,
-                        "character_event",
-                        {
-                            "id": response_event.id,
-                            "character_id": response_event.character_id,
-                            "event_type": response_event.event_type.value,
-                            "event_time": response_event.event_time.isoformat(),
-                            "content": response_event.content,
-                            "metadata": response_event.metadata,
-                        },
-                    )
+                    raw_event = {
+                        "id": response_event.id,
+                        "character_id": response_event.character_id,
+                        "event_type": response_event.event_type.value,
+                        "event_time": response_event.event_time.isoformat(),
+                        "content": response_event.content,
+                        "metadata": response_event.metadata,
+                    }
+                    self.hub.publish(channel, "character_event", raw_event)
+                    if self.voice_materializer is not None and response_event.metadata.get("action") == "VOICE_MESSAGE":
+                        self.voice_materializer.materialize_direct(response_event, conversation_id=conversation_id)
                 self.hub.publish(
                     channel,
                     "reaction_complete",
@@ -440,6 +441,8 @@ class ReactionScheduler:
                 def member_done(decision: dict) -> None:
                     for raw_event in decision.get("emitted_events") or []:
                         self.hub.publish(channel, "group_character_event", raw_event)
+                        if self.voice_materializer is not None and (raw_event.get("metadata") or {}).get("action") == "VOICE_MESSAGE":
+                            self.voice_materializer.materialize_group(raw_event)
                     self.hub.publish(
                         channel,
                         "group_member_complete",

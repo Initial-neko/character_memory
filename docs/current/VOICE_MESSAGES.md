@@ -1,6 +1,6 @@
 # Voice Messages
 
-Status: **foundation implemented; end-to-end user flow is not complete yet**.
+Status: **V1 end-to-end implementation is under review on the voice-message feature branch.**
 
 This document describes the current `main` contract after the voice-message persistence work. It is intentionally narrower than voice calls: a voice message is a durable chat event with text plus a synthesized audio asset, not a live call transport.
 
@@ -40,18 +40,23 @@ The current state-transition service can update a persisted direct-chat event an
 
 The service validates event provenance before writing so an id collision with the separate group-event table cannot modify an unrelated direct-chat row.
 
-## What is deliberately not complete
+## V1 product flow
 
-The current tree does **not** yet provide the full product flow:
+The V1 feature branch completes the durable voice-message path:
 
-- the model is not yet allowed to choose `VOICE_MESSAGE` in its normal action whitelist;
-- no synthesis worker currently takes a pending voice message through the formal TTS route and stores the result automatically;
-- the browser does not yet render the voice-message player/bubble contract;
-- group-chat voice-message state transitions are not implemented;
-- stale `pending` messages are not recovered after a process crash;
-- `/v1/media/{id}` is still the general media download route and has not been redesigned into a seekable audio streaming endpoint.
+```text
+VOICE_MESSAGE action
+  -> persist pending event first
+  -> one POST /v1/tts with the complete message text
+  -> save WAV/MP3 through MediaStorage
+  -> update the same event id to ready/failed
+  -> direct/group SSE updates the existing bubble
+  -> history reload reuses the persisted audio asset
+```
 
-These are follow-up tasks, not hidden behavior.
+The browser renders a compact IM-style voice bubble rather than native `<audio controls>`. The bubble shows a speaker glyph and duration, grows within a bounded width according to duration, supports play/pause, and exposes the original text on demand. Translation has a UI slot but is not a V1 backend dependency.
+
+Only `VOICE_MESSAGE` enters this materialization path. Ordinary `MESSAGE` remains text and does not gain a durable audio asset.
 
 ## Relationship to voice calls
 
@@ -78,4 +83,4 @@ The feature becomes end-to-end only when the same change set provides all of the
 5. focused recovery/error behavior;
 6. regression coverage across persistence and client delivery.
 
-Until then, documentation and UI should describe voice messages as an in-progress capability rather than a finished chat feature.
+Acceptance still requires CI plus manual browser/audio verification before this branch is merged.

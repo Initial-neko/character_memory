@@ -8,7 +8,7 @@
   // character list title. Put a quiet, explicit entry directly below "新建人物"
   // so it remains discoverable without consuming the sidebar header.
   const archiveListButton = document.createElement("button");
-  archiveListButton.className = "character-archive-entry";
+  archiveListButton.className = "character-archive-entry character-archive-list-button";
   archiveListButton.type = "button";
   archiveListButton.title = "查看已归档人物";
   archiveListButton.innerHTML = '<span class="character-archive-entry-icon" aria-hidden="true">▣</span><span class="character-archive-entry-label">查看归档人物</span><span class="character-archive-entry-chevron" aria-hidden="true">›</span>';

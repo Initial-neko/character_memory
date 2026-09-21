@@ -90,7 +90,8 @@
   createButton.type = "button";
   createButton.className = "create-character-button";
   createButton.textContent = "＋ 新建人物";
-  CM.dom.characterList.insertAdjacentElement("afterend", createButton);
+  const characterActions = document.getElementById("characterActions");
+  (characterActions || CM.dom.characterList).appendChild(createButton);
   createButton.addEventListener("click", openBuilder);
 
   CM.dom.drawerBody.addEventListener("click", event => {

@@ -2,27 +2,23 @@
   const CM = window.CM;
   if (!CM) throw new Error("CM core must load before space.js");
 
-  const sidebar = document.querySelector(".sidebar");
-  const brand = sidebar?.querySelector(".brand");
+  const sidebarSlot = document.getElementById("sidebarSpace");
   const chatShell = document.querySelector(".chat-shell");
   const topbarActions = document.querySelector(".topbar-actions");
-  const voiceButton = document.getElementById("voiceCallButton");
 
   const nav = document.createElement("button");
   nav.className = "space-nav-button";
   nav.type = "button";
   nav.innerHTML = '<span class="space-nav-icon">◎</span><span class="space-nav-copy"><strong>空间</strong><small>角色们的近况</small></span>';
-  if (brand?.nextSibling) sidebar.insertBefore(nav, brand.nextSibling);
-  else sidebar?.appendChild(nav);
+  sidebarSlot?.appendChild(nav);
 
   const characterEntry = document.createElement("button");
   characterEntry.id = "characterSpaceButton";
-  characterEntry.className = "ghost-button space-character-entry";
+  characterEntry.className = "ghost-button space-character-entry desktop-only-control";
   characterEntry.type = "button";
-  characterEntry.textContent = "动态";
-  characterEntry.title = "查看这个角色的空间";
-  if (voiceButton) topbarActions?.insertBefore(characterEntry, voiceButton);
-  else topbarActions?.prepend(characterEntry);
+  characterEntry.textContent = "查看动态";
+  characterEntry.title = "查看当前人物的空间";
+  topbarActions?.appendChild(characterEntry);
 
   const shell = document.createElement("section");
   shell.className = "space-shell hidden";

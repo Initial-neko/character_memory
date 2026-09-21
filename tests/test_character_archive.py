@@ -163,6 +163,20 @@ def test_archive_api_is_idempotent_and_refuses_unknown_characters(tmp_path: Path
         assert client.post("/v1/characters/nobody/restore").status_code == 404
 
 
+def test_archive_refuses_to_hide_the_last_active_character(tmp_path: Path):
+    config = _config(tmp_path)
+    app = create_api(str(config))
+
+    with TestClient(app) as client:
+        assert client.post("/v1/characters/momo/archive").status_code == 200
+        assert client.post("/v1/characters/rei/archive").status_code == 200
+
+        response = client.post("/v1/characters/rin/archive")
+        assert response.status_code == 409
+        assert "至少保留一个未归档人物" in response.text
+        assert [item["id"] for item in client.get("/v1/characters").json()["characters"]] == ["rin"]
+
+
 def test_character_archive_frontend_contract_and_syntax():
     root = Path(__file__).resolve().parents[1]
     web = root / "src" / "character_memory" / "web"
@@ -174,7 +188,9 @@ def test_character_archive_frontend_contract_and_syntax():
     assert "/static/character_archive.js" in index
     for token in [
         "character-archive-list-button",
+        "archiveCurrentCharacterButton",
         "data-character-archive",
+        "data-character-archive-confirm",
         "data-character-restore",
         "?archived=true",
         "/archive",
@@ -229,8 +245,10 @@ def test_every_hook_the_archive_module_reads_is_still_emitted_by_the_shell():
     rendered_here: set[str] = set()
     for attribute in re.findall(r'class="([^"]*)"', script) + re.findall(r'className\s*=\s*"([^"]*)"', script):
         rendered_here.update(attribute.split())
-    for attribute in re.findall(r"(data-[\w-]+)\s*=", script):
-        rendered_here.add(attribute)
+    # Any ``data-`` token outside a selector is an attribute this module writes
+    # into its own markup -- bare or with a value; the drawer's cancel button is
+    # emitted bare, which is how it slipped past a value-only pattern.
+    rendered_here.update(re.findall(r"data-[\w-]+", re.sub(r"\[[^\]]*\]", "", script)))
 
     assert read, "the module queries the DOM; the extraction above has gone stale"
     missing = sorted(hook for hook in read - rendered_here if hook not in shell)

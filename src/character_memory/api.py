@@ -175,6 +175,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+            profiles = character_profiles()
+            target = next((item for item in profiles if item["id"] == character_id), None)
+            if archived and target is not None and "archived_at" not in target:
+                active_profiles = split_archived(profiles, False)
+                if len(active_profiles) <= 1:
+                    raise HTTPException(status_code=409, detail="至少保留一个未归档人物")
+
             try:
                 stamp = set_character_archived(settings, character_id, archived)
             except OSError as exc:

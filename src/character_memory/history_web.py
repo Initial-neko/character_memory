@@ -3,6 +3,7 @@ from __future__ import annotations
 from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
 from character_memory.storage.chat_history import ChatHistoryRepository
+from character_memory.voice_message_fields import voice_fields
 
 
 def attach_history_routes(app):
@@ -101,6 +102,9 @@ def attach_history_routes(app):
             "image_id": event.metadata.get("image_id"),
             "media_id": media_id,
             "image": image,
+            # Deliberately a distinct key from "media_id" above, which drives
+            # image rendering.
+            **voice_fields(event.metadata),
             "source_event_type": source_event_type,
             "source_event_id": source_event_id,
             "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,

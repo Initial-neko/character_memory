@@ -7,22 +7,13 @@ import time
 from typing import Callable
 from uuid import uuid4
 
-from character_memory.domain.models import ActionType, Event, EventType, Memory
+from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.runtime.context import compile_context
+from character_memory.voice_message_fields import voice_pending_fields
 
 
 logger = logging.getLogger("character_memory.application.group")
-
-_EXPRESSIVE_ACTIONS = {
-    ActionType.REPLY,
-    ActionType.MINIMAL_RESPONSE,
-    ActionType.PROACTIVE_MESSAGE,
-    ActionType.MESSAGE,
-    ActionType.EMOJI,
-    ActionType.STICKER,
-    ActionType.IMAGE,
-}
 
 
 class SupersededGroupReaction(RuntimeError):
@@ -398,7 +389,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                         created_memory_ids.append(saved.id)
 
                 for index, action in enumerate(reaction.actions):
-                    if action.type not in _EXPRESSIVE_ACTIONS:
+                    if action.type not in EXPRESSIVE_ACTIONS:
                         continue
                     metadata = {
                         "action": action.type.value,
@@ -421,6 +412,11 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                             continue
                         content = f"[图片：{image.label}]"
                         metadata.update({"image_id": image.id, "image_label": image.label})
+                    elif action.type == ActionType.VOICE_MESSAGE:
+                        if not (action.message or "").strip():
+                            continue
+                        content = (action.message or "").strip()
+                        metadata.update(voice_pending_fields())
                     else:
                         if not (action.message or "").strip():
                             continue

@@ -3,20 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 
-from character_memory.domain.models import ActionType, EventType
+from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, EventType
 
 
 logger = logging.getLogger("character_memory.application.proactive")
-
-_EXPRESSIVE = {
-    ActionType.PROACTIVE_MESSAGE,
-    ActionType.REPLY,
-    ActionType.MINIMAL_RESPONSE,
-    ActionType.MESSAGE,
-    ActionType.EMOJI,
-    ActionType.STICKER,
-    ActionType.IMAGE,
-}
 
 
 class ProactiveService:
@@ -78,7 +68,7 @@ class ProactiveService:
                     )
                     action_types = {action.type for action in result.reaction.actions}
                     legacy = result.reaction.action.type if result.reaction.action is not None else ActionType.NO_ACTION
-                    if action_types & _EXPRESSIVE or legacy in _EXPRESSIVE:
+                    if action_types & EXPRESSIVE_ACTIONS or legacy in EXPRESSIVE_ACTIONS:
                         status = "EXECUTED"
                     elif legacy == ActionType.DEFER:
                         status = "DEFERRED"

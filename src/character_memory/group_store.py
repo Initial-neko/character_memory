@@ -306,6 +306,16 @@ class GroupRepository:
             self.store._maybe_commit()
         return event.model_copy(update={"id": cur.lastrowid})
 
+    def update_event_metadata(self, event_id: int, metadata: dict[str, Any]) -> bool:
+        """Replace a conversation event's metadata document; see SQLiteStore."""
+        with self.store._lock:
+            cur = self.store.conn.execute(
+                "UPDATE conversation_events SET metadata_json=? WHERE id=?",
+                (json.dumps(metadata, ensure_ascii=False), event_id),
+            )
+            self.store._maybe_commit()
+            return cur.rowcount > 0
+
     def list_events(self, conversation_id: str, limit: int = 160) -> list[GroupEvent]:
         limit = max(1, min(int(limit), 500))
         with self.store._lock:

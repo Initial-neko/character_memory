@@ -8,6 +8,12 @@
 
 > 不优化“人物有多喜欢用户”，而优化“人物现在为什么会这样做”。
 
+## 项目状态
+
+这是一个快速迭代中的实验项目，目前没有稳定版本承诺。README 只描述可运行入口和已经落地的主能力；尚未完成端到端闭环的能力会明确标记为 foundation / in progress，而不是用实施计划冒充现状。
+
+开发和贡献约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，仓库级工程规则见 [AGENTS.md](AGENTS.md)。文档索引见 [docs/README.md](docs/README.md)。
+
 ## 当前能力
 
 - 多 Character Persona；`personas/*/persona.yaml` 是人物定义事实源。
@@ -23,9 +29,10 @@
 - Avatar Search / Avatar Generate / 从聊天图片设头像。
 - Media Runtime：SenseVoice ASR；正式 Browser TTS 固定走 `:8001/v1/tts`，按配置路由 Kokoro / Sherpa / Edge / GSV-TTS-Lite。
 - TTS Workbench + Provider Runtime：`:9002` 承载正式 Provider adapter、试听/benchmark，以及可选 VoiceDesign 工具；Sherpa 试听使用独立 provider-specific Media route，不经过正式 TTS selector。
-- GSV-TTS-Lite：独立 `:9014` sidecar，支持 per-character `voice.yaml` registry；VoiceDesign freeze 可以把试听结果固化为角色 reference。
+- GSV-TTS-Lite：独立 `:9014` sidecar；音色统一保存为 `voices/<name>.yaml` 模板，`personas/<character>/voice.yaml` 只引用模板；VoiceDesign freeze 会把试听结果固化成可复用模板。
 - Settings Center：`config.yaml` 管正式运行选择，`.env` 管 Secret 与 GSV runtime 资产。Provider/Voice/Speed 与 GSV runtime 配置支持热生效；Kokoro/Sherpa device 变更只需重启对应 TTS Runtime。
 - Dev Console：统一测试 LLM、ASR/TTS、ImageGen、资源与运行状态。
+- Voice Message 基础契约已落地：WAV/MP3 持久化、`VOICE_MESSAGE` action 与 `pending/ready/failed` 状态存在；自动合成、播放器与群聊状态迁移仍在后续实现中。
 - pytest、Browser Smoke、JSONL Eval regression。
 
 ## 运行架构
@@ -172,6 +179,7 @@ Browser Smoke 在 CI 的独立 job 中安装 Playwright/Chromium，不放入默�
 - [Visual Generation](docs/current/VISUAL_GENERATION.md)
 - [Stickers](docs/current/STICKERS.md)
 - [Media Runtime](docs/current/MEDIA_RUNTIME.md)
+- [Voice Messages](docs/current/VOICE_MESSAGES.md)
 - [Dev Console](docs/current/DEV_CONSOLE.md)
 - [Settings Center](docs/current/SETTINGS_CENTER.md)
 - [TTS Provider Lab](docs/current/TTS_PROVIDER_LAB.md)

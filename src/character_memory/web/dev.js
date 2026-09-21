@@ -102,6 +102,16 @@
       if ($("spaceMaxPostsPerDay")) $("spaceMaxPostsPerDay").value = String(data.max_posts_per_day ?? 0);
       if ($("spaceAudienceSize")) $("spaceAudienceSize").value = String(data.audience_size ?? 5);
       if ($("spacePollSeconds")) $("spacePollSeconds").value = String(data.poll_seconds ?? 60);
+      const media = data.media || {};
+      if ($("spaceObservationEnabled")) $("spaceObservationEnabled").checked = Boolean(media.observation_enabled ?? true);
+      if ($("spaceImageSearchEnabled")) $("spaceImageSearchEnabled").checked = Boolean(media.image_search_enabled ?? true);
+      if ($("spaceImageGenerationEnabled")) $("spaceImageGenerationEnabled").checked = Boolean(media.image_generation_enabled ?? true);
+      if ($("spaceVoicePostEnabled")) $("spaceVoicePostEnabled").checked = Boolean(media.voice_post_enabled ?? true);
+      if ($("spaceLinkPreviewEnabled")) $("spaceLinkPreviewEnabled").checked = Boolean(media.link_preview_enabled ?? true);
+      if ($("spaceObservationChance")) $("spaceObservationChance").value = String(media.observation_chance ?? 0.30);
+      if ($("spaceMediaChance")) $("spaceMediaChance").value = String(media.media_chance ?? 0.40);
+      if ($("spaceVoiceChance")) $("spaceVoiceChance").value = String(media.voice_chance ?? 0.15);
+      if ($("spaceMaxImagesPerPost")) $("spaceMaxImagesPerPost").value = String(media.max_images_per_post ?? 9);
     } catch (error) {
       $("spaceStatus").textContent = `ERROR: ${error.message}`;
     }
@@ -121,6 +131,15 @@
           max_posts_per_day: Number($("spaceMaxPostsPerDay").value || 0),
           audience_size: Number($("spaceAudienceSize").value || 0),
           poll_seconds: Number($("spacePollSeconds").value || 60),
+          observation_enabled: $("spaceObservationEnabled").checked,
+          image_search_enabled: $("spaceImageSearchEnabled").checked,
+          image_generation_enabled: $("spaceImageGenerationEnabled").checked,
+          voice_post_enabled: $("spaceVoicePostEnabled").checked,
+          link_preview_enabled: $("spaceLinkPreviewEnabled").checked,
+          observation_chance: Number($("spaceObservationChance").value || 0),
+          media_chance: Number($("spaceMediaChance").value || 0),
+          voice_chance: Number($("spaceVoiceChance").value || 0),
+          max_images_per_post: Number($("spaceMaxImagesPerPost").value || 9),
           rearm: true,
         }),
       });
@@ -499,6 +518,28 @@
     button.addEventListener("click", () => {
       $("spaceIntervalMinutes").value = button.dataset.minutes || "1440";
     });
+  });
+  $("spaceMediaNaturalPreset").addEventListener("click", () => {
+    $("spaceObservationEnabled").checked = true;
+    $("spaceImageSearchEnabled").checked = true;
+    $("spaceImageGenerationEnabled").checked = true;
+    $("spaceVoicePostEnabled").checked = true;
+    $("spaceLinkPreviewEnabled").checked = true;
+    $("spaceObservationChance").value = "0.30";
+    $("spaceMediaChance").value = "0.40";
+    $("spaceVoiceChance").value = "0.15";
+    $("spaceMaxImagesPerPost").value = "9";
+  });
+  $("spaceMediaStressPreset").addEventListener("click", () => {
+    $("spaceObservationEnabled").checked = true;
+    $("spaceImageSearchEnabled").checked = true;
+    $("spaceImageGenerationEnabled").checked = true;
+    $("spaceVoicePostEnabled").checked = true;
+    $("spaceLinkPreviewEnabled").checked = true;
+    $("spaceObservationChance").value = "1";
+    $("spaceMediaChance").value = "1";
+    $("spaceVoiceChance").value = "1";
+    $("spaceMaxImagesPerPost").value = "9";
   });
   $("runSpaceAudience").addEventListener("click", runSpaceAudience);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);

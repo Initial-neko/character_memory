@@ -32,6 +32,10 @@
 .voice-minimize { background: rgba(255,255,255,.12); }
 .voice-minimize:hover { background: rgba(255,255,255,.18); }
 .voice-hangup { background: #b84242; }
+.voice-call-card :where(button:focus-visible) {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(132,166,255,.24);
+}
 .voice-call-detail { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 22px; color: #f6f7fb; }
 .voice-call-detail-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,.12); }
 .voice-call-detail-head strong { color: #fff; }

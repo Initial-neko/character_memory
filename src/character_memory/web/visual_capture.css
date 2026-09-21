@@ -9,6 +9,11 @@
 .voice-visual-controls { display: flex; justify-content: center; gap: 7px; flex-wrap: wrap; margin: 0 0 12px; }
 .voice-visual-button { border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 8px 11px; background: rgba(255,255,255,.08); color: #eef1f7; cursor: pointer; font-size: 12px; }
 .voice-visual-button:hover { background: rgba(255,255,255,.14); }
+.voice-visual-button:focus-visible {
+  outline: none;
+  border-color: rgba(103,151,255,.65);
+  box-shadow: 0 0 0 3px rgba(103,151,255,.18);
+}
 .voice-visual-button.active { border-color: rgba(103,151,255,.65); background: rgba(94,129,244,.26); color: #fff; }
 .voice-visual-button.stop { color: #ffc8c8; }
 .voice-visual-button.hidden { display: none; }

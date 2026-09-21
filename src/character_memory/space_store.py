@@ -282,6 +282,19 @@ class SpaceRepository:
             row = self.store.conn.execute(sql, args).fetchone()
         return int(row["total"] if row is not None else 0)
 
+    def count_posts_since(self, character_id: str, since: datetime) -> int:
+        """Posts one character has published at or after ``since``.
+
+        Backs the per-day publishing ceiling, so it counts the author's own
+        posts only -- reactions and comments are not a publishing budget.
+        """
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) AS total FROM space_posts WHERE character_id=? AND created_at_epoch>=?",
+                (character_id, epoch_us(since)),
+            ).fetchone()
+        return int(row["total"] if row is not None else 0)
+
     def list_comments(self, post_id: int) -> list[SpaceComment]:
         with self.store._lock:
             rows = self.store.conn.execute(

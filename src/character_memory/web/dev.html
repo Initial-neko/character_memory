@@ -53,13 +53,14 @@
 
       <article class="card wide" id="spaceAutonomyCard">
         <div class="card-title-row">
-          <div><h2>Character Space Autonomy</h2><p class="subtle">测试阶段可把正式 Opportunity 从 24H 调成 1H / 30min / 10min，并直接观察一段时间。到点只是让角色判断一次，仍然可以不发。</p></div>
+          <div><h2>Character Space Autonomy</h2><p class="subtle">测试阶段可把正式 Opportunity 从 24H 调成 1H / 30min / 10min，并直接观察一段时间。到点只是让角色判断一次，仍然可以不发；一天可以发多条。</p></div>
           <span class="pill">social life</span>
         </div>
 
         <div class="visual-provider-row">
           <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked /> Autonomous Space</label>
           <label>Opportunity Interval (min)<input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="1440" /></label>
+          <label>Max Posts / Day<input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="0" /></label>
           <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /></label>
           <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
         </div>
@@ -72,7 +73,7 @@
           <button class="secondary space-preset" data-minutes="1440" type="button">24H / 正式</button>
           <button class="primary" id="applySpaceConfig" type="button">应用测试配置</button>
         </div>
-        <p class="subtle">应用后会写入 config.yaml，并立即热应用到当前 Character Runtime。修改 Interval 时默认从“现在”重新计算下一次时间；Poll 只影响检查延迟，不会增加 Opportunity 次数。</p>
+        <p class="subtle">应用后会写入 config.yaml，并立即热应用到当前 Character Runtime。修改 Interval 时默认从“现在”重新计算下一次时间；Poll 只影响检查延迟，不会增加 Opportunity 次数。Max Posts / Day 是每天发布上限，0 = 不限——它只是上限，不会强制发帖。</p>
 
         <div class="visual-provider-row">
           <label>Character<select id="spaceCharacter"><option value="rin">rin</option></select></label>

@@ -813,6 +813,7 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
         assert [field["name"] for field in section["fields"]] == [
             "space_autonomy_enabled",
             "space_opportunity_interval_minutes",
+            "space_max_posts_per_day",
             "space_audience_size",
             "space_scheduler_poll_seconds",
         ]
@@ -823,6 +824,7 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
                 "values": {
                     "space_autonomy_enabled": True,
                     "space_opportunity_interval_minutes": 60,
+                    "space_max_posts_per_day": 12,
                     "space_audience_size": 2,
                     "space_scheduler_poll_seconds": 20,
                 }
@@ -834,11 +836,13 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
     assert set(result["restart_required"]) == {
         "space_autonomy_enabled",
         "space_opportunity_interval_minutes",
+        "space_max_posts_per_day",
         "space_audience_size",
         "space_scheduler_poll_seconds",
     }
     settings = load_settings(str(config))
     assert settings.space_opportunity_interval_minutes == 60
+    assert settings.space_max_posts_per_day == 12
     assert settings.space_audience_size == 2
     assert settings.space_scheduler_poll_seconds == 20
 

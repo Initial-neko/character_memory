@@ -68,10 +68,12 @@ proactive_wake_enabled: true
 proactive_wake_minutes: 60
 
 # Character Space autonomous social life. The model may decide not to post on
-# any opportunity. Production default is one opportunity every 24H; test soak
+# any opportunity, and a character may publish several posts in one day when the
+# interval is short. Production default is one opportunity every 24H; test soak
 # runs can shorten this to 60/30/10 minutes from Dev Console.
 space_autonomy_enabled: true
 space_opportunity_interval_minutes: 1440  # 1440=24H, 60=1H, 30=30min, 10=10min
+space_max_posts_per_day: 0                # publishing ceiling per local day; 0 = unlimited
 space_audience_size: 5                    # 0 disables automatic distribution; hard max 10
 space_scheduler_poll_seconds: 60          # check latency only; does not change interval
 

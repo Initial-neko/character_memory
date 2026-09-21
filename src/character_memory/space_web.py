@@ -39,6 +39,7 @@ class CreateSpaceCommentRequest(BaseModel):
 class SpaceDevConfigRequest(BaseModel):
     enabled: bool | None = None
     interval_minutes: float | None = Field(default=None, ge=10.0, le=10080.0)
+    max_posts_per_day: int | None = Field(default=None, ge=0, le=200)
     audience_size: int | None = Field(default=None, ge=0, le=10)
     poll_seconds: float | None = Field(default=None, ge=10.0, le=3600.0)
     rearm: bool = True
@@ -273,6 +274,7 @@ def attach_space_routes(app):
         return scheduler.apply_runtime_config(
             enabled=req.enabled,
             interval_minutes=req.interval_minutes,
+            max_posts_per_day=req.max_posts_per_day,
             audience_size=req.audience_size,
             poll_seconds=req.poll_seconds,
             rearm=req.rearm,

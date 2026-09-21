@@ -199,7 +199,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
         "id": "space-autonomy",
         "title": "Character Space",
-        "description": "角色自主动态调度。默认每 24 小时一次 Opportunity；测试阶段可改成 1 小时或更短。到点只是让角色判断一次，仍然可以选择不发。",
+        "description": "角色自主动态调度。默认每 24 小时一次 Opportunity；测试阶段可改成 1 小时或更短，一个角色一天因此可以发多条动态。到点只是让角色判断一次，仍然可以选择不发。",
         "fields": [
             {"name": "space_autonomy_enabled", "label": "Autonomous Space", "type": "checkbox"},
             {
@@ -210,6 +210,15 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "max": 10080,
                 "step": 10,
                 "help": "同一角色两次正式 Space Opportunity 的最小间隔。1440=24H，60=1H，30=30min，10=10min。",
+            },
+            {
+                "name": "space_max_posts_per_day",
+                "label": "Max Posts / Day",
+                "type": "number",
+                "min": 0,
+                "max": 200,
+                "step": 1,
+                "help": "每个角色每天最多发布几条自主动态。0 = 不限。它只是上限，不会强制发帖；角色判断不发时不消耗额度。",
             },
             {
                 "name": "space_audience_size",

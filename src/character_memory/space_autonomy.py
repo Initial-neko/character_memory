@@ -78,9 +78,9 @@ class SpaceAutonomyService:
 {now.isoformat()}
 
 # Character Space Opportunity
-这是一次“要不要公开发动态”的 Opportunity，不是发帖 KPI。
-系统可能在测试阶段按较短间隔再次给你 Opportunity；这不代表必须提高发帖频率。
-不要为了完成任务、维持活跃、取悦用户而发动态。
+这是一次“要不要公开发动态”的判断，发或不发都由你决定，它本身不是发帖 KPI。
+判断标准不随间隔变化：间隔短不代表要多发，间隔长也不代表必须憋着一条。
+不必为了显得活跃而凑内容，也不用因为这是一次“机会”就刻意保持沉默。
 只根据这个人物已经真实存在的经历、记忆和状态判断。
 不要凭空创造没有发生过的新事件。
 
@@ -324,6 +324,17 @@ class SpaceAutonomyScheduler:
             ),
         )
 
+    def max_posts_per_day(self) -> int:
+        """Published-post ceiling for one character per local day; 0 means none."""
+        return max(
+            0,
+            min(200, int(getattr(self.access.settings, "space_max_posts_per_day", 0))),
+        )
+
+    def _posts_today(self, character_id: str, now: datetime) -> int:
+        midnight = now.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        return self.repository.count_posts_since(character_id, midnight)
+
     def _state_for(self, character_id: str, now: datetime) -> dict:
         return self.repository.ensure_opportunity_state(
             character_id,
@@ -345,12 +356,14 @@ class SpaceAutonomyScheduler:
                     "next_opportunity_at": state.get("next_opportunity_at"),
                     "last_status": state.get("last_status"),
                     "last_post_id": state.get("last_post_id"),
+                    "posts_today": self._posts_today(character_id, now),
                     "due": epoch_us(now) >= int(state["next_opportunity_at_epoch"]),
                 }
             )
         return {
             "enabled": autonomy_enabled(self.access),
             "interval_minutes": self.interval_minutes(),
+            "max_posts_per_day": self.max_posts_per_day(),
             "poll_seconds": self.poll_seconds,
             "audience_size": min(
                 MAX_AUTONOMOUS_AUDIENCE,
@@ -365,6 +378,7 @@ class SpaceAutonomyScheduler:
         *,
         enabled: bool | None = None,
         interval_minutes: float | None = None,
+        max_posts_per_day: int | None = None,
         audience_size: int | None = None,
         poll_seconds: float | None = None,
         rearm: bool = True,
@@ -376,6 +390,10 @@ class SpaceAutonomyScheduler:
         if interval_minutes is not None:
             self.access.settings.space_opportunity_interval_minutes = max(
                 10.0, min(10080.0, float(interval_minutes))
+            )
+        if max_posts_per_day is not None:
+            self.access.settings.space_max_posts_per_day = max(
+                0, min(200, int(max_posts_per_day))
             )
         if audience_size is not None:
             self.access.settings.space_audience_size = max(
@@ -411,6 +429,13 @@ class SpaceAutonomyScheduler:
             character_id = profile["id"]
             state = self._state_for(character_id, now)
             if epoch_us(now) < int(state["next_opportunity_at_epoch"]):
+                continue
+            cap = self.max_posts_per_day()
+            if cap and self._posts_today(character_id, now) >= cap:
+                # Today's publishing budget is spent. next_opportunity_at is left
+                # where it is so the character resumes by itself once the local
+                # day rolls over -- being over budget is not a reason to move the
+                # schedule, only to wait.
                 continue
             run_id = self.repository.claim_due_opportunity(
                 character_id,

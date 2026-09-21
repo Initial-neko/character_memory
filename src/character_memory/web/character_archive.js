@@ -3,29 +3,25 @@
   if (!CM) throw new Error("CM core must load before character_archive.js");
 
   let archived = [];
-  const sidebarTitle = document.querySelector(".sidebar-title");
 
-  // The sidebar "Characters" heading is the only always-present anchor for a
-  // list-level action, so the archive drawer hangs off it the way the group
-  // archive list hangs off its section head. It reads "已归档" rather than
-  // "归档": it sits inside the heading, so a bare verb looked like a label for
-  // the list below it instead of a way to see the archived ones.
-  if (sidebarTitle) {
-    const actions = document.createElement("span");
-    actions.className = "character-section-actions";
-    actions.innerHTML = '<button class="character-archive-list-button" type="button" title="查看已归档角色">已归档</button>';
-    sidebarTitle.appendChild(actions);
-  }
-  const archiveListButton = sidebarTitle?.querySelector(".character-archive-list-button");
+  // Archive browsing is a list-level action, but it should not compete with the
+  // character list title. Put a quiet, explicit entry directly below "新建人物"
+  // so it remains discoverable without consuming the sidebar header.
+  const archiveListButton = document.createElement("button");
+  archiveListButton.className = "character-archive-entry";
+  archiveListButton.type = "button";
+  archiveListButton.title = "查看已归档人物";
+  archiveListButton.innerHTML = '<span class="character-archive-entry-icon" aria-hidden="true">▣</span><span class="character-archive-entry-label">查看归档人物</span><span class="character-archive-entry-chevron" aria-hidden="true">›</span>';
+  const createButton = document.querySelector(".create-character-button");
+  if (createButton) createButton.insertAdjacentElement("afterend", archiveListButton);
+  else CM.dom.characterList?.insertAdjacentElement("afterend", archiveListButton);
+  const archiveLabel = archiveListButton.querySelector(".character-archive-entry-label");
 
   function renderArchiveListButton() {
-    if (!archiveListButton) return;
-    archiveListButton.textContent = archived.length ? `已归档 (${archived.length})` : "已归档";
+    if (!archiveLabel) return;
+    archiveLabel.textContent = archived.length ? `查看归档人物 (${archived.length})` : "查看归档人物";
   }
 
-  // One read at startup so the heading can say how many are archived. Without
-  // it the count would only appear after the drawer had been opened once, which
-  // is exactly the state a first-time user cannot reach.
   async function refreshArchiveCount() {
     const data = await CM.api("/v1/characters?archived=true");
     archived = data.characters || [];
@@ -43,10 +39,7 @@
     try {
       await CM.loadCharacters();
     } catch (error) {
-      // Every character is archived. The "没有发现任何 Persona" throw guards a
-      // broken persona tree, not a deliberate empty list, so the hint replaces
-      // it here instead of surfacing an error for something the operator did.
-      CM.dom.characterList.innerHTML = '<div class="character-archive-empty">全部角色都已归档，可从「归档」里恢复。</div>';
+      CM.dom.characterList.innerHTML = '<div class="character-archive-empty">全部人物都已归档，可从「查看归档人物」里恢复。</div>';
     }
   }
 
@@ -54,8 +47,6 @@
     if (!characterId) return;
     closeMenus();
     await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/archive`, {method:"POST"});
-    // Switch before reloading: the sidebar must never be left pointing at a
-    // character it no longer lists.
     if (!CM.isGroupConversation() && CM.state.characterId === characterId) {
       const fallback = CM.state.characters.find(item => item.id !== characterId);
       if (fallback) await CM.switchCharacter(fallback.id);
@@ -66,7 +57,7 @@
 
   function renderArchivedDrawer() {
     if (!archived.length) {
-      CM.dom.drawerBody.innerHTML = '<p class="muted">还没有归档的角色。</p>';
+      CM.dom.drawerBody.innerHTML = '<p class="muted">还没有归档的人物。</p>';
       return;
     }
     CM.dom.drawerBody.innerHTML = `<div class="character-archive-list">${archived.map(profile => {
@@ -76,8 +67,8 @@
   }
 
   async function showArchived() {
-    CM.openDrawer("已归档角色", "归档只隐藏角色，不删除聊天记录、Memory、Trace 或媒体；可随时恢复");
-    CM.dom.drawerBody.innerHTML = "<p>正在读取归档角色…</p>";
+    CM.openDrawer("已归档人物", "归档只隐藏人物，不删除聊天记录、Memory、Trace 或媒体；可随时恢复");
+    CM.dom.drawerBody.innerHTML = "<p>正在读取归档人物…</p>";
     try {
       const data = await CM.api("/v1/characters?archived=true");
       archived = data.characters || [];
@@ -121,13 +112,11 @@
     if (restore) restoreCharacter(restore.dataset.characterRestore).catch(console.error);
   });
 
-  archiveListButton?.addEventListener("click", () => showArchived().catch(console.error));
+  archiveListButton.addEventListener("click", () => showArchived().catch(console.error));
   document.addEventListener("click", event => {
     if (!event.target.closest(".character-item-wrap")) closeMenus();
   });
 
-  // A failure here is not worth a message: the heading simply keeps its
-  // count-less label, and opening the drawer reports the real error.
   refreshArchiveCount().catch(() => {});
 
   CM.registerFeature("characterArchive", {showArchived, archiveCharacter, restoreCharacter, refreshArchiveCount});

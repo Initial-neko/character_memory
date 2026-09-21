@@ -216,3 +216,19 @@ def test_a_failed_synthesis_falls_back_to_the_body_when_it_is_not_json(tmp_path)
             raise ValueError("not json")
 
     assert _response_detail(_Plain("")) == "upstream connect error"
+
+
+def test_the_failure_bubble_shows_the_reason_it_stored():
+    """Stored and rendered are different things, and only one of them happened.
+
+    ``voice_error`` reached the payload from the day the field existed -- in
+    both renderers -- and no markup read it, so a failed voice message said
+    only that it had failed.
+    """
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "src/character_memory/web/app.js").read_text(encoding="utf-8")
+    css = (root / "src/character_memory/web/styles.css").read_text(encoding="utf-8")
+
+    assert "message.voice_error" in app
+    assert 'class="voice-error"' in app
+    assert ".voice-error" in css

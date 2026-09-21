@@ -755,3 +755,42 @@ def test_a_silent_sidecar_says_so_instead_of_offering_nothing(tmp_path: Path, mo
     field = _gsv_template_field(app, config, tmp_path / ".env", runtime)
     assert [item["disabled"] for item in field["options"]] == [True]
     assert "未应答" in field["options"][0]["label"]
+
+
+def test_a_working_provider_with_an_unusable_default_template_says_so(tmp_path: Path, monkeypatch):
+    """The warning has to survive the hop from the sidecar to the card.
+
+    A provider whose default template is missing is *working* -- every template
+    it lists resolves -- so it must not be shown as unavailable. It also must
+    not be shown as simply fine: only a character with no voice of its own
+    reaches that default, and the operator needs to know that before one of
+    them goes silent.
+    """
+
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "gsv"\ntts_voice: "momo"\n', encoding="utf-8")
+
+    class WarnedClient(_SettingsRuntimeClient):
+        def __init__(self):
+            super().__init__()
+            self.providers["gsv"]["default_template_problem"] = (
+                "Default template 'murasame' is not defined; pick an existing template."
+            )
+
+    runtime = WarnedClient()
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=runtime,
+    )
+
+    with TestClient(app) as client:
+        snapshot = client.get("/v1/settings").json()
+
+    gsv = next(item for item in snapshot["tts"]["providers"] if item["id"] == "gsv")
+    assert gsv["ready"] is True, "a warning must not read as a refusal"
+    assert "murasame" in gsv["default_template_problem"]
+
+    settings_js = (Path(__file__).resolve().parents[1] / "src/character_memory/web/settings.js").read_text(encoding="utf-8")
+    assert "item.default_template_problem" in settings_js

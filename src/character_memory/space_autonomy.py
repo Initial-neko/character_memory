@@ -7,6 +7,7 @@ import threading
 
 from character_memory.domain.models import ActionType, DailyLifePlan, Event, EventType
 from character_memory.space_store import SpaceRepository
+from character_memory.time_utils import epoch_us
 
 
 logger = logging.getLogger("character_memory.space_autonomy")

@@ -78,6 +78,25 @@
           <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
         </div>
 
+        <div class="visual-provider-row">
+          <label class="visual-check"><input id="spaceObservationEnabled" type="checkbox" checked /> Web Observation</label>
+          <label class="visual-check"><input id="spaceImageSearchEnabled" type="checkbox" checked /> Internet Images</label>
+          <label class="visual-check"><input id="spaceImageGenerationEnabled" type="checkbox" checked /> AI Images</label>
+          <label class="visual-check"><input id="spaceVoicePostEnabled" type="checkbox" checked /> Voice Posts</label>
+          <label class="visual-check"><input id="spaceLinkPreviewEnabled" type="checkbox" checked /> Link Preview</label>
+        </div>
+        <div class="visual-provider-row">
+          <label>Observation Chance<input id="spaceObservationChance" type="number" min="0" max="1" step="0.05" value="0.30" /></label>
+          <label>Image Media Chance<input id="spaceMediaChance" type="number" min="0" max="1" step="0.05" value="0.40" /></label>
+          <label>Voice Chance<input id="spaceVoiceChance" type="number" min="0" max="1" step="0.05" value="0.15" /></label>
+          <label>Max Images / Post<input id="spaceMaxImagesPerPost" type="number" min="1" max="9" step="1" value="9" /></label>
+        </div>
+        <div class="actions">
+          <button class="secondary" id="spaceMediaNaturalPreset" type="button">自然媒体参数</button>
+          <button class="secondary" id="spaceMediaStressPreset" type="button">媒体全开测试</button>
+        </div>
+        <p class="subtle">Chance 只是“本轮是否开放这项能力”的测试门控，不代表强制搜索/配图/发语音。媒体全开测试会把三项 Chance 调到 1，方便连续触发观察真实执行链。</p>
+
         <div class="actions">
           <button class="secondary space-preset" data-minutes="10" type="button">10min</button>
           <button class="secondary space-preset" data-minutes="30" type="button">30min</button>

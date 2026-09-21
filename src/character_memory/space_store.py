@@ -288,7 +288,7 @@ class SpaceRepository:
         with self.store._lock:
             rows = self.store.conn.execute(
                 "SELECT * FROM space_reactions WHERE post_id=? AND reaction_type=? "
-                "ORDER BY created_at_epoch,id",
+                "ORDER BY created_at_epoch,character_id",
                 (int(post_id), reaction_type),
             ).fetchall()
         return [self._reaction_from_row(row) for row in rows]

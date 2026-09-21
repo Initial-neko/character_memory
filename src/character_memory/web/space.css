@@ -10,8 +10,9 @@
 .space-header { position:sticky; top:0; z-index:9; min-height:68px; padding:12px 24px; border-bottom:1px solid var(--ui-line); background:color-mix(in srgb, var(--ui-surface) 94%, transparent); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .space-heading { display:flex; align-items:center; gap:11px; min-width:0; }
 .space-heading-mark { width:38px; height:38px; flex:0 0 38px; border-radius:50%; display:grid; place-items:center; background:var(--ui-surface-sunken); font-size:20px; }
-.space-heading h1 { margin:0; font-size:17px; }
-.space-heading p { margin:3px 0 0; color:var(--ui-muted); font-size:11px; }
+.space-title { margin:0; font-size:17px; }
+.space-subtitle { margin:3px 0 0; color:var(--ui-muted); font-size:11px; }
+.space-close-button { flex:0 0 auto; }
 .space-feed-wrap { width:min(720px,100%); margin:0 auto; padding:24px 24px 64px; }
 .space-feed-meta { min-height:20px; color:var(--ui-muted); font-size:11px; margin-bottom:8px; }
 .space-feed { display:grid; gap:0; }

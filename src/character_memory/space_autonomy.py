@@ -600,6 +600,12 @@ class SpaceAutonomyScheduler:
                     "due": epoch_us(now) >= int(state["next_opportunity_at_epoch"]),
                 }
             )
+        visual_runtime = getattr(self.access, "visual_runtime", None)
+        visual_available = bool(
+            visual_runtime is not None
+            and callable(getattr(visual_runtime, "available", None))
+            and visual_runtime.available()
+        )
         return {
             "enabled": autonomy_enabled(self.access),
             "interval_minutes": self.interval_minutes(),
@@ -609,6 +615,25 @@ class SpaceAutonomyScheduler:
                 MAX_AUTONOMOUS_AUDIENCE,
                 max(0, int(getattr(self.access.settings, "space_audience_size", 5))),
             ),
+            "media": {
+                "observation_enabled": bool(getattr(self.access.settings, "space_observation_enabled", True)),
+                "search_available": self.service.observation_service.available(),
+                "image_search_enabled": bool(getattr(self.access.settings, "space_image_search_enabled", True)),
+                "image_generation_enabled": bool(getattr(self.access.settings, "space_image_generation_enabled", True)),
+                "image_generation_available": visual_available,
+                "voice_post_enabled": bool(getattr(self.access.settings, "space_voice_post_enabled", True)),
+                "link_preview_enabled": bool(getattr(self.access.settings, "space_link_preview_enabled", True)),
+                "observation_chance": float(getattr(self.access.settings, "space_observation_chance", 0.30)),
+                "media_chance": float(getattr(self.access.settings, "space_media_chance", 0.40)),
+                "voice_chance": float(getattr(self.access.settings, "space_voice_chance", 0.15)),
+                "max_images_per_post": max(
+                    1,
+                    min(
+                        MAX_IMAGES_PER_POST,
+                        int(getattr(self.access.settings, "space_max_images_per_post", MAX_IMAGES_PER_POST)),
+                    ),
+                ),
+            },
             "characters": items,
             "recent_runs": self.repository.list_opportunity_runs(limit=30),
         }
@@ -621,6 +646,15 @@ class SpaceAutonomyScheduler:
         max_posts_per_day: int | None = None,
         audience_size: int | None = None,
         poll_seconds: float | None = None,
+        observation_enabled: bool | None = None,
+        image_search_enabled: bool | None = None,
+        image_generation_enabled: bool | None = None,
+        voice_post_enabled: bool | None = None,
+        link_preview_enabled: bool | None = None,
+        observation_chance: float | None = None,
+        media_chance: float | None = None,
+        voice_chance: float | None = None,
+        max_images_per_post: int | None = None,
         rearm: bool = True,
         now: datetime | None = None,
     ) -> dict:
@@ -642,6 +676,26 @@ class SpaceAutonomyScheduler:
         if poll_seconds is not None:
             self.poll_seconds = max(10.0, min(3600.0, float(poll_seconds)))
             self.access.settings.space_scheduler_poll_seconds = self.poll_seconds
+        if observation_enabled is not None:
+            self.access.settings.space_observation_enabled = bool(observation_enabled)
+        if image_search_enabled is not None:
+            self.access.settings.space_image_search_enabled = bool(image_search_enabled)
+        if image_generation_enabled is not None:
+            self.access.settings.space_image_generation_enabled = bool(image_generation_enabled)
+        if voice_post_enabled is not None:
+            self.access.settings.space_voice_post_enabled = bool(voice_post_enabled)
+        if link_preview_enabled is not None:
+            self.access.settings.space_link_preview_enabled = bool(link_preview_enabled)
+        if observation_chance is not None:
+            self.access.settings.space_observation_chance = max(0.0, min(1.0, float(observation_chance)))
+        if media_chance is not None:
+            self.access.settings.space_media_chance = max(0.0, min(1.0, float(media_chance)))
+        if voice_chance is not None:
+            self.access.settings.space_voice_chance = max(0.0, min(1.0, float(voice_chance)))
+        if max_images_per_post is not None:
+            self.access.settings.space_max_images_per_post = max(
+                1, min(MAX_IMAGES_PER_POST, int(max_images_per_post))
+            )
 
         if rearm:
             next_at = now + timedelta(minutes=self.interval_minutes())

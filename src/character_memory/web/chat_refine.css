@@ -209,3 +209,160 @@
   .composer-wrap { padding: 12px 12px 14px; }
   .composer { border-radius: 17px; }
 }
+
+
+/* Collapsible desktop avatar rail. */
+:root {
+  --cm-sidebar-expanded: 280px;
+  --cm-sidebar-collapsed: 68px;
+  --cm-sidebar-width: var(--cm-sidebar-expanded);
+}
+body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-collapsed); }
+
+.workspace {
+  grid-template-columns: var(--cm-sidebar-width) minmax(0, 1fr);
+  transition: grid-template-columns .18s ease;
+}
+.sidebar {
+  width: var(--cm-sidebar-width);
+  transition: width .18s ease, transform .18s ease;
+}
+.composer-wrap {
+  left: var(--cm-sidebar-width);
+  transition: left .18s ease;
+}
+
+.sidebar-collapse-toggle {
+  position: absolute;
+  z-index: 28;
+  top: 74px;
+  right: -14px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid var(--ui-line);
+  border-radius: 50%;
+  background: var(--ui-surface);
+  color: var(--ui-muted);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .07);
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  line-height: 1;
+  opacity: .72;
+}
+.sidebar-collapse-toggle:hover { opacity: 1; background: var(--ui-surface-soft); }
+.sidebar-mobile-toggle,
+.sidebar-mobile-backdrop { display: none; }
+
+body.sidebar-collapsed .sidebar { padding-inline: 8px; }
+body.sidebar-collapsed .brand { justify-content: center; padding: 7px 0 16px; }
+body.sidebar-collapsed .brand > div:last-child { display: none; }
+body.sidebar-collapsed .brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+body.sidebar-collapsed .character-list {
+  width: 100%;
+  max-height: 58vh;
+  padding: 0;
+  gap: 4px;
+  overflow-x: hidden;
+}
+body.sidebar-collapsed .character-item-wrap { display: grid; justify-items: center; }
+body.sidebar-collapsed .character-item {
+  width: 48px;
+  height: 48px;
+  padding: 3px;
+  grid-template-columns: 42px;
+  gap: 0;
+  place-items: center;
+  border-radius: 14px;
+}
+body.sidebar-collapsed .character-avatar {
+  width: 42px;
+  height: 42px;
+  font-size: 14px;
+}
+body.sidebar-collapsed .character-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+body.sidebar-collapsed .character-copy,
+body.sidebar-collapsed .character-more-button,
+body.sidebar-collapsed .character-context-menu { display: none !important; }
+body.sidebar-collapsed .character-item.active {
+  background: var(--ui-surface);
+  box-shadow: 0 0 0 2px var(--ui-line-strong), 0 2px 8px rgba(0,0,0,.05);
+}
+
+body.sidebar-collapsed .create-character-button {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 7px auto 0;
+  padding: 0;
+  justify-content: center;
+  border: 1px dashed var(--ui-line-strong);
+  border-radius: 14px;
+  font-size: 0;
+}
+body.sidebar-collapsed .create-character-button::before {
+  content: "＋";
+  font-size: 22px;
+  line-height: 1;
+}
+body.sidebar-collapsed .character-archive-entry { display: none; }
+
+body.sidebar-collapsed .group-section {
+  margin-top: 9px;
+  padding-top: 10px;
+}
+body.sidebar-collapsed .group-section-head {
+  justify-content: center;
+  padding: 0 0 6px;
+}
+body.sidebar-collapsed .group-section-head > span:first-child,
+body.sidebar-collapsed .group-archive-list-button { display: none; }
+body.sidebar-collapsed .group-section-actions { display: flex; }
+body.sidebar-collapsed .group-create-button {
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  border-radius: 12px;
+}
+body.sidebar-collapsed .group-list {
+  width: 100%;
+  max-height: 24vh;
+  gap: 4px;
+  overflow-x: hidden;
+}
+body.sidebar-collapsed .group-item-wrap { display: grid; justify-items: center; }
+body.sidebar-collapsed .group-item {
+  width: 48px;
+  height: 48px;
+  padding: 3px;
+  grid-template-columns: 42px;
+  gap: 0;
+  place-items: center;
+  border-radius: 14px;
+}
+body.sidebar-collapsed .group-avatar {
+  width: 42px;
+  height: 42px;
+}
+body.sidebar-collapsed .group-copy,
+body.sidebar-collapsed .group-more-button,
+body.sidebar-collapsed .group-context-menu { display: none !important; }
+body.sidebar-collapsed .group-item.active {
+  background: var(--ui-surface);
+  box-shadow: 0 0 0 2px var(--ui-line-strong), 0 2px 8px rgba(0,0,0,.05);
+}
+body.sidebar-collapsed .sidebar-foot { display: none; }

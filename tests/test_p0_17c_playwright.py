@@ -129,6 +129,7 @@ def test_sidebar_shell_compact_rail_persists_and_header_stays_clear(page, wake_s
     assert identity_right <= actions_left + 1
 
     page.locator("#sidebarCollapseButton").click()
+    page.wait_for_timeout(250)
     assert 66 <= _sidebar_width(page) <= 70
     expect(page.locator(".space-nav-copy")).not_to_be_visible()
     visible_characters = page.locator("#characterList .character-item:visible").count()
@@ -140,6 +141,7 @@ def test_sidebar_shell_compact_rail_persists_and_header_stays_clear(page, wake_s
     assert 66 <= _sidebar_width(page) <= 70
 
     page.locator("#sidebarCollapseButton").click()
+    page.wait_for_timeout(250)
     assert 270 <= _sidebar_width(page) <= 290
 
     page.set_viewport_size({"width": 1366, "height": 768})
@@ -165,12 +167,13 @@ def test_sidebar_mobile_uses_drawer_not_avatar_rail(page, wake_server):
     expect(page.locator("#sidebarCollapseButton")).not_to_be_visible()
 
     page.locator("#sidebarMobileButton").click()
+    page.wait_for_timeout(250)
     after = page.locator(".sidebar").bounding_box()
     assert after is not None and after["x"] >= -1
     expect(page.locator("#characterList .character-copy").first).to_be_visible()
 
     page.locator("#characterList .character-item").first.click()
-    page.wait_for_timeout(100)
+    page.wait_for_timeout(250)
     closed = page.locator(".sidebar").bounding_box()
     assert closed is not None and closed["x"] < 0
 

@@ -27,6 +27,9 @@ from character_memory.wake_web import attach_wake_routes
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = Path(os.environ.get("CHARACTER_MEMORY_E2E_DB", ROOT / ".e2e-realtime.db"))
 MEDIA_DIR = Path(os.environ.get("CHARACTER_MEMORY_E2E_MEDIA", DB_PATH.parent / "e2e-media"))
+# Overridable because archiving a character writes a marker into its directory:
+# a browser test that exercises archiving must not touch the repo's personas.
+PERSONA_ROOT = Path(os.environ.get("CHARACTER_MEMORY_E2E_PERSONA_ROOT", ROOT / "personas"))
 
 
 class DeterministicPersonModel(PersonModel):
@@ -83,7 +86,7 @@ settings = Settings(
     media_dir=str(MEDIA_DIR),
     sticker_dir=str(DB_PATH.parent / "e2e-stickers"),
     avatar_dir=str(DB_PATH.parent / "e2e-avatars"),
-    persona_path=str(ROOT / "personas" / "rin" / "persona.yaml"),
+    persona_path=str(PERSONA_ROOT / "rin" / "persona.yaml"),
     proactive_wake_enabled=False,
 )
 store = SQLiteStore(settings.db_path)

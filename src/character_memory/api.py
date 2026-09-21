@@ -20,6 +20,8 @@ from character_memory.config import (
     resolve_media_dir,
     resolve_persona_path,
     resolve_sticker_dir,
+    set_character_archived,
+    split_archived,
 )
 from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
@@ -150,6 +152,47 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     def public_profile(profile: dict[str, str]) -> dict[str, str]:
         return {key: value for key, value in profile.items() if key != "persona_path"}
+
+    def refresh_character_cache() -> None:
+        """Re-read the persona tree into the cached bundle list.
+
+        The listing filter reads ``archived_at`` off a profile, so a cache built
+        before the marker was written would keep serving the archived character
+        as active. The cache is never filtered itself -- ``ensure_character`` and
+        the group payloads resolve archived characters on purpose -- so only this
+        refresh matters.
+        """
+
+        if app_bundle is not None and hasattr(app_bundle, "characters"):
+            app_bundle.characters[:] = discover_character_profiles(settings)
+
+    def _set_archived(character_id: str, *, archived: bool) -> dict:
+        """Archive or restore one character. Idempotent, like the group routes."""
+
+        with character_write_lock:
+            try:
+                resolve_persona_path(settings, character_id)
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+            try:
+                stamp = set_character_archived(settings, character_id, archived)
+            except OSError as exc:
+                logger.exception("api.character archive failed character=%s error=%s", character_id, exc)
+                raise HTTPException(status_code=500, detail=f"归档失败：{exc}") from exc
+
+            refresh_character_cache()
+            logger.info("api.character archived=%s character=%s", archived, character_id)
+
+            profile = next(
+                (item for item in character_profiles() if item["id"] == character_id), None
+            )
+            return {
+                "ok": True,
+                "archived": archived,
+                "archived_at": stamp,
+                "character": public_profile(profile) if profile else {"id": character_id},
+            }
 
     def ensure_character(character_id: str) -> dict[str, str]:
         for profile in character_profiles():
@@ -366,8 +409,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         if isinstance(getattr(app_bundle.chat, "runtime", None), dict):
             app_bundle.chat.runtime[character_id] = runtime
         refresh_runtime_sticker_catalog(stickers)
-        if hasattr(app_bundle, "characters"):
-            app_bundle.characters[:] = discover_character_profiles(settings)
+        refresh_character_cache()
 
     def dispatch_proactive_once() -> list[dict]:
         if not getattr(settings, "api_key", ""):
@@ -473,12 +515,22 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         }
 
     @app.get("/v1/characters")
-    def characters():
-        return {"characters": [public_profile(profile) for profile in character_profiles()]}
+    def characters(archived: bool = False):
+        listed = split_archived(character_profiles(), archived)
+        return {"characters": [public_profile(profile) for profile in listed]}
 
     @app.get("/v1/characters/summaries")
-    def character_summaries():
-        return {"characters": [character_summary(profile) for profile in character_profiles()]}
+    def character_summaries(archived: bool = False):
+        listed = split_archived(character_profiles(), archived)
+        return {"characters": [character_summary(profile) for profile in listed]}
+
+    @app.post("/v1/characters/{character_id}/archive")
+    def archive_character(character_id: str):
+        return _set_archived(character_id, archived=True)
+
+    @app.post("/v1/characters/{character_id}/restore")
+    def restore_character(character_id: str):
+        return _set_archived(character_id, archived=False)
 
     @app.get("/v1/stickers")
     def stickers(character_id: str | None = None):

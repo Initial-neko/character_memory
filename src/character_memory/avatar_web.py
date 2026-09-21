@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from character_memory.avatar_intent import AvatarIntentPlanner, AvatarSearchIntent
 from character_memory.avatars import AvatarSearchService, AvatarStore
-from character_memory.config import load_persona, resolve_avatar_dir
+from character_memory.config import load_persona, resolve_avatar_dir, split_archived
 from character_memory.domain.models import EventType
 from character_memory.search import BraveSearchProvider, SearchApiProvider
 
@@ -144,8 +144,12 @@ def attach_avatar_routes(app) -> None:
             return fallback_intent(item, hint), "fallback"
 
     @app.get("/v1/character-profiles")
-    def character_profiles_with_avatars():
-        return {"characters": [public_profile(item) for item in access.character_profiles()]}
+    def character_profiles_with_avatars(archived: bool = False):
+        # Filtered like ``/v1/characters``: the avatar manager republishes this
+        # list straight into ``CM.state.characters``, so a route that answered
+        # with archived characters would put them back in the sidebar.
+        listed = split_archived(access.character_profiles(), archived)
+        return {"characters": [public_profile(item) for item in listed]}
 
     @app.get("/v1/characters/{character_id}/avatar")
     def get_avatar(character_id: str):

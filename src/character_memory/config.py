@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -169,12 +170,69 @@ def _persona_root(settings: Settings) -> Path:
     return Path("personas")
 
 
+ARCHIVE_FILENAME = "archived.yaml"
+
+
+def read_archive_state(persona_path: str | Path) -> str | None:
+    """Return when a character was archived, or ``None`` when it is active.
+
+    The marker sits *beside* ``persona.yaml`` rather than inside it because the
+    whole persona document is handed to the model verbatim: UI lifecycle state
+    must not reach the prompt. Existence decides, and the timestamp is only
+    decoration -- a marker whose contents were hand-edited into nonsense still
+    hides the character, since the alternative is silently un-hiding one the
+    operator believes is gone.
+    """
+
+    path = Path(persona_path).parent / ARCHIVE_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return ""
+    if isinstance(data, dict):
+        return str(data.get("archived_at") or "")
+    return ""
+
+
+def set_character_archived(settings: Settings, character_id: str, archived: bool) -> str:
+    """Archive or restore a character; return the stamp (``""`` when restored).
+
+    Atomic, following ``persona_builder.save_persona``: a torn marker would be
+    read by the next discovery as a character that vanished for no stated
+    reason. Restoring removes the file rather than blanking it, so "active" has
+    exactly one representation on disk.
+    """
+
+    marker = Path(resolve_persona_path(settings, character_id)).parent / ARCHIVE_FILENAME
+    if not archived:
+        try:
+            marker.unlink()
+        except FileNotFoundError:
+            pass
+        return ""
+
+    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    temp = marker.with_suffix(".yaml.tmp")
+    temp.write_text(
+        yaml.safe_dump({"archived_at": stamp}, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    temp.replace(marker)
+    return stamp
+
+
 def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
     """Discover characters directly from personas/*/persona.yaml.
 
     Persona files stay the single character definition source. The UI/API does
     not need a second character registry or duplicated config list. Avatar state
     is an asset concern and is projected into the public profile dynamically.
+
+    ``archived_at`` is present only on archived characters: key presence *is*
+    the flag, which keeps the value a plain string like every other key here and
+    lets a caller filter without a second lookup.
     """
 
     root = _persona_root(settings)
@@ -194,16 +252,18 @@ def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
         if not character_id or character_id in seen:
             continue
         seen.add(character_id)
-        profiles.append(
-            {
-                "id": character_id,
-                "name": str(data.get("name") or character_id),
-                "identity": str(data.get("identity") or ""),
-                "tagline": str(data.get("tagline") or ""),
-                "avatar_url": _avatar_url(settings, character_id),
-                "persona_path": str(path),
-            }
-        )
+        profile = {
+            "id": character_id,
+            "name": str(data.get("name") or character_id),
+            "identity": str(data.get("identity") or ""),
+            "tagline": str(data.get("tagline") or ""),
+            "avatar_url": _avatar_url(settings, character_id),
+            "persona_path": str(path),
+        }
+        archived_at = read_archive_state(path)
+        if archived_at is not None:
+            profile["archived_at"] = archived_at
+        profiles.append(profile)
 
     if not profiles:
         profiles.append(
@@ -217,6 +277,18 @@ def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
             }
         )
     return profiles
+
+
+def split_archived(profiles: list[dict[str, str]], archived: bool) -> list[dict[str, str]]:
+    """The listing filter, shared by every route that feeds a character picker.
+
+    Archiving is UI lifecycle: an archived character is absent from the sidebar
+    and from both member pickers, but it stays fully resolvable -- an existing
+    group keeps its member, and its history keeps rendering. So the split lives
+    here, at the edge that answers the browser, and never inside discovery.
+    """
+
+    return [profile for profile in profiles if ("archived_at" in profile) is archived]
 
 
 def resolve_persona_path(settings: Settings, character_id: str) -> str:

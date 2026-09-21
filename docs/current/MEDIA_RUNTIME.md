@@ -227,14 +227,15 @@ Browser
   -> 32kHz WAV
 ```
 
-GSV 有两层 voice 来源：
+GSV 的 voice 模型已经收敛为模板：
 
-- project `.env` 中的 global/default reference（`GSV_TTS_*`）；
-- 可选的 `personas/<character>/voice.yaml` per-character registry。
+- project `.env` 只保存 global GPT/SoVITS model 路径和默认模板名；
+- `voices/<name>.yaml` 是音色的唯一载体，保存 reference audio + exact transcript，并可按模板覆盖模型；
+- `personas/<character>/voice.yaml` 只保存 `template: <name>` 引用，因此多个 Character 可以共享同一个音色。
 
-Browser 会把 Character id 作为 GSV voice 请求发送；registry 中存在该 id 时使用角色 reference，不存在时退回 global/default reference。VoiceDesign freeze 会保存用户实际试听的 WAV、写入 `voice.yaml`，再调用 `:9014/v1/voices/reload`，不会为了 registry 变化卸载已热身的 GPT/SoVITS 权重。
+Browser 仍把 Character id 作为 GSV voice 请求发送。sidecar 先解析角色引用，再落到对应模板；无法解析时才使用 `GSV_TTS_VOICE` 指定的默认模板。VoiceDesign freeze 会保存实际试听的 WAV、创建/更新模板、让角色引用该模板，再调用 `:9014/v1/voices/reload`。registry reload 不卸载已经热身的 GPT/SoVITS 权重。
 
-`character-stack` 在独立 GSV venv 存在时启动 `:9014`。global asset 尚未配置完整时 sidecar 可以保持 listening/`ready=false`，Settings Center 可随后填写并通过 `/v1/configure` 热配置，不需要先用 shell export，也不会阻止整个 stack 启动。
+`character-stack` 在独立 GSV venv 存在时启动 `:9014`。base model 或默认模板尚未配置完整时 sidecar 可以保持 listening/`ready=false`，Settings Center 可随后填写并通过 `/v1/configure` 热配置，不需要先用 shell export，也不会阻止整个 stack 启动。
 
 ### Sherpa
 
@@ -413,6 +414,12 @@ otherwise                  -> reject
 
 无效 transcript 不创建 chat message，也不上传当前通话中的 Visual Capture frames。
 
+## 9.5 Voice messages
+
+Voice Message 与 Voice Call 共用正式 TTS Provider，但当前仍是独立的 durable-message 能力。主线已经有 WAV/MP3 存储、`VOICE_MESSAGE` action 和 `pending/ready/failed` 元数据契约；自动 synthesis worker、Browser voice bubble/player、group transition 与 stale-pending recovery 尚未完成。
+
+因此当前正式 voice-call pipeline 不会自动把普通 spoken reply 转成 Voice Message，也不要让 Voice Message 依赖 call session state。完整边界见 [VOICE_MESSAGES.md](VOICE_MESSAGES.md)。
+
 ## 10. Resource policy
 
 - 主 LLM / Vision 保持 cloud-only。
@@ -498,7 +505,7 @@ Kokoro/Sherpa/CosyVoice 的音质横向试听应在 `:9002/tts` 做；正式 Bro
 - streaming ASR partials
 - streaming TTS chunks
 - sentence-level TTS pipeline
-- voice cloning
+- general-purpose automatic voice cloning outside the explicit VoiceDesign/template workflow
 - emotion/prosody control
 - group call transport
 - character-initiated call

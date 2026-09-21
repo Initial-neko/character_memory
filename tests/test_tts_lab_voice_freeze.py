@@ -15,13 +15,18 @@ from __future__ import annotations
 from datetime import datetime
 import hashlib
 from pathlib import Path
+import socket
+import threading
+import time
 
 import httpx
 import pytest
+import uvicorn
 import yaml
 from fastapi.testclient import TestClient
 
 from character_memory.config import Settings
+from character_memory.gsv_tts_experiment import GsvTtsRuntime, create_gsv_tts_app
 from character_memory.tts_lab import (
     GsvVoiceReloader,
     Qwen3VoiceDesignSidecar,
@@ -691,3 +696,134 @@ def test_character_list_carries_a_display_name(tmp_path):
 
     momo = next(item for item in characters if item["id"] == "momo")
     assert momo["name"] == "Momo"
+
+
+# --- a failed reload must not be reported as a bare status code ---------------
+
+
+def _gsv_runtime(tmp_path: Path, **kwargs):
+    """A GSV runtime whose base models exist, so only the template tree varies."""
+
+    ckpt = tmp_path / "base.ckpt"
+    ckpt.write_bytes(b"ckpt")
+    sovits = tmp_path / "base.pth"
+    sovits.write_bytes(b"pth")
+    return GsvTtsRuntime(
+        gpt_model=str(ckpt),
+        sovits_model=str(sovits),
+        tts_factory=lambda **_: None,
+        persona_root=tmp_path / "personas",
+        voices_root=tmp_path / "voices",
+        **kwargs,
+    )
+
+
+def _good_template(root: Path, name: str) -> None:
+    audio = root / name / "clip.wav"
+    audio.parent.mkdir(parents=True, exist_ok=True)
+    audio.write_bytes(b"RIFF")
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"{name}.yaml").write_text(
+        yaml.safe_dump(
+            {"ref_audio": f"{name}/{audio.name}", "ref_text": f"{name} 的参考文本"},
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_a_failed_reload_keeps_the_voices_that_already_worked(tmp_path):
+    """The registry is all-or-nothing, so the tree is read before it is adopted.
+
+    An operator saving a new voice must not lose the ones already in use
+    because a stale file elsewhere in the tree stopped parsing: the reload is
+    a refresh, and a refresh that fails leaves the sidecar as it was. The
+    failure is still recorded -- ``/health`` must go unready and say which file
+    is at fault, or the operator has no way to learn that anything is wrong.
+    """
+
+    _good_template(tmp_path / "voices", "murasame")
+    runtime = _gsv_runtime(tmp_path, default_voice="murasame")
+    assert set(runtime._voices) == {"murasame"}
+
+    broken = tmp_path / "voices" / "old-experiment.yaml"
+    broken.write_text(
+        "ref_audio: old-experiment/missing.wav\nref_text: 旧实验。\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        runtime.reload_voices()
+    assert str(broken) in str(excinfo.value)
+
+    # The tree is what is broken, not the voices: the loaded profile survives
+    # and keeps resolving, so an in-flight conversation does not lose its voice.
+    assert set(runtime._voices) == {"murasame"}
+    assert set(runtime._templates) == {"murasame"}
+    assert runtime._resolve_voice("murasame")[2] == "murasame 的参考文本"
+    # ...and the operator is still told, in the words of the file that failed.
+    ready, reason = runtime._asset_status()
+    assert ready is False
+    assert str(broken) in reason
+
+
+@pytest.fixture
+def gsv_http_server(tmp_path):
+    """A real GSV sidecar on a real port, with a tree that does not parse.
+
+    The reloader's contract is a cross-process one -- what the sidecar says in
+    its 400 body is what the operator reads in the TTS Lab -- so it is checked
+    over a socket rather than against a fake response object, which cannot
+    disagree with the sidecar about the shape of ``detail``.
+    """
+
+    _good_template(tmp_path / "voices", "murasame")
+    broken = tmp_path / "voices" / "old-experiment.yaml"
+    broken.write_text(
+        "ref_audio: old-experiment/missing.wav\nref_text: 旧实验。\n", encoding="utf-8"
+    )
+    runtime = _gsv_runtime(tmp_path, default_voice="murasame")
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_gsv_tts_app(runtime),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            lifespan="on",
+        )
+    )
+    threading.Thread(target=server.run, daemon=True).start()
+    deadline = time.monotonic() + 10.0
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert server.started, "the GSV sidecar never came up"
+
+    yield f"http://127.0.0.1:{port}", broken
+
+    server.should_exit = True
+
+
+def test_the_sidecars_own_sentence_reaches_the_operator_over_a_real_socket(gsv_http_server):
+    """A bare "HTTP 400" is what sent someone restarting a sidecar that had
+    already answered. The sentence naming the offending file is the whole
+    reason the reload reports a reason at all, and it has to survive the trip
+    out of the sidecar's body and into the operator's message.
+    """
+
+    base_url, broken = gsv_http_server
+    reloader = GsvVoiceReloader(base_url=base_url)
+    try:
+        with pytest.raises(RuntimeError) as excinfo:
+            reloader.reload()
+    finally:
+        reloader.close()
+
+    message = str(excinfo.value)
+    assert "HTTP 400" in message
+    assert str(broken) in message, message
+    assert "ref_audio not found" in message, message

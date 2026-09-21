@@ -444,7 +444,7 @@
         `ref_audio: ${data.ref_audio || ""}`,
         activated
           ? "已生效：GSV sidecar 已加载该声线，可以立即使用。"
-          : `暂未生效，重启 GSV sidecar 后生效。原因：${data.reason || "GSV sidecar 未运行或未接受该声线"}`,
+          : `暂未热加载，声线还没生效。原因：${data.reason || "GSV sidecar 未运行或未接受该声线"}`,
         shared.length
           ? `已覆盖模板，另有 ${shared.length} 个角色（${shared.join("、")}）共用这个声音，它们也会一起改变。`
           : "",
@@ -482,7 +482,7 @@
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
       status.textContent = `已保存为模板 ${data.template}，ref_audio: ${data.ref_audio || ""}。${
-        data.activated ? "已生效。" : "未能热加载，GSV 未运行？重启 GSV sidecar 后生效。"
+        data.activated ? "已生效。" : `未能热加载：${data.reason || "GSV sidecar 未运行"}`
       }`;
     } catch (error) {
       status.textContent = "保存失败：" + error.message;

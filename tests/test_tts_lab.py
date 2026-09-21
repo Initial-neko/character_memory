@@ -508,6 +508,22 @@ def test_voice_design_freeze_status_surfaces_result_and_activation_state():
     assert "reason" in script
 
 
+def test_a_missing_activation_names_the_sidecars_reason_and_not_a_restart():
+    """A restart is not the remedy, so the copy must not offer it.
+
+    The sidecar is already running; it refused the reload because a file in the
+    tree does not parse, and restarting re-reads the same broken tree and
+    changes nothing. The one useful sentence is the sidecar's own reason, so
+    both the freeze and the save-template paths have to print it instead of
+    telling the operator to bounce a process that already answered.
+    """
+
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+
+    assert "重启" not in script
+    assert script.count("data.reason") == 2
+
+
 def test_voice_design_freeze_result_survives_the_gate_re_render():
     script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
     body = script.split("async function freezeVoiceDesign(", 1)[1].split("\n  $(", 1)[0]

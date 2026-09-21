@@ -844,7 +844,25 @@ class GsvVoiceReloader:
         url = f"{self.base_url}/v1/voices/reload"
         response = self.client.post(url, timeout=10.0)
         if response.status_code >= 400:
-            raise RuntimeError(f"GSV voice reload failed with HTTP {response.status_code} at {url}")
+            # Carry the sidecar's own sentence through. It names the template
+            # that would not parse -- the one fact the operator needs and the
+            # only one this process cannot reconstruct from a status code. The
+            # bare "HTTP 400" shipped once and sent someone restarting a
+            # sidecar that had already answered.
+            raise RuntimeError(
+                f"GSV voice reload failed with HTTP {response.status_code} at {url}: "
+                f"{_response_detail(response)}"
+            )
+
+
+def _response_detail(response) -> str:
+    """The sidecar's ``detail`` when it sent one, else its body, else the code."""
+
+    try:
+        detail = response.json().get("detail")
+    except Exception:
+        detail = None
+    return str(detail or response.text or "").strip() or "no response body"
 
 
 class TtsLabRuntime:

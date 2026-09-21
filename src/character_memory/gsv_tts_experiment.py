@@ -233,12 +233,21 @@ class GsvTtsRuntime:
         whole console. The failure is reported through ``/health`` instead --
         the readers stay strict, so nothing is silently skipped or downgraded,
         and ``/v1/tts`` refuses with the same sentence ``/health`` reports.
+
+        A failed *reload* keeps the registry it already has. The read is
+        all-or-nothing, so committing a half-read tree would trade working
+        voices for none of them; the error is still recorded, which is what
+        makes ``/health`` and ``/v1/tts`` report the tree rather than the stale
+        registry. ``_templates`` is restored alongside ``_voices`` because
+        ``_load_voices`` assigns it on the way in, before it can raise.
         """
+        previous_voices = self._voices
+        previous_templates = self._templates
         try:
             self._voices = self._load_voices()
         except VoiceProfileError as exc:
-            self._voices = {}
-            self._templates = {}
+            self._voices = previous_voices
+            self._templates = previous_templates
             self._voices_error = str(exc)
             print(f"gsv-tts voices unavailable: {exc}", flush=True)
         else:

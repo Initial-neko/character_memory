@@ -633,6 +633,12 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         path = media_storage.asset_path(asset)
         if path is None:
             raise HTTPException(status_code=404, detail="media file not found")
+        if str(asset.mime_type).startswith("audio/"):
+            return FileResponse(
+                path,
+                media_type=asset.mime_type,
+                headers={"Content-Disposition": f'inline; filename="{asset.storage_name}"'},
+            )
         return FileResponse(path, media_type=asset.mime_type, filename=asset.original_name)
 
     @app.post("/v1/characters/draft")

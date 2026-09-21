@@ -30,7 +30,9 @@
   const settingsLink = document.getElementById("settingsLink");
   const wakeButton = document.getElementById("wakeButton");
   const intentButton = document.getElementById("intentButton");
-  const items = [settingsLink, intentButton, runtimeButton, wakeButton].filter(Boolean);
+  const spaceButton = document.getElementById("characterSpaceButton");
+  const archiveButton = document.getElementById("archiveCurrentCharacterButton");
+  const items = [spaceButton, intentButton, wakeButton, runtimeButton, settingsLink, archiveButton].filter(Boolean);
 
   for (const item of items) {
     item.classList.remove("desktop-only-control");
@@ -39,6 +41,10 @@
       item.title = "打开 Settings Center";
     } else if (item === runtimeButton) {
       item.textContent = "运行状态";
+    } else if (item === intentButton) {
+      item.textContent = "Intent";
+    } else if (item === wakeButton) {
+      item.textContent = "唤醒人物";
     }
     menu.append(item);
   }

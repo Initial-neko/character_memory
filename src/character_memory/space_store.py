@@ -229,7 +229,7 @@ class SpaceRepository:
     def list_comments(self, post_id: int) -> list[SpaceComment]:
         with self.store._lock:
             rows = self.store.conn.execute(
-                "SELECT * FROM space_comments WHERE post_id=? ORDER BY created_at_epoch,id",
+                "SELECT * FROM space_comments WHERE post_id=? ORDER BY created_at_epoch,character_id",
                 (int(post_id),),
             ).fetchall()
         return [self._comment_from_row(row) for row in rows]

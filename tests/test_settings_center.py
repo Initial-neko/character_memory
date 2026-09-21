@@ -794,3 +794,69 @@ def test_a_working_provider_with_an_unusable_default_template_says_so(tmp_path: 
 
     settings_js = (Path(__file__).resolve().parents[1] / "src/character_memory/web/settings.js").read_text(encoding="utf-8")
     assert "item.default_template_problem" in settings_js
+
+
+def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('chat_model: "deepseek-flash"\n', encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+    app = create_settings_app(
+        str(config),
+        store=store,
+        runtime_http_client=_SettingsRuntimeClient(),
+    )
+
+    with TestClient(app) as client:
+        snapshot = client.get("/v1/settings").json()
+        section = next(item for item in snapshot["schema"] if item["id"] == "space-autonomy")
+        assert [field["name"] for field in section["fields"]] == [
+            "space_autonomy_enabled",
+            "space_daily_window_start_hour",
+            "space_daily_window_end_hour",
+            "space_audience_size",
+            "space_scheduler_poll_seconds",
+        ]
+
+        response = client.patch(
+            "/v1/settings",
+            json={
+                "values": {
+                    "space_autonomy_enabled": True,
+                    "space_daily_window_start_hour": 6,
+                    "space_daily_window_end_hour": 9,
+                    "space_audience_size": 2,
+                    "space_scheduler_poll_seconds": 20,
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert set(result["restart_required"]) == {
+        "space_autonomy_enabled",
+        "space_daily_window_start_hour",
+        "space_daily_window_end_hour",
+        "space_audience_size",
+        "space_scheduler_poll_seconds",
+    }
+    settings = load_settings(str(config))
+    assert settings.space_daily_window_start_hour == 6
+    assert settings.space_daily_window_end_hour == 9
+    assert settings.space_audience_size == 2
+    assert settings.space_scheduler_poll_seconds == 20
+
+
+def test_space_autonomy_settings_reject_invalid_daily_window(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('chat_model: "deepseek-flash"\n', encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    with pytest.raises(ValueError, match="space_daily_window_end_hour"):
+        store.save_values(
+            {
+                "space_daily_window_start_hour": 18,
+                "space_daily_window_end_hour": 18,
+            }
+        )

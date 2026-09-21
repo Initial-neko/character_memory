@@ -15,6 +15,8 @@ class EventType(str, Enum):
     LIFE_EVENT = "LIFE_EVENT"
     DIARY = "DIARY"
     SOCIAL_POST = "SOCIAL_POST"
+    SPACE_POST_SEEN = "SPACE_POST_SEEN"
+    SPACE_COMMENT_RECEIVED = "SPACE_COMMENT_RECEIVED"
     PROACTIVE_INTENT = "PROACTIVE_INTENT"
     ACTION = "ACTION"
 
@@ -38,6 +40,10 @@ class ActionType(str, Enum):
     # P0.19 internal visual-tool intent. This is not a visible chat message by
     # itself; direct-chat orchestration may turn it into a generated IMAGE event.
     GENERATE_IMAGE = "GENERATE_IMAGE"
+    # Space-only social actions. They are intentionally not part of
+    # EXPRESSIVE_ACTIONS, so PersonRuntime never persists them as chat messages.
+    SPACE_LIKE = "SPACE_LIKE"
+    SPACE_COMMENT = "SPACE_COMMENT"
 
 
 # Actions that produce a visible outward message. All four action gates --
@@ -129,6 +135,7 @@ class ActionDecision(BaseModel):
             ActionType.MESSAGE,
             ActionType.VOICE_MESSAGE,
             ActionType.EMOJI,
+            ActionType.SPACE_COMMENT,
         }
         if self.type in message_actions:
             if not (self.message or "").strip():

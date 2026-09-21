@@ -280,7 +280,7 @@ class OpenAICompatibleModel(PersonModel):
             return (
                 "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State、Available Stickers、Available Images 和 Behavioral Contract。"
                 "返回一个 JSON 对象。actions 是必填的顶层字段；actions 必须可以是空数组，即使决定沉默也必须显式输出 actions=[]。actions 中每个对象使用 type 字段表示动作类型，不要使用 action 字段；文本动作使用 message 字段，不要使用 text 字段。"
-                "actions 为 0 到 3 个动作；通常使用 MESSAGE，单独字符表情可用 EMOJI；若输入列出了 Available Stickers，可以用 STICKER 并填写 sticker_id；若列出了 Available Images，可以用 IMAGE 并填写 image_id。"
+                "actions 为 0 到 3 个动作；通常使用 MESSAGE，单独字符表情可用 EMOJI；若输入的 Behavioral Contract 明确指定 SPACE_LIKE / SPACE_COMMENT 等专用动作，则必须只使用该场景允许的专用动作，不要退回普通聊天动作；若输入列出了 Available Stickers，可以用 STICKER 并填写 sticker_id；若列出了 Available Images，可以用 IMAGE 并填写 image_id。"
                 "STICKER/IMAGE 只能选择输入中真实存在的 id，不要编造资源 id，也不要为了显得活泼而强行发送媒体。"
                 "如果当前用户事件附带真实图片，请结合你实际看到的图片内容理解和回应，不要只依赖文件名。"
                 "没有真正想回复的内容时 actions 必须是空数组，不要省略 actions，也不要因为用户发了消息就强行回复。"
@@ -302,7 +302,8 @@ class OpenAICompatibleModel(PersonModel):
             return (
                 "上一份 JSON 不符合 PersonReaction。只修正结构，不扩写内容："
                 "顶层必须显式包含 actions，不能省略；没有想回复时写 actions=[]；不要返回 {type:'json_object'} 一类包装对象。"
-                "actions 必须是 0~3 个动作，每个动作必须用 type 字段，不要用 action 字段；MESSAGE/EMOJI 的文本必须放在 message 字段，不要用 text；"
+                "actions 必须是 0~3 个动作，每个动作必须用 type 字段，不要用 action 字段；MESSAGE/EMOJI/SPACE_COMMENT 的文本必须放在 message 字段，不要用 text；"
+                "如果原输入的 Behavioral Contract 是 Space 场景，只能保留它允许的 SPACE_LIKE / SPACE_COMMENT，不要修成普通 MESSAGE；"
                 "STICKER 需要 sticker_id，IMAGE 需要 image_id；memory_candidates 和 intent_candidates 必须是数组。只返回修正后的 JSON。"
             )
 

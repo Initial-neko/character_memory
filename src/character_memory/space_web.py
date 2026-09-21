@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
+from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
 
 
@@ -45,6 +46,27 @@ def attach_space_routes(app):
         raise RuntimeError("create_api() must expose app.state.character_memory before space routes are attached")
 
     repository = SpaceRepository(access.read_store)
+    autonomy = SpaceAutonomyService(access, repository)
+    scheduler = SpaceAutonomyScheduler(
+        access,
+        repository,
+        poll_seconds=float(getattr(access.settings, "space_scheduler_poll_seconds", 60.0)),
+    )
+    scheduler_enabled = autonomy_enabled(access)
+
+    if scheduler_enabled:
+        @app.on_event("startup")
+        def _start_space_autonomy():
+            scheduler.start()
+
+        @app.on_event("shutdown")
+        def _stop_space_autonomy():
+            scheduler.stop()
+
+    # Expose the feature runtime for tests/diagnostics without initializing LLM.
+    access.space_repository = repository
+    access.space_autonomy = autonomy
+    access.space_scheduler = scheduler
 
     def repo() -> SpaceRepository:
         return repository
@@ -229,5 +251,39 @@ def attach_space_routes(app):
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"view": view.model_dump(mode="json")}
+
+    @app.get("/v1/space/dev/status")
+    def space_dev_status():
+        payload = scheduler.status()
+        payload["enabled"] = scheduler_enabled
+        return payload
+
+    @app.post("/v1/space/dev/opportunity/{character_id}")
+    def space_dev_opportunity(character_id: str):
+        require_known(character_id, active=True)
+        try:
+            return autonomy.run_opportunity(
+                character_id,
+                now=datetime.now().astimezone(),
+                cascade=True,
+                source="DEV",
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/space/dev/audience/{post_id}")
+    def space_dev_audience(post_id: int):
+        try:
+            return {
+                "post_id": post_id,
+                "audience": autonomy.process_audience(
+                    post_id,
+                    now=datetime.now().astimezone(),
+                ),
+            }
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return app

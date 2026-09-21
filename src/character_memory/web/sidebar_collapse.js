@@ -135,7 +135,21 @@
     sync();
   });
 
+  // Restore the persisted desktop mode before first paint without replaying the
+  // normal expand/collapse transition. Otherwise a reload can briefly expose an
+  // in-between rail width even though the stored state is already compact.
+  const workspace = document.querySelector(".workspace");
+  const composerWrap = document.querySelector(".composer-wrap");
+  const initialTransitionTargets = [workspace, sidebar, composerWrap].filter(Boolean);
+  const initialTransitions = initialTransitionTargets.map(element => element.style.transition);
+  initialTransitionTargets.forEach(element => { element.style.transition = "none"; });
   applyDesktopState(storedCollapsed(), false);
+  void sidebar.offsetWidth;
+  requestAnimationFrame(() => {
+    initialTransitionTargets.forEach((element, index) => {
+      element.style.transition = initialTransitions[index];
+    });
+  });
   setMobileOpen(false);
   sync();
 

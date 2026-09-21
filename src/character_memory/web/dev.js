@@ -73,6 +73,75 @@
     }
   }
 
+  async function loadSpaceCharacters() {
+    const select = $("spaceCharacter");
+    if (!select) return;
+    try {
+      const data = await jsonFetch("/v1/dev/characters");
+      const items = data.characters || [];
+      const current = select.value;
+      select.replaceChildren(...items.map((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.name ? `${item.name} · ${item.id}` : item.id;
+        return option;
+      }));
+      if (items.some((item) => item.id === current)) select.value = current;
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR loading characters: ${error.message}`;
+    }
+  }
+
+  async function refreshSpaceStatus() {
+    try {
+      const data = await jsonFetch("/v1/dev/space/status");
+      $("spaceStatus").textContent = pretty(data);
+    } catch (error) {
+      $("spaceStatus").textContent = `ERROR: ${error.message}`;
+    }
+  }
+
+  async function runSpaceOpportunity() {
+    const button = $("runSpaceOpportunity");
+    const characterId = $("spaceCharacter").value;
+    button.disabled = true;
+    $("spaceResult").textContent = "正在执行 Daily Space Opportunity...";
+    try {
+      const data = await jsonFetch(`/v1/dev/space/opportunity/${encodeURIComponent(characterId)}`, {
+        method: "POST",
+      });
+      $("spaceResult").textContent = pretty(data);
+      const postId = data.post?.id;
+      if (postId) $("spacePostId").value = String(postId);
+      refreshSpaceStatus();
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runSpaceAudience() {
+    const button = $("runSpaceAudience");
+    const postId = Number($("spacePostId").value || 0);
+    if (!postId) {
+      $("spaceResult").textContent = "ERROR: 请先填写 Post ID，或先触发一次会发动态的 Daily Life。";
+      return;
+    }
+    button.disabled = true;
+    $("spaceResult").textContent = `正在模拟 Post #${postId} 的 Audience...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/space/audience/${postId}`, {
+        method: "POST",
+      });
+      $("spaceResult").textContent = pretty(data);
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function runTts() {
     const button = $("runTts");
     button.disabled = true;
@@ -371,8 +440,11 @@
     }
   }
 
-  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); });
+  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); });
   $("runLlm").addEventListener("click", runLlm);
+  $("runSpaceOpportunity").addEventListener("click", runSpaceOpportunity);
+  $("runSpaceAudience").addEventListener("click", runSpaceAudience);
+  $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);
   $("runTts").addEventListener("click", runTts);
   $("runAsr").addEventListener("click", runAsr);
   $("runMediaSmoke").addEventListener("click", runMediaSmoke);
@@ -389,5 +461,7 @@
   refreshStatus();
   refreshMetrics();
   refreshResources();
+  loadSpaceCharacters();
+  refreshSpaceStatus();
   scheduleResourceRefresh();
 })();

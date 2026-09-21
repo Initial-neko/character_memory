@@ -205,6 +205,30 @@ class PersonRuntime:
         normalized_action = sanitized[0] if sanitized else ActionDecision(type=ActionType.NO_REPLY)
         return reaction.model_copy(update={"actions": sanitized, "action": normalized_action}), sticker_decisions, image_decisions
 
+    @staticmethod
+    def _sanitize_channel_actions(event: Event, reaction):
+        """Keep channel-specific actions from leaking into chat persistence.
+
+        Space reactions still go through PersonRuntime so Memory/Mental State/
+        Intent are shared with the same person. Only the outward action surface
+        changes: a Space event may never create a private CHARACTER_MESSAGE.
+        """
+        if event.event_type == EventType.SPACE_POST_SEEN:
+            allowed = {ActionType.SPACE_LIKE, ActionType.SPACE_COMMENT}
+        elif event.event_type == EventType.SPACE_COMMENT_RECEIVED:
+            allowed = {ActionType.SPACE_COMMENT}
+        else:
+            return reaction, []
+
+        kept = [action for action in reaction.actions if action.type in allowed]
+        dropped = [
+            {"type": action.type.value, "decision": "DROP_WRONG_CHANNEL"}
+            for action in reaction.actions
+            if action.type not in allowed
+        ]
+        normalized_action = kept[0] if kept else ActionDecision(type=ActionType.NO_REPLY)
+        return reaction.model_copy(update={"actions": kept, "action": normalized_action}), dropped
+
     def handle(
         self,
         event: Event,
@@ -293,6 +317,7 @@ class PersonRuntime:
             reaction,
             allowed_sticker_ids=allowed_sticker_ids,
         )
+        reaction, channel_decisions = self._sanitize_channel_actions(event, reaction)
         timings["model_ms"] = _ms(stage)
         action_types = [action.type.value for action in reaction.actions]
         model_used = model_call.trace.model or str(getattr(self.model, "model", "") or "")
@@ -414,6 +439,7 @@ class PersonRuntime:
                     "actions": [action.model_dump(mode="json") for action in reaction.actions],
                     "sticker_decisions": sticker_decisions,
                     "image_decisions": image_decisions,
+                    "channel_decisions": channel_decisions,
                     "memory_candidates": [candidate.model_dump(mode="json") for candidate in reaction.memory_candidates],
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,

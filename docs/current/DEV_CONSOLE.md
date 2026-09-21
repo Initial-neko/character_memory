@@ -83,6 +83,19 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 
 浏览器不传 API Key，也不持久化 key。
 
+### Character Space Autonomy
+
+用于验证真实的角色自主社交闭环，不是 mock。
+
+支持：
+
+- 选择一个未归档 Character；
+- `触发 Daily Life`：立即执行一次 Space Opportunity，并在发帖时继续跑 Audience / 点赞 / 评论 / 作者回复；
+- 指定 Post ID 后 `再次模拟 Audience`；
+- 查看当天正式调度时间和 `space_daily_runs` 状态。
+
+Dev 手动触发不会占用当天正式的 Daily Opportunity，因此可以反复验收。
+
 ### TTS
 
 调用正式 Media Runtime TTS：

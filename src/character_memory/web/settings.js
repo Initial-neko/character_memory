@@ -88,6 +88,12 @@
         } else {
           wrap.appendChild(input);
         }
+        if (field.help) {
+          const help = document.createElement("div");
+          help.className = "subtle field-help";
+          help.textContent = field.help;
+          wrap.appendChild(help);
+        }
         grid.appendChild(wrap);
       }
       card.appendChild(grid);

@@ -76,6 +76,7 @@ async_web.py            async message accept + SSE routes
 group_web.py            group HTTP surface
 history_web.py          history APIs
 search_web.py           message search APIs
+space_web.py            Character Space HTTP surface
 avatar_web.py           avatar/search HTTP surface
 visual_web.py           ImageGen/visual tool HTTP surface
 visual_capture_web.py   Camera/Screen transient Vision routes
@@ -100,6 +101,7 @@ search.py                   external avatar image search providers
 visual_generation.py        ImageGen providers + prompt compiler
 visual_runtime.py           direct autonomous generated-image execution
 group_autonomous_visual.py  group autonomous ImageGen glue/adapter
+space_store.py               Character Space shared posts/comments/reactions/views
 media.py                    media asset storage/contracts
 media_runtime.py            local ASR/Sherpa TTS providers/runtime
 media_bootstrap.py          Windows/native media bootstrap
@@ -203,6 +205,8 @@ images.js               normal image draft/send
 ai_images.js            generated image source
 avatars.js              avatar management
 search.js               message search
+space.js                Character Space feed + per-character Space entry
+space.css               Character Space layout
 intent.js               intent UX
 wake.js                 wake
 dictation.js            speech-to-text
@@ -242,6 +246,7 @@ time_format.js          shared MM-DD HH:mm:ss timestamp formatter
 | LLM 回复/structured output | `domain/models.py` → `llm/client.py` → `runtime/person_runtime.py` |
 | Direct async/SSE | `application/async_conversation.py` → `async_web.py` → `web/app.js` |
 | Group chat | `group_store.py` → `application/group_conversation_service.py` → `group_web.py` → `web/groups.js` |
+| Character Space | `space_store.py` → `space_web.py` → `web/space.js` / `web/space.css` |
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
 | Memory/Recall | `memory/embedding.py` → `memory/recall.py` → `storage/sqlite.py` |
 | Formal TTS registry/routing | `tts_registry.py` → `settings_server.py` / `media_server.py` → `tts_lab.py` |

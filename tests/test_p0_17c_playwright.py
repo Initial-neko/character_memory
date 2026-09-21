@@ -138,6 +138,7 @@ def test_sidebar_shell_compact_rail_persists_and_header_stays_clear(page, wake_s
 
     page.reload(wait_until="domcontentloaded")
     expect(page.locator("#characterList .character-item").first).to_be_visible()
+    page.wait_for_timeout(250)
     assert 66 <= _sidebar_width(page) <= 70
 
     page.locator("#sidebarCollapseButton").click()

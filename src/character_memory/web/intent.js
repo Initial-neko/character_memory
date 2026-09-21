@@ -3,6 +3,7 @@
   if (!CM) throw new Error("CM core must load before intent.js");
 
   const button = document.createElement("button");
+  button.id = "intentButton";
   button.type = "button";
   button.className = "ghost-button";
   button.textContent = "Intent";

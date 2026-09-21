@@ -72,6 +72,6 @@ proactive_wake_minutes: 60
 # Configure them in Settings Center; they persist to project-local .env:
 # GSV_TTS_GPT_MODEL="C:/path/to/voice.ckpt"
 # GSV_TTS_SOVITS_MODEL="C:/path/to/voice.pth"
-# GSV_TTS_REF_AUDIO="C:/path/to/reference.wav"
-# GSV_TTS_REF_TEXT="reference transcript"
-# GSV_TTS_VOICE="murasame"
+# GSV_TTS_VOICE="murasame"    # default template, i.e. voices/murasame.yaml
+# The reference audio and its transcript are not environment values: each
+# template under voices/ holds its own, with ref_audio relative to voices/.

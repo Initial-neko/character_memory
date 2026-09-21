@@ -13,6 +13,25 @@ from character_memory.settings_store import GSV_RUNTIME_FIELDS, SettingsStore
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_IDS, provider_spec
 
 
+def build_gsv_payload(merged: dict[str, Any]) -> dict[str, Any]:
+    """Map settings onto the sidecar's ``configure`` body.
+
+    ``ref_audio``/``ref_text`` are deliberately *absent* rather than empty.
+    ``configure`` treats ``None`` as "leave alone" and ``""`` as "overwrite", and
+    those two attributes have no empty-string fallback (unlike ``default_voice``
+    and friends). Sending ``""`` would blank the live reference -- which showed
+    up as "GSV got worse after I removed the settings fields", not as an error.
+    The reference clip lives in a template now, so there is nothing here to send.
+    """
+
+    return {
+        "gpt_model": str(merged.get("GSV_TTS_GPT_MODEL") or "").strip(),
+        "sovits_model": str(merged.get("GSV_TTS_SOVITS_MODEL") or "").strip(),
+        "voice": str(merged.get("GSV_TTS_VOICE") or "murasame").strip() or "murasame",
+        "device": (str(merged.get("tts_device") or "cuda").strip() or "cuda") if str(merged.get("tts_provider") or "").strip().lower() == "gsv" else "cuda",
+    }
+
+
 class SettingsPatch(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
@@ -103,18 +122,10 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
         return {"ok": not errors, "providers": providers, "error": "; ".join(errors) if errors else None}
 
     def _gsv_payload(values: dict[str, Any] | None = None, *, preload: bool | None = None) -> dict[str, Any]:
-        snapshot = settings_store.snapshot()["values"]
-        merged = dict(snapshot)
+        merged = dict(settings_store.snapshot()["values"])
         if values:
             merged.update(values)
-        payload = {
-            "gpt_model": str(merged.get("GSV_TTS_GPT_MODEL") or "").strip(),
-            "sovits_model": str(merged.get("GSV_TTS_SOVITS_MODEL") or "").strip(),
-            "ref_audio": str(merged.get("GSV_TTS_REF_AUDIO") or "").strip(),
-            "ref_text": str(merged.get("GSV_TTS_REF_TEXT") or "").strip(),
-            "voice": str(merged.get("GSV_TTS_VOICE") or "murasame").strip() or "murasame",
-            "device": (str(merged.get("tts_device") or "cuda").strip() or "cuda") if str(merged.get("tts_provider") or "").strip().lower() == "gsv" else "cuda",
-        }
+        payload = build_gsv_payload(merged)
         if preload is not None:
             payload["preload"] = bool(preload)
         return payload
@@ -186,6 +197,49 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                 )
             if voice_field is not None:
                 voice_field["options"] = voice_options
+
+        # Same injection the voice section already does, applied to the GSV
+        # section: the template list is runtime state, the schema is static, so
+        # the options are grafted on per request. Scope differs from tts_voice --
+        # this field must name a *template*, not any name a provider resolves.
+        gsv_section = next((section for section in schema if section.get("id") == "gsv-runtime"), None)
+        if gsv_section is not None:
+            template_field = next(
+                (field for field in gsv_section.get("fields", []) if field.get("name") == "GSV_TTS_VOICE"),
+                None,
+            )
+            if template_field is not None:
+                # Deliberately the gsv provider, not the locally-bound ``selected``
+                # one: this field must name a GSV template by definition, so it
+                # must not follow whichever provider the chat is currently using.
+                gsv_provider = next((item for item in providers if item["id"] == "gsv"), None)
+                templates = list((gsv_provider or {}).get("voices") or [])
+                gsv_ready = bool(gsv_provider and gsv_provider.get("ready"))
+                current_template = str(snapshot["values"].get("GSV_TTS_VOICE") or "").strip()
+                template_field["options"] = [
+                    {"value": name, "label": name, "disabled": not gsv_ready}
+                    for name in templates
+                ]
+                # Only when the sidecar actually answered: with ``ready`` false the
+                # list is unknown rather than empty, and "a template you cannot see"
+                # is not evidence that it is gone. Gating on readiness also keeps
+                # the default ``murasame`` (the value a never-configured install
+                # reports) from being announced as a missing template.
+                if gsv_ready and current_template and current_template not in templates:
+                    template_field["options"].insert(
+                        0,
+                        {
+                            "value": current_template,
+                            "label": f"{current_template} (当前配置 · 尚无此模板)",
+                            "disabled": True,
+                        },
+                    )
+                if not template_field["options"]:
+                    # An empty dropdown gives the user nothing to do; say where
+                    # templates come from instead.
+                    template_field["options"] = [
+                        {"value": "", "label": "尚无模板，请到 TTS Lab 的声音合成页创建一个", "disabled": True}
+                    ]
 
         snapshot["schema"] = schema
         snapshot["tts"] = {

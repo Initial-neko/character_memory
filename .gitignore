@@ -16,10 +16,13 @@ config.yaml.bak.*
 
 # Frozen voice assets are local data. A VoiceDesign clip cannot be regenerated
 # from its prompt (the sidecar is unseeded), so the WAV is an asset, not build
-# output. voice.yaml is ignored alongside it on purpose: a committed profile
-# whose ref_audio is missing makes the GSV sidecar refuse to start, so the pair
-# has to be committed or ignored together.
+# output. The character's voice.yaml is *not* ignored alongside it: it only ever
+# names a template now, which is configuration -- see the voices/ rule below.
 personas/*/voice/
-personas/*/voice.yaml
 # Characters created at runtime through the app are local data too.
 personas/character-*/
+# Voice templates own the reference clips; they are local assets, not source.
+# personas/<id>/voice.yaml stays tracked -- that is configuration, not audio.
+# A runtime-created character-* directory above is local data wholesale, so a
+# voice.yaml inside one of those stays ignored along with the rest of it.
+voices/

@@ -22,8 +22,6 @@ def _clear_secret_env(monkeypatch):
         "HF_TOKEN",
         "GSV_TTS_GPT_MODEL",
         "GSV_TTS_SOVITS_MODEL",
-        "GSV_TTS_REF_AUDIO",
-        "GSV_TTS_REF_TEXT",
         "GSV_TTS_VOICE",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -210,8 +208,6 @@ def test_gsv_runtime_fields_persist_to_dotenv_without_overwriting_yaml_or_existi
         {
             "GSV_TTS_GPT_MODEL": "C:/models/voice.ckpt",
             "GSV_TTS_SOVITS_MODEL": "C:/models/voice.pth",
-            "GSV_TTS_REF_AUDIO": "C:/models/ref.wav",
-            "GSV_TTS_REF_TEXT": "参考文本",
             "GSV_TTS_VOICE": "murasame",
         }
     )
@@ -227,13 +223,11 @@ def test_gsv_runtime_fields_persist_to_dotenv_without_overwriting_yaml_or_existi
     assert env_values["EXISTING_VALUE"] == "keep-me"
     assert env_values["GSV_TTS_GPT_MODEL"] == "C:/models/voice.ckpt"
     assert env_values["GSV_TTS_SOVITS_MODEL"] == "C:/models/voice.pth"
-    assert env_values["GSV_TTS_REF_AUDIO"] == "C:/models/ref.wav"
-    assert env_values["GSV_TTS_REF_TEXT"] == "参考文本"
     assert env_values["GSV_TTS_VOICE"] == "murasame"
 
     snapshot = store.snapshot()
     assert snapshot["values"]["GSV_TTS_GPT_MODEL"] == "C:/models/voice.ckpt"
-    assert snapshot["values"]["GSV_TTS_REF_TEXT"] == "参考文本"
+    assert snapshot["values"]["GSV_TTS_VOICE"] == "murasame"
 
 
 def test_qwen3_is_not_a_formal_tts_provider(tmp_path: Path, monkeypatch):
@@ -507,8 +501,11 @@ def test_gsv_runtime_can_be_configured_and_selected_in_one_save_without_stack_re
                 payload = kwargs["json"]
                 assert payload["gpt_model"] == "C:/models/voice.ckpt"
                 assert payload["sovits_model"] == "C:/models/voice.pth"
-                assert payload["ref_audio"] == "C:/models/ref.wav"
-                assert payload["ref_text"] == "参考文本"
+                # The reference is owned by a template now. The key has to be
+                # *absent*: ``configure`` reads "" as "overwrite" and would blank
+                # the warm engine's reference, which surfaces as "GSV got worse".
+                assert "ref_audio" not in payload
+                assert "ref_text" not in payload
                 assert payload["device"] == "cuda"
                 self.providers["gsv"]["ready"] = True
                 self.providers["gsv"]["reason"] = None
@@ -528,8 +525,6 @@ def test_gsv_runtime_can_be_configured_and_selected_in_one_save_without_stack_re
                 "values": {
                     "GSV_TTS_GPT_MODEL": "C:/models/voice.ckpt",
                     "GSV_TTS_SOVITS_MODEL": "C:/models/voice.pth",
-                    "GSV_TTS_REF_AUDIO": "C:/models/ref.wav",
-                    "GSV_TTS_REF_TEXT": "参考文本",
                     "GSV_TTS_VOICE": "murasame",
                     "tts_provider": "gsv",
                     "tts_voice": "zf_001",
@@ -547,7 +542,7 @@ def test_gsv_runtime_can_be_configured_and_selected_in_one_save_without_stack_re
 
     env_values = parse_env_file(tmp_path / ".env")
     assert env_values["GSV_TTS_GPT_MODEL"] == "C:/models/voice.ckpt"
-    assert env_values["GSV_TTS_REF_TEXT"] == "参考文本"
+    assert env_values["GSV_TTS_VOICE"] == "murasame"
 
 
 def test_settings_tts_preview_calls_selected_healthy_provider(tmp_path: Path, monkeypatch):

@@ -1,6 +1,6 @@
 # GSV-TTS-Lite Experiment
 
-Status: available in both TTS Lab and the formal `:8001/v1/tts` route. V1 still uses one configured reference/voice.
+Status: available in both TTS Lab and the formal `:8001/v1/tts` route. V1 synthesizes whole WAVs; every voice is a template under `voices/`.
 
 ## Architecture
 
@@ -28,8 +28,10 @@ Required environment variables:
 
     GSV_TTS_GPT_MODEL
     GSV_TTS_SOVITS_MODEL
-    GSV_TTS_REF_AUDIO
-    GSV_TTS_REF_TEXT
+
+The default template must also resolve: `voices/<GSV_TTS_VOICE>.yaml` under
+`GSV_TTS_VOICES_ROOT`, whose `ref_audio` file exists. The reference clip and its
+transcript live in that template, not in the environment.
 
 Optional environment variables:
 
@@ -40,6 +42,8 @@ Optional environment variables:
     GSV_TTS_DEVICE
     GSV_TTS_MODELS_DIR
     GSV_TTS_VOICE
+    GSV_TTS_VOICES_ROOT
+    GSV_TTS_PERSONA_ROOT
     GSV_TTS_LANGUAGE
     GSV_TTS_PROMPT_LANGUAGE
     GSV_TTS_PRELOAD
@@ -51,6 +55,7 @@ Defaults:
     port = 9014
     device = cuda
     voice = murasame
+    voices_root = <repo>/voices (pinned absolute by scripts/start-gsv-tts.sh and the dev stack)
     language = zh
     prompt_language = auto
     preload = 1 when scripts/start-gsv-tts.sh is used
@@ -62,11 +67,21 @@ Use Windows-style forward-slash paths for local model assets when launching from
 
     export GSV_TTS_GPT_MODEL="C:/path/to/voice.ckpt"
     export GSV_TTS_SOVITS_MODEL="C:/path/to/voice.pth"
-    export GSV_TTS_REF_AUDIO="C:/path/to/reference.wav"
-    export GSV_TTS_REF_TEXT="reference transcript"
     export GSV_TTS_VOICE="murasame"
 
     bash scripts/start-gsv-tts.sh
+
+Only the two base models are exported: the reference clip is a template. The
+default template `voices/murasame.yaml` holds it, with `ref_audio` relative to
+its own directory:
+
+    ref_audio: murasame.wav
+    ref_text: <exactly what the clip says>
+
+`scripts/start-gsv-tts.sh` pins `GSV_TTS_VOICES_ROOT` to `<repo>/voices` (the
+same absolute-path rule as `GSV_TTS_PERSONA_ROOT`), so a template created in TTS
+Lab is found without further configuration. `/health` reports `ready=false` and
+names the missing template or clip until one exists.
 
 Health:
 
@@ -160,7 +175,7 @@ across seeds — some seeds stretch three characters into 11.5 s) and by ear.
 `temperature`/`top_k`/`top_p`/`repetition_penalty`/`noise_scale` are deliberately **not**
 exposed per request. They are the other end of the same lever as the seed; making them
 per-request would hand every caller a knob that destroys the reproducibility just gained.
-If timbre ever needs tuning, pin per-voice values in the voice profile instead.
+If timbre ever needs tuning, pin per-voice values in the template instead.
 
 ## V1 inference policy
 
@@ -184,14 +199,17 @@ Formal GSV routing now has two voice layers:
 
 - `config.py` / Settings select `tts_provider: gsv` and the global/default formal voice;
 - Media Runtime routes GSV through `:9002` to the isolated `:9014` sidecar;
-- Settings owns the global/default GSV GPT/SoVITS/reference configuration and can hot-configure/reload `:9014`;
-- `personas/<character>/voice.yaml` optionally registers a per-character reference;
-- Browser voice requests carry the Character id. Registered ids use their character reference; unknown ids degrade to the global/default reference;
-- VoiceDesign freeze stores the exact auditioned WAV bytes under `personas/<character>/voice/`, writes provenance + transcript to `voice.yaml`, then calls `POST /v1/voices/reload`.
+- Settings owns the global/default GSV GPT/SoVITS models and the default template name, and can hot-configure/reload `:9014`;
+- `voices/<name>.yaml` owns a reference clip and its transcript — the only place either lives;
+- `personas/<character>/voice.yaml` optionally names one (`template: <name>`), so a character can be given a voice and can share it;
+- Browser voice requests carry the Character id. A registered id uses the template it names; an unknown id degrades to the default template;
+- VoiceDesign freeze stores the exact auditioned WAV bytes as a template (`voices/<character id>.yaml` plus its content-addressed clip), rewrites `voice.yaml` to name it, then calls `POST /v1/voices/reload`.
 
-`GSV_TTS_VOICE` names the global/default reference. It does not replace the per-character registry.
+`GSV_TTS_VOICE` names the **default template** — the one every unresolvable voice request lands on. It does not replace the per-character registry.
 
-Registry reload deliberately keeps the warm engine resident. A profile may override GPT/SoVITS models; unset profile model fields inherit the global runtime models.
+`config.yaml`'s `tts_voice` does **not** select that default. It is a cross-provider field (a kokoro voice name, a sherpa speaker id) and stays one, so on the GSV path it is not what decides an unconfigured character's voice: the browser always sends `voice: <character id>`, and a name that does not resolve falls to `GSV_TTS_VOICE`.
+
+Registry reload deliberately keeps the warm engine resident. A template may override GPT/SoVITS models; unset template model fields inherit the global runtime models.
 
 Still out of scope: SSE/WebRTC/token-level browser streaming and a general model-asset management system. Qwen3 VoiceDesign remains optional tooling, not a prerequisite for GSV and not a formal chat Provider.
 
@@ -200,16 +218,17 @@ Still out of scope: SSE/WebRTC/token-level browser streaming and a general model
 
 `config.yaml` does not own GSV model assets. It only selects the formal TTS provider/voice/speed/device.
 
-The five GSV runtime values are persisted in the adjacent project `.env` through Settings Center:
+The three GSV runtime values are persisted in the adjacent project `.env` through Settings Center:
 
 ```text
 GSV_TTS_GPT_MODEL
 GSV_TTS_SOVITS_MODEL
-GSV_TTS_REF_AUDIO
-GSV_TTS_REF_TEXT
 GSV_TTS_VOICE
 ```
 
-The sidecar can start with these fields missing and report `ready=false`. Settings Center may then configure the running sidecar through `POST /v1/configure`; no full-stack restart is required. Model/reference/device changes unload and reload the GSV engine when needed, while switching away from GSV uses `POST /v1/unload` to release GPU memory.
+`GSV_TTS_VOICE` is a template name, chosen from a dropdown of what `voices/`
+actually contains; the reference clip is not a setting at all.
+
+The sidecar can start with these fields missing and report `ready=false`. Settings Center may then configure the running sidecar through `POST /v1/configure`; no full-stack restart is required. Model/device changes unload and reload the GSV engine when needed, while switching away from GSV uses `POST /v1/unload` to release GPU memory. Adding or editing a template is a file change, not an engine change: `POST /v1/voices/reload` re-reads both trees and keeps the warm weights.
 
 The project launcher does not inject the whole project `.env` into every child process. Only the GSV child receives its `GSV_TTS_*` values as process environment because that upstream runtime consumes environment variables directly. This preserves the intended precedence `real system env > project .env` and prevents Settings edits from being masked by stale launcher-copied values.

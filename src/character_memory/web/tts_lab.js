@@ -434,6 +434,9 @@
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json();
       const activated = Boolean(data.activated);
+      // Overwriting a template changes every character that references it, so
+      // say who else is affected instead of letting it happen silently.
+      const shared = data.shared_with || [];
       state.voiceDesignFreezeResult = true;
       $("voiceDesignFreezeStatus").textContent = [
         `已固化到 ${data.character_id || characterId}。`,
@@ -442,11 +445,49 @@
         activated
           ? "已生效：GSV sidecar 已加载该声线，可以立即使用。"
           : `暂未生效，重启 GSV sidecar 后生效。原因：${data.reason || "GSV sidecar 未运行或未接受该声线"}`,
-      ].join("\n");
+        shared.length
+          ? `已覆盖模板，另有 ${shared.length} 个角色（${shared.join("、")}）共用这个声音，它们也会一起改变。`
+          : "",
+      ].filter(Boolean).join("\n");
     } catch (error) {
       $("voiceDesignFreezeStatus").textContent = "固化失败：" + error.message;
     } finally {
       renderFreezeState();
+    }
+  }
+
+  // Same guard as freezing: the stored transcript has to describe the audio
+  // being saved, and this path has no character to fall back on -- the name is
+  // the whole identity of a template.
+  async function saveVoiceDesignTemplate() {
+    const button = $("saveVoiceDesignTemplate");
+    const status = $("voiceDesignTemplateStatus");
+    const name = $("voiceDesignTemplateName").value.trim();
+    if (!state.voiceDesignArtifact || !voiceDesignSnapshotMatches()) {
+      status.textContent = "测试文本或 Instruct 已修改，请重新生成后再保存。";
+      return;
+    }
+    if (!name) {
+      status.textContent = "请先填模板名。";
+      return;
+    }
+    button.disabled = true;
+    status.textContent = "保存中...";
+    try {
+      const response = await fetch("/v1/voice-design/save-template", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({artifact_id: state.voiceDesignArtifact, name}),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      status.textContent = `已保存为模板 ${data.template}，ref_audio: ${data.ref_audio || ""}。${
+        data.activated ? "已生效。" : "未能热加载，GSV 未运行？重启 GSV sidecar 后生效。"
+      }`;
+    } catch (error) {
+      status.textContent = "保存失败：" + error.message;
+    } finally {
+      button.disabled = false;
     }
   }
 
@@ -458,6 +499,7 @@
   $("polishVoiceDesign").addEventListener("click", polishVoiceDesign);
   $("generateVoiceDesign").addEventListener("click", generateVoiceDesign);
   $("freezeVoiceDesign").addEventListener("click", freezeVoiceDesign);
+  $("saveVoiceDesignTemplate").addEventListener("click", saveVoiceDesignTemplate);
   $("voiceDesignInstruct").addEventListener("input", renderFreezeState);
   $("voiceDesignText").addEventListener("input", renderFreezeState);
   $("voiceDesignLanguage").addEventListener("change", renderFreezeState);

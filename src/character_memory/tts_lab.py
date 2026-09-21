@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
+import logging
 import os
 from pathlib import Path
 import secrets
@@ -20,9 +21,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from character_memory.media_runtime import float_audio_to_wav
 from character_memory.tts_registry import provider_spec
+from character_memory.voices import template_root
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+logger = logging.getLogger("character_memory.tts_lab")
 
 
 @dataclass(frozen=True)
@@ -678,6 +682,147 @@ class VoiceDesignArtifactStore:
             return self._entries.get(str(token or "").strip())
 
 
+_TEMPLATE_NAME_MAX = 64
+_WINDOWS_RESERVED = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def validate_template_name(raw: str) -> str:
+    """Validate a user-chosen template name.
+
+    Unlike ``character_id`` -- whose safety comes from a whitelist lookup -- a
+    template name is new, so it needs explicit rules. Each one below maps to a
+    real failure: the name becomes ``voices/<name>.yaml`` and ``voices/<name>/``,
+    so a separator escapes the tree and a Windows reserved word fails the write
+    in a way that is hard to read.
+    """
+
+    name = str(raw or "").strip()
+    if not name:
+        raise ValueError("模板名不能为空")
+    if len(name) > _TEMPLATE_NAME_MAX:
+        raise ValueError(f"模板名 too long (max {_TEMPLATE_NAME_MAX})")
+    if "/" in name or "\\" in name:
+        raise ValueError("模板名不能包含路径分隔符")
+    if name in {".", ".."} or ".." in name:
+        raise ValueError("模板名不能包含 '..'")
+    if Path(name).is_absolute() or (len(name) > 1 and name[1] == ":"):
+        raise ValueError("模板名不能是绝对路径")
+    if name.upper().split(".")[0] in _WINDOWS_RESERVED:
+        raise ValueError(f"{name} 是 Windows 保留名，请换一个")
+    if name != name.rstrip(". "):
+        raise ValueError("模板名不能以 '.' 或空格结尾")
+    return name
+
+
+def _template_name_for(character_id: str, persona_dir: Path) -> str:
+    """The name a character's frozen template is filed under.
+
+    ``character_id`` is what the user sees, and it is the right name almost
+    always -- but it is not necessarily a *filename*, and the freeze route names
+    files with it. ``discover_character_profiles`` answers "is this a character
+    the app shows", not "is this safe to join onto a directory": ``persona.yaml``
+    may declare ``id: ../../escaped`` and still be discoverable. So the id must
+    pass the same rule a typed name does, and the persona directory name -- which
+    came from a glob of ``*/persona.yaml`` and therefore cannot contain a
+    separator -- is the fallback for one that does not.
+    """
+
+    try:
+        return validate_template_name(character_id)
+    except ValueError:
+        return persona_dir.name
+
+
+def _write_voice_template(voices_root: Path, name: str, artifact: VoiceDesignArtifact) -> str:
+    """Write the clip and the template document; return the relative ref_audio.
+
+    Shared by the freeze route and the save-as-template route. They differ only
+    in how ``name`` is chosen and whether a reference is written afterwards --
+    everything about *how a template is persisted* is here, so the two writers
+    cannot drift into emitting two shapes.
+
+    Content-addressed: designs cannot be regenerated, so re-writing must never
+    overwrite the clip an older template still points at. An orphaned WAV costs
+    disk; a clobbered one loses a voice permanently.
+    """
+
+    template_dir = voices_root / name
+    template_dir.mkdir(parents=True, exist_ok=True)
+
+    digest = hashlib.sha256(artifact.audio).hexdigest()[:16]
+    audio_path = template_dir / f"{digest}.wav"
+    if not audio_path.exists():
+        audio_temp = audio_path.with_suffix(".wav.tmp")
+        audio_temp.write_bytes(artifact.audio)
+        audio_temp.replace(audio_path)
+
+    # Relative to the template file, which is how ``load_template`` resolves it.
+    # An absolute path would work too, but a relative path is what survives
+    # moving the tree.
+    ref_audio = f"{name}/{audio_path.name}"
+
+    template_path = voices_root / f"{name}.yaml"
+    template_temp = template_path.with_suffix(".yaml.tmp")
+    template_temp.write_text(
+        yaml.safe_dump(
+            {
+                "voice_id": name,
+                "ref_audio": ref_audio,
+                "ref_text": artifact.text,
+                "gpt_model": None,
+                "sovits_model": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "instruct": artifact.instruct,
+                "model": artifact.model,
+            },
+            allow_unicode=True,
+            sort_keys=False,
+            width=120,
+        ),
+        encoding="utf-8",
+    )
+    template_temp.replace(template_path)
+    return ref_audio
+
+
+def _reload_voices(reloader: GsvVoiceReloader) -> tuple[bool, str | None]:
+    """Ask GSV to re-read its registry. Never fatal.
+
+    The files are already on disk and GSV loads them at next start, so a dead
+    sidecar degrades to "takes effect later" rather than losing the freeze.
+
+    The reloader is passed in rather than reached for as a module global: it is
+    built inside ``create_tts_lab_app`` (it owns the app's HTTP client and is
+    closed by the app's shutdown handler), and both routes that write voices
+    share this one implementation so they cannot disagree about what a failed
+    reload means.
+    """
+
+    try:
+        reloader.reload()
+        return True, None
+    except Exception as exc:
+        logger.warning("GSV voice reload failed: %s", exc)
+        return False, str(exc) or exc.__class__.__name__
+
+
+def _references_template(voice_path: Path, template_name: str) -> bool:
+    """Best-effort read: a broken sibling must not break someone else's freeze."""
+
+    try:
+        document = yaml.safe_load(voice_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return False
+    return isinstance(document, dict) and str(document.get("template") or "").strip() == template_name
+
+
 class GsvVoiceReloader:
     """Asks a running GSV sidecar to re-read persona voice profiles.
 
@@ -768,6 +913,20 @@ class VoiceDesignFreezeRequest(BaseModel):
 
     character_id: str = Field(min_length=1, max_length=128)
     artifact_id: str = Field(min_length=1, max_length=128)
+
+
+class VoiceDesignSaveTemplateRequest(BaseModel):
+    """Save-as-template names the audition and the name to file it under.
+
+    Same reasoning as :class:`VoiceDesignFreezeRequest`: the transcript comes
+    from the audition, never from the client, so it cannot drift from the audio
+    it describes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=128)
 
 
 def create_tts_lab_app(
@@ -991,56 +1150,87 @@ def create_tts_lab_app(
                 detail="This auditioned voice is no longer available; generate it again before freezing.",
             )
 
+        character_id = profile["id"]
         # The directory comes from the discovered profile, never from the
         # client-supplied id, so a request cannot address a path outside the
         # persona tree.
         persona_dir = Path(profile["persona_path"]).parent
-        voice_dir = persona_dir / "voice"
-        voice_dir.mkdir(parents=True, exist_ok=True)
+        voices_root = template_root(None)
+        template_name = _template_name_for(character_id, persona_dir)
+        # WAV and template first, the reference last. This order means a crash
+        # leaves an unreferenced file, never a reference to a template with no
+        # audio. The helper writes the first two; the reference is this route's
+        # own, because only the route knows which character is being pointed.
+        ref_audio = _write_voice_template(voices_root, template_name, artifact)
 
-        # Content-addressed: designs cannot be regenerated, so re-freezing must
-        # never overwrite the WAV an older profile still points at.
-        digest = hashlib.sha256(artifact.audio).hexdigest()[:16]
-        relative_audio = f"voice/{digest}.wav"
-        audio_path = voice_dir / f"{digest}.wav"
-        if not audio_path.exists():
-            audio_temp = audio_path.with_suffix(".wav.tmp")
-            audio_temp.write_bytes(artifact.audio)
-            audio_temp.replace(audio_path)
-
-        # voice.yaml lands last so a crash can never leave a profile pointing at
-        # a WAV that does not exist yet.
-        voice_config = persona_dir / "voice.yaml"
-        document = {
-            "voice_id": profile["id"],
-            "ref_audio": relative_audio,
-            "ref_text": artifact.text,
-            "gpt_model": None,
-            "sovits_model": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "instruct": artifact.instruct,
-            "model": artifact.model,
-        }
-        config_temp = voice_config.with_suffix(".yaml.tmp")
-        config_temp.write_text(
-            yaml.safe_dump(document, allow_unicode=True, sort_keys=False, width=120),
-            encoding="utf-8",
+        # Who else is already using this template? Overwriting changes their
+        # voice too, so the caller needs to be able to warn before it happens.
+        shared_with = sorted(
+            other["id"]
+            for other in get_character_profiles()
+            if other["id"] != character_id
+            and _references_template(
+                Path(other["persona_path"]).parent / "voice.yaml", template_name
+            )
         )
-        config_temp.replace(voice_config)
 
-        activated = True
-        reason = None
-        try:
-            voice_reloader_tool.reload()
-        except Exception as exc:
-            activated = False
-            reason = str(exc) or exc.__class__.__name__
+        reference_path = persona_dir / "voice.yaml"
+        reference_temp = reference_path.with_suffix(".yaml.tmp")
+        reference_temp.write_text(
+            yaml.safe_dump({"template": template_name}, sort_keys=False), encoding="utf-8"
+        )
+        reference_temp.replace(reference_path)
+
+        activated, reason = _reload_voices(voice_reloader_tool)
 
         return {
             "ok": True,
-            "character_id": profile["id"],
-            "voice_id": profile["id"],
-            "ref_audio": relative_audio,
+            "character_id": character_id,
+            "voice_id": template_name,
+            "template": template_name,
+            "ref_audio": ref_audio,
+            "ref_text": artifact.text,
+            "shared_with": shared_with,
+            "activated": activated,
+            "reason": reason,
+        }
+
+    @app.post("/v1/voice-design/save-template")
+    def voice_design_save_template(req: VoiceDesignSaveTemplateRequest):
+        """Save an auditioned voice as a reusable template, with no character involved."""
+
+        try:
+            name = validate_template_name(req.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        artifact = voice_artifacts.get(req.artifact_id)
+        if artifact is None:
+            raise HTTPException(
+                status_code=404,
+                detail="This auditioned voice is no longer available; generate it again before saving.",
+            )
+
+        voices_root = template_root(None)
+        template_path = voices_root / f"{name}.yaml"
+        if template_path.exists():
+            # A name the user typed colliding is a mistake, not an intended
+            # overwrite. Re-freezing a character is the deliberate overwrite path.
+            raise HTTPException(
+                status_code=409,
+                detail=f"模板 {name} 已存在；换个名字，或直接固化到角色以覆盖。",
+            )
+
+        # Same writer the freeze route uses: one place decides how a template is
+        # persisted, so the two paths cannot drift into two shapes.
+        ref_audio = _write_voice_template(voices_root, name, artifact)
+
+        activated, reason = _reload_voices(voice_reloader_tool)
+
+        return {
+            "ok": True,
+            "template": name,
+            "ref_audio": ref_audio,
             "ref_text": artifact.text,
             "activated": activated,
             "reason": reason,

@@ -10,10 +10,10 @@ config.yaml
 
 .env
   -> API keys/tokens
-  -> GSV-TTS-Lite local runtime asset paths
+  -> GSV-TTS-Lite model paths and default template name
 ```
 
-The two files intentionally have different ownership. `config.yaml` answers **what the application selects**; provider-specific GSV model/reference paths do not belong there.
+The two files intentionally have different ownership. `config.yaml` answers **what the application selects**; provider-specific GSV model paths do not belong there.
 
 Effective secret/runtime-env precedence is:
 
@@ -56,6 +56,8 @@ tts_speed: 1.0
 tts_device: cuda
 ```
 
+`tts_voice` is a cross-provider field (a kokoro voice name, a sherpa speaker id) and stays one. It does not select GSV's default voice: the browser always sends `voice: <character id>`, so a character with no voice of its own lands on the **default template** (`GSV_TTS_VOICE`), not on `tts_voice`.
+
 Qwen3-TTS is not a formal realtime Provider. Qwen3 VoiceDesign remains a Workbench tool.
 
 Provider metadata is centralized in `character_memory.tts_registry`; Config validation, Settings inventory and Media routing consume the same formal provider IDs.
@@ -82,7 +84,7 @@ Not every field called “device” can truthfully hot-apply.
 | TTS Provider | hot on next `:8001/v1/tts` request |
 | TTS Voice | hot |
 | TTS Speed | hot |
-| GSV GPT/SoVITS/reference/voice runtime values | `:9014 /v1/configure`, hot |
+| GSV GPT/SoVITS model + default-template runtime values | `:9014 /v1/configure`, hot |
 | GSV Device | unload/reconfigure/reload, hot |
 | Kokoro Device | persisted; restart **TTS Provider Runtime :9002** |
 | Sherpa Device | persisted; restart **Media Runtime :8001** |
@@ -117,18 +119,17 @@ These values persist in the project `.env`:
 ```text
 GSV_TTS_GPT_MODEL
 GSV_TTS_SOVITS_MODEL
-GSV_TTS_REF_AUDIO
-GSV_TTS_REF_TEXT
 GSV_TTS_VOICE
 ```
 
-The first four are required for the global/default GSV reference. `GSV_TTS_VOICE` defaults to `murasame`.
+The two model paths are required, and every template inherits them unless it pins its own. `GSV_TTS_VOICE` names the **default template**, picked from a dropdown of `voices/*.yaml` (default `murasame`); GSV is ready once that template exists and its `ref_audio` resolves. The reference clip is therefore not a setting any more.
 
-Per-character frozen voices are separate again:
+Voices themselves are templates, and a character only names one:
 
 ```text
-personas/<character>/voice.yaml
-personas/<character>/voice/<content-addressed>.wav
+voices/<name>.yaml                    # ref_audio + ref_text: the only carrier
+voices/<name>/<content-addressed>.wav
+personas/<character>/voice.yaml       # one line: template: <name>
 ```
 
 A GSV sidecar can start health-checkable with incomplete global assets. Settings can fill the runtime configuration through `POST :9014/v1/configure`; selecting GSV preloads it, and switching away unloads it to release VRAM.

@@ -96,6 +96,12 @@ class Settings(BaseModel):
     # 1440 keeps the production default at roughly once per 24 hours; shorter
     # values are intentionally supported for test soak runs.
     space_opportunity_interval_minutes: float = Field(default=1440.0, ge=10.0, le=10080.0)
+    # Upper bound on published Space posts per character per local day. The
+    # interval already paces opportunities; this is the explicit ceiling a test
+    # operator can raise or remove without touching the interval. 0 means no
+    # ceiling. It never forces a post -- a character that decides not to publish
+    # simply does not consume the budget.
+    space_max_posts_per_day: int = Field(default=0, ge=0, le=200)
     space_audience_size: int = Field(default=5, ge=0, le=10)
     space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 

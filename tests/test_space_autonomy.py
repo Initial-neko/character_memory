@@ -217,6 +217,32 @@ def test_interval_scheduler_runs_again_after_one_hour_and_manual_dev_does_not_co
     assert len(repository.list_opportunity_runs(character_id="c00")) == 2
     store.close()
 
+def test_daily_post_ceiling_skips_without_moving_the_next_opportunity(tmp_path):
+    """A spent publishing budget pauses scheduling; it never reschedules it.
+
+    Times are mid-day UTC so that the local day the ceiling is measured over is
+    the same one every CI timezone lands in.
+    """
+    access, store, model = _access(tmp_path, ids=("c00",))
+    access.settings.space_opportunity_interval_minutes = 30
+    access.settings.space_max_posts_per_day = 2
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    start = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+
+    assert scheduler.status(start)["max_posts_per_day"] == 2
+    assert scheduler.run_once(start) == []
+    assert len(scheduler.run_once(datetime(2026, 9, 21, 12, 30, tzinfo=timezone.utc))) == 1
+    assert len(scheduler.run_once(datetime(2026, 9, 21, 13, 0, tzinfo=timezone.utc))) == 1
+    assert model.opportunities == 2
+
+    before = repository.get_opportunity_state("c00")["next_opportunity_at"]
+    assert scheduler.run_once(datetime(2026, 9, 21, 13, 30, tzinfo=timezone.utc)) == []
+    assert model.opportunities == 2
+    assert repository.get_opportunity_state("c00")["next_opportunity_at"] == before
+    store.close()
+
+
 def test_dev_console_exposes_space_autonomy_controls():
     from pathlib import Path
 
@@ -233,6 +259,7 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="refreshSpaceStatus"',
         'id="spacePostId"',
         'id="spaceIntervalMinutes"',
+        'id="spaceMaxPostsPerDay"',
         'id="spaceAudienceSize"',
         'id="spacePollSeconds"',
         'id="applySpaceConfig"',

@@ -98,6 +98,7 @@
       $("spaceStatus").textContent = pretty(data);
       if ($("spaceEnabled")) $("spaceEnabled").checked = Boolean(data.enabled);
       if ($("spaceIntervalMinutes")) $("spaceIntervalMinutes").value = String(data.interval_minutes ?? 1440);
+      if ($("spaceMaxPostsPerDay")) $("spaceMaxPostsPerDay").value = String(data.max_posts_per_day ?? 0);
       if ($("spaceAudienceSize")) $("spaceAudienceSize").value = String(data.audience_size ?? 5);
       if ($("spacePollSeconds")) $("spacePollSeconds").value = String(data.poll_seconds ?? 60);
     } catch (error) {
@@ -116,6 +117,7 @@
         body: JSON.stringify({
           enabled: $("spaceEnabled").checked,
           interval_minutes: Number($("spaceIntervalMinutes").value || 1440),
+          max_posts_per_day: Number($("spaceMaxPostsPerDay").value || 0),
           audience_size: Number($("spaceAudienceSize").value || 0),
           poll_seconds: Number($("spacePollSeconds").value || 60),
           rearm: true,

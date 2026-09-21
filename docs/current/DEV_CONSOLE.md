@@ -90,7 +90,7 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 支持：
 
 - 选择一个未归档 Character；
-- 直接调整并持久化 `Autonomous Space / Opportunity Interval / Audience / Scheduler Poll`；
+- 直接调整并持久化 `Autonomous Space / Opportunity Interval / Max Posts per Day / Audience / Scheduler Poll`；
 - 快捷档 `10min / 30min / 1H / 6H / 24H`；
 - `立即手动触发一次`：立即跑一次完整 Space Opportunity，不改变正式 next time；
 - `让选中角色立即到期`：把 next opportunity 设为现在，用真实后台 Scheduler 验证；

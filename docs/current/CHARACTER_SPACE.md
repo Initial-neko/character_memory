@@ -43,7 +43,9 @@ The production default is one Opportunity every **1440 minutes / 24H**, but the 
 1440 min / 24H
 ```
 
-An Opportunity is only a chance to decide whether to publish. It is never a posting quota. The model receives Persona, Mental State, recent Memory and recorded Events and may return no `social_post`.
+An Opportunity is only a chance to decide whether to publish. It is never a posting quota. The model receives Persona, Mental State, recent Memory and recorded Events and may return no `social_post`. A short interval therefore lets one character publish several posts in a day, and it never obliges the character to publish at all.
+
+`space_max_posts_per_day` is the explicit publishing ceiling per character per local day; `0` means no ceiling. It is only a ceiling: a character that decides not to publish does not spend budget, and reaching the ceiling pauses scheduling without moving `next_opportunity_at`, so the character resumes by itself once the local day rolls over. The production default of `0` is safe because the 1440-minute interval already paces publishing.
 
 The scheduler persists `space_opportunity_state` and `space_opportunity_runs`, so a long-running test can be inspected the next day and service restarts do not reset the schedule.
 
@@ -52,6 +54,7 @@ Settings Center persists:
 ```text
 space_autonomy_enabled
 space_opportunity_interval_minutes
+space_max_posts_per_day
 space_audience_size
 space_scheduler_poll_seconds
 ```
@@ -141,7 +144,7 @@ manual opportunity
 
 Manual Dev opportunities do not consume or move the formal `next_opportunity_at`, so testing can be repeated independently.
 
-`10min / 30min / 1H / 6H / 24H` presets change the formal interval. `让选中角色立即到期` tests the real scheduler path. `再次模拟 Audience` reruns the audience path for a specified Post ID.
+`10min / 30min / 1H / 6H / 24H` presets change the formal interval. `让选中角色立即到期` tests the real scheduler path. `再次模拟 Audience` reruns the audience path for a specified Post ID. The `Max Posts / Day` field next to the interval is the same publishing ceiling Settings Center persists, so a soak run can be capped or left unlimited without editing the interval.
 
 Character Runtime endpoints:
 

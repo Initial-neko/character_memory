@@ -79,6 +79,7 @@ class DevAvatarFromMediaRequest(BaseModel):
 class DevSpaceConfigRequest(BaseModel):
     enabled: bool
     interval_minutes: float = Field(ge=10.0, le=10080.0)
+    max_posts_per_day: int = Field(ge=0, le=200)
     audience_size: int = Field(ge=0, le=10)
     poll_seconds: float = Field(ge=10.0, le=3600.0)
     rearm: bool = True
@@ -263,6 +264,7 @@ def create_dev_app(
             {
                 "space_autonomy_enabled": req.enabled,
                 "space_opportunity_interval_minutes": req.interval_minutes,
+                "space_max_posts_per_day": req.max_posts_per_day,
                 "space_audience_size": req.audience_size,
                 "space_scheduler_poll_seconds": req.poll_seconds,
             }

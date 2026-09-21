@@ -486,3 +486,179 @@ class SpaceRepository:
         with self.store._lock:
             rows = self.store.conn.execute(sql, args).fetchall()
         return [dict(row) for row in rows]
+
+
+    def get_opportunity_state(self, character_id: str) -> dict[str, Any] | None:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM space_opportunity_state WHERE character_id=?",
+                (character_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def ensure_opportunity_state(
+        self,
+        character_id: str,
+        now: datetime,
+        interval_minutes: float,
+    ) -> dict[str, Any]:
+        interval_seconds = max(600.0, float(interval_minutes) * 60.0)
+        next_at = datetime.fromtimestamp(now.timestamp() + interval_seconds, tz=now.tzinfo)
+        with self.store._lock:
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO space_opportunity_state("
+                "character_id,next_opportunity_at,next_opportunity_at_epoch,updated_at,updated_at_epoch"
+                ") VALUES(?,?,?,?,?)",
+                (
+                    character_id,
+                    next_at.isoformat(),
+                    epoch_us(next_at),
+                    now.isoformat(),
+                    epoch_us(now),
+                ),
+            )
+            self.store._maybe_commit()
+            row = self.store.conn.execute(
+                "SELECT * FROM space_opportunity_state WHERE character_id=?",
+                (character_id,),
+            ).fetchone()
+        return dict(row)
+
+    def set_next_opportunity(
+        self,
+        character_id: str,
+        next_at: datetime,
+        now: datetime,
+    ) -> dict[str, Any]:
+        with self.store._lock:
+            self.store.conn.execute(
+                "INSERT INTO space_opportunity_state("
+                "character_id,next_opportunity_at,next_opportunity_at_epoch,updated_at,updated_at_epoch"
+                ") VALUES(?,?,?,?,?) "
+                "ON CONFLICT(character_id) DO UPDATE SET "
+                "next_opportunity_at=excluded.next_opportunity_at,"
+                "next_opportunity_at_epoch=excluded.next_opportunity_at_epoch,"
+                "updated_at=excluded.updated_at,updated_at_epoch=excluded.updated_at_epoch",
+                (
+                    character_id,
+                    next_at.isoformat(),
+                    epoch_us(next_at),
+                    now.isoformat(),
+                    epoch_us(now),
+                ),
+            )
+            self.store._maybe_commit()
+            row = self.store.conn.execute(
+                "SELECT * FROM space_opportunity_state WHERE character_id=?",
+                (character_id,),
+            ).fetchone()
+        return dict(row)
+
+    def claim_due_opportunity(
+        self,
+        character_id: str,
+        now: datetime,
+        interval_minutes: float,
+        *,
+        source: str = "SCHEDULED",
+    ) -> int | None:
+        interval_seconds = max(600.0, float(interval_minutes) * 60.0)
+        next_at = datetime.fromtimestamp(now.timestamp() + interval_seconds, tz=now.tzinfo)
+        now_epoch = epoch_us(now)
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM space_opportunity_state WHERE character_id=?",
+                (character_id,),
+            ).fetchone()
+            if row is None or int(row["next_opportunity_at_epoch"]) > now_epoch:
+                return None
+            cur = self.store.conn.execute(
+                "INSERT INTO space_opportunity_runs("
+                "character_id,scheduled_for,scheduled_for_epoch,started_at,started_at_epoch,status,source,error"
+                ") VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    character_id,
+                    str(row["next_opportunity_at"]),
+                    int(row["next_opportunity_at_epoch"]),
+                    now.isoformat(),
+                    now_epoch,
+                    "RUNNING",
+                    str(source or "SCHEDULED"),
+                    "",
+                ),
+            )
+            self.store.conn.execute(
+                "UPDATE space_opportunity_state SET "
+                "next_opportunity_at=?,next_opportunity_at_epoch=?,updated_at=?,updated_at_epoch=? "
+                "WHERE character_id=?",
+                (
+                    next_at.isoformat(),
+                    epoch_us(next_at),
+                    now.isoformat(),
+                    now_epoch,
+                    character_id,
+                ),
+            )
+            self.store._maybe_commit()
+            return int(cur.lastrowid)
+
+    def finish_opportunity_run(
+        self,
+        run_id: int,
+        character_id: str,
+        now: datetime,
+        *,
+        status: str,
+        post_id: int | None = None,
+        error: str = "",
+    ) -> None:
+        normalized = str(status or "").strip().upper()
+        if normalized not in {"POSTED", "NO_POST", "FAILED"}:
+            raise ValueError("invalid Space opportunity run status")
+        now_epoch = epoch_us(now)
+        with self.store._lock:
+            self.store.conn.execute(
+                "UPDATE space_opportunity_runs SET completed_at=?,completed_at_epoch=?,status=?,post_id=?,error=? "
+                "WHERE id=? AND character_id=?",
+                (
+                    now.isoformat(),
+                    now_epoch,
+                    normalized,
+                    post_id,
+                    str(error or "")[:2000],
+                    int(run_id),
+                    character_id,
+                ),
+            )
+            self.store.conn.execute(
+                "UPDATE space_opportunity_state SET "
+                "last_opportunity_at=?,last_opportunity_at_epoch=?,last_status=?,last_post_id=?,"
+                "updated_at=?,updated_at_epoch=? WHERE character_id=?",
+                (
+                    now.isoformat(),
+                    now_epoch,
+                    normalized,
+                    post_id,
+                    now.isoformat(),
+                    now_epoch,
+                    character_id,
+                ),
+            )
+            self.store._maybe_commit()
+
+    def list_opportunity_runs(
+        self,
+        *,
+        character_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM space_opportunity_runs"
+        args: list[Any] = []
+        if character_id:
+            sql += " WHERE character_id=?"
+            args.append(character_id)
+        sql += " ORDER BY started_at_epoch DESC,id DESC LIMIT ?"
+        args.append(max(1, min(int(limit), 500)))
+        with self.store._lock:
+            rows = self.store.conn.execute(sql, args).fetchall()
+        return [dict(row) for row in rows]

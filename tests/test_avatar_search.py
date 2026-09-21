@@ -69,8 +69,41 @@ def test_searchapi_image_search_parses_candidates_and_maps_safe_search():
     assert "hl=zh-cn" in seen["url"]
     assert "safe=active" in seen["url"]
     assert "secret" not in seen["url"]
-    with pytest.raises(NotImplementedError):
-        provider.search_web("anything")
+    client.close()
+
+
+def test_searchapi_web_search_parses_organic_results():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "organic_results": [
+                    {
+                        "title": "Example News",
+                        "link": "https://example.org/news",
+                        "domain": "example.org",
+                        "snippet": "Something happened today.",
+                        "date": "Sep 22, 2026",
+                    }
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = SearchApiProvider("secret", country="jp", language="zh-cn", client=client)
+    results = provider.search_web("today example", limit=5)
+
+    assert len(results) == 1
+    assert results[0].title == "Example News"
+    assert results[0].url == "https://example.org/news"
+    assert results[0].snippet == "Something happened today."
+    assert results[0].source_domain == "example.org"
+    assert results[0].published_at == "Sep 22, 2026"
+    assert "engine=google" in seen["url"]
+    assert "link=resolved" in seen["url"]
     client.close()
 
 

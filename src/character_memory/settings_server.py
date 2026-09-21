@@ -88,6 +88,10 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                     {
                         "id": provider_id,
                         "label": str(raw.get("label") or provider_spec(provider_id).label),
+                        # An unready provider that answered still has a known
+                        # asset list, and that list is what the user needs in
+                        # order to fix it. Only silence leaves it unknown.
+                        "answered": True,
                         "ready": bool(raw.get("ready")),
                         "loaded": bool(raw.get("loaded")),
                         "voices": voices,
@@ -107,6 +111,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                     {
                         "id": provider_id,
                         "label": provider_spec(provider_id).label,
+                        "answered": False,
                         "ready": False,
                         "loaded": False,
                         "voices": [],
@@ -214,18 +219,24 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                 # must not follow whichever provider the chat is currently using.
                 gsv_provider = next((item for item in providers if item["id"] == "gsv"), None)
                 templates = list((gsv_provider or {}).get("voices") or [])
-                gsv_ready = bool(gsv_provider and gsv_provider.get("ready"))
+                gsv_answered = bool(gsv_provider and gsv_provider.get("answered"))
                 current_template = str(snapshot["values"].get("GSV_TTS_VOICE") or "").strip()
+                # Selectable whenever the list is known -- deliberately not gated
+                # on readiness. A GSV that reports the default template as
+                # missing is exactly the state this field exists to repair, and
+                # the save path already applies a new template before health
+                # gates it, so disabling the options left the operator holding
+                # the one value that fixes it with no way to enter it.
                 template_field["options"] = [
-                    {"value": name, "label": name, "disabled": not gsv_ready}
+                    {"value": name, "label": name, "disabled": not gsv_answered}
                     for name in templates
                 ]
-                # Only when the sidecar actually answered: with ``ready`` false the
-                # list is unknown rather than empty, and "a template you cannot see"
-                # is not evidence that it is gone. Gating on readiness also keeps
-                # the default ``murasame`` (the value a never-configured install
-                # reports) from being announced as a missing template.
-                if gsv_ready and current_template and current_template not in templates:
+                # Only against a list that was actually read: silence means the
+                # list is unknown rather than empty, and "a template you cannot
+                # see" is not evidence that it is gone. Hence the list being
+                # non-empty as well -- absence can only be concluded from a
+                # list you have.
+                if gsv_answered and templates and current_template and current_template not in templates:
                     template_field["options"].insert(
                         0,
                         {
@@ -235,11 +246,14 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                         },
                     )
                 if not template_field["options"]:
-                    # An empty dropdown gives the user nothing to do; say where
-                    # templates come from instead.
-                    template_field["options"] = [
-                        {"value": "", "label": "尚无模板，请到 TTS Lab 的声音合成页创建一个", "disabled": True}
-                    ]
+                    # An empty dropdown gives the user nothing to do; say why it
+                    # is empty instead.
+                    label = (
+                        "尚无模板，请到 TTS Lab 的声音合成页创建一个"
+                        if gsv_answered
+                        else "GSV sidecar 未应答，暂时列不出模板"
+                    )
+                    template_field["options"] = [{"value": "", "label": label, "disabled": True}]
 
         snapshot["schema"] = schema
         snapshot["tts"] = {

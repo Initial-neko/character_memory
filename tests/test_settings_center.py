@@ -674,3 +674,84 @@ def test_settings_center_and_formal_tts_wiring_are_declared():
     assert "zh-CN-XiaoxiaoNeural" in registry
     assert 'http://127.0.0.1:8003/settings' in chat
     assert 'http://127.0.0.1:8003/settings' in lab
+
+
+def _gsv_template_field(app, config_path, env_path, client):
+    with TestClient(app) as test_client:
+        snapshot = test_client.get("/v1/settings").json()
+    section = next(item for item in snapshot["schema"] if item["id"] == "gsv-runtime")
+    return next(field for field in section["fields"] if field["name"] == "GSV_TTS_VOICE")
+
+
+def test_a_missing_default_template_does_not_lock_the_field_that_fixes_it(tmp_path: Path, monkeypatch):
+    """The one value that repairs GSV must stay enterable while GSV is broken.
+
+    Readiness is "the default template loads", so a GSV whose default template
+    is missing reports ``ready: false`` -- and that is precisely the state this
+    selector exists to repair. Disabling its options on readiness left the
+    operator looking at the template they needed, greyed out, on a page whose
+    save path was already written to apply a new template before health gating
+    it: the only way out was to hand-edit .env.
+    """
+
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "gsv"\ntts_voice: "momo"\n', encoding="utf-8")
+
+    class BrokenDefaultClient(_SettingsRuntimeClient):
+        def __init__(self):
+            super().__init__()
+            self.providers["gsv"]["ready"] = False
+            self.providers["gsv"]["reason"] = (
+                "Default template 'murasame' is not defined; create one in the TTS Lab "
+                "voice design page or pick an existing template in Settings Center."
+            )
+            # What the sidecar reports: the registered templates plus the
+            # configured default, which need not exist.
+            self.providers["gsv"]["voices"] = ["character-c70f8f95", "momo", "rei", "murasame"]
+
+    runtime = BrokenDefaultClient()
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+    app = create_settings_app(str(config), store=store, runtime_http_client=runtime)
+
+    field = _gsv_template_field(app, config, tmp_path / ".env", runtime)
+    options = {item["value"]: item for item in field["options"]}
+    assert options["momo"]["disabled"] is False
+    assert options["rei"]["disabled"] is False
+
+    with TestClient(app) as client:
+        response = client.patch("/v1/settings", json={"values": {"GSV_TTS_VOICE": "momo"}})
+
+    assert response.status_code == 200
+    assert parse_env_file(tmp_path / ".env")["GSV_TTS_VOICE"] == "momo"
+    # Applied to the running sidecar, not merely persisted for the next start.
+    configure = [call for call in runtime.post_calls if call[0].endswith("/v1/configure")]
+    assert configure, "saving the default template must reach the running sidecar"
+    assert {call[1]["json"]["voice"] for call in configure} == {"momo"}
+
+
+def test_a_silent_sidecar_says_so_instead_of_offering_nothing(tmp_path: Path, monkeypatch):
+    """An unreachable sidecar lists no templates; the dropdown has to say why.
+
+    "Create one in the TTS Lab" is the wrong instruction when the reason the
+    list is empty is that nothing answered -- the templates may be sitting right
+    there, and the user would go looking for a problem that is not theirs.
+    """
+
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "gsv"\ntts_voice: "momo"\n', encoding="utf-8")
+
+    class SilentGsvClient(_SettingsRuntimeClient):
+        def get(self, url, **kwargs):
+            if url.endswith("/v1/providers/gsv"):
+                raise RuntimeError("connection refused")
+            return super().get(url, **kwargs)
+
+    runtime = SilentGsvClient()
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+    app = create_settings_app(str(config), store=store, runtime_http_client=runtime)
+
+    field = _gsv_template_field(app, config, tmp_path / ".env", runtime)
+    assert [item["disabled"] for item in field["options"]] == [True]
+    assert "未应答" in field["options"][0]["label"]

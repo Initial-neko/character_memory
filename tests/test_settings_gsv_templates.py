@@ -142,8 +142,14 @@ def test_gsv_section_offers_the_registry_as_options(tmp_path):
     assert all(not option["disabled"] for option in field["options"])
 
 
-def test_the_template_field_is_disabled_while_gsv_is_not_ready(tmp_path):
-    """A dead sidecar cannot apply a choice, so do not pretend it can."""
+def test_the_template_field_offers_nothing_when_the_sidecar_lists_no_templates(tmp_path):
+    """Nothing to choose from, so point at where templates come from.
+
+    A sidecar that *is* listing templates is a different case -- its options stay
+    selectable even while it reports itself unready, because that is the state
+    the selector exists to repair (see
+    ``test_settings_center.py::test_a_missing_default_template_does_not_lock_the_field_that_fixes_it``).
+    """
 
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

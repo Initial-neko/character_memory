@@ -24,6 +24,7 @@
 - Direct Chat + Group Chat；群聊共享事实只保存一次，成员按因果顺序逐个判断。
 - 异步消息接受：用户消息先持久化并立即返回 202，人物反应通过 SSE 渐进推送。
 - Message Search、Group Mentions、Unread、Intent Preview、Group Archive/Restore。
+- Character Space 基础：独立空间入口 + 角色动态小入口，共享帖子/评论/点赞/已查看事实；归档角色保留历史但停止新的 Space 参与。Daily Life 与 Agent 自动互动仍在后续接入。
 - 用户图片输入 + Vision；浏览器 Camera / Display Capture 会选择关键帧作为本轮 transient Vision context，不把帧二进制长期写进聊天事实。
 - ImageGen：Direct 与 Group 中 Character 都可以自主选择 `SELFIE / SCENE`；同时保留用户显式“AI 生成图片”草稿工具。
 - Avatar Search / Avatar Generate / 从聊天图片设头像。
@@ -46,6 +47,7 @@ Browser
                                                                 │
 Character Runtime :8000                                         │
 ├─ Direct / Group HTTP + SSE                                    │
+├─ Character Space shared social facts                          │
 ├─ ReactionScheduler / PersonRuntime                            │
 ├─ Persona / Memory / Mental State / Intent                     │
 ├─ Vision / Visual Capture context                              │
@@ -174,6 +176,7 @@ Browser Smoke 在 CI 的独立 job 中安装 Playwright/Chromium，不放入默�
 - [Codebase Layout](docs/current/CODEBASE_LAYOUT.md)
 - [Person Runtime](docs/current/PERSON_RUNTIME.md)
 - [Conversation Runtime](docs/current/CONVERSATION_RUNTIME.md)
+- [Character Space](docs/current/CHARACTER_SPACE.md)
 - [Memory](docs/current/MEMORY.md)
 - [Visual Capture](docs/current/VISUAL_CAPTURE.md)
 - [Visual Generation](docs/current/VISUAL_GENERATION.md)

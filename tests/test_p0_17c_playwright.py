@@ -191,7 +191,7 @@ def test_character_archive_confirmation_and_restore_round_trip(page, wake_server
     target.locator("[data-character-more]").click()
     target.locator("[data-character-archive]").click()
 
-    expect(page.locator("#drawer")).to_have_class(lambda value: "open" in value)
+    page.wait_for_function("() => document.getElementById('drawer').classList.contains('open')")
     expect(page.locator("[data-character-archive-confirm]")).to_be_visible()
     expect(page.locator("#drawerBody")).to_contain_text("聊天记录")
     expect(page.locator("#drawerBody")).to_contain_text("空间动态")

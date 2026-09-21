@@ -50,6 +50,15 @@ class SpaceDevConfigRequest(BaseModel):
     max_posts_per_day: int | None = Field(default=None, ge=0, le=200)
     audience_size: int | None = Field(default=None, ge=0, le=10)
     poll_seconds: float | None = Field(default=None, ge=10.0, le=3600.0)
+    observation_enabled: bool | None = None
+    image_search_enabled: bool | None = None
+    image_generation_enabled: bool | None = None
+    voice_post_enabled: bool | None = None
+    link_preview_enabled: bool | None = None
+    observation_chance: float | None = Field(default=None, ge=0.0, le=1.0)
+    media_chance: float | None = Field(default=None, ge=0.0, le=1.0)
+    voice_chance: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_images_per_post: int | None = Field(default=None, ge=1, le=9)
     rearm: bool = True
 
 
@@ -309,6 +318,15 @@ def attach_space_routes(app):
             max_posts_per_day=req.max_posts_per_day,
             audience_size=req.audience_size,
             poll_seconds=req.poll_seconds,
+            observation_enabled=req.observation_enabled,
+            image_search_enabled=req.image_search_enabled,
+            image_generation_enabled=req.image_generation_enabled,
+            voice_post_enabled=req.voice_post_enabled,
+            link_preview_enabled=req.link_preview_enabled,
+            observation_chance=req.observation_chance,
+            media_chance=req.media_chance,
+            voice_chance=req.voice_chance,
+            max_images_per_post=req.max_images_per_post,
             rearm=req.rearm,
             now=datetime.now().astimezone(),
         )

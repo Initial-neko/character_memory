@@ -232,7 +232,10 @@
           );
           status.textContent = "✓ " + loaded + " · runtime " + (item.device || "device unknown") + " · " + (item.model || item.id)
             + (devicePending ? " · configured " + configuredDevice.toUpperCase() + "（需重启对应 TTS Runtime）" : "")
-            + (correctedVoice ? " · Voice 已自动切换为 " + selectedVoice + "（保存后写入配置）" : "");
+            + (correctedVoice ? " · Voice 已自动切换为 " + selectedVoice + "（保存后写入配置）" : "")
+            // The provider works, so this is a warning and not the ✗ line: only
+            // a character with no voice of its own reaches the default template.
+            + (item.default_template_problem ? " · ⚠ " + item.default_template_problem : "");
         } else {
           status.textContent = "✗ unavailable · " + (item.reason || "health check failed");
         }

@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from character_memory.media_runtime import float_audio_to_wav
 from character_memory.tts_registry import provider_spec
 from character_memory.voices import template_root
+from character_memory.web_assets import attach_static_assets
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -317,6 +318,10 @@ class GsvSidecarProvider:
                 "model": data.get("model"),
                 "device": data.get("device"),
                 "reason": data.get("reason"),
+                # Carried, not folded into ``reason``: the sidecar stays ready
+                # without a usable default template, and only the requests that
+                # fall back to it fail.
+                "default_template_problem": data.get("default_template_problem"),
                 "note": data.get("note") or fallback["note"],
             }
         except Exception:
@@ -959,7 +964,6 @@ def create_tts_lab_app(
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.responses import FileResponse, Response
-        from fastapi.staticfiles import StaticFiles
     except ImportError as exc:
         raise RuntimeError("TTS Lab requires the api extra") from exc
 
@@ -1003,7 +1007,7 @@ def create_tts_lab_app(
 
     web_dir = Path(__file__).with_name("web")
     app = FastAPI(title="Character Memory TTS Provider Lab", version="0.1")
-    app.mount("/static", StaticFiles(directory=web_dir), name="static")
+    attach_static_assets(app, web_dir)
 
     @app.on_event("shutdown")
     def shutdown():

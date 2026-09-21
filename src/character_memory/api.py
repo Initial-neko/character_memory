@@ -31,6 +31,7 @@ from character_memory.persona_builder import PersonaBuilder, PersonaDraft, norma
 from character_memory.stickers import StickerTagSuggestion, import_sticker_bundle, load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.voice_message_fields import voice_fields
+from character_memory.web_assets import attach_static_assets
 
 
 logger = logging.getLogger("character_memory.api")
@@ -90,7 +91,6 @@ class CreateCharacterRequest(BaseModel):
 def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = None):
     from fastapi import Body, FastAPI, HTTPException
     from fastapi.responses import FileResponse
-    from fastapi.staticfiles import StaticFiles
 
     configure_logging()
     own_bundle = bundle is None
@@ -438,7 +438,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     app = FastAPI(title="character-memory", version="0.12.0")
     web_dir = Path(__file__).with_name("web")
-    app.mount("/static", StaticFiles(directory=web_dir), name="static")
+    attach_static_assets(app, web_dir)
 
     # One application runtime access point. Feature route modules (group chat,
     # future media tools) reuse this instead of creating their own model/store.

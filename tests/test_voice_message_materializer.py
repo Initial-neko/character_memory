@@ -1,7 +1,11 @@
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 
-from character_memory.application.voice_message_materializer import VoiceMessageMaterializer
+from character_memory.application.voice_message_materializer import (
+    VoiceMessageMaterializer,
+    _response_detail,
+)
 from character_memory.domain.models import Event, EventType
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.media import MediaStorage
@@ -25,6 +29,7 @@ class _Response:
         self.content = content
         self.status_code = status
         self.headers = {"x-media-audio-ms": "3210"}
+        self.text = ""
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -142,3 +147,72 @@ def test_voice_message_frontend_has_native_bubble_not_audio_controls():
     assert "voice_status:metadata.voice_status" in groups
     assert "CM.voiceMessageHtml(message)" in groups
     assert ".voice-bubble" in css
+
+
+class _ErrorResponse:
+    """The shape the media runtime answers a refused synthesis with.
+
+    Copied from the live stack: every hop between the materializer and the
+    sidecar replies with the previous hop's body verbatim, so the sentence that
+    names the cause arrives nested inside escaped JSON.
+    """
+
+    def __init__(self, detail):
+        self.status_code = 503
+        self.content = b""
+        self.headers = {}
+        self._detail = detail
+
+    @property
+    def text(self):
+        return json.dumps({"detail": self._detail})
+
+    def json(self):
+        return {"detail": self._detail}
+
+
+def _refused(detail):
+    return _ErrorResponse(detail)
+
+
+def test_a_failed_synthesis_keeps_the_cause_the_body_carried(tmp_path):
+    """ "503 Service Unavailable for url ..." names the hop, never the reason.
+
+    That string was the whole of what a failed voice message recorded, so the
+    bubble could say a voice message had failed and nothing else -- while the
+    sentence naming the missing template sat in the body one layer down.
+    """
+    store = SQLiteStore(tmp_path / "voice.db")
+    hub = _Hub()
+    inner = "Default template 'murasame' is not defined; pick an existing template in Settings Center."
+    client = _Client(response=_refused(json.dumps({"detail": inner})))
+    event = store.append_event(Event(
+        character_id="momo",
+        event_type=EventType.CHARACTER_MESSAGE,
+        event_time=datetime(2026, 9, 21, 23, 1, tzinfo=timezone.utc),
+        content="喂喂，听得到吗～",
+        metadata={"action": "VOICE_MESSAGE", "conversation_id": "momo", **voice_pending_fields()},
+    ))
+
+    _materializer(tmp_path, store, hub, client).materialize_direct(event, conversation_id="momo")
+
+    saved = store.get_event(event.id)
+    assert saved.metadata["voice_status"] == "failed"
+    stored = saved.metadata["voice_error"]
+    assert inner in stored, stored
+    assert "503" in stored and "http://127.0.0.1:8001/v1/tts" in stored, stored
+    assert saved.metadata["voice_media_id"] is None
+
+
+def test_a_failed_synthesis_falls_back_to_the_body_when_it_is_not_json(tmp_path):
+    """A proxy or a crash answers with plain text; that is still the reason."""
+
+    class _Plain(_ErrorResponse):
+        @property
+        def text(self):
+            return "upstream connect error"
+
+        def json(self):
+            raise ValueError("not json")
+
+    assert _response_detail(_Plain("")) == "upstream connect error"

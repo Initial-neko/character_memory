@@ -95,7 +95,11 @@
     const width = Math.min(260, 92 + Math.min(seconds || 1, 34) * 5);
     const mediaUrl = message.voice_media_id ? `/v1/media/${encodeURIComponent(message.voice_media_id)}` : "";
     if (status === "failed") {
-      return `<div class="voice-message voice-failed"><div class="voice-bubble voice-disabled">⚠ 语音生成失败</div><div class="voice-tools"><button type="button" data-voice-text>文本</button></div><div class="voice-transcript hidden" data-voice-transcript>${CM.escapeHtml(message.content || "")}</div></div>`;
+      // The reason is stored on the message and was rendered nowhere, so a
+      // failed voice message said only that it had failed -- while the sentence
+      // naming the cause sat in the payload the whole time.
+      const why = String(message.voice_error || "").trim();
+      return `<div class="voice-message voice-failed"><div class="voice-bubble voice-disabled">⚠ 语音生成失败</div>${why ? `<div class="voice-error">${CM.escapeHtml(why)}</div>` : ""}<div class="voice-tools"><button type="button" data-voice-text>文本</button></div><div class="voice-transcript hidden" data-voice-transcript>${CM.escapeHtml(message.content || "")}</div></div>`;
     }
     if (status !== "ready" || !mediaUrl) {
       return `<div class="voice-message voice-pending"><div class="voice-bubble voice-disabled"><span class="voice-glyph">)))</span><span>语音生成中…</span></div></div>`;

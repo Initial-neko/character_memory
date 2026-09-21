@@ -343,6 +343,15 @@ class GsvTtsRuntime:
                 "unusable. Create the default template in the TTS Lab voice design page "
                 "or pick an existing template in Settings Center."
             )
+        if not Path(profile.ref_audio).is_file():
+            # Checked here, on the profile the request actually resolved to,
+            # rather than as part of readiness: readiness is about the engine,
+            # and a clip that was renamed or deleted since the tree was read is
+            # about this one reference. A warm engine answers without re-reading
+            # the tree, so this is the only place the two cannot drift apart.
+            raise RuntimeError(
+                f"Voice {profile.voice_id!r} ref_audio not found: {profile.ref_audio}"
+            )
         # A profile only overrides the models it pins; unset means "inherit".
         return (
             profile.voice_id,
@@ -373,12 +382,18 @@ class GsvTtsRuntime:
         return True, None
 
     def _asset_status(self) -> tuple[bool, str | None]:
-        """Ready when the shared base models and the default template both resolve.
+        """Ready when the shared base models exist and the voice tree loaded.
 
         The two model paths stay required: every template inherits them unless it
-        pins its own. The reference clip moved into the template, so the check
-        follows it there -- readiness is now "the default template loads", which
-        subsumes the old four-field check.
+        pins its own.
+
+        The *default* template is deliberately not part of this. It is the
+        fallback for a character with no ``voice.yaml`` of its own, so a missing
+        default costs that one character its voice -- while folding it in here
+        cost every character its voice: a request naming a template that exists
+        was refused with the default's name, because ``load`` checks readiness
+        before it looks at what was asked for. What is broken about the default
+        is still reported, by ``_default_template_problem``.
         """
         if self._voices_error:
             # The tree failed to load whole. Reported verbatim: it already names
@@ -397,16 +412,28 @@ class GsvTtsRuntime:
         missing_files = [value for value in required.values() if value and not Path(value).is_file()]
         if missing_files:
             return False, f"GSV asset not found: {', '.join(missing_files)}"
+        return True, None
 
-        profile = self._voices.get(self.default_voice)
-        if profile is None:
-            return False, (
+    def _default_template_problem(self) -> str | None:
+        """Why the fallback voice would fail, or ``None`` when it would not.
+
+        Reported next to readiness rather than through it: the fallback being
+        unusable is a fact the operator needs, and one that a request for some
+        other template has no reason to care about.
+        """
+        if self._voices_error:
+            # The tree failure is already the readiness reason; repeating it
+            # here would put two sentences about one broken file side by side.
+            return None
+        if self.default_voice not in self._templates:
+            return (
                 f"Default template {self.default_voice!r} is not defined; create one in the "
                 "TTS Lab voice design page or pick an existing template in Settings Center."
             )
-        if not Path(profile.ref_audio).is_file():
-            return False, f"Default template {self.default_voice!r} ref_audio not found: {profile.ref_audio}"
-        return True, None
+        profile = self._voices.get(self.default_voice)
+        if profile is not None and not Path(profile.ref_audio).is_file():
+            return f"Default template {self.default_voice!r} ref_audio not found: {profile.ref_audio}"
+        return None
 
     def _factory(self):
         if self._tts_factory is not None:
@@ -510,6 +537,10 @@ class GsvTtsRuntime:
             "cuda_allocated_mb": allocated,
             "cuda_reserved_mb": reserved,
             "reason": reason,
+            # Not folded into ``reason``: this one does not make the sidecar
+            # unready, and a reader that treats every reason as a refusal would
+            # take a working engine for a dead one.
+            "default_template_problem": self._default_template_problem(),
             "note": "Full-WAV GSV sidecar used by both TTS Lab and formal :8001 routing.",
         }
 

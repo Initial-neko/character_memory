@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from character_memory.settings_store import GSV_RUNTIME_FIELDS, SettingsStore
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_IDS, provider_spec
+from character_memory.web_assets import attach_static_assets
 
 
 def build_gsv_payload(merged: dict[str, Any]) -> dict[str, Any]:
@@ -51,7 +52,6 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.responses import FileResponse, Response
-        from fastapi.staticfiles import StaticFiles
     except ImportError as exc:
         raise RuntimeError("Settings Center requires the api extra") from exc
 
@@ -59,7 +59,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
     migration = settings_store.migrate_legacy_secrets()
     web_dir = Path(__file__).with_name("web")
     app = FastAPI(title="Character Memory Settings Center", version="0.1")
-    app.mount("/static", StaticFiles(directory=web_dir), name="static")
+    attach_static_assets(app, web_dir)
 
     runtime_urls = {
         "character": os.getenv("CHARACTER_SETTINGS_CHARACTER_BASE", "http://127.0.0.1:8000").rstrip("/"),
@@ -100,6 +100,12 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                         "model": raw.get("model"),
                         "device": raw.get("device"),
                         "reason": raw.get("reason"),
+                        # A warning, not a refusal: the provider is ready and
+                        # every template it lists works. Only a character with
+                        # no voice of its own falls back to a default that is
+                        # not there, and the card should say so without putting
+                        # an unavailable provider in front of the operator.
+                        "default_template_problem": raw.get("default_template_problem"),
                         "note": raw.get("note"),
                         "device_hot_apply": provider_spec(provider_id).device_hot_apply,
                     }

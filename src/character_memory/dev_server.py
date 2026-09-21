@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from character_memory.app import build_model
 from character_memory.config import Settings, load_settings
 from character_memory.resource_metrics import collect_resource_snapshot
+from character_memory.web_assets import attach_static_assets
 
 
 logger = logging.getLogger("character_memory.dev_server")
@@ -84,7 +85,6 @@ def create_dev_app(
     try:
         from fastapi import Body, FastAPI, Header, HTTPException, Query
         from fastapi.responses import FileResponse, Response
-        from fastapi.staticfiles import StaticFiles
     except ImportError as exc:
         raise RuntimeError("Dev Console requires the api extra") from exc
 
@@ -175,7 +175,7 @@ def create_dev_app(
         return response
 
     app = FastAPI(title="Character Memory Dev Console", version="0.4")
-    app.mount("/static", StaticFiles(directory=web_dir), name="static")
+    attach_static_assets(app, web_dir)
 
     @app.on_event("shutdown")
     def shutdown():

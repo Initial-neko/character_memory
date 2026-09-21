@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -12,6 +13,35 @@ from character_memory.group_store import GroupRepository
 from character_memory.voice_message_fields import VOICE_DURATION_MS, VOICE_ERROR, VOICE_MEDIA_ID, VOICE_STATUS
 
 logger = logging.getLogger("character_memory.application.voice_message_materializer")
+
+
+def _response_detail(response, *, depth: int = 4) -> str:
+    """The innermost cause the body carries, unwrapped from its re-encodings.
+
+    Each hop between here and the sidecar answers with the previous hop's body
+    verbatim, so the sentence that names the cause arrives nested:
+    ``{"detail": "{\\"detail\\": \\"...\\"}"}``. This string is stored as the
+    message's ``voice_error`` and shown to the user, so it is unwrapped rather
+    than passed along in its escaped form.
+    """
+
+    try:
+        value = response.json().get("detail")
+    except Exception:
+        value = None
+    if value is None:
+        value = response.text
+    for _ in range(depth):
+        if not isinstance(value, str):
+            break
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            break
+        if not isinstance(parsed, dict) or "detail" not in parsed:
+            break
+        value = parsed["detail"]
+    return str(value or "").strip() or "no response body"
 
 
 class VoiceMessageMaterializer:
@@ -43,7 +73,16 @@ class VoiceMessageMaterializer:
             f"{self.media_base}/v1/tts",
             json={"text": text, "voice": character_id},
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            # Carry the body through. "503 Service Unavailable for url ..." names
+            # the hop, never the cause, and it is the whole of what the stored
+            # ``voice_error`` keeps -- so the bubble could say a voice message
+            # failed and nothing else. The media runtime answers with the
+            # provider's own sentence in its body.
+            raise RuntimeError(
+                f"VOICE_MESSAGE synthesis failed with HTTP {response.status_code} at "
+                f"{self.media_base}/v1/tts: {_response_detail(response)}"
+            )
         return response
 
     def _save(self, *, store, character_id: str, event_id: int, event_time, response):

@@ -873,23 +873,26 @@ def test_gsv_voice_profile_overrides_models_only_when_it_pins_them(tmp_path):
     assert pinned["sovits_model"] == "rin-sovits.pth"
 
 
-def test_gsv_runtime_without_a_default_template_refuses_the_request(tmp_path):
+def test_gsv_runtime_without_a_default_template_warns_and_refuses_the_request(tmp_path):
     """A missing personas directory is not an error: the sidecar still starts.
 
-    It cannot synthesize -- readiness is "the default template resolves", and
-    nothing here defines one -- and that arrives as a reported reason rather
-    than a crash at startup. A request against it must then fail loudly. The
-    runtime-global ``ref_audio``/``ref_text`` pair used to answer this corner,
-    and it is reachable whenever the engine is already warm (``load()``
-    short-circuits on ``already_loaded``), so the "it will not be asked to
-    synthesize" reasoning behind that fallback was false: the operator got HTTP
-    200, the wrong voice, and a ``/health`` that said not ready.
+    Readiness is about the engine -- the base models and a tree that parsed --
+    and nothing here defines a default template, so there is nothing to fall
+    back to. That is a warning the operator needs (``default_template_problem``,
+    which the Settings Center shows) rather than a dead engine: a request has to
+    name a voice that resolves, and this one does not. The runtime-global
+    ``ref_audio``/``ref_text`` pair used to answer this corner, and it was
+    reachable whenever the engine was already warm (``load()`` short-circuits on
+    ``already_loaded``), so the "it will not be asked to synthesize" reasoning
+    behind that fallback was false: the operator got HTTP 200, the wrong voice,
+    and a ``/health`` that said not ready.
     """
     rig = _Rig(tmp_path, persona_root=tmp_path / "does-not-exist")
 
     status = rig.runtime.status()
-    assert status["ready"] is False
-    assert "murasame" in status["reason"]
+    assert status["ready"] is True, "the engine is fine; only the fallback is missing"
+    assert status["reason"] is None
+    assert "murasame" in status["default_template_problem"]
     assert status["voices"] == ["murasame"]
 
     with TestClient(create_gsv_tts_app(rig.runtime)) as client:
@@ -902,13 +905,14 @@ def test_gsv_runtime_without_a_default_template_refuses_the_request(tmp_path):
 
 
 def test_gsv_synthesize_refuses_after_the_default_template_clip_disappears(tmp_path):
-    """The ``already_loaded`` early return must not bypass readiness.
+    """A warm engine must not answer from a reference that no longer resolves.
 
     The engine stays warm across a registry change -- that is the point of
     ``reload`` -- while the template it was warmed for can be renamed, or its
-    clip deleted. Checking readiness only on the cold path answered those
-    requests from a reference that no longer resolves, with ``/health`` already
-    reporting not ready.
+    clip deleted. Readiness is no longer the thing that catches this (the engine
+    and the tree are both fine), so the check lives on the profile the request
+    resolved to, which is also the only place it covers a *named* template
+    rather than just the default.
     """
     personas = _persona_root(tmp_path)
     clip = _write_template(tmp_path, "murasame")
@@ -923,7 +927,8 @@ def test_gsv_synthesize_refuses_after_the_default_template_clip_disappears(tmp_p
     with pytest.raises(RuntimeError, match="murasame"):
         rig.runtime.synthesize(GsvTtsRequest(text="你好", voice="murasame"))
 
-    assert rig.runtime.status()["ready"] is False
+    assert rig.runtime.status()["ready"] is True
+    assert "murasame" in rig.runtime.status()["default_template_problem"]
 
 
 def test_gsv_runtime_reports_a_broken_voice_asset_without_dying_of_it(tmp_path):
@@ -1144,3 +1149,27 @@ def test_gsv_synthesis_hands_the_engine_the_templates_own_reference(tmp_path):
     assert rig.calls["cache_prompt"][0]["prompt_audio_paths"] == clip
     assert rig.calls["cache_prompt"][0]["prompt_audio_texts"] == "模板参考文本。"
     assert [path for path, _ in rig.calls["cache_spk"]] == [clip]
+
+
+def test_a_named_template_is_served_while_the_default_template_is_missing(tmp_path):
+    """The regression the readiness split fixes: 503 for a voice that works.
+
+    Every browser request names its character, and a character with a template
+    of its own never touches the default. While readiness required the default,
+    ``load`` refused the request before ``_resolve_voice`` looked at what was
+    asked for -- so one missing fallback took every voice offline, and the
+    message named a template the caller had not mentioned.
+    """
+    _write_template(tmp_path, "momo")
+    rig = _Rig(tmp_path, persona_root=_persona_root(tmp_path), default_voice="ghost")
+
+    status = rig.runtime.status()
+    assert status["ready"] is True, "a missing fallback is not a dead engine"
+    assert "ghost" in status["default_template_problem"]
+
+    result, infer = rig.synthesize(voice="momo")
+    assert result.voice == "momo"
+
+    # ... and the voice that really is missing still fails, naming itself.
+    with pytest.raises(RuntimeError, match="ghost"):
+        rig.runtime.synthesize(GsvTtsRequest(text="你好", voice="ghost"))

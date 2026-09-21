@@ -91,13 +91,23 @@ def test_asset_status_requires_the_default_template_to_resolve(tmp_path):
     assert ready is True, reason
 
 
-def test_asset_status_reports_a_missing_default_template(tmp_path):
+def test_a_missing_default_template_is_a_warning_not_an_unready_engine(tmp_path):
+    """An unusable fallback must not read as an unusable sidecar.
+
+    The default is only reached by a character with no ``voice.yaml``, so a
+    missing one costs that character its voice. Reporting it through readiness
+    cost every character theirs: ``load`` consults readiness before it looks at
+    what the request named, so a request for a template that exists was refused
+    as 503 with a stranger's name in the message.
+    """
+
     runtime = _runtime(tmp_path, default_voice="ghost")
 
     ready, reason = runtime._asset_status()
 
-    assert ready is False
-    assert "ghost" in reason
+    assert ready is True
+    assert reason is None
+    assert "ghost" in runtime._default_template_problem()
 
 
 def test_a_missing_default_template_refuses_the_request_loudly(tmp_path):

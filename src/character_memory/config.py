@@ -105,6 +105,19 @@ class Settings(BaseModel):
     space_audience_size: int = Field(default=5, ge=0, le=10)
     space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 
+    # Autonomous Space world/media behavior. These probabilities are gates for
+    # whether a capability is even offered to the character on one opportunity;
+    # the character may still decide not to use it.
+    space_observation_enabled: bool = True
+    space_image_search_enabled: bool = True
+    space_image_generation_enabled: bool = True
+    space_voice_post_enabled: bool = True
+    space_link_preview_enabled: bool = True
+    space_observation_chance: float = Field(default=0.30, ge=0.0, le=1.0)
+    space_media_chance: float = Field(default=0.40, ge=0.0, le=1.0)
+    space_voice_chance: float = Field(default=0.15, ge=0.0, le=1.0)
+    space_max_images_per_post: int = Field(default=9, ge=1, le=9)
+
     # Legacy V2 fields remain loadable so existing config.yaml files do not need
     # a destructive migration. The interval scheduler no longer consumes them.
     space_daily_window_start_hour: int = Field(default=18, ge=0, le=23)

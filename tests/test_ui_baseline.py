@@ -123,23 +123,42 @@ def test_topbar_shares_its_row_with_the_character_heading():
     assert _declaration(_rule(css, ".topbar-actions"), "flex") == "0 0 auto"
 
 
-def test_character_row_reserves_the_lane_its_menu_button_sits_in():
+def test_character_row_reserves_a_lane_wide_enough_for_its_archive_button():
     """A shorthand that overwrites the button's lane puts the unread dot under it.
 
     `.character-item` used to set `padding-right:38px` in one rule and
     `padding:10px` in a later one, so the lane was 10px and the two collided.
     """
     css = (WEB / "styles.css").read_text(encoding="utf-8")
-    assert "38px" in _declaration(_rule(css, ".character-item"), "padding")
+    padding = _declaration(_rule(css, ".character-item"), "padding").split()
+    assert len(padding) == 4, "the lane has to be part of the shorthand"
+    top, right, bottom, left = (int(value.removesuffix("px")) for value in padding)
+    assert top == bottom
+    assert right >= 56, "the lane the archive button sits in"
+    assert right > left
+
+    mobile = _AT_RULE.findall(css)
+    assert any("58px" in block for block in mobile), "the mobile rule must keep the lane"
 
 
-def test_row_menus_are_not_hover_only():
-    """Archiving a character has no other entry point, so it cannot be hidden."""
-    chat = _rule((WEB / "styles.css").read_text(encoding="utf-8"), ".character-more-button")
+def test_archiving_a_character_is_a_labelled_button_not_a_hover_trigger():
+    """It has no other entry point, so it cannot be hidden or unnamed.
+
+    The row used to carry a "···" at 45% opacity that opened a menu holding
+    this one action. It was invisible enough that the action could not be
+    found, so the trigger is now the action.
+    """
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    assert 'class="character-archive-button"' in app
+    assert 'data-character-more' not in app
+
+    button = _rule((WEB / "styles.css").read_text(encoding="utf-8"), ".character-archive-button")
+    assert _declaration(button, "opacity") in (None, "1")
+    assert _declaration(button, "border"), "an unstyled button does not read as one"
+
+    # The group row keeps its "···" menu, but still must not be hover-only.
     groups = _rule((WEB / "p0_11.css").read_text(encoding="utf-8"), ".group-more-button")
-    for body in (chat, groups):
-        opacity = _declaration(body, "opacity")
-        assert opacity not in (None, "0"), "a hover-only trigger is invisible on touch"
+    assert _declaration(groups, "opacity") not in (None, "0")
 
 
 def _luminance(value: str) -> float:

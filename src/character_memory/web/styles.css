@@ -21,15 +21,11 @@ button,textarea { font:inherit; }
 .character-archive-list-button { border:0; background:transparent; color:inherit; cursor:pointer; height:24px; min-height:0; padding:0 7px; border-radius:var(--ui-r-sm); font:inherit; font-size:11px; letter-spacing:0; text-transform:none; }
 .character-archive-list-button:hover { background:var(--ui-hover); }
 .character-item-wrap { position:relative; min-width:0; }
-/* Always visible, dimmed at rest: an action that only exists on hover is not
- * discoverable, and on a touch screen it does not exist at all. This is the
- * only way to archive a character, so it has to be findable without guessing. */
-.character-more-button { position:absolute; right:7px; top:50%; transform:translateY(-50%); width:27px; height:27px; padding:0; border:0; border-radius:var(--ui-r-sm); background:transparent; color:var(--ui-muted); cursor:pointer; opacity:.45; transition:opacity .12s ease, background .12s ease; }
-.character-item-wrap:hover .character-more-button, .character-item-wrap:focus-within .character-more-button, .character-more-button:focus-visible { opacity:1; }
-.character-more-button:hover { background:var(--ui-hover); }
-.character-context-menu { position:absolute; right:7px; top:calc(50% + 18px); z-index:24; min-width:94px; padding:5px; border:1px solid var(--ui-line); border-radius:var(--ui-r-sm); background:var(--ui-surface); box-shadow:var(--ui-shadow-pop); }
-.character-context-menu button { width:100%; min-height:0; border:0; border-radius:var(--ui-r-xs); background:transparent; padding:8px 10px; text-align:left; color:var(--ui-text); cursor:pointer; }
-.character-context-menu button:hover { background:var(--ui-hover); }
+/* A labelled button, not a "···" that only appears on hover. Archiving was the
+ * single item behind that menu, and the trigger was invisible enough that the
+ * action could not be found at all. It sits in the lane the row reserves. */
+.character-archive-button { position:absolute; right:8px; top:50%; transform:translateY(-50%); min-height:var(--ui-control-h-sm); padding:0 9px; border:1px solid var(--ui-line); border-radius:var(--ui-r-sm); background:var(--ui-surface); color:var(--ui-muted); font-size:11px; line-height:1; }
+.character-archive-button:hover:not(:disabled) { border-color:var(--ui-line-strong); background:var(--ui-surface-soft); color:var(--ui-text); }
 .character-archive-list { display:grid; gap:8px; }
 .character-archive-card { display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--ui-line); border-radius:var(--ui-r-sm); padding:10px 12px; }
 .character-archive-copy { display:grid; gap:2px; min-width:0; }
@@ -38,10 +34,10 @@ button,textarea { font:inherit; }
 .character-archive-card button { min-height:0; padding:6px 12px; border-radius:var(--ui-r-sm); }
 .character-archive-empty { color:var(--ui-muted); font-size:12px; padding:10px; }
 .character-list { display:grid; gap:4px; overflow:auto; }
-/* The 38px right padding is the lane the row's ⋯ button sits in. It used to be
- * a separate `padding-right` declaration above this one, which this shorthand
- * silently overwrote -- so the unread dot ran under the button. */
-.character-item { width:100%; border:0; background:transparent; border-radius:var(--ui-r-md); padding:10px 38px 10px 10px; display:grid; grid-template-columns:38px minmax(0,1fr); gap:10px; text-align:left; cursor:pointer; color:var(--ui-text); }
+/* The right padding is the lane the archive button sits in. It used to be a
+ * separate `padding-right` declaration that this shorthand silently
+ * overwrote, which left the unread dot running under the button. */
+.character-item { width:100%; border:0; background:transparent; border-radius:var(--ui-r-md); padding:10px 62px 10px 10px; display:grid; grid-template-columns:38px minmax(0,1fr); gap:10px; text-align:left; cursor:pointer; color:var(--ui-text); }
 .character-item:hover { background:var(--ui-hover); }.character-item.active { background:var(--ui-surface); box-shadow:0 1px 2px rgba(0,0,0,.05); }
 .character-avatar { width:38px; height:38px; border-radius:50%; background:var(--ui-surface-sunken); display:grid; place-items:center; font-weight:650; font-size:13px; }
 .character-copy { min-width:0; }.character-name { display:block; font-size:13px; font-weight:600; margin:1px 0 3px; }.character-pending { color:var(--ui-muted); font-size:10px; font-weight:500; }.character-tagline { display:block; color:var(--ui-muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -86,4 +82,4 @@ button,textarea { font:inherit; }
 .drawer-backdrop { position:fixed; inset:0; background:rgba(20,25,32,.18); z-index:30; }.drawer { position:fixed; z-index:31; top:0; right:0; width:min(620px,92vw); height:100vh; background:var(--ui-surface); box-shadow:-12px 0 40px rgba(25,30,40,.12); transform:translateX(102%); transition:transform .18s ease; display:flex; flex-direction:column; }.drawer.open { transform:translateX(0); }.hidden { display:none; }
 .drawer-header { min-height:70px; border-bottom:1px solid var(--ui-line); display:flex; align-items:center; justify-content:space-between; padding:14px 18px; }.drawer-header h2 { margin:0; font-size:17px; }.drawer-header p { margin:3px 0 0; color:var(--ui-muted); font-size:11px; }.drawer-body { overflow:auto; padding:18px; }
 .section { margin-bottom:22px; }.section h3{margin:0 0 8px;font-size:14px}.section p{margin:5px 0;line-height:1.55}.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:12px}.kv div:nth-child(odd){color:var(--ui-muted)}.card-list{display:grid;gap:8px}.empty{color:var(--ui-muted);text-align:center;padding:90px 0;font-size:13px}
-@media(max-width:820px){.workspace{display:block}.sidebar{position:relative;width:100%;height:auto;border-right:0;border-bottom:1px solid var(--ui-line);padding-bottom:9px}.brand,.sidebar-title,.sidebar-foot{display:none}.character-list{display:flex;overflow:auto;padding:2px}.character-item{min-width:150px;grid-template-columns:32px minmax(0,1fr);padding:7px}.character-avatar{width:32px;height:32px}.chat-shell{min-height:calc(100vh - 58px)}.composer-wrap{left:0}.topbar{padding-inline:14px}.now{display:none}.chat{padding-inline:14px}.bubble-wrap{max-width:86%}}
+@media(max-width:820px){.workspace{display:block}.sidebar{position:relative;width:100%;height:auto;border-right:0;border-bottom:1px solid var(--ui-line);padding-bottom:9px}.brand,.sidebar-title,.sidebar-foot{display:none}.character-list{display:flex;overflow:auto;padding:2px}.character-item{min-width:170px;grid-template-columns:32px minmax(0,1fr);padding:7px 58px 7px 7px}.character-avatar{width:32px;height:32px}.chat-shell{min-height:calc(100vh - 58px)}.composer-wrap{left:0}.topbar{padding-inline:14px}.now{display:none}.chat{padding-inline:14px}.bubble-wrap{max-width:86%}}

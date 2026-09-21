@@ -32,13 +32,6 @@
     renderArchiveListButton();
   }
 
-  function closeMenus(exceptId = null) {
-    CM.dom.characterList?.querySelectorAll("[data-character-menu]").forEach(menu => {
-      if (exceptId && menu.dataset.characterMenu === exceptId) return;
-      menu.classList.add("hidden");
-    });
-  }
-
   async function reloadCharacters() {
     try {
       await CM.loadCharacters();
@@ -52,7 +45,6 @@
 
   async function archiveCharacter(characterId) {
     if (!characterId) return;
-    closeMenus();
     await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/archive`, {method:"POST"});
     // Switch before reloading: the sidebar must never be left pointing at a
     // character it no longer lists.
@@ -98,20 +90,6 @@
   }
 
   CM.dom.characterList?.addEventListener("click", event => {
-    const more = event.target.closest("[data-character-more]");
-    if (more) {
-      event.stopPropagation();
-      const id = more.dataset.characterMore;
-      const menu = CM.dom.characterList.querySelector(`[data-character-menu="${CSS.escape(id)}"]`);
-      const wasHidden = menu?.classList.contains("hidden");
-      closeMenus(id);
-      if (menu && wasHidden) menu.classList.remove("hidden");
-      return;
-    }
-    if (!event.target.closest("[data-character]")) closeMenus();
-  });
-
-  CM.dom.characterList?.addEventListener("click", event => {
     const archive = event.target.closest("[data-character-archive]");
     if (archive) archiveCharacter(archive.dataset.characterArchive).catch(console.error);
   });
@@ -122,9 +100,6 @@
   });
 
   archiveListButton?.addEventListener("click", () => showArchived().catch(console.error));
-  document.addEventListener("click", event => {
-    if (!event.target.closest(".character-item-wrap")) closeMenus();
-  });
 
   // A failure here is not worth a message: the heading simply keeps its
   // count-less label, and opening the drawer reports the real error.

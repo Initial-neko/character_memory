@@ -180,7 +180,9 @@ def test_character_archive_frontend_contract_and_syntax():
         "/restore",
     ]:
         assert token in script
-    for token in ["character-context-menu", "character-more-button", "character-archive-card"]:
+    # The row's archive control is a labelled button rather than a "···" that
+    # opened a one-item menu; the "···" trigger was too easy to miss entirely.
+    for token in ["character-archive-button", "character-archive-card", "character-archive-list-button"]:
         assert token in css
 
     node = shutil.which("node")

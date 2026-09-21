@@ -129,7 +129,12 @@ body {
 }
 
 button, input, select, textarea { font: inherit; }
-button { cursor: pointer; }
+button {
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+}
 
 :where(a) { color: var(--ui-link); }
 
@@ -181,17 +186,31 @@ button,
   white-space: nowrap;
 }
 
-button:hover:not(:disabled),
-.ui-btn:hover:not(:disabled) { background: var(--ui-surface-soft); border-color: var(--ui-line-strong); }
+/* Keep the baseline intentionally low-specificity.
+ *
+ * This is a fallback for plain buttons, not a state override for every feature
+ * component. The old `button:hover:not(:disabled)` selector was more specific
+ * than rules such as `.voice-visual-button:hover`, so hovering/focusing dark
+ * feature controls repainted them with the light page surface. Wrapping the
+ * complete selector in :where() makes feature styles win naturally. */
+:where(button:hover:not(:disabled), .ui-btn:hover:not(:disabled)) {
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line-strong);
+}
 
-button:focus-visible,
-.ui-btn:focus-visible,
-select:focus-visible,
-input:focus-visible,
-textarea:focus-visible { outline: none; border-color: var(--ui-line-strong); box-shadow: 0 0 0 3px var(--ui-focus); }
+:where(
+  button:focus-visible,
+  .ui-btn:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible
+) {
+  outline: none;
+  border-color: var(--ui-line-strong);
+  box-shadow: 0 0 0 3px var(--ui-focus);
+}
 
-button:disabled,
-.ui-btn:disabled { opacity: .5; cursor: not-allowed; }
+:where(button:disabled, .ui-btn:disabled) { opacity: .5; cursor: not-allowed; }
 
 button.primary,
 .ui-btn.is-primary {

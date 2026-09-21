@@ -1,79 +1,51 @@
-:root {
-  color-scheme: light;
-  font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #f5f6f8;
-  color: #171a21;
-}
+/* Settings Center layout. Tokens and components (buttons, fields, badges,
+ * cards, notices, page chrome) come from ui.css. */
 
-* { box-sizing: border-box; }
-body { margin: 0; background: #f5f6f8; color: #171a21; }
 a { color: inherit; }
-button, input, select { font: inherit; }
-button { border: 0; border-radius: 9px; padding: 9px 14px; background: #171a21; color: #fff; cursor: pointer; }
-button.secondary { background: #eef0f4; color: #20232a; }
-button.danger { background: #fff0f0; color: #b42318; }
-button:disabled { opacity: .5; cursor: not-allowed; }
-code, .mono { font-family: "SFMono-Regular", Consolas, monospace; }
+code, .mono { font-family: var(--ui-mono); }
 
 .settings-shell { max-width: 1320px; margin: 0 auto; padding: 28px; }
 .settings-topbar { display: flex; justify-content: space-between; gap: 28px; align-items: flex-start; margin-bottom: 20px; }
 .settings-topbar h1 { margin: 3px 0 6px; font-size: 30px; }
-.eyebrow { margin: 0; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #6b7280; }
-.subtle { color: #69707d; }
-.service-links { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.service-links a { text-decoration: none; background: #fff; border: 1px solid #e1e4e9; border-radius: 9px; padding: 8px 11px; font-size: 13px; }
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 
-.card { background: #fff; border: 1px solid #e1e4e9; border-radius: 14px; box-shadow: 0 1px 2px rgba(17,24,39,.03); }
 .toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px 18px; margin-bottom: 14px; }
 .toolbar-actions { display: flex; gap: 8px; }
-.notice { margin: 0 0 14px; padding: 12px 15px; border-radius: 10px; background: #ecfdf3; border: 1px solid #abefc6; color: #067647; white-space: pre-wrap; }
-.notice.error { background: #fff1f0; border-color: #fecdca; color: #b42318; }
 .hidden { display: none !important; }
 
-.runtime-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin-bottom: 14px; }
+.runtime-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
 .runtime-card { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; }
 .runtime-card div { display: flex; flex-direction: column; gap: 2px; }
-.runtime-card span:not(.badge) { font-size: 12px; color: #7b8190; }
-.badge { font-size: 12px; border-radius: 999px; padding: 4px 8px; background: #eef0f4; color: #606775; }
-.badge.ok { background: #ecfdf3; color: #067647; }
-.badge.bad { background: #fff1f0; color: #b42318; }
+.runtime-card span:not(.badge) { font-size: 12px; color: var(--ui-muted); }
 
-.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
 .settings-section { padding: 18px; }
 .section-heading { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
 .section-heading h2 { margin: 0 0 5px; font-size: 18px; }
-.section-heading p { margin: 0; color: #6b7280; font-size: 13px; line-height: 1.5; }
-.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field.wide { grid-column: 1 / -1; }
-.field label { font-size: 12px; font-weight: 600; color: #4b5260; }
-.field input, .field select { width: 100%; min-height: 38px; border: 1px solid #d7dbe2; border-radius: 8px; padding: 8px 10px; background: #fff; color: #171a21; }
-.field input[type="checkbox"] { width: 18px; min-height: 18px; accent-color: #171a21; }
-.checkbox-row { min-height: 38px; display: flex; align-items: center; gap: 8px; }
+.section-heading p { margin: 0; color: var(--ui-muted); font-size: 13px; line-height: 1.5; }
 .tts-health-status { margin-top: 2px; font-size: 11px; line-height: 1.45; }
-.tts-preview-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid #eef0f3; display: grid; grid-template-columns: auto minmax(220px,1fr); gap: 10px 12px; align-items: center; }
+.tts-preview-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ui-line); display: grid; grid-template-columns: auto minmax(220px, 1fr); gap: 10px 12px; align-items: center; }
 .tts-preview-row audio { width: 100%; min-width: 0; height: 38px; }
 .tts-preview-status { grid-column: 1 / -1; font-size: 12px; }
 
 .secrets-card { margin-top: 14px; padding: 18px; }
 .secret-list { display: grid; gap: 10px; }
-.secret-row { display: grid; grid-template-columns: minmax(180px,1fr) minmax(260px,1.4fr) auto; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid #eef0f3; }
+.secret-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.4fr) auto; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--ui-line); }
 .secret-row:first-child { border-top: 0; }
 .secret-meta strong { display: block; font-size: 14px; }
-.secret-meta span { display: block; margin-top: 3px; color: #767d89; font-size: 12px; }
+.secret-meta span { display: block; margin-top: 3px; color: var(--ui-muted); font-size: 12px; }
 .secret-input { display: flex; gap: 8px; }
-.secret-input input { flex: 1; min-width: 0; border: 1px solid #d7dbe2; border-radius: 8px; padding: 8px 10px; }
+.secret-input input { flex: 1; min-width: 0; }
 .secret-actions { display: flex; gap: 6px; }
-.footer-card { margin-top: 14px; padding: 18px; line-height: 1.65; color: #4e5562; }
-.footer-card h2 { margin-top: 0; color: #171a21; font-size: 18px; }
+.footer-card { margin-top: 14px; padding: 18px; line-height: 1.65; color: var(--ui-muted); }
+.footer-card h2 { margin-top: 0; color: var(--ui-text); font-size: 18px; }
 .footer-card p:last-child { margin-bottom: 0; }
+.footer-card code { color: var(--ui-text); }
 
 @media (max-width: 900px) {
   .settings-shell { padding: 18px; }
   .settings-topbar { flex-direction: column; }
   .service-links { justify-content: flex-start; }
-  .runtime-grid, .settings-grid { grid-template-columns: 1fr; }
-  .field-grid { grid-template-columns: 1fr; }
+  .runtime-grid, .settings-grid, .field-grid { grid-template-columns: 1fr; }
   .tts-preview-row { grid-template-columns: 1fr; }
   .tts-preview-status { grid-column: 1; }
   .secret-row { grid-template-columns: 1fr; }

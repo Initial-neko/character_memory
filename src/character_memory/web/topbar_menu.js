@@ -6,18 +6,12 @@
   const runtimeButton = CM.dom.runtimeButton;
   if (!actions || !runtimeButton) return;
 
-  // The topbar is the narrowest row on the page: it shares its width with the
-  // character's name and tagline, and six controls do not fit beside them at
-  // any window width worth supporting. Before this menu existed the actions
-  // simply won -- they kept their intrinsic width, the heading overflowed, and
-  // the avatar was squeezed to zero. The controls the user actually reaches
-  // for during a conversation stay in the open; the three diagnostic views
-  // collapse behind one trigger.
   const trigger = document.createElement("button");
   trigger.id = "topbarMoreButton";
   trigger.className = "ghost-button topbar-more-button";
   trigger.type = "button";
-  trigger.title = "诊断工具";
+  trigger.title = "更多操作";
+  trigger.setAttribute("aria-label", "更多操作");
   trigger.setAttribute("aria-haspopup", "true");
   trigger.setAttribute("aria-expanded", "false");
   trigger.textContent = "⋯";
@@ -26,16 +20,27 @@
   menu.id = "topbarMenu";
   menu.className = "topbar-menu hidden";
   menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "诊断工具");
+  menu.setAttribute("aria-label", "更多操作");
 
   actions.append(trigger, menu);
 
-  // wake.js and intent.js build their buttons as siblings of Runtime's, and
-  // they keep owning them -- this only relocates the elements. Keep this order:
-  // it is the order they used to appear in.
+  // Only conversation-frequency actions stay visible in the header:
+  // call, search, and this overflow trigger. Everything diagnostic or
+  // configuration-oriented moves into one predictable menu.
+  const settingsLink = document.getElementById("settingsLink");
   const wakeButton = document.getElementById("wakeButton");
-  for (const button of [wakeButton, document.getElementById("intentButton"), runtimeButton]) {
-    if (button) menu.append(button);
+  const intentButton = document.getElementById("intentButton");
+  const items = [settingsLink, intentButton, runtimeButton, wakeButton].filter(Boolean);
+
+  for (const item of items) {
+    item.classList.remove("desktop-only-control");
+    if (item === settingsLink) {
+      item.textContent = "设置";
+      item.title = "打开 Settings Center";
+    } else if (item === runtimeButton) {
+      item.textContent = "运行状态";
+    }
+    menu.append(item);
   }
 
   function close() {
@@ -50,11 +55,10 @@
   });
 
   menu.addEventListener("click", event => {
-    const button = event.target.closest("button");
-    // 唤醒 answers on its own label ("唤醒中…", "没有想说什么"), so the menu has
-    // to stay open for it. The other two open a drawer that covers the topbar
-    // anyway, and leaving the menu open behind it would be untidy.
-    if (button && button !== wakeButton) close();
+    const action = event.target.closest("button, a");
+    // Wake keeps its live status label in-place while running. Other actions
+    // either open a drawer or navigate, so the menu can close immediately.
+    if (action && action !== wakeButton) close();
   });
 
   document.addEventListener("click", event => {

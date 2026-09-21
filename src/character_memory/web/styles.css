@@ -109,3 +109,5 @@ button,textarea { font:inherit; }
 @keyframes voice-pulse { from { opacity:.35; transform:rotate(180deg) scale(.92); } to { opacity:1; transform:rotate(180deg) scale(1.04); } }
 .message-row.user .voice-bubble.playing .voice-glyph { animation-name:voice-pulse-user; }
 @keyframes voice-pulse-user { from { opacity:.35; transform:scale(.92); } to { opacity:1; transform:scale(1.04); } }
+
+.voice-pending .voice-bubble { opacity:.72; }

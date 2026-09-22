@@ -87,6 +87,15 @@
     }).join("");
   }
 
+  function avatarStyleOptions() {
+    return [
+      ["AUTO", "自动 · 按角色设定"],
+      ["ANIME_CLEAN", "清爽二次元"],
+      ["SOFT_ILLUSTRATION", "柔和半写实插画"],
+      ["NATURAL_PORTRAIT", "自然人像"],
+    ].map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+  }
+
   function managerHtml(profile) {
     const avatar = imageHtml(profile, "avatar-manager-current-image");
     const configured = (visualProviders?.providers || []).some(item => item.configured);
@@ -100,9 +109,11 @@
       <div class="ui-actions"><button class="primary" type="button" data-avatar-search>让角色决定并搜索</button></div>
       <div class="ui-field-row avatar-generation-controls">
         <label class="ui-field avatar-provider-field"><span>AI 生成来源</span><select data-avatar-provider>${providerOptions()}</select></label>
-        <button type="button" data-avatar-generate ${configured ? "" : "disabled"}>生成一个候选头像</button>
+        <label class="ui-field avatar-style-field"><span>候选画风</span><select data-avatar-style>${avatarStyleOptions()}</select></label>
+        <label class="ui-field avatar-count-field"><span>候选数量</span><select data-avatar-count><option value="2">2 张</option><option value="4" selected>4 张</option></select></label>
+        <button type="button" data-avatar-generate ${configured ? "" : "disabled"}>生成候选头像</button>
       </div>
-      <div data-avatar-results class="avatar-results"><p class="ui-hint">生成结果先作为候选保存，不会自动替换当前头像。</p></div>
+      <div data-avatar-results class="avatar-results"><p class="ui-hint">会先走与 Image 工具相同的 Prompt 润色链路，再生成同一画风的一组候选；只有你点“设为头像”才会替换当前头像。</p></div>
     </div>`;
   }
 
@@ -156,19 +167,41 @@
   async function generate() {
     if (!managerCharacterId) return;
     const provider = CM.dom.drawerBody.querySelector("[data-avatar-provider]")?.value || "";
+    const style = CM.dom.drawerBody.querySelector("[data-avatar-style]")?.value || "AUTO";
+    const count = Number(CM.dom.drawerBody.querySelector("[data-avatar-count]")?.value || 4);
     const hint = CM.dom.drawerBody.querySelector("[data-avatar-hint]")?.value.trim() || "";
     const button = CM.dom.drawerBody.querySelector("[data-avatar-generate]");
     const box = CM.dom.drawerBody.querySelector("[data-avatar-results]");
-    if (button) { button.disabled = true; button.textContent = "正在生成…"; }
-    if (box) box.innerHTML = `<p class="muted">正在通过 ${CM.escapeHtml(provider)} 生成候选头像。当前头像在 Provider 支持时会作为 identity reference。</p>`;
+    if (button) { button.disabled = true; button.textContent = "正在生成候选…"; }
+    if (box) box.innerHTML = `<p class="muted">正在先润色头像 Prompt，再通过 ${CM.escapeHtml(provider)} 生成 ${count} 张同画风候选。当前头像在 Provider 支持时会作为 identity reference。</p>`;
     try {
-      const result = await CM.api(`/v1/characters/${encodeURIComponent(managerCharacterId)}/avatar/generate`, {method:"POST", body:JSON.stringify({provider, hint})});
-      const candidate = result.candidate;
-      box.innerHTML = `<div class="avatar-search-plan"><strong>AI 生成候选</strong><p>${CM.escapeHtml(result.visual_intent || "保持人物身份一致")}</p><span>${CM.escapeHtml(candidate.provider)} · ${CM.escapeHtml(candidate.model || "默认模型")} · ${CM.fmtMs(result.duration_ms)}</span>${candidate.supports_reference_images ? '<span>已支持当前头像作为参考身份锚点。</span>' : '<span>当前 Provider 为纯文生图路径，依赖 Prompt 保持身份。</span>'}</div><article class="avatar-generated-candidate"><img src="${CM.escapeHtml(candidate.url)}" alt="AI 生成头像候选"><div class="avatar-candidate-actions"><button class="primary" type="button" data-avatar-use-media="${CM.escapeHtml(candidate.media_id)}">设为头像</button><button type="button" data-avatar-generate-again>再生成一张</button></div></article>`;
+      const result = await CM.api(`/v1/characters/${encodeURIComponent(managerCharacterId)}/avatar/generate`, {
+        method:"POST",
+        body:JSON.stringify({provider, hint, style, count}),
+      });
+      const candidates = Array.isArray(result.candidates) && result.candidates.length
+        ? result.candidates
+        : (result.candidate ? [result.candidate] : []);
+      const providerLabel = candidates[0]?.provider || provider || "ImageGen";
+      const modelLabel = candidates[0]?.model || "默认模型";
+      const refNote = result.used_avatar_reference
+        ? '<span>已使用当前头像作为 identity reference。</span>'
+        : '<span>当前路径通过润色后的 Prompt 保持角色身份。</span>';
+      const promptDetails = result.polished_prompt
+        ? `<details><summary>查看润色后的 Image Prompt</summary><div><code>${CM.escapeHtml(result.polished_prompt)}</code></div></details>`
+        : "";
+      const cards = candidates.map((candidate, index) => `
+        <article class="avatar-generated-candidate">
+          <img src="${CM.escapeHtml(candidate.url)}" alt="AI 生成头像候选 ${index + 1}" loading="lazy">
+          <div class="avatar-candidate-copy"><strong>候选 ${index + 1}</strong><span>${CM.escapeHtml(candidate.provider || providerLabel)} · ${CM.escapeHtml(candidate.model || modelLabel)}</span></div>
+          <div class="avatar-candidate-actions"><button class="primary" type="button" data-avatar-use-media="${CM.escapeHtml(candidate.media_id)}">设为头像</button></div>
+        </article>
+      `).join("");
+      box.innerHTML = `<div class="avatar-search-plan"><strong>AI 头像候选 · ${CM.escapeHtml(result.style || style)}</strong><p>${CM.escapeHtml(result.visual_intent || "保持人物身份一致")}</p><span>${CM.escapeHtml(result.style_guidance || "")}</span><span>${CM.escapeHtml(providerLabel)} · ${CM.escapeHtml(modelLabel)} · 共 ${candidates.length} 张 · ${CM.fmtMs(result.duration_ms)}</span>${refNote}${promptDetails}</div><div class="avatar-generated-grid">${cards}</div><div class="ui-actions"><button type="button" data-avatar-generate-again>按当前画风再来一批</button></div>`;
     } catch (error) {
       if (box) box.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
     } finally {
-      if (button) { button.disabled = false; button.textContent = "生成一个候选头像"; }
+      if (button) { button.disabled = false; button.textContent = "生成候选头像"; }
     }
   }
 

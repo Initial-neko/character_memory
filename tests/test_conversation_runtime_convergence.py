@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from character_memory.application.action_materialization import materialize_expressive_action
+from character_memory.application.incoming_message import normalize_user_fact
 from character_memory.domain.models import ActionDecision, ActionType
 from character_memory.message_projection import common_chat_message_fields
 
@@ -63,6 +64,36 @@ def test_direct_and_group_share_one_action_materializer_contract():
     assert image.metadata["image_id"] == "room"
 
 
+def test_direct_and_group_share_one_incoming_user_fact_contract():
+    sticker = normalize_user_fact(
+        "  看这个  ",
+        sticker={"id": "wave", "label": "挥手", "tags": ["问候"], "description": ""},
+    )
+    image = normalize_user_fact(
+        "  这是现场  ",
+        image={
+            "id": "media-1",
+            "original_name": "desk.png",
+            "mime_type": "image/png",
+            "size_bytes": 42,
+        },
+    )
+
+    assert sticker.display_text == "看这个"
+    assert sticker.metadata["action"] == "STICKER"
+    assert sticker.metadata["sticker_id"] == "wave"
+    assert sticker.metadata["sticker_meaning"] == "问候"
+    assert "看这个" in sticker.runtime_content
+    assert "用户发送表情包" in sticker.runtime_content
+
+    assert image.display_text == "这是现场"
+    assert image.metadata["media_id"] == "media-1"
+    assert image.metadata["media_name"] == "desk.png"
+    assert image.metadata["media_mime_type"] == "image/png"
+    assert "这是现场" in image.runtime_content
+    assert "desk.png" in image.runtime_content
+
+
 def test_direct_and_group_share_resource_projection_fields():
     metadata = {
         "action": "VOICE_MESSAGE",
@@ -81,6 +112,21 @@ def test_direct_and_group_share_resource_projection_fields():
     assert projected["voice_status"] == "ready"
     assert projected["voice_media_id"] == "voice-1"
     assert projected["voice_duration_ms"] == 1234
+
+
+def test_direct_and_group_builders_and_history_use_shared_boundaries():
+    direct = (SRC / "application" / "chat_service.py").read_text(encoding="utf-8")
+    group = (SRC / "application" / "group_conversation_service.py").read_text(encoding="utf-8")
+    api = (SRC / "api.py").read_text(encoding="utf-8")
+    history = (SRC / "history_web.py").read_text(encoding="utf-8")
+    group_web = (SRC / "group_web.py").read_text(encoding="utf-8")
+
+    assert "normalize_user_fact(" in direct
+    assert "normalize_user_fact(" in group
+    assert "project_direct_message(" in direct
+    assert "project_direct_message(" in api
+    assert "project_direct_message(" in history
+    assert "project_group_message(" in group_web
 
 
 def test_direct_and_group_call_shared_reaction_and_message_layers():

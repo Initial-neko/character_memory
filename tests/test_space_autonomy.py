@@ -141,6 +141,17 @@ class ListeningSpaceModel(SpaceModel):
         return super().react_call_for_session(context, session_id)
 
 
+class AudienceFailingModel(SpaceModel):
+    """The audience step fails the way an upstream provider outage does."""
+
+    def react_call_for_session(self, context, session_id):
+        if session_id.rsplit(":", 1)[-1] == "c01":
+            raise RuntimeError(
+                "Provider HTTP 503 from https://provider.example/v1/chat/completions"
+            )
+        return super().react_call_for_session(context, session_id)
+
+
 class WorldMemoryModel(SpaceModel):
     def _reaction(self, context):
         if "WORLD_OBSERVATION" in context:
@@ -580,6 +591,36 @@ def test_daily_post_ceiling_skips_without_moving_the_next_opportunity(tmp_path):
     assert scheduler.run_once(datetime(2026, 9, 21, 13, 30, tzinfo=timezone.utc)) == []
     assert model.opportunities == 2
     assert repository.get_opportunity_state("c00")["next_opportunity_at"] == before
+    store.close()
+
+
+def test_audience_failure_does_not_report_a_published_post_as_a_failed_run(tmp_path):
+    """A provider outage after publishing must not erase the post from the ledger.
+
+    The post is already public when the audience step runs, so the run has to
+    keep its post id and its POSTED status; the outage belongs in the error
+    column, not in a FAILED status that claims nothing was published.
+    """
+    access, store, _ = _access(tmp_path, ids=("c00", "c01"), model=AudienceFailingModel())
+    access.settings.space_opportunity_interval_minutes = 30
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    start = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+    scheduler.status(start)
+
+    outcomes = scheduler.run_once(datetime(2026, 9, 21, 12, 30, tzinfo=timezone.utc))
+
+    outcome = next(item for item in outcomes if item["character_id"] == "c00")
+    assert outcome["posted"] is True
+    assert outcome["audience"] == []
+    post_id = outcome["post"]["id"]
+    runs = repository.list_opportunity_runs(character_id="c00")
+    assert len(runs) == 1
+    assert runs[0]["status"] == "POSTED"
+    assert runs[0]["post_id"] == post_id
+    assert "503" in runs[0]["error"]
+    published, _, _ = repository.list_posts(limit=5)
+    assert post_id in [item.id for item in published]
     store.close()
 
 

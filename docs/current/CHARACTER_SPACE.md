@@ -256,6 +256,8 @@ After an autonomous post is created, the current baseline selector chooses a spa
 
 Relationship/interest-aware ranking is not implemented yet. The current selector is deliberately a small deterministic baseline rather than a fake "relationship AI" score.
 
+The audience step runs after the post is already public, so it is fail-soft like media execution: an outage there is reported as `audience_error`, and the run keeps `POSTED` with its `post_id`. A provider failure while deciding who noticed a post must not be recorded as a run that published nothing.
+
 Each selected character gets a `SPACE_POST_SEEN` event through its existing PersonRuntime. The Space channel only allows:
 
 ```text

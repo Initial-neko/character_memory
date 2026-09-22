@@ -54,7 +54,7 @@ Development started from `main@a22be1332e521ce27ba6e7654c60cede7d971597`.
 
 Pull request: **#70 — Add Character Space multimedia attachment foundation**
 
-Current PR head at handoff: `b2abd24b50e44b80c6f101fcdd2c620bed1fed8a`.
+Current implementation head before this coordination update: `78d43a7892506630b7b193102b798709635f6b43`.
 
 Design choice: use a dedicated Space attachment-relation module backed by the same SQLite store and existing `MediaAsset` ids. This keeps media bytes in the existing MediaStorage layer and avoids coupling binary persistence to the social-feed repository.
 
@@ -74,8 +74,10 @@ Implemented in this slice:
 
 Validation state:
 
-- GitHub Actions CI for PR #70 was started for head `b2abd24b50e44b80c6f101fcdd2c620bed1fed8a`.
-- At the time of this handoff entry the CI run was still in progress; do not treat this line as a green-CI claim.
+- First CI attempt reached **687 passed, 8 skipped, 1 failed** in the main test job. The only failure was a frontend source-contract assertion that looked for the literal class name `space-media-single`, while the implementation intentionally composes it as `space-media-${layout}` at runtime.
+- The product code did not fail. Commit `78d43a7892506630b7b193102b798709635f6b43` fixes that over-specific test to assert the actual 1 / 2-4 / 5-9 layout branch.
+- `windows-smoke` passed on that CI attempt.
+- A fresh CI run is required for the final PR head; Claude should use the latest PR #70 head rather than assuming the SHA written in an older entry is final.
 - Autonomous Web Observation / image search / ImageGen / voice-post execution remain intentionally deferred.
 
 ## Claude acceptance findings

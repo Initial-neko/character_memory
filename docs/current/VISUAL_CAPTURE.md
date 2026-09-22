@@ -24,7 +24,7 @@ DISPLAY
 - `DISPLAY` 使用 `navigator.mediaDevices.getDisplayMedia()`；
 - audio 不随视觉 stream 上传。
 
-Camera/Screen 可以在 Voice call UI 中开启，也可以复用同一 Visual Capture client contract 发送到 Direct / Group conversation。
+Camera/Screen 可以在通话 UI 中开启，也可以复用同一 Visual Capture client contract 发送到 Direct / Group conversation。通话 Session、麦克风和视觉采集彼此独立：用户可以关闭麦克风后继续单独共享屏幕或摄像头，AI TTS 输出也不会因为本地麦克风关闭而停止。
 
 ## 2. Browser flow
 
@@ -171,11 +171,18 @@ Group visual request 继续使用共享 room fact 与普通 mention ordering。�
 
 frame bytes 不会被复制成每个 Character 各一份 durable fact。
 
-## 8. Voice integration
+## 8. Call integration
 
-Voice call 可以同时开启 Camera / Screen Capture。
+通话会话可以组合使用麦克风、Camera 和 Screen Capture，但三者不是绑定关系：
 
-关键顺序：
+```text
+Call Session
+├─ microphone      optional / 可随时 mute
+├─ camera/display  optional / 可独立保持
+└─ AI TTS output   independent
+```
+
+语音输入仍保持原有顺序：
 
 ```text
 speech
@@ -183,6 +190,8 @@ speech
   -> transcript validity gate
   -> only valid transcript selects/sends visual frames
 ```
+
+当麦克风关闭而 Camera/Screen 仍在共享时，当前通话目标中的普通文字消息会自动选择最近约 15 秒内的少量关键帧，并走现有 visual message route。若用户切换到其他 Direct/Group conversation，视觉帧不会跟随到非通话目标。
 
 当前 validity gate：
 

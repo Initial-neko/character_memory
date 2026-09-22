@@ -75,6 +75,8 @@
   let feedLoading = false;
   let feedEpoch = 0;
   const expandedComments = new Set();
+  const expandedThreads = new Set();
+  const replyTargets = new Map();
 
   function profileFor(id) {
     return CM.state.characters.find(item => item.id === id) || {id, name:id};
@@ -191,23 +193,112 @@
     return `<div class="space-likes"><span class="space-heart">♡</span><span>${CM.escapeHtml(names.join("、"))}${CM.escapeHtml(suffix)}</span></div>`;
   }
 
+  function commentName(comment) {
+    return comment?.author?.name || (comment?.actor_type === "USER" ? "我" : comment?.character_id) || "未知";
+  }
+
+  function commentStickerHtml(comment) {
+    const sticker = comment?.sticker || (
+      comment?.sticker_id
+        ? {id:comment.sticker_id, label:"表情包", url:`/v1/stickers/${encodeURIComponent(comment.sticker_id)}/asset`}
+        : null
+    );
+    if (!sticker?.url) return "";
+    return `<div class="space-comment-sticker"><img src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"></div>`;
+  }
+
+  function threadRootId(post, commentId) {
+    const comments = Array.isArray(post.comments) ? post.comments : [];
+    const byId = new Map(comments.map(item => [String(item.id), item]));
+    let current = byId.get(String(commentId));
+    const seen = new Set();
+    while (current?.reply_to_comment_id != null) {
+      const key = String(current.id);
+      if (seen.has(key)) break;
+      seen.add(key);
+      const parent = byId.get(String(current.reply_to_comment_id));
+      if (!parent) break;
+      current = parent;
+    }
+    return current?.id ?? commentId;
+  }
+
+  function commentRowHtml(post, comment, {reply = false} = {}) {
+    const name = commentName(comment);
+    const actorClass = comment.actor_type === "USER" ? " space-comment-user" : "";
+    const allComments = Array.isArray(post.comments) ? post.comments : [];
+    const parent = comment.reply_to_comment_id == null
+      ? null
+      : allComments.find(item => String(item.id) === String(comment.reply_to_comment_id));
+    const replyTo = reply && parent
+      ? `<span class="space-comment-reply-to">回复 <strong>${CM.escapeHtml(commentName(parent))}</strong></span>`
+      : "";
+    const content = comment.content
+      ? `<span class="space-comment-text">${CM.escapeHtml(comment.content)}</span>`
+      : "";
+    return `<div class="space-comment${actorClass}${reply ? " space-comment-reply" : ""}" data-space-comment="${CM.escapeHtml(comment.id)}">
+      <div class="space-comment-main">
+        <strong class="space-comment-author">${CM.escapeHtml(name)}</strong>
+        ${replyTo}
+        ${content}
+        ${commentStickerHtml(comment)}
+      </div>
+      <button class="space-comment-reply-button" type="button"
+        data-space-reply-post="${CM.escapeHtml(post.id)}"
+        data-space-reply-comment="${CM.escapeHtml(comment.id)}"
+        data-space-reply-name="${CM.escapeHtml(name)}">回复</button>
+    </div>`;
+  }
+
   function commentsHtml(post) {
     const allComments = Array.isArray(post.comments) ? post.comments : [];
-    const expanded = expandedComments.has(String(post.id));
-    const comments = expanded ? allComments : allComments.slice(0, 3);
-    const body = comments.map(comment => {
-      const name = comment.author?.name || (comment.actor_type === "USER" ? "我" : comment.character_id);
-      const actorClass = comment.actor_type === "USER" ? " space-comment-user" : "";
-      return `<div class="space-comment${actorClass}"><strong>${CM.escapeHtml(name)}</strong><span>${CM.escapeHtml(comment.content)}</span></div>`;
+    const byId = new Map(allComments.map(item => [String(item.id), item]));
+    const roots = allComments.filter(comment => (
+      comment.reply_to_comment_id == null || !byId.has(String(comment.reply_to_comment_id))
+    ));
+    const rootIds = new Set(roots.map(root => String(root.id)));
+    const repliesByRoot = new Map();
+    for (const comment of allComments) {
+      if (rootIds.has(String(comment.id))) continue;
+      const rootId = String(threadRootId(post, comment.id));
+      if (!repliesByRoot.has(rootId)) repliesByRoot.set(rootId, []);
+      repliesByRoot.get(rootId).push(comment);
+    }
+
+    const postId = String(post.id);
+    const expandedRoots = expandedComments.has(postId);
+    const visibleRoots = expandedRoots ? roots : roots.slice(0, 3);
+    const body = visibleRoots.map(root => {
+      const rootKey = String(root.id);
+      const replies = repliesByRoot.get(rootKey) || [];
+      const threadKey = `${postId}:${rootKey}`;
+      const expanded = expandedThreads.has(threadKey);
+      const visibleReplies = expanded ? replies : replies.slice(0, 2);
+      const repliesHtml = visibleReplies.map(comment => commentRowHtml(post, comment, {reply:true})).join("");
+      const hiddenCount = Math.max(0, replies.length - visibleReplies.length);
+      const threadToggle = replies.length > 2
+        ? `<button class="space-thread-toggle" type="button" data-space-thread-toggle="${CM.escapeHtml(threadKey)}">${expanded ? "收起回复" : `展开 ${hiddenCount} 条回复`}</button>`
+        : "";
+      return `<div class="space-comment-thread" data-space-thread-root="${CM.escapeHtml(root.id)}">
+        ${commentRowHtml(post, root)}
+        ${replies.length ? `<div class="space-comment-replies">${repliesHtml}${threadToggle}</div>` : ""}
+      </div>`;
     }).join("");
-    const toggle = allComments.length > 3
-      ? `<button class="space-comments-toggle" type="button" data-space-comments-toggle="${CM.escapeHtml(post.id)}">${expanded ? "收起评论" : `查看全部 ${allComments.length} 条评论`}</button>`
+
+    const rootToggle = roots.length > 3
+      ? `<button class="space-comments-toggle" type="button" data-space-comments-toggle="${CM.escapeHtml(post.id)}">${expandedRoots ? "收起评论" : `查看全部 ${roots.length} 条主评论`}</button>`
       : "";
+    const target = replyTargets.get(postId);
+    const replyBanner = target
+      ? `<div class="space-comment-replying">回复 <strong>${CM.escapeHtml(target.name)}</strong><button type="button" data-space-reply-cancel="${CM.escapeHtml(post.id)}">取消</button></div>`
+      : "";
+    const placeholder = target ? `回复 ${target.name}…` : "评论这条动态…";
     return `<div class="space-comments">
       <div class="space-comments-list">${body || '<div class="space-comments-empty">还没有评论</div>'}</div>
-      ${toggle}
+      ${rootToggle}
       <form class="space-comment-form" data-space-comment-form="${CM.escapeHtml(post.id)}">
-        <textarea class="space-comment-input" name="content" rows="1" maxlength="1000" placeholder="评论这条动态…" aria-label="评论这条动态"></textarea>
+        ${replyBanner}
+        <textarea class="space-comment-input" name="content" rows="1" maxlength="1000" placeholder="${CM.escapeHtml(placeholder)}" aria-label="${CM.escapeHtml(placeholder)}"></textarea>
         <button class="space-comment-submit" type="submit">发送</button>
         <div class="space-comment-error hidden" aria-live="polite"></div>
       </form>
@@ -377,6 +468,42 @@
       return;
     }
 
+    const threadToggle = event.target.closest("[data-space-thread-toggle]");
+    if (threadToggle) {
+      const threadKey = String(threadToggle.dataset.spaceThreadToggle || "");
+      if (expandedThreads.has(threadKey)) expandedThreads.delete(threadKey);
+      else expandedThreads.add(threadKey);
+      const postId = threadKey.split(":", 1)[0];
+      replacePost(postsById.get(postId));
+      return;
+    }
+
+    const replyButton = event.target.closest("[data-space-reply-comment]");
+    if (replyButton) {
+      const postId = String(replyButton.dataset.spaceReplyPost || "");
+      const commentId = String(replyButton.dataset.spaceReplyComment || "");
+      const name = String(replyButton.dataset.spaceReplyName || "评论");
+      replyTargets.set(postId, {commentId, name});
+      const post = postsById.get(postId);
+      if (post) {
+        const rootId = threadRootId(post, commentId);
+        expandedThreads.add(`${postId}:${rootId}`);
+      }
+      replacePost(post);
+      const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
+        .find(node => node.dataset.spacePost === postId);
+      updated?.querySelector(".space-comment-input")?.focus();
+      return;
+    }
+
+    const cancelReply = event.target.closest("[data-space-reply-cancel]");
+    if (cancelReply) {
+      const postId = String(cancelReply.dataset.spaceReplyCancel || "");
+      replyTargets.delete(postId);
+      replacePost(postsById.get(postId));
+      return;
+    }
+
     const play = event.target.closest("[data-space-voice-play]");
     if (play) {
       if (voicePlayer.button === play && voicePlayer.audio) {
@@ -429,11 +556,19 @@
     if (submit) submit.disabled = true;
     errorBox?.classList.add("hidden");
     try {
+      const replyTarget = replyTargets.get(postId);
+      const body = {content};
+      if (replyTarget?.commentId) body.reply_to_comment_id = Number(replyTarget.commentId);
       const data = await CM.api(`/v1/space/posts/${encodeURIComponent(postId)}/comments`, {
         method:"POST",
-        body:JSON.stringify({content}),
+        body:JSON.stringify(body),
       });
       expandedComments.add(postId);
+      if (replyTarget?.commentId) {
+        const rootId = threadRootId(data.post, replyTarget.commentId);
+        expandedThreads.add(`${postId}:${rootId}`);
+      }
+      replyTargets.delete(postId);
       replacePost(data.post);
       const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
         .find(node => node.dataset.spacePost === postId);

@@ -8,6 +8,7 @@ import yaml
 
 from character_memory.api import create_api
 from character_memory.config import load_settings, set_character_archived
+from character_memory.space_autonomy import SpaceAutonomyService
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
 from character_memory.space_web import attach_space_routes
@@ -145,6 +146,44 @@ def test_space_repository_keeps_shared_social_facts_and_caps_distinct_commenters
     assert next(item for item in comments if item.id == user_comment.id).actor_type == "USER"
     assert "space/001-core" in store.list_schema_migrations()
     assert "space/005-comment-actors" in store.list_schema_migrations()
+    assert "space/006-comment-stickers" in store.list_schema_migrations()
+    store.close()
+
+
+def test_space_comment_threads_keep_nested_reply_links_and_stickers(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "space-comment-thread.db")
+    repo = SpaceRepository(store)
+    now = datetime(2026, 9, 22, 9, 0, tzinfo=timezone.utc)
+    post = repo.create_post("c00", "线程测试", now)
+
+    root = repo.add_comment(post.id, "c01", "第一层评论", now)
+    sticker_reply = repo.add_comment(
+        post.id,
+        "c00",
+        "",
+        now + timedelta(seconds=1),
+        reply_to_comment_id=root.id,
+        sticker_id="test-sticker",
+    )
+    nested = repo.add_comment(
+        post.id,
+        "user",
+        "继续回复这条表情",
+        now + timedelta(seconds=2),
+        actor_type="USER",
+        reply_to_comment_id=sticker_reply.id,
+    )
+
+    assert sticker_reply.content == ""
+    assert sticker_reply.sticker_id == "test-sticker"
+    assert nested.reply_to_comment_id == sticker_reply.id
+    assert repo.root_comment_id(nested.id) == root.id
+    assert repo.get_comment(sticker_reply.id).sticker_id == "test-sticker"
+    assert [item.id for item in repo.list_comments(post.id)] == [
+        root.id,
+        sticker_reply.id,
+        nested.id,
+    ]
     store.close()
 
 
@@ -399,6 +438,59 @@ def test_browser_user_can_comment_and_reload_the_same_space_fact(tmp_path: Path)
         assert comments[-1]["actor_type"] == "USER"
         assert comments[-1]["author"]["name"] == "我"
 
+        character_comment = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={"character_id":"c01", "content":"我也觉得要带伞。"},
+        )
+        assert character_comment.status_code == 200
+        target_id = character_comment.json()["comment"]["id"]
+
+        replied = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={"content":"那就说定啦。", "reply_to_comment_id":target_id},
+        )
+        assert replied.status_code == 200
+        assert replied.json()["comment"]["reply_to_comment_id"] == target_id
+        assert replied.json()["thread_replies"] == []
+
+        nested = client.get(f"/v1/space/posts/{post_id}").json()["post"]["comments"][-1]
+        assert nested["content"] == "那就说定啦。"
+        assert nested["reply_to_comment_id"] == target_id
+        assert nested["actor_type"] == "USER"
+
+
+def test_a_failed_thread_reply_does_not_report_a_written_comment_as_an_error(tmp_path: Path, monkeypatch):
+    """A comment that was stored stays stored, whatever the characters do next.
+
+    The automatic replies run after the comment is already durable. A model or
+    provider failure there used to escape as a 500, so the client showed
+    "comment failed" and the user retried -- storing the same comment twice.
+    """
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    def explode(self, post_id, comment_id, *, now=None, max_rounds=None):
+        raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr(SpaceAutonomyService, "process_comment_thread", explode)
+
+    with TestClient(app) as client:
+        post_id = client.post(
+            "/v1/space/posts",
+            json={"character_id": "c00", "content": "今天降温了。"},
+        ).json()["post"]["id"]
+
+        response = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={"content": "我这边也是。"},
+        )
+        assert response.status_code == 200
+        assert response.json()["thread_replies"] == []
+
+        comments = client.get(f"/v1/space/posts/{post_id}").json()["post"]["comments"]
+        assert [item["content"] for item in comments] == ["我这边也是。"]
+
 
 def test_space_feed_pages_ten_items_and_can_filter_one_character(tmp_path: Path):
     config = _config(tmp_path, count=2)
@@ -471,6 +563,13 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "data-space-voice-text",
         "new Audio(",
         "data-space-comments-toggle",
+        "data-space-thread-toggle",
+        "data-space-reply-comment",
+        "data-space-reply-cancel",
+        "expandedThreads",
+        "replyTargets",
+        "reply_to_comment_id",
+        "space-comment-sticker",
         "data-space-comment-form",
         "/comments",
         'addEventListener("submit"',
@@ -492,6 +591,11 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         ".space-voice-bubble",
         ".space-voice-transcript",
         ".space-comments-toggle",
+        ".space-thread-toggle",
+        ".space-comment-replies",
+        ".space-comment-reply-button",
+        ".space-comment-replying",
+        ".space-comment-sticker",
         ".space-comment-form",
         ".space-comment-input",
         ".space-comment-submit",

@@ -24,6 +24,7 @@ from character_memory.time_utils import epoch_us
 logger = logging.getLogger("character_memory.space_autonomy")
 
 MAX_AUTONOMOUS_AUDIENCE = 10
+MAX_AUTOMATIC_REPLY_ROUNDS = 4
 
 
 class SpaceAutonomyService:
@@ -460,59 +461,139 @@ Sources:
         )
         return candidates[:size]
 
-    def _author_reply(self, post, comment, now: datetime) -> dict | None:
-        try:
-            author = self._require_active(post.character_id)
-        except (KeyError, ValueError):
-            return None
-        bundle = self.access.require_bundle()
-        runtime = bundle.runtimes.get(post.character_id)
-        if runtime is None:
-            return None
-        commenter = next(
+    def _comment_actor_name(self, comment) -> str:
+        if comment.actor_type == "USER":
+            return "用户"
+        profile = next(
             (item for item in self._profiles() if item["id"] == comment.character_id),
             {"id": comment.character_id, "name": comment.character_id},
         )
-        result = runtime.handle(
-            Event(
-                character_id=post.character_id,
-                event_type=EventType.SPACE_COMMENT_RECEIVED,
-                event_time=now,
-                content=(
-                    f"{self._name(commenter)} 评论了你发布的动态“{post.content}”："
-                    f"{comment.content}"
-                ),
-                metadata={
-                    "channel": "SPACE",
-                    "post_id": post.id,
-                    "comment_id": comment.id,
-                    "commenter_id": comment.character_id,
-                    "conversation_id": f"space:{post.id}:comment:{comment.id}:author",
-                },
-            )
-        )
-        reply_action = next(
-            (item for item in result.reaction.actions if item.type == ActionType.SPACE_COMMENT),
+        return self._name(profile)
+
+    def _comment_target_id(self, post, comment) -> str | None:
+        if comment.reply_to_comment_id is not None:
+            parent = self.repository.get_comment(comment.reply_to_comment_id)
+            if parent is None or parent.post_id != post.id or parent.actor_type != "CHARACTER":
+                return None
+            target_id = parent.character_id
+        else:
+            target_id = post.character_id
+        if not target_id or target_id == comment.character_id:
+            return None
+        return target_id
+
+    @staticmethod
+    def _reply_actions(reaction):
+        text_action = next(
+            (
+                item for item in reaction.actions
+                if item.type == ActionType.SPACE_COMMENT and (item.message or "").strip()
+            ),
             None,
         )
-        if reply_action is None or not (reply_action.message or "").strip():
-            return None
-        try:
-            reply = self.repository.add_comment(
-                post.id,
-                post.character_id,
-                reply_action.message,
-                now,
-                reply_to_comment_id=comment.id,
+        sticker_action = next(
+            (
+                item for item in reaction.actions
+                if item.type == ActionType.SPACE_STICKER and (item.sticker_id or "").strip()
+            ),
+            None,
+        )
+        return text_action, sticker_action
+
+    def process_comment_thread(
+        self,
+        post_id: int,
+        comment_id: int,
+        *,
+        now: datetime | None = None,
+        max_rounds: int = MAX_AUTOMATIC_REPLY_ROUNDS,
+    ) -> list[dict]:
+        """Advance one Space discussion without allowing an unbounded AI loop."""
+        if not str(getattr(self.access.settings, "api_key", "") or "").strip():
+            return []
+        now = now or datetime.now().astimezone()
+        post = self.repository.get_post(post_id)
+        source = self.repository.get_comment(comment_id)
+        if post is None:
+            raise KeyError("space post not found")
+        if source is None or source.post_id != post.id:
+            raise KeyError("space comment not found")
+
+        bundle = self.access.require_bundle()
+        replies: list[dict] = []
+        rounds = max(0, min(int(max_rounds), MAX_AUTOMATIC_REPLY_ROUNDS))
+        root_id = self.repository.root_comment_id(source.id) or source.id
+
+        for round_index in range(rounds):
+            target_id = self._comment_target_id(post, source)
+            if target_id is None:
+                break
+            try:
+                self._require_active(target_id)
+            except (KeyError, ValueError):
+                break
+            runtime = bundle.runtimes.get(target_id)
+            if runtime is None:
+                break
+
+            visible_content = source.content.strip() if source.content else ""
+            if source.sticker_id:
+                visible_content = f"{visible_content} [表情包]".strip()
+            if source.reply_to_comment_id is None:
+                event_content = (
+                    f"{self._comment_actor_name(source)} 评论了你发布的动态“{post.content}”："
+                    f"{visible_content or '[无文字]'}"
+                )
+            else:
+                event_content = (
+                    f"{self._comment_actor_name(source)} 在空间的一条评论讨论中回复了你："
+                    f"{visible_content or '[无文字]'}"
+                )
+
+            result = runtime.handle(
+                Event(
+                    character_id=target_id,
+                    event_type=EventType.SPACE_COMMENT_RECEIVED,
+                    event_time=now,
+                    content=event_content,
+                    metadata={
+                        "channel": "SPACE",
+                        "post_id": post.id,
+                        "comment_id": source.id,
+                        "commenter_id": source.character_id,
+                        "reply_to_comment_id": source.reply_to_comment_id,
+                        "thread_root_comment_id": root_id,
+                        "propagation_round": round_index + 1,
+                        "conversation_id": f"space:{post.id}:thread:{root_id}:target:{target_id}",
+                    },
+                )
             )
-        except ValueError:
-            logger.info(
-                "space.author_reply skipped post=%s author=%s reason=commenter-cap",
-                post.id,
-                post.character_id,
-            )
-            return None
-        return reply.model_dump(mode="json")
+            text_action, sticker_action = self._reply_actions(result.reaction)
+            if text_action is None and sticker_action is None:
+                break
+
+            try:
+                reply = self.repository.add_comment(
+                    post.id,
+                    target_id,
+                    text_action.message if text_action is not None else "",
+                    now,
+                    reply_to_comment_id=source.id,
+                    sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
+                )
+            except ValueError:
+                logger.info(
+                    "space.thread_reply skipped post=%s target=%s round=%s",
+                    post.id,
+                    target_id,
+                    round_index + 1,
+                )
+                break
+            payload = reply.model_dump(mode="json")
+            replies.append(payload)
+            source = reply
+
+        return replies
 
     def process_audience(self, post_id: int, *, now: datetime | None = None) -> list[dict]:
         now = now or datetime.now().astimezone()
@@ -561,31 +642,30 @@ Sources:
             )
 
             liked = any(item.type == ActionType.SPACE_LIKE for item in result.reaction.actions)
-            comment_action = next(
-                (
-                    item for item in result.reaction.actions
-                    if item.type == ActionType.SPACE_COMMENT and (item.message or "").strip()
-                ),
-                None,
-            )
+            comment_action, sticker_action = self._reply_actions(result.reaction)
             if liked:
                 self.repository.set_reaction(post.id, character_id, "LIKE", True, now)
 
             comment_payload = None
-            reply_payload = None
-            if comment_action is not None:
+            thread_replies: list[dict] = []
+            if comment_action is not None or sticker_action is not None:
                 try:
                     comment = self.repository.add_comment(
                         post.id,
                         character_id,
-                        comment_action.message,
+                        comment_action.message if comment_action is not None else "",
                         now,
+                        sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
                     )
                 except ValueError:
                     comment = None
                 if comment is not None:
                     comment_payload = comment.model_dump(mode="json")
-                    reply_payload = self._author_reply(post, comment, now)
+                    thread_replies = self.process_comment_thread(
+                        post.id,
+                        comment.id,
+                        now=now,
+                    )
 
             outcomes.append(
                 {
@@ -594,7 +674,10 @@ Sources:
                     "viewed": True,
                     "liked": liked,
                     "comment": comment_payload,
-                    "author_reply": reply_payload,
+                    # Compatibility: the first automatic reply is still exposed
+                    # under the old key while the full bounded chain is explicit.
+                    "author_reply": thread_replies[0] if thread_replies else None,
+                    "thread_replies": thread_replies,
                     "actions": [
                         item.model_dump(mode="json") for item in result.reaction.actions
                     ],

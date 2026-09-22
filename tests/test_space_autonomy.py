@@ -26,6 +26,7 @@ from character_memory.runtime.person_runtime import PersonRuntime
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService
 from character_memory.space_store import SpaceRepository
 from character_memory.storage.sqlite import SQLiteStore
+from character_memory.stickers import Sticker, StickerCatalog
 
 
 class SpaceModel(PersonModel):
@@ -260,7 +261,25 @@ class WrongChannelModel(SpaceModel):
         )
 
 
-def _access(tmp_path, ids=("c00", "c01", "c02"), model=None):
+class StickerThreadModel(SpaceModel):
+    def _reaction(self, context):
+        if "SPACE_COMMENT_RECEIVED" in context:
+            if "persona c00" in context:
+                return PersonReaction(
+                    actions=[ActionDecision(type=ActionType.SPACE_STICKER, sticker_id="wave")]
+                )
+            if "persona c01" in context:
+                return PersonReaction(
+                    actions=[ActionDecision(type=ActionType.SPACE_COMMENT, message="挥手回应")]
+                )
+        if "SPACE_POST_SEEN" in context and "persona c01" in context:
+            return PersonReaction(
+                actions=[ActionDecision(type=ActionType.SPACE_COMMENT, message="挥手回应")]
+            )
+        return PersonReaction(actions=[])
+
+
+def _access(tmp_path, ids=("c00", "c01", "c02"), model=None, sticker_catalog=None):
     store = SQLiteStore(tmp_path / "space-autonomy.db")
     embedding = DeterministicEmbedding()
     model = model or SpaceModel()
@@ -276,6 +295,7 @@ def _access(tmp_path, ids=("c00", "c01", "c02"), model=None):
             embedding,
             model,
             f"persona {character_id}",
+            sticker_catalog,
         )
         for character_id in ids
     }
@@ -444,8 +464,19 @@ def test_space_autonomy_runs_view_reaction_comment_and_author_reply(tmp_path):
     assert [(item.character_id, item.content) for item in comments] == [
         ("c01", "听起来今天挺需要休息的。"),
         ("c00", "那就一起慢慢来。"),
+        ("c01", "那就一起慢慢来。"),
+        ("c00", "那就一起慢慢来。"),
+        ("c01", "那就一起慢慢来。"),
     ]
-    assert comments[1].reply_to_comment_id == comments[0].id
+    assert [item.reply_to_comment_id for item in comments[1:]] == [
+        comments[0].id,
+        comments[1].id,
+        comments[2].id,
+        comments[3].id,
+    ]
+    commenter_outcome = next(item for item in outcome["audience"] if item["character_id"] == "c01")
+    assert len(commenter_outcome["thread_replies"]) == 4
+    assert commenter_outcome["author_reply"]["id"] == comments[1].id
 
     # Space reactions went through PersonRuntime but never polluted direct chat.
     assert not any(
@@ -456,6 +487,61 @@ def test_space_autonomy_runs_view_reaction_comment_and_author_reply(tmp_path):
     assert any(
         item.event_type == EventType.SPACE_COMMENT_RECEIVED
         for item in store.list_events("c00")
+    )
+    store.close()
+
+
+def test_space_thread_allows_validated_stickers_and_stops_after_four_rounds(tmp_path):
+    (tmp_path / "wave.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"></svg>',
+        encoding="utf-8",
+    )
+    stickers = StickerCatalog(
+        tmp_path,
+        [
+            Sticker(
+                id="wave",
+                file="wave.svg",
+                label="挥手回应",
+                tags=["挥手回应", "回复"],
+                description="用于自然回应讨论",
+            )
+        ],
+        source="test",
+    )
+    model = StickerThreadModel()
+    access, store, _ = _access(
+        tmp_path,
+        ids=("c00", "c01"),
+        model=model,
+        sticker_catalog=stickers,
+    )
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    now = datetime(2026, 9, 22, 20, 30, tzinfo=timezone.utc)
+
+    outcome = service.run_opportunity("c00", now=now, cascade=True, source="DEV")
+    audience = outcome["audience"]
+    assert len(audience) == 1
+    assert len(audience[0]["thread_replies"]) == 4
+
+    comments = repository.list_comments(outcome["post"]["id"])
+    assert len(comments) == 5
+    assert comments[0].character_id == "c01"
+    assert comments[1].character_id == "c00"
+    assert comments[1].sticker_id == "wave"
+    assert comments[1].content == ""
+    assert comments[2].character_id == "c01"
+    assert comments[3].sticker_id == "wave"
+    assert comments[4].character_id == "c01"
+    assert all(
+        comments[index].reply_to_comment_id == comments[index - 1].id
+        for index in range(1, len(comments))
+    )
+    assert not any(
+        item.event_type == EventType.CHARACTER_MESSAGE
+        for character_id in ("c00", "c01")
+        for item in store.list_events(character_id)
     )
     store.close()
 

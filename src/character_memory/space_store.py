@@ -28,6 +28,7 @@ class SpaceComment(BaseModel):
     character_id: str
     actor_type: str = "CHARACTER"
     content: str
+    sticker_id: str | None = None
     created_at: datetime
     reply_to_comment_id: int | None = None
 
@@ -79,6 +80,7 @@ class SpaceRepository:
                     character_id TEXT NOT NULL,
                     actor_type TEXT NOT NULL DEFAULT 'CHARACTER',
                     content TEXT NOT NULL,
+                    sticker_id TEXT,
                     created_at TEXT NOT NULL,
                     created_at_epoch INTEGER NOT NULL,
                     reply_to_comment_id INTEGER
@@ -179,6 +181,10 @@ class SpaceRepository:
                 self.store.conn.execute(
                     "ALTER TABLE space_comments ADD COLUMN actor_type TEXT NOT NULL DEFAULT 'CHARACTER'"
                 )
+            if "sticker_id" not in comment_columns:
+                self.store.conn.execute(
+                    "ALTER TABLE space_comments ADD COLUMN sticker_id TEXT"
+                )
             self.store._ensure_migration_table_locked()
             self.store.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
@@ -195,6 +201,10 @@ class SpaceRepository:
             self.store.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
                 ("space/005-comment-actors", datetime.now().astimezone().isoformat()),
+            )
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
+                ("space/006-comment-stickers", datetime.now().astimezone().isoformat()),
             )
             self.store._maybe_commit()
 
@@ -221,6 +231,7 @@ class SpaceRepository:
             # whether the comment spends one of the ten character slots.
             actor_type=str(row["actor_type"] or "CHARACTER"),
             content=str(row["content"]),
+            sticker_id=row["sticker_id"],
             created_at=parse_datetime(row["created_at"]),
             reply_to_comment_id=row["reply_to_comment_id"],
         )
@@ -332,6 +343,29 @@ class SpaceRepository:
             ).fetchall()
         return [self._comment_from_row(row) for row in rows]
 
+    def get_comment(self, comment_id: int) -> SpaceComment | None:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM space_comments WHERE id=?",
+                (int(comment_id),),
+            ).fetchone()
+        return self._comment_from_row(row) if row is not None else None
+
+    def root_comment_id(self, comment_id: int) -> int | None:
+        comment = self.get_comment(comment_id)
+        if comment is None:
+            return None
+        seen: set[int] = set()
+        while comment.reply_to_comment_id is not None:
+            if comment.id in seen:
+                break
+            seen.add(comment.id)
+            parent = self.get_comment(comment.reply_to_comment_id)
+            if parent is None or parent.post_id != comment.post_id:
+                break
+            comment = parent
+        return comment.id
+
     def add_comment(
         self,
         post_id: int,
@@ -341,6 +375,7 @@ class SpaceRepository:
         *,
         actor_type: str = "CHARACTER",
         reply_to_comment_id: int | None = None,
+        sticker_id: str | None = None,
     ) -> SpaceComment:
         if self.get_post(post_id) is None:
             raise KeyError("space post not found")
@@ -348,15 +383,12 @@ class SpaceRepository:
         if normalized_actor_type not in {"CHARACTER", "USER"}:
             raise ValueError("space comment actor_type must be CHARACTER or USER")
         clean_content = str(content or "").strip()
-        if not clean_content:
-            raise ValueError("space comment must not be empty")
+        clean_sticker_id = str(sticker_id or "").strip() or None
+        if not clean_content and clean_sticker_id is None:
+            raise ValueError("space comment requires content or sticker")
         if reply_to_comment_id is not None:
-            with self.store._lock:
-                parent = self.store.conn.execute(
-                    "SELECT post_id FROM space_comments WHERE id=?",
-                    (int(reply_to_comment_id),),
-                ).fetchone()
-            if parent is None or int(parent["post_id"]) != int(post_id):
+            parent = self.get_comment(int(reply_to_comment_id))
+            if parent is None or int(parent.post_id) != int(post_id):
                 raise ValueError("reply target does not belong to this post")
 
         with self.store._lock:
@@ -374,13 +406,15 @@ class SpaceRepository:
                     if int(row["total"] if row is not None else 0) >= MAX_COMMENTERS_PER_POST:
                         raise ValueError(f"a space post may have at most {MAX_COMMENTERS_PER_POST} character commenters")
             cur = self.store.conn.execute(
-                "INSERT INTO space_comments(post_id,character_id,actor_type,content,created_at,created_at_epoch,reply_to_comment_id) "
-                "VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO space_comments("
+                "post_id,character_id,actor_type,content,sticker_id,created_at,created_at_epoch,reply_to_comment_id"
+                ") VALUES(?,?,?,?,?,?,?,?)",
                 (
                     int(post_id),
                     character_id,
                     normalized_actor_type,
                     clean_content,
+                    clean_sticker_id,
                     now.isoformat(),
                     epoch_us(now),
                     reply_to_comment_id,
@@ -393,6 +427,7 @@ class SpaceRepository:
             character_id=character_id,
             actor_type=normalized_actor_type,
             content=clean_content,
+            sticker_id=clean_sticker_id,
             created_at=now,
             reply_to_comment_id=reply_to_comment_id,
         )

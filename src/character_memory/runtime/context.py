@@ -62,6 +62,12 @@ def compile_context(
     resource_actions = ""
     if has_stickers:
         resource_actions += " / STICKER"
+    space_sticker_action = " / SPACE_STICKER" if has_stickers else ""
+    sticker_action_name = (
+        "SPACE_STICKER"
+        if event.event_type in {EventType.SPACE_POST_SEEN, EventType.SPACE_COMMENT_RECEIVED}
+        else "STICKER"
+    )
     if has_images:
         resource_actions += " / IMAGE"
     if effective_generate_image:
@@ -70,8 +76,8 @@ def compile_context(
         EventType.USER_MESSAGE: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；也可以完全不回复",
         EventType.TIME_TICK: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；只有确实想主动表达时才发送",
         EventType.PROACTIVE_INTENT: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；也可以放弃或延后",
-        EventType.SPACE_POST_SEEN: "只允许 SPACE_LIKE 或 SPACE_COMMENT；也可以 actions=[] 表示看到了但不互动",
-        EventType.SPACE_COMMENT_RECEIVED: "只允许 SPACE_COMMENT 回复这条评论；也可以 actions=[] 不回复",
+        EventType.SPACE_POST_SEEN: f"只允许 SPACE_LIKE / SPACE_COMMENT{space_sticker_action}；也可以 actions=[] 表示看到了但不互动",
+        EventType.SPACE_COMMENT_RECEIVED: f"只允许 SPACE_COMMENT{space_sticker_action} 回复这条评论；也可以 actions=[] 不回复",
     }.get(event.event_type, f"0~3 个 MESSAGE / EMOJI{resource_actions}；也可以没有对外表达")
     generate_contract = ""
     if effective_generate_image:
@@ -86,16 +92,18 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 这是 Character Space / 朋友圈场景，不是私聊。你已经看到了另一位角色公开发布的动态。
 - SPACE_LIKE：轻量表达“看到了/认可/支持”，不需要 message。
 - SPACE_COMMENT：只有真的想公开说一句时使用，message 就是评论正文。
+- SPACE_STICKER：只有 Available Stickers 非空并且一个现有表情比文字更自然时使用，sticker_id 必须来自候选列表。
 - actions=[]：完全合法，表示看到了但没有公开互动。
-不要使用 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / IMAGE；这些属于聊天表达，不应从朋友圈事件漏进私聊。
+不要使用 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / IMAGE；普通 STICKER 属于聊天表达，Space 表情必须使用 SPACE_STICKER。
 通常保持稀疏：多数动态不需要评论，点赞也不是义务。
 """
     elif event.event_type == EventType.SPACE_COMMENT_RECEIVED:
         space_contract = """
-这是 Character Space / 朋友圈评论场景，不是私聊。有人评论了你的动态。
+这是 Character Space / 朋友圈评论场景，不是私聊。有人在一条动态下评论了你，或回复了你参与的评论。
 - SPACE_COMMENT：表示在这条动态下公开回复，message 就是回复正文。
+- SPACE_STICKER：只有 Available Stickers 非空并且一个现有表情比文字更自然时使用，sticker_id 必须来自候选列表。
 - actions=[]：完全合法，表示看到了评论但不公开回复。
-不要使用 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / IMAGE；不要因为对方评论了就机械回复。
+不要使用 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / IMAGE；普通 STICKER 属于聊天表达，Space 表情必须使用 SPACE_STICKER。不要因为对方评论了就机械回复。
 """
 
     world_contract = ""
@@ -142,7 +150,7 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 本事件允许的对外表达：{allowed}。
 {space_contract}
 {world_contract}
-actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。VOICE_MESSAGE 表示真的发送一条语音消息，不是把普通文字自动朗读；只有当这段内容更适合直接说出来、需要通过语气表达，或较完整而不适合拆成多条短文字时才使用，不要频繁使用。一个 VOICE_MESSAGE 的 message 必须是一段完整连续表达，即使包含多句话也保持为一个 action，不要为了语音拆句。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时这些候选就是你可以自然使用的聊天表达资源，你可以单独发 STICKER，也可以 MESSAGE + STICKER，不需要等用户先发表情包；sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用 STICKER。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。
+actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。VOICE_MESSAGE 表示真的发送一条语音消息，不是把普通文字自动朗读；只有当这段内容更适合直接说出来、需要通过语气表达，或较完整而不适合拆成多条短文字时才使用，不要频繁使用。一个 VOICE_MESSAGE 的 message 必须是一段完整连续表达，即使包含多句话也保持为一个 action，不要为了语音拆句。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时这些候选就是你可以自然使用的表达资源，不需要等用户先发表情包；聊天事件里可以单独使用 STICKER，也可以 MESSAGE + STICKER。当前事件如需表情应使用 {sticker_action_name}，sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用表情。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。
 {generate_contract}
 如果当前事件包含用户上传的真实图片，模型会同时收到图片本体；应根据实际视觉内容回应，不要从文件名臆测。
 如果确实没有想回复的内容，直接 actions=[]。不要为了礼貌、活跃度或“完成任务”硬补一句话。

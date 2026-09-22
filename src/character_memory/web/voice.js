@@ -195,7 +195,7 @@
     const active = Boolean(voice.active && voice.micActive);
     dom.mic.classList.toggle("active", active);
     dom.mic.classList.toggle("muted", voice.active && !voice.micActive);
-    dom.mic.setAttribute("aria-pressed", active ? "true" : "false");
+    dom.mic.setAttribute?.("aria-pressed", active ? "true" : "false");
     dom.mic.textContent = active ? "🎙 麦克风" : "🔇 麦克风";
     dom.mic.title = active ? "关闭麦克风" : "开启麦克风";
     dom.mic.disabled = !voice.active;

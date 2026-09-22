@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 import yaml
@@ -255,6 +256,26 @@ def test_every_hook_the_archive_module_reads_is_still_emitted_by_the_shell():
     assert missing == [], f"no web source emits these any more: {missing}"
 
 
+def test_archive_frontend_surfaces_a_failed_voice_registry_refresh():
+    """Both calls returned the reload result, and both threw it away.
+
+    ``voice_registry`` was in the archive and restore payloads the whole time,
+    but the module awaited them as bare statements: a 200 meaning "the sidecar
+    never picked this up" looked exactly like a clean archive. The responses are
+    held now, and a failed refresh reaches the drawer the user is looking at.
+    """
+
+    web = Path(__file__).resolve().parents[1] / "src" / "character_memory" / "web"
+    script = (web / "character_archive.js").read_text(encoding="utf-8")
+
+    for endpoint in ("/archive`", "/restore${query}`"):
+        call = "await CM.api(`/v1/characters/${encodeURIComponent(characterId)}" + endpoint
+        assert call in script, endpoint
+        assert f"= {call}" in script, f"the {endpoint} response is awaited but discarded"
+    assert "voice_registry" in script
+    assert "reloaded !== false" in script
+
+
 def test_archive_keeps_voice_reference_and_refreshes_live_gsv_registry(tmp_path: Path, monkeypatch):
     config = _config(tmp_path)
     settings = load_settings(str(config))
@@ -288,3 +309,52 @@ def test_archive_keeps_voice_reference_and_refreshes_live_gsv_registry(tmp_path:
 
     assert [item[0] for item in calls].count("reload") == 2
     assert ("init", 1.5) in calls
+
+
+def test_archive_says_so_when_it_could_not_refresh_the_voice_registry(tmp_path: Path, monkeypatch):
+    """A stale GSV registry is the archive's real failure, and it returned 200.
+
+    ``_rebuild_voices`` keeps the previous ``_archived_character_ids`` whenever
+    a single template under the voices tree is unresolvable -- which the GSV
+    sidecar treats as an ordinary state, not an incident. Archive still removed
+    the row, so the character stayed synthesizable through a sidecar that had
+    never heard about it, and the only trace was an ``info`` line. The response
+    now carries the failure to the client, and the log says so at a level an
+    operator would actually see.
+
+    The module logger is spied on rather than read through ``caplog``: the
+    application installs its own handlers and does not propagate, so a record's
+    level is only observable where it is emitted.
+    """
+
+    config = _config(tmp_path)
+    settings = load_settings(str(config))
+    momo_dir = Path(settings.persona_path).parent.parent / "momo"
+    (momo_dir / "voice.yaml").write_text("template: murasame\n", encoding="utf-8")
+
+    class FailingReloader:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def reload(self):
+            raise RuntimeError("voices tree has an unresolvable template")
+
+        def close(self):
+            pass
+
+    spy = MagicMock()
+    monkeypatch.setattr("character_memory.tts_lab.GsvVoiceReloader", FailingReloader)
+    monkeypatch.setattr("character_memory.api.logger", spy)
+    app = create_api(str(config))
+
+    with TestClient(app) as client:
+        archived = client.post("/v1/characters/momo/archive")
+
+    assert archived.status_code == 200
+    assert archived.json()["voice_registry"] == {
+        "ok": False,
+        "reloaded": False,
+        "reason": "voices tree has an unresolvable template",
+    }
+    assert spy.warning.called, "a registry the sidecar did not pick up is not an info-level event"
+    assert "voices tree has an unresolvable template" in str(spy.warning.call_args)

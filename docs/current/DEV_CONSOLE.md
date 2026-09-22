@@ -90,7 +90,7 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 支持：
 
 - 选择一个未归档 Character；
-- 直接调整并持久化 Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / World Observation / World Pages / World Text / Audience / Scheduler Poll；
+- 热调整 Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / World Observation / World Pages / World Text / Audience / Scheduler Poll；
 - 快捷档 `10min / 30min / 1H / 6H / 24H`；
 - `立即手动触发一次`：立即跑一次完整 Space Opportunity，不改变正式 next time；
 - `让选中角色立即到期`：把 next opportunity 设为现在，用真实后台 Scheduler 验证；
@@ -101,29 +101,28 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 - 无头浏览器打开 URL：只验证一个公开 URL 的渲染/正文抽取，不触发角色记忆或 Space 发帖；
 - 查看每个人的 last/next opportunity、last status，以及最近 opportunity run history。
 
-配置会写回 `config.yaml`，同时热应用到当前 Character Runtime。测试时可设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。
+这里的调参只热应用到当前 Character Runtime，不写 `config.yaml`；Group Autonomy 卡片同理。两者的正式值都由 Settings Center 保存，Dev 的测试值只活到这次 Character Runtime 进程结束：测试时可临时设为 1H 并让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果；重启后回到 Settings Center 的正式值。
 
-### TTS
+### Random Encounter
 
-调用正式 Media Runtime TTS：
-
-```text
-POST :8001/v1/tts
-```
-
-因此它验证的是当前正式配置后的路径：
+Dev 只做观察和手动触发，正式调度参数不在这里改：
 
 ```text
-tts_provider: sherpa
-  -> :8001 local VITS
-
-tts_provider: kokoro
-  -> :8001 -> :9002 provider runtime
+Settings Center -> Random Encounter
+  encounter_enabled / encounter_interval_minutes
+  encounter_web_probability / encounter_max_pending
+  encounter_poll_seconds
 ```
 
-卡片展示 WAV、provider/device、inference/audio/RTF/total timing。
+Dev 侧对应的诊断入口：
 
-如果目的是横向试听 Sherpa/Kokoro/CosyVoice，请使用 `:9002/tts` 的 TTS Lab，而不是把 Dev Console 变成第二个 provider picker。
+```text
+GET  /v1/dev/encounters/status
+POST /v1/dev/encounters/opportunity?source_type=AUTO|WEB|GENERATED
+POST /v1/dev/encounters/due
+```
+
+`AUTO` 按 `encounter_web_probability` 决定走真实互联网资料来源还是系统生成，`WEB` / `GENERATED` 强制其中一条。手动触发不移动正式 next opportunity；`立即到期` 才把 next opportunity 设为现在，交给真实 Scheduler。候选角色在用户明确留下前不占正式角色位。
 
 ### ASR
 
@@ -144,7 +143,7 @@ tts_provider: kokoro
 TTS -> generated WAV -> ASR
 ```
 
-用于验证当前本地 model/runtime 安装，不是假 provider test。
+用于验证当前本地 model/runtime 安装，不是假 provider test。这里的 TTS 走正式 Media Runtime `POST :8001/v1/tts`，因此用的是 `config.yaml` 当前选中的 provider（Sherpa / Kokoro / GSV）及其到 `:9002` 的正式路由；请求体只带后端默认值，没有第二个 provider picker。横向试听请用 `:9002/tts` 的 TTS Lab。
 
 ### ImageGen
 
@@ -182,6 +181,18 @@ Dev ImageGen 可以持久化测试 MediaAsset，方便继续做 avatar/media 检
 ### Metrics
 
 显示 Media Runtime bounded latency buffer，帮助分辨 ASR/TTS warm path 和 HTTP total。
+
+### 归档人物与语音
+
+归档是生命周期标记，不是删除：`persona.yaml`、`voice.yaml` 和历史媒体都留在磁盘上，但该角色立刻退出正式语音面：
+
+- 不再进入 `/v1/voice-templates` 的正式语音快照与分配；
+- 对它设置语音返回 409；
+- 运行中的 GSV sidecar 拒绝为它合成，重载后不再解析这个 id。
+
+`POST /v1/characters/{id}/archive` 与 `/restore` 的响应带一个 `voice_registry` 字段，报告这次 best-effort 重载的结果。voices 树里只要有一个模板不可解析，重载就整体回滚，该字段是 `{"ok": false, "reloaded": false, "reason": ...}`，而归档本身仍然返回 200——这时 sidecar 还在按旧名单合成。Character Archive 抽屉会把这条失败直接显示出来；修好模板后再归档/恢复一次，或重启 GSV sidecar。
+
+restore 复活原来的映射：`voice.yaml` 从未被改写，重载成功后该 id 立即重新可用。
 
 ## 4. Settings boundary
 

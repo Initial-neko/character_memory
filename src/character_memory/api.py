@@ -170,7 +170,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 reloader.close()
             return {"ok": True, "reloaded": True}
         except Exception as exc:
-            logger.info("api.voice_registry reload skipped/failed error=%s", exc)
+            logger.warning("api.voice_registry reload skipped/failed error=%s", exc)
             return {"ok": False, "reloaded": False, "reason": str(exc) or exc.__class__.__name__}
 
     resources = ApiResourceService(

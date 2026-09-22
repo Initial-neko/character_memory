@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -110,6 +111,67 @@ def settings():
         chat_model="fake-model",
         embedding_provider="deterministic",
     )
+
+
+def test_every_element_id_a_web_script_reads_is_still_emitted_by_a_page():
+    """``$("id")`` is a cross-file contract, and one broke with no error at all.
+
+    The Dev Console's Media Live Smoke read its sample text, speaker and speed
+    out of ``ttsText`` / ``speakerId`` / ``ttsSpeed``. A later pass deleted the
+    legacy TTS card that was the only markup emitting those ids, so the button
+    stayed visible and clickable while ``runMediaSmoke`` threw
+    ``Cannot read properties of null`` on every press. Nothing but a live click
+    could have caught it, because the script and the markup never mention each
+    other. Checking every id a web script looks up against the ids the web
+    markup emits turns the next such deletion into a failing test.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    web = root / "src" / "character_memory" / "web"
+    emitted: set[str] = set()
+    for page in sorted(web.glob("*.html")):
+        emitted.update(re.findall(r'id="([^"]+)"', page.read_text(encoding="utf-8")))
+    assert emitted, "the pages emit ids; the extraction above has gone stale"
+
+    missing = {}
+    for script_path in sorted(web.glob("*.js")):
+        text = script_path.read_text(encoding="utf-8")
+        for element_id in sorted(set(re.findall(r'\$\("([A-Za-z][\w-]*)"\)', text))):
+            if element_id not in emitted:
+                missing.setdefault(script_path.name, []).append(element_id)
+    assert missing == {}, f"no page emits these ids any more: {missing}"
+
+
+def test_dev_console_doc_keeps_up_with_the_runtime_only_scope():
+    """The durable doc described a console that no longer exists.
+
+    The Space card stopped persisting ``config.yaml`` and the legacy TTS card
+    the doc described was deleted from the page, but ``docs/current`` is where
+    AGENTS.md puts durable behavior and neither change reached it: the doc still
+    told a reader their Dev tuning was persisted, and still described a TTS
+    surface no page emits. The Random Encounter card and the archive/voice
+    lifecycle landed with the same PR and are pinned here too.
+    """
+
+    doc = Path("docs/current/DEV_CONSOLE.md").read_text(encoding="utf-8")
+
+    for stale in ("直接调整并持久化", "配置会写回 `config.yaml`", "### TTS\n"):
+        assert stale not in doc, stale
+    assert "不写 `config.yaml`" in doc, "the runtime-only scope has to be stated"
+
+    script = Path("src/character_memory/web/dev.js").read_text(encoding="utf-8")
+    for endpoint in (
+        "/v1/dev/encounters/status",
+        "/v1/dev/encounters/opportunity",
+        "/v1/dev/encounters/due",
+    ):
+        assert endpoint in script
+        assert endpoint in doc, f"{endpoint} is documented nowhere"
+
+    # Archiving is a voice-lifecycle change, not a deletion, and the doc says
+    # which of the two the running GSV sidecar actually sees.
+    assert "409" in doc
+    assert "reloaded" in doc
 
 
 def test_dev_console_assets_cover_runtime_test_surfaces():

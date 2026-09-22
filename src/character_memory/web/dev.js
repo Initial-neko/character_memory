@@ -514,14 +514,13 @@
     $("mediaSmokeResult").textContent = "真实推理中：TTS → WAV → ASR ...";
     $("mediaSmokeLatency").textContent = "-";
     try {
+      // The smoke request model carries its own defaults (sample text, speaker
+      // 0, speed 1). Reading them out of the DOM here outlived the legacy TTS
+      // card those inputs lived in, which made the button throw on click.
       const data = await jsonFetch("/v1/dev/media-smoke", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: $("ttsText").value || "你好，这是 Character Memory 的媒体自检。",
-          speaker_id: Number($("speakerId").value || 0),
-          speed: Number($("ttsSpeed").value || 1),
-        }),
+        body: JSON.stringify({}),
       });
       $("mediaSmokeLatency").textContent = `${data.total_ms} ms total`;
       $("mediaSmokeResult").textContent = pretty(data);

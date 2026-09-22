@@ -2,6 +2,37 @@
   const CM = window.CM;
   if (!CM) throw new Error("CM core must load before message_content.js");
 
+  // Voice messages always carry canonical text. Unlike WeChat-style
+  // transcription-on-demand, Character Memory shows that text immediately
+  // below every voice bubble so listening is optional, not required for access.
+  // app.js still owns the shared audio player/binder; this renderer is loaded
+  // after app.js and becomes the canonical Direct/Group voice markup.
+  CM.voiceMessageHtml = message => {
+    if (message.action !== "VOICE_MESSAGE") return "";
+    const status = message.voice_status || "pending";
+    const durationMs = Number(message.voice_duration_ms || 0);
+    const seconds = durationMs > 0 ? Math.max(1, Math.round(durationMs / 1000)) : 0;
+    const width = Math.min(260, 92 + Math.min(seconds || 1, 34) * 5);
+    const mediaUrl = message.voice_media_id
+      ? `/v1/media/${encodeURIComponent(message.voice_media_id)}`
+      : "";
+    const transcript = `<div class="voice-transcript voice-transcript-always" data-voice-transcript>${CM.escapeHtml(message.content || "")}</div>`;
+
+    if (status === "failed") {
+      const why = String(message.voice_error || "").trim();
+      return `<div class="voice-message voice-failed"><div class="voice-bubble voice-disabled">⚠ 语音生成失败</div>${why ? `<div class="voice-error">${CM.escapeHtml(why)}</div>` : ""}${transcript}</div>`;
+    }
+    if (status !== "ready" || !mediaUrl) {
+      return `<div class="voice-message voice-pending"><div class="voice-bubble voice-disabled"><span class="voice-glyph">)))</span><span>语音生成中…</span></div>${transcript}</div>`;
+    }
+    return `<div class="voice-message" data-voice-message="${CM.escapeHtml(message.id)}">
+      <button class="voice-bubble" type="button" data-voice-play data-audio-url="${CM.escapeHtml(mediaUrl)}" style="--voice-width:${width}px" aria-label="播放语音消息">
+        <span class="voice-glyph" aria-hidden="true">)))</span><span class="voice-duration">${seconds || "?"}"</span>
+      </button>
+      ${transcript}
+    </div>`;
+  };
+
   // Group bubbles size images and stickers differently from direct chat, and
   // p0_11.css keeps that sizing on group-only classes. The caller has to say
   // which surface it is rendering for; without the hook those rules are dead

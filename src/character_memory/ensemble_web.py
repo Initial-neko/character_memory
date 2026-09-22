@@ -40,10 +40,15 @@ def attach_ensemble_routes(app):
     @app.post("/v1/ensembles/prepare")
     def prepare_ensemble(req: EnsembleStartRequest):
         try:
-            return {"build": service.prepare(req.prompt)}
+            build = service.start(req.prompt)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        build_id = build["group_id"]
+        try:
+            return {"build": service.research(build_id)}
         except Exception as exc:
+            repository.delete(build_id)
             raise HTTPException(status_code=502, detail=f"资料整理失败：{exc}") from exc
 
     @app.get("/v1/ensembles/{group_id}")

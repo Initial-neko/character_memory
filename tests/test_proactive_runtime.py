@@ -48,3 +48,47 @@ def test_proactive_turn_reuses_latest_conversation_and_marks_message_source(tmp_
     assert proactive.metadata["source_event_type"] == EventType.PROACTIVE_INTENT.value
     assert proactive.metadata["conversation_id"] == "browser-session"
     store.close()
+
+
+class ProactiveVoiceModel(PersonModel):
+    def __init__(self):
+        self.contexts = []
+
+    def react(self, context):
+        self.contexts.append(context)
+        return PersonReaction(
+            actions=[ActionDecision(type=ActionType.VOICE_MESSAGE, message="我直接说吧，路上慢一点。")]
+        )
+
+    def plan_day(self, context):
+        return DailyLifePlan()
+
+    def write_diary(self, context):
+        return DiaryResult(diary="", mental_state_update="")
+
+
+def test_proactive_intent_contract_allows_and_persists_voice_message(tmp_path):
+    t0 = datetime(2026, 9, 22, 9, tzinfo=timezone.utc)
+    store = SQLiteStore(tmp_path / "proactive-voice.db")
+    emb = DeterministicEmbedding()
+    model = ProactiveVoiceModel()
+    runtime = PersonRuntime(store, VectorRecall(store, emb), emb, model, "persona")
+    service = ChatService(store, {"momo": runtime}, FixedClock(t0))
+
+    result = service.dispatch_proactive_intent(
+        character_id="momo",
+        intent_id=8,
+        content="晚一点提醒用户路上注意安全",
+        at=t0,
+    )
+
+    assert result.event.event_type == EventType.PROACTIVE_INTENT
+    assert model.contexts
+    assert "VOICE_MESSAGE" in model.contexts[-1]
+    messages = store.list_events("momo", limit=10, event_type=EventType.CHARACTER_MESSAGE.value)
+    assert len(messages) == 1
+    voice = messages[0]
+    assert voice.metadata["action"] == "VOICE_MESSAGE"
+    assert voice.metadata["voice_status"] == "pending"
+    assert voice.content == "我直接说吧，路上慢一点。"
+    store.close()

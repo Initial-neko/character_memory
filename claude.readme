@@ -84,7 +84,11 @@ Validation state:
 
 ### 2026-09-22 — Autonomous Space Images implementation
 
-Status: `IN_PROGRESS`
+Status: `READY_FOR_ACCEPTANCE`
+
+Pull request: **#71 — Let autonomous Space posts search and generate images**
+
+Implementation head before this coordination update: `d053f59d3a48b8326f86b1342e6504016f0ac2f1`.
 
 PR #70 was merged to `main` as `4ce2d1acce7d3c52881e1412fbf655c61f26c4ea`. Development then continued on `feature/space-autonomous-images`.
 
@@ -99,6 +103,13 @@ Implemented so far:
 - Settings/Dev runtime gates and max-media cap;
 - Dev forced media-post endpoint/UI independent from formal scheduler;
 - tests for wide-image search, media persistence, ImageGen reuse and provider failure fallback.
+
+Validation state:
+
+- CI run **#365** passed all three jobs: `test`, `windows-smoke`, and `browser-smoke`.
+- Main test result: **694 passed, 8 skipped**.
+- Earlier CI attempts caught only contract-test drift caused by the intentional Search/Settings architecture changes; those tests were updated without weakening the runtime behavior or remote-media safety checks.
+- CI does not prove live SearchAPI/Agnes/ModelScope credentials or network availability. Use the Dev media smoke controls for local-provider acceptance.
 
 Acceptance focus for this slice:
 

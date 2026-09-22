@@ -69,14 +69,14 @@ def test_full_chat_list_does_not_close_or_delete_encounter(tmp_path):
     )
 
     def full_creator(*_args, **_kwargs):
-        raise ValueError("聊天列表最多保留 10 位角色，请先归档一位再留下新角色。")
+        raise ValueError("角色已达到容量上限：当前 20 位，本次新增 1 位，最多 20 位。")
 
     access = SimpleNamespace(
         create_character_from_draft=full_creator,
         store=lambda: store,
     )
     service = EncounterService(access, repo)
-    with pytest.raises(ValueError, match="最多保留 10 位"):
+    with pytest.raises(ValueError, match="最多 20 位"):
         service.accept(candidate["id"], now=now)
 
     # The candidate remains available for trial chat/dismissal instead of being
@@ -126,6 +126,6 @@ def test_encounter_ui_and_server_wiring_exist():
         "data-encounter-chat",
         "data-encounter-accept",
         "data-encounter-dismiss",
-        "聊天列表最多",
+        "active_character_soft_limit",
     ]:
         assert token in script

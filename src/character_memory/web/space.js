@@ -37,6 +37,23 @@
   `;
   chatShell?.appendChild(shell);
 
+  const lightbox = document.createElement("div");
+  lightbox.className = "space-lightbox hidden";
+  lightbox.setAttribute("role", "dialog");
+  lightbox.setAttribute("aria-modal", "true");
+  lightbox.setAttribute("aria-label", "动态图片预览");
+  lightbox.innerHTML = `
+    <button class="space-lightbox-backdrop" type="button" data-space-lightbox-close aria-label="关闭预览"></button>
+    <div class="space-lightbox-frame">
+      <button class="space-lightbox-close" type="button" data-space-lightbox-close aria-label="关闭">×</button>
+      <button class="space-lightbox-nav prev" type="button" data-space-lightbox-prev aria-label="上一张">‹</button>
+      <img class="space-lightbox-image" alt="动态图片预览">
+      <button class="space-lightbox-nav next" type="button" data-space-lightbox-next aria-label="下一张">›</button>
+      <div class="space-lightbox-caption"><span data-space-lightbox-label></span><span data-space-lightbox-count></span></div>
+    </div>
+  `;
+  document.body.appendChild(lightbox);
+
   const feed = shell.querySelector(".space-feed");
   const meta = shell.querySelector(".space-feed-meta");
   const title = shell.querySelector(".space-title");
@@ -46,6 +63,8 @@
   let opened = false;
   let filterCharacterId = null;
   let voicePlayer = {audio:null, button:null};
+  let lightboxItems = [];
+  let lightboxIndex = 0;
   let postsById = new Map();
   const expandedComments = new Set();
 
@@ -97,7 +116,7 @@
       const layout = images.length === 1 ? "single" : images.length <= 4 ? "quad" : "nine";
       const cells = images.map((item, index) => {
         const label = item.label || `动态图片 ${index + 1}`;
-        return `<a class="space-media-cell" href="${CM.escapeHtml(item.url)}" target="_blank" rel="noreferrer"><img src="${CM.escapeHtml(item.url)}" alt="${CM.escapeHtml(label)}" loading="lazy"></a>`;
+        return `<button class="space-media-cell" type="button" data-space-image-open data-image-url="${CM.escapeHtml(item.url)}" data-image-label="${CM.escapeHtml(label)}" aria-label="放大查看 ${CM.escapeHtml(label)}"><img src="${CM.escapeHtml(item.url)}" alt="${CM.escapeHtml(label)}" loading="lazy"></button>`;
       }).join("");
       imageHtml = `<div class="space-media-grid space-media-${layout}" data-space-media-count="${images.length}">${cells}</div>`;
     }
@@ -108,6 +127,43 @@
     ).join("");
 
     return `${imageHtml}${voiceMediaHtml}${links}`;
+  }
+
+  function renderLightbox() {
+    const item = lightboxItems[lightboxIndex] || null;
+    if (!item) return;
+    const image = lightbox.querySelector(".space-lightbox-image");
+    image.src = item.url;
+    image.alt = item.label || "动态图片预览";
+    lightbox.querySelector("[data-space-lightbox-label]").textContent = item.label || "";
+    lightbox.querySelector("[data-space-lightbox-count]").textContent = lightboxItems.length > 1 ? `${lightboxIndex + 1} / ${lightboxItems.length}` : "";
+    lightbox.querySelector("[data-space-lightbox-prev]").classList.toggle("hidden", lightboxItems.length <= 1);
+    lightbox.querySelector("[data-space-lightbox-next]").classList.toggle("hidden", lightboxItems.length <= 1);
+  }
+
+  function openLightbox(button) {
+    const grid = button.closest(".space-media-grid");
+    const buttons = [...(grid?.querySelectorAll("[data-space-image-open]") || [])];
+    lightboxItems = buttons.map(node => ({url:String(node.dataset.imageUrl || ""),label:String(node.dataset.imageLabel || "动态图片")})).filter(item => item.url);
+    lightboxIndex = Math.max(0, buttons.indexOf(button));
+    if (!lightboxItems.length) return;
+    renderLightbox();
+    lightbox.classList.remove("hidden");
+    document.body.classList.add("space-lightbox-open");
+  }
+
+  function closeLightbox() {
+    lightbox.classList.add("hidden");
+    document.body.classList.remove("space-lightbox-open");
+    lightboxItems = [];
+    lightboxIndex = 0;
+    lightbox.querySelector(".space-lightbox-image").removeAttribute("src");
+  }
+
+  function moveLightbox(delta) {
+    if (lightboxItems.length <= 1) return;
+    lightboxIndex = (lightboxIndex + delta + lightboxItems.length) % lightboxItems.length;
+    renderLightbox();
   }
 
   function stopVoice() {
@@ -227,11 +283,19 @@
 
   function close() {
     stopVoice();
+    closeLightbox();
     setOpen(false);
     window.scrollTo({top:0, behavior:"auto"});
   }
 
   feed.addEventListener("click", event => {
+    const imageButton = event.target.closest("[data-space-image-open]");
+    if (imageButton) {
+      event.preventDefault();
+      openLightbox(imageButton);
+      return;
+    }
+
     const commentsToggle = event.target.closest("[data-space-comments-toggle]");
     if (commentsToggle) {
       const postId = String(commentsToggle.dataset.spaceCommentsToggle || "");
@@ -309,6 +373,18 @@
         errorBox.classList.remove("hidden");
       }
     }
+  });
+
+  lightbox.addEventListener("click", event => {
+    if (event.target.closest("[data-space-lightbox-close]")) { closeLightbox(); return; }
+    if (event.target.closest("[data-space-lightbox-prev]")) { moveLightbox(-1); return; }
+    if (event.target.closest("[data-space-lightbox-next]")) moveLightbox(1);
+  });
+  document.addEventListener("keydown", event => {
+    if (lightbox.classList.contains("hidden")) return;
+    if (event.key === "Escape") closeLightbox();
+    else if (event.key === "ArrowLeft") moveLightbox(-1);
+    else if (event.key === "ArrowRight") moveLightbox(1);
   });
 
   nav.addEventListener("click", () => open(null).catch(console.error));

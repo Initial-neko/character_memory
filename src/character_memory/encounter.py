@@ -266,7 +266,13 @@ Excerpt:
             "messages": self.repository.list_messages(candidate_id, limit=50),
         }
 
-    def accept(self, candidate_id: int, *, now: datetime | None = None) -> dict:
+    def accept(
+        self,
+        candidate_id: int,
+        *,
+        now: datetime | None = None,
+        confirm_over_soft_limit: bool = False,
+    ) -> dict:
         now = now or datetime.now().astimezone()
         candidate = self.repository.get_candidate(candidate_id)
         if candidate is None:
@@ -280,7 +286,11 @@ Excerpt:
         if not callable(creator):
             raise RuntimeError("character creator is unavailable")
         draft = PersonaDraft.model_validate(candidate["draft"])
-        profile = creator(draft, "")
+        profile = creator(
+            draft,
+            "",
+            confirm_over_soft_limit=confirm_over_soft_limit,
+        )
         character_id = profile["id"]
 
         messages = self.repository.list_messages(candidate_id, limit=40)

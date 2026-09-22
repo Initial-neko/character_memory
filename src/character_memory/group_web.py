@@ -7,7 +7,7 @@ import threading
 from pydantic import BaseModel, Field, model_validator
 
 from character_memory.application.group_conversation_service import GroupConversationService
-from character_memory.group_store import GroupRepository
+from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.images import load_image_catalog
 from character_memory.message_projection import common_chat_message_fields
 
@@ -17,7 +17,7 @@ logger = logging.getLogger("character_memory.group_web")
 
 class CreateGroupRequest(BaseModel):
     name: str = Field(default="新群聊", max_length=80)
-    member_ids: list[str] = Field(min_length=2, max_length=4)
+    member_ids: list[str] = Field(min_length=2, max_length=MAX_GROUP_CHARACTERS)
 
     @model_validator(mode="after")
     def distinct_members(self):
@@ -115,6 +115,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "created_at": group.created_at.isoformat(),
             "updated_at": group.updated_at.isoformat(),
             "archived_at": group.archived_at.isoformat() if group.archived_at else None,
+            "status": "ACTIVE" if len(group.member_ids) >= 2 else "BUILDING",
         }
 
     def resource_snapshot(group=None) -> dict:
@@ -319,6 +320,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         preliminary = repo().get_group(conversation_id)
         if preliminary is None:
             raise HTTPException(status_code=404, detail="group not found")
+        if len(preliminary.member_ids) < 2:
+            raise HTTPException(status_code=409, detail="群聊还在构建中，请先完成成员确认。")
         try:
             bundle = access.get_bundle()
             refresh_member_resources(bundle, preliminary.member_ids)

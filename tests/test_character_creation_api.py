@@ -131,9 +131,9 @@ def test_duplicate_character_id_is_rejected(tmp_path):
     store.close()
 
 
-def test_character_creation_is_blocked_when_ten_active_slots_are_full(tmp_path):
+def _capacity_bundle(tmp_path, count: int):
     persona_root = tmp_path / "personas"
-    for index in range(10):
+    for index in range(count):
         directory = persona_root / f"c{index:02d}"
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "persona.yaml").write_text(
@@ -141,16 +141,55 @@ def test_character_creation_is_blocked_when_ten_active_slots_are_full(tmp_path):
             encoding="utf-8",
         )
     settings = Settings(
-        db_path=str(tmp_path / "x.db"),
+        db_path=str(tmp_path / f"capacity-{count}.db"),
         persona_path=str(persona_root / "c00" / "persona.yaml"),
         embedding_provider="deterministic",
     )
     store = SQLiteStore(settings.db_path)
     bundle = SimpleNamespace(settings=settings, store=store, characters=discover_character_profiles(settings))
-    client = TestClient(create_api(bundle=bundle))
+    return persona_root, store, bundle
+
+
+def test_character_creation_requires_confirmation_after_ten_active_slots(tmp_path):
+    persona_root, store, bundle = _capacity_bundle(tmp_path, 10)
+    app = create_api(bundle=bundle)
+    client = TestClient(app)
 
     response = client.post("/v1/characters", json={"draft": valid_draft()})
     assert response.status_code == 409
-    assert "最多保留 10 位角色" in response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "ACTIVE_CHARACTER_SOFT_LIMIT"
+    assert detail["active_count"] == 10
+    assert detail["result_count"] == 11
+    assert detail["hard_limit"] == 20
+    assert detail["confirmation_required"] is True
+    assert not (persona_root / "nova" / "persona.yaml").exists()
+
+    # The batch/single creation contract accepts the exact same operation once
+    # the caller has shown its one confirmation page.
+    capacity = app.state.character_memory.check_character_capacity(
+        1,
+        confirm_over_soft_limit=True,
+    )
+    assert capacity["result_count"] == 11
+    assert capacity["warning"] is True
+    store.close()
+
+
+def test_character_creation_hard_stops_at_twenty_active_slots(tmp_path):
+    persona_root, store, bundle = _capacity_bundle(tmp_path, 20)
+    app = create_api(bundle=bundle)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/characters",
+        json={"draft": valid_draft(), "confirm_over_soft_limit": True},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "ACTIVE_CHARACTER_HARD_LIMIT"
+    assert detail["active_count"] == 20
+    assert detail["result_count"] == 21
+    assert detail["confirmation_required"] is False
     assert not (persona_root / "nova" / "persona.yaml").exists()
     store.close()

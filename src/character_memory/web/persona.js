@@ -71,7 +71,13 @@
     const button = document.getElementById("createPersona");
     if (button) { button.disabled = true; button.textContent = "正在创建…"; }
     try {
-      const result = await CM.api("/v1/characters", {method:"POST", body:JSON.stringify({draft})});
+      const capacity = CM.state.characterCapacity || {activeTotal:CM.state.characters.length,softLimit:10,hardLimit:20};
+      const needsConfirm = Number(capacity.activeTotal || 0) >= Number(capacity.softLimit || 10);
+      if (Number(capacity.activeTotal || 0) >= Number(capacity.hardLimit || 20)) {
+        throw new Error(`角色已达到 ${capacity.hardLimit || 20} 位上限，请先归档一位人物。`);
+      }
+      if (needsConfirm && !window.confirm(`当前已有 ${capacity.activeTotal} 位角色。继续创建会超过 10 位提醒阈值，是否仍然新增？`)) return;
+      const result = await CM.api("/v1/characters", {method:"POST", body:JSON.stringify({draft,confirm_over_soft_limit:needsConfirm})});
       await CM.loadCharacters();
       CM.closeDrawer();
       await CM.switchCharacter(result.character.id);

@@ -5,12 +5,12 @@ import threading
 
 from pydantic import BaseModel, Field, model_validator
 
-from character_memory.group_store import GroupRepository
+from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.time_utils import epoch_us
 
 
 class AddGroupMembersRequest(BaseModel):
-    member_ids: list[str] = Field(min_length=1, max_length=4)
+    member_ids: list[str] = Field(min_length=1, max_length=MAX_GROUP_CHARACTERS)
 
     @model_validator(mode="after")
     def clean_members(self):
@@ -83,8 +83,8 @@ def attach_group_member_routes(app):
 
             additions = [character_id for character_id in req.member_ids if character_id not in group.member_ids]
             merged = [*group.member_ids, *additions]
-            if len(merged) > 4:
-                raise HTTPException(status_code=400, detail="group supports at most 4 characters")
+            if len(merged) > MAX_GROUP_CHARACTERS:
+                raise HTTPException(status_code=400, detail=f"group supports at most {MAX_GROUP_CHARACTERS} characters")
 
             if additions:
                 now = datetime.now().astimezone()

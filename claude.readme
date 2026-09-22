@@ -13,17 +13,16 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 ## Current baseline
 
 - Repository: `Initial-neko/character_memory`
-- Base: `main@91383b824b47ab5a52a6d9a7b3663f581f352c09`
-- Active branch: `refactor/docs-and-runtime-services`
+- Base: `main@ff57f30c9c3c849cd18933a5ce909ca6a2d30058`
+- Active branch: none
 - Pull request: **#74 — Clarify architecture docs and compose shared runtime services**
 - Phase: post-feature architecture cleanup after Space / World Observation
-- Status: **READY_FOR_ACCEPTANCE**
+- Status: **MERGED**
 
 ## Validation
 
-- PR #74 implementation including typed CharacterRuntimeAccess passed CI run #386 on commit b70a69aeaf5b54d2398acb400f9bc31b71be087c.
-- Later commits are documentation/typing cleanup; the latest PR HEAD should still be used for final acceptance.
-- Main test, Windows smoke and browser smoke are required before merge.
+- PR #74 merged to `main` as `ff57f30c9c3c849cd18933a5ce909ca6a2d30058`.
+- Final PR CI run #390 passed `test`, `windows-smoke`, and `browser-smoke` on head `b685fce5c0804fe97a96d98b7da7287491df7348`.
 
 ## Current slice
 

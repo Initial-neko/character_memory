@@ -231,7 +231,7 @@
 
   CM.renderCharacterList = () => {
     const unread = CM.features.unread;
-    CM.dom.characterList.innerHTML = CM.state.characters.map(profile => {
+    CM.dom.characterList.innerHTML = CM.state.characters.slice(0, 10).map(profile => {
       const pending = CM.state.pendingCharacters.has(profile.id);
       const hasUnread = unread?.isUnread?.(profile.id) || false;
       const preview = unread?.preview?.(profile) || profile.tagline || profile.identity || "Persistent AI Person";

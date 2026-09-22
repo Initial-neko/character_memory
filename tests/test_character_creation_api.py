@@ -129,3 +129,28 @@ def test_duplicate_character_id_is_rejected(tmp_path):
     assert first.status_code == 500  # loaded test bundle cannot dynamically register a runtime
     assert not (persona_root / "nova" / "persona.yaml").exists()
     store.close()
+
+
+def test_character_creation_is_blocked_when_ten_active_slots_are_full(tmp_path):
+    persona_root = tmp_path / "personas"
+    for index in range(10):
+        directory = persona_root / f"c{index:02d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "persona.yaml").write_text(
+            f"id: c{index:02d}\nname: C{index:02d}\n",
+            encoding="utf-8",
+        )
+    settings = Settings(
+        db_path=str(tmp_path / "x.db"),
+        persona_path=str(persona_root / "c00" / "persona.yaml"),
+        embedding_provider="deterministic",
+    )
+    store = SQLiteStore(settings.db_path)
+    bundle = SimpleNamespace(settings=settings, store=store, characters=discover_character_profiles(settings))
+    client = TestClient(create_api(bundle=bundle))
+
+    response = client.post("/v1/characters", json={"draft": valid_draft()})
+    assert response.status_code == 409
+    assert "最多保留 10 位角色" in response.text
+    assert not (persona_root / "nova" / "persona.yaml").exists()
+    store.close()

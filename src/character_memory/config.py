@@ -132,6 +132,15 @@ class Settings(BaseModel):
     group_autonomy_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
     group_autonomy_user_quiet_minutes: float = Field(default=30.0, ge=0.0, le=1440.0)
 
+    # Random Encounter: a lightweight discovery pool separate from the formal
+    # character list. Candidates may be explored even when the active chat list
+    # is full; only accepting a candidate consumes one of the 10 active slots.
+    encounter_enabled: bool = True
+    encounter_interval_minutes: float = Field(default=1440.0, ge=10.0, le=10080.0)
+    encounter_web_probability: float = Field(default=0.5, ge=0.0, le=1.0)
+    encounter_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
+    encounter_max_pending: int = Field(default=3, ge=1, le=10)
+
     # Legacy V2 fields remain loadable so existing config.yaml files do not need
     # a destructive migration. The interval scheduler no longer consumes them.
     space_daily_window_start_hour: int = Field(default=18, ge=0, le=23)

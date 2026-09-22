@@ -100,6 +100,15 @@ group_autonomy_max_messages: 3             # hard range 1..4 visible character m
 group_autonomy_user_quiet_minutes: 30      # skip/rearm when the user spoke too recently; 0 disables this guard
 group_autonomy_poll_seconds: 60            # check latency only; does not change interval
 
+# Random Encounter. Candidates live outside the formal chat list until the user
+# explicitly keeps one. The formal direct-chat list has a hard 10-character cap;
+# a full list does not stop discovery or temporary encounter chat.
+encounter_enabled: true
+encounter_interval_minutes: 1440           # 24H default; 10/30/60 useful for soak tests
+encounter_web_probability: 0.5             # WEB vs system-generated candidate selection
+encounter_poll_seconds: 60                 # scheduler check latency only
+encounter_max_pending: 3                   # do not accumulate an endless unseen candidate pile
+
 
 # GSV-TTS-Lite runtime assets are intentionally NOT stored in config.yaml.
 # Configure them in Settings Center; they persist to project-local .env:

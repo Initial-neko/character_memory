@@ -97,3 +97,25 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 ## Claude acceptance findings
 
 Append findings below this line.
+
+
+## 2026-09-22 Random Encounter + Space observability
+
+- Formal direct-chat character list is capped at 10 active characters.
+  - Encounter candidates do not consume a slot.
+  - Trial chat remains available at 10/10.
+  - Accept/restore is rejected until one active character is archived.
+- Added durable Encounter candidate pool:
+  - GENERATED: PersonaBuilder creates an original stranger from rotating themes.
+  - WEB: existing SearchProvider + WorldObservation/Playwright browser gathers public inspiration; the model must transform it into an original character rather than cloning a real person.
+  - Web failure falls back to GENERATED so one provider outage does not kill the daily encounter.
+  - NEW/SEEN/CHATTING/ACCEPTED/DISMISSED lifecycle and restart-safe scheduler.
+  - Temporary encounter messages do not create Person Memory before acceptance.
+  - Acceptance reuses the canonical persona save/runtime registration path and records the first encounter as a LIFE_EVENT.
+- Space opportunity ledger now persists execution details:
+  - World explore decision/query/rendered observations
+  - final media intents
+  - media failures and audience follow-up error
+  - status() aggregates posted/no-post/failed, web exploration/browser render, image-search/ImageGen/voice intent counts.
+  - status() also exposes lightweight Memory growth metrics: active/inactive/pinned/superseded totals plus 24H creation counts by DIRECT/GROUP/SPACE/WORLD source channel.
+- Main Space UI includes 今日邂逅 cards with source provenance, trial chat, keep/dismiss actions, and 10-slot capacity display.

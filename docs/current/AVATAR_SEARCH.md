@@ -136,13 +136,18 @@ POST /v1/characters/{character_id}/avatar/generate
 POST /v1/characters/{character_id}/avatar/from-chat
 ```
 
-Generate compiles Persona/Mental State/recent mood into a plain-text visual prompt and calls the configured ImageGen provider.
+Generate reuses the same `ImageRewriteRequest -> compile_instruction -> VisualPromptPlanner` prompt-polish path as the explicit Image tool. The avatar manager can add one bounded style preset before polish:
+
+- `AUTO` — let Persona/world setting decide the stable visual language;
+- `ANIME_CLEAN` — clean anime illustration;
+- `SOFT_ILLUSTRATION` — soft semi-realistic illustration;
+- `NATURAL_PORTRAIT` — natural portrait treatment.
+
+One request produces 1~4 **candidates** (UI default 4). The polished base prompt is shared across the batch; candidates only vary framing/view/expression slightly so style and character identity do not drift just to look different.
 
 If Provider supports reference images, current avatar may be supplied as an identity anchor.
 
-Generated result is a **candidate**, not automatic current avatar.
-
-The user can explicitly choose the generated/chat asset and copy it into avatar storage via `avatar/from-chat`.
+Generated results are candidates, never an automatic current avatar. The user explicitly chooses one generated/chat asset and copies it into avatar storage via `avatar/from-chat`.
 
 ImageGen provider/config details are documented in [`VISUAL_GENERATION.md`](VISUAL_GENERATION.md).
 

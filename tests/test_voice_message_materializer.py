@@ -186,19 +186,23 @@ def test_group_voice_message_updates_the_same_group_event(tmp_path):
     assert hub.published[-1][2]["id"] == event.id
 
 
-def test_voice_message_frontend_has_native_bubble_not_audio_controls():
+def test_voice_message_frontend_has_native_shared_bubble_not_audio_controls():
     root = Path(__file__).resolve().parents[1]
-    app = (root / "src/character_memory/web/app.js").read_text(encoding="utf-8")
-    groups = (root / "src/character_memory/web/groups.js").read_text(encoding="utf-8")
-    css = (root / "src/character_memory/web/styles.css").read_text(encoding="utf-8")
+    web = root / "src/character_memory/web"
+    app = (web / "app.js").read_text(encoding="utf-8")
+    groups = (web / "groups.js").read_text(encoding="utf-8")
+    common = (web / "message_content.js").read_text(encoding="utf-8")
+    css = (web / "styles.css").read_text(encoding="utf-8")
 
     assert 'message.action !== "VOICE_MESSAGE"' in app
     assert "voice-bubble" in app
     assert "new Audio(" in app
     assert "<audio controls" not in app
-    assert "voice_status:metadata.voice_status" in app
-    assert "voice_status:metadata.voice_status" in groups
-    assert "CM.voiceMessageHtml(message)" in groups
+    assert "CM.voiceMessageHtml(message)" in common
+    assert "CM.messageContentHtml(message)" in app
+    assert "CM.messageContentHtml(message)" in groups
+    assert "CM.bindMessageContent(row)" in app
+    assert "CM.bindMessageContent(row)" in groups
     assert ".voice-bubble" in css
 
 

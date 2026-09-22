@@ -7,12 +7,12 @@ from typing import Callable
 
 import numpy as np
 
-from character_memory.domain.models import ActionDecision, ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory, RuntimeResult
-from character_memory.runtime.context import compile_context
+from character_memory.application.action_materialization import materialize_expressive_action
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.person_context import PersonContextBuilder
+from character_memory.runtime.reaction_engine import evaluate_reaction
 from character_memory.runtime.sticker_retrieval import StickerRetriever
 from character_memory.visual_runtime import direct_visual_available, generate_direct_visual_action
-from character_memory.voice_message_fields import voice_pending_fields
 
 
 logger = logging.getLogger("character_memory.runtime")
@@ -269,69 +269,48 @@ class PersonRuntime:
             exclude_event_id=event.id,
         )
 
-        stage = time.perf_counter()
-        person_context = self.context_builder.build(
-            event.character_id,
-            query=event.content,
-            at=event.event_time,
+        conversation_id = str(event.metadata.get("conversation_id") or f"{event.character_id}:default")
+        evaluation = evaluate_reaction(
+            self,
+            event=event,
             exclude_event_id=event.id,
-            recent_limit=8,
-        )
-        memories = person_context.memories
-        state_before = person_context.mental_state
-        recent = person_context.recent_events
-        timings["recall_ms"] = _ms(stage)
-        logger.info("runtime.recall done count=%d ids=%s duration_ms=%.1f", len(memories), [memory.id for memory in memories], timings["recall_ms"])
-
-        stage = time.perf_counter()
-        sticker_retrieval = self.sticker_retriever.retrieve(
-            self.sticker_catalog,
-            self._sticker_query(event, recent),
-        )
-        prompt_stickers = sticker_retrieval.catalog if sticker_retrieval is not None else None
-        allowed_sticker_ids = {match.sticker_id for match in sticker_retrieval.matches} if sticker_retrieval is not None else set()
-        timings["sticker_retrieval_ms"] = _ms(stage)
-        allow_generate_image = direct_visual_available() and event.event_type in {
-            EventType.USER_MESSAGE,
-            EventType.TIME_TICK,
-            EventType.PROACTIVE_INTENT,
-        }
-        context = compile_context(
-            self.persona,
-            state_before,
-            memories,
-            event,
-            recent,
             last_chat_event=last_chat_event,
-            sticker_catalog=prompt_stickers,
-            image_catalog=self.image_catalog,
-            allow_generate_image=allow_generate_image,
+            session_id=conversation_id,
+            image_data_urls=image_data_urls,
+            # compile_context only exposes the tool on USER_MESSAGE turns; make
+            # that product boundary explicit here instead of advertising a wider
+            # capability that a lower layer later removes.
+            allow_generate_image=direct_visual_available() and event.event_type == EventType.USER_MESSAGE,
         )
-        timings["context_ms"] = _ms(stage)
+        timings.update(evaluation.timings)
+        memories = evaluation.memories
+        recent = evaluation.recent
+        state_before = evaluation.state_before
+        context = evaluation.context
+        model_call = evaluation.model_call
+        reaction = evaluation.reaction
+        sticker_retrieval = evaluation.sticker_retrieval
+        sticker_decisions = evaluation.sticker_decisions
+        image_decisions = evaluation.image_decisions
+        allowed_sticker_ids = evaluation.allowed_sticker_ids
+
+        logger.info(
+            "runtime.recall done count=%d ids=%s duration_ms=%.1f",
+            len(memories),
+            [memory.id for memory in memories],
+            timings["recall_ms"],
+        )
         logger.info(
             "runtime.context ready chars=%d recent_events=%d sticker_candidates=%d has_state=%s generate_image=%s duration_ms=%.1f",
             len(context),
             len(recent),
             len(allowed_sticker_ids),
             bool(state_before),
-            allow_generate_image,
+            direct_visual_available() and event.event_type == EventType.USER_MESSAGE,
             timings["context_ms"],
         )
 
-        conversation_id = str(event.metadata.get("conversation_id") or f"{event.character_id}:default")
-        stage = time.perf_counter()
-        logger.info("runtime.model react start event_id=%s conversation=%s images=%d", event.id, conversation_id, len(image_data_urls or []))
-        if image_data_urls:
-            model_call = self.model.react_call_with_images_for_session(context, image_data_urls, conversation_id)
-        else:
-            model_call = self.model.react_call_for_session(context, conversation_id)
-        reaction = model_call.value
-        reaction, sticker_decisions, image_decisions = self._sanitize_resource_actions(
-            reaction,
-            allowed_sticker_ids=allowed_sticker_ids,
-        )
         reaction, channel_decisions = self._sanitize_channel_actions(event, reaction)
-        timings["model_ms"] = _ms(stage)
         action_types = [action.type.value for action in reaction.actions]
         model_used = model_call.trace.model or str(getattr(self.model, "model", "") or "")
         logger.info(
@@ -385,43 +364,26 @@ class PersonRuntime:
                     created_intent_ids.append(intent_id)
 
                 for index, action in enumerate(reaction.actions):
-                    if action.type not in EXPRESSIVE_ACTIONS:
+                    materialized = materialize_expressive_action(
+                        action,
+                        action_index=index,
+                        sticker_catalog=self.sticker_catalog,
+                        image_catalog=self.image_catalog,
+                        base_metadata={
+                            "source_event_id": event.id,
+                            "source_event_type": event.event_type.value,
+                            "conversation_id": conversation_id,
+                        },
+                    )
+                    if materialized is None:
                         continue
-                    metadata = {
-                        "action": action.type.value,
-                        "action_index": index,
-                        "source_event_id": event.id,
-                        "source_event_type": event.event_type.value,
-                        "conversation_id": conversation_id,
-                    }
-                    if action.type == ActionType.STICKER:
-                        sticker = self.sticker_catalog.get(action.sticker_id) if self.sticker_catalog is not None else None
-                        if sticker is None:
-                            continue
-                        content = f"[表情包：{sticker.label}]"
-                        metadata.update({"sticker_id": sticker.id, "sticker_label": sticker.label})
-                    elif action.type == ActionType.IMAGE:
-                        image = self.image_catalog.get(action.image_id) if self.image_catalog is not None else None
-                        if image is None:
-                            continue
-                        content = f"[图片：{image.label}]"
-                        metadata.update({"image_id": image.id, "image_label": image.label})
-                    elif action.type == ActionType.VOICE_MESSAGE:
-                        if not (action.message or "").strip():
-                            continue
-                        content = (action.message or "").strip()
-                        metadata.update(voice_pending_fields())
-                    else:
-                        if not (action.message or "").strip():
-                            continue
-                        content = (action.message or "").strip()
                     self.store.append_event(
                         Event(
                             character_id=event.character_id,
                             event_type=EventType.CHARACTER_MESSAGE,
                             event_time=event.event_time,
-                            content=content,
-                            metadata=metadata,
+                            content=materialized.content,
+                            metadata=materialized.metadata,
                         )
                     )
 

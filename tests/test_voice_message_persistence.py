@@ -246,27 +246,28 @@ def test_the_four_wire_key_names_are_pinned():
     assert set(voice_fields({})) == set(voice_pending_fields())
 
 
-def test_both_history_payloads_read_the_shared_keys():
-    """Two payload builders read these keys. A literal string in either one is
-    the drift this module exists to prevent, so assert they call the shared
-    reader rather than trusting review to catch it."""
+def test_both_history_payloads_use_the_shared_projection():
+    """Direct and Group payload builders must delegate resource/voice fields."""
+    projection = (ROOT / "src/character_memory/message_projection.py").read_text(encoding="utf-8")
+    assert "voice_fields(" in projection
     for relative in (
         "src/character_memory/history_web.py",
         "src/character_memory/group_web.py",
     ):
         source = (ROOT / relative).read_text(encoding="utf-8")
-        assert "voice_fields(" in source, relative
+        assert "common_chat_message_fields(" in source, relative
 
 
-def test_both_runtimes_write_the_pending_state_from_the_shared_helper():
-    """Same reasoning for the write side: the two action loops are verbatim
-    copies, and a hardcoded key in one of them drifts on the next rename."""
+def test_both_runtimes_delegate_pending_voice_state_to_the_shared_materializer():
+    """The canonical pending fields live behind one Action -> Message boundary."""
+    materializer = (ROOT / "src/character_memory/application/action_materialization.py").read_text(encoding="utf-8")
+    assert "voice_pending_fields(" in materializer
     for relative in (
         "src/character_memory/runtime/person_runtime.py",
         "src/character_memory/application/group_conversation_service.py",
     ):
         source = (ROOT / relative).read_text(encoding="utf-8")
-        assert "voice_pending_fields(" in source, relative
+        assert "materialize_expressive_action(" in source, relative
 
 
 def test_a_persisted_voice_message_reloads_with_its_audio_reference(tmp_path):

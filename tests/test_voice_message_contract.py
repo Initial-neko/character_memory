@@ -54,14 +54,15 @@ def test_the_expressive_set_holds_exactly_these_actions():
 
 
 def test_every_action_gate_consults_the_shared_set():
-    """Identity, not equality: two equal sets would drift apart on the next edit,
-    and the drift is silent -- the action just stops producing a message. Four
-    modules used to hold their own byte-identical copy of this set."""
-    from character_memory.application import group_conversation_service, proactive_service
-    from character_memory.eval import runner as eval_runner
-    from character_memory.runtime import person_runtime
+    """Visible-message admission is centralized in the shared materializer.
 
-    for module in (person_runtime, group_conversation_service, proactive_service, eval_runner):
+    Direct and Group no longer own separate action gates; proactive/eval still
+    consult the same domain set for their narrower orchestration paths.
+    """
+    from character_memory.application import action_materialization, proactive_service
+    from character_memory.eval import runner as eval_runner
+
+    for module in (action_materialization, proactive_service, eval_runner):
         assert module.EXPRESSIVE_ACTIONS is EXPRESSIVE_ACTIONS, module.__name__
 
 

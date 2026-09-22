@@ -161,19 +161,10 @@
       ? `<button class="detail-button" type="button" data-thought="${message.source_event_id}" title="查看安全的思考摘要">想法</button>` : "";
     const trace = message.has_trace && message.source_event_id
       ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮开发详情">···</button>` : "";
-    const sticker = message.sticker || (message.sticker_id ? {id:message.sticker_id,label:message.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset`} : null);
-    const image = message.image || null;
-    const isVoiceMessage = message.action === "VOICE_MESSAGE";
-    const hideStoredResourceText = isVoiceMessage || (message.action === "STICKER" && sticker) || (message.action === "IMAGE" && image);
-    const text = hideStoredResourceText ? "" : String(message.content || "").trim();
-    const textHtml = text ? `<div class="bubble">${CM.escapeHtml(text)}</div>` : "";
-    const stickerHtml = sticker?.url ? `<div class="sticker-bubble"><img src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>` : "";
-    const imageHtml = image?.url ? `<div class="image-bubble"><img src="${CM.escapeHtml(image.url)}" alt="${CM.escapeHtml(image.label || "图片")}" loading="lazy"><div class="image-caption">${CM.escapeHtml(image.label || "图片")}</div></div>` : "";
-    const voiceHtml = CM.voiceMessageHtml(message);
+    const contentHtml = CM.messageContentHtml(message);
     const proactive = message.proactive || message.action === "PROACTIVE_MESSAGE";
-    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${textHtml}${stickerHtml}${imageHtml}${voiceHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${proactive ? '<span class="proactive-badge">主动消息</span>' : ""}${thought}${trace}</div></div>`;
-    row.querySelectorAll(".sticker-bubble img").forEach(img => img.addEventListener("error", () => img.closest(".sticker-bubble")?.classList.add("broken"), {once:true}));
-    CM.bindVoiceMessage(row);
+    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${contentHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${proactive ? '<span class="proactive-badge">主动消息</span>' : ""}${thought}${trace}</div></div>`;
+    CM.bindMessageContent(row);
     d.chat.appendChild(row);
     return row;
   };

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from character_memory.application.group_conversation_service import GroupConversationService
 from character_memory.group_store import GroupRepository
 from character_memory.images import load_image_catalog
-from character_memory.voice_message_fields import voice_fields
+from character_memory.message_projection import common_chat_message_fields
 
 
 logger = logging.getLogger("character_memory.group_web")
@@ -191,14 +191,12 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "actor_name": "我" if role == "user" else (profile.get("name") or event.actor_id),
             "content": content,
             "event_time": event.event_time.isoformat(),
-            "action": event.metadata.get("action"),
+            **common_chat_message_fields(
+                event.metadata,
+                sticker=sticker,
+                image=image,
+            ),
             "mentions": event.metadata.get("mentions", []) if role == "user" else [],
-            "sticker_id": event.metadata.get("sticker_id"),
-            "sticker": sticker,
-            "image_id": event.metadata.get("image_id"),
-            "media_id": event.metadata.get("media_id"),
-            "image": image,
-            **voice_fields(event.metadata),
             "source_conversation_event_id": event.metadata.get("source_conversation_event_id"),
             "turn_summary": turn_summary if role == "user" else None,
         }

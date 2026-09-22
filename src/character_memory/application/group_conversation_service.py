@@ -7,10 +7,11 @@ import time
 from typing import Callable
 from uuid import uuid4
 
-from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory
+from character_memory.application.action_materialization import materialize_expressive_action
+from character_memory.domain.models import ActionType, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository
-from character_memory.runtime.context import compile_context
-from character_memory.voice_message_fields import voice_pending_fields
+from character_memory.runtime.reaction_engine import evaluate_reaction
+from character_memory.visual_runtime import direct_visual_available
 
 
 logger = logging.getLogger("character_memory.application.group")
@@ -348,21 +349,8 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 recall_query = f"{recall_query} 群聊图片".strip()
             if source_event.metadata.get("action") == ActionType.STICKER.value:
                 recall_query = f"{source_event.metadata.get('sticker_label') or '表情包'} {source_event.metadata.get('sticker_meaning') or ''}".strip()
-            recent = self._recent_as_events(group.id)
-            person_context = runtime.context_builder.build(
-                character_id,
-                query=recall_query,
-                at=now,
-                recent_events=recent,
-                recent_limit=14,
-            )
-            state_before = person_context.mental_state
-            memories = person_context.memories
-            recent = person_context.recent_events
-            sticker_query = "\n".join(item.content.strip() for item in recent[-4:] if (item.content or "").strip()) or recall_query
-            sticker_retrieval = runtime.sticker_retriever.retrieve(runtime.sticker_catalog, sticker_query)
-            prompt_stickers = sticker_retrieval.catalog if sticker_retrieval is not None else None
-            allowed_sticker_ids = {match.sticker_id for match in sticker_retrieval.matches} if sticker_retrieval is not None else set()
+
+            recent_events = self._recent_as_events(group.id)
             synthetic = Event(
                 character_id=character_id,
                 event_type=EventType.TIME_TICK if autonomous else EventType.USER_MESSAGE,
@@ -380,33 +368,39 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
                 },
             )
-            context = compile_context(
-                runtime.persona,
-                state_before,
-                memories,
-                synthetic,
-                recent,
-                last_chat_event=None,
-                sticker_catalog=prompt_stickers,
-                image_catalog=runtime.image_catalog,
-            ) + self._group_contract(
-                group,
-                character_id,
-                mentioned_ids,
-                autonomous=autonomous,
-                autonomous_phase=autonomous_phase,
+            evaluation = evaluate_reaction(
+                runtime,
+                event=synthetic,
+                query=recall_query,
+                recent_events=recent_events,
+                recent_limit=14,
+                sticker_query_builder=lambda recent: (
+                    "\n".join(item.content.strip() for item in recent[-4:] if (item.content or "").strip())
+                    or recall_query
+                ),
+                context_suffix=self._group_contract(
+                    group,
+                    character_id,
+                    mentioned_ids,
+                    autonomous=autonomous,
+                    autonomous_phase=autonomous_phase,
+                ),
+                session_id=f"group:{group.id}:{character_id}",
+                image_data_urls=image_data_urls,
+                # User-triggered Group turns may use the same visual tool as
+                # Direct. Autonomous opportunities intentionally cannot.
+                allow_generate_image=(not autonomous and direct_visual_available()),
             )
-            session_id = f"group:{group.id}:{character_id}"
-            model_started = time.perf_counter()
-            if image_data_urls:
-                model_call = runtime.model.react_call_with_images_for_session(context, image_data_urls, session_id)
-            else:
-                model_call = runtime.model.react_call_for_session(context, session_id)
-            reaction = model_call.value
-            reaction, sticker_decisions, image_decisions = runtime._sanitize_resource_actions(
-                reaction,
-                allowed_sticker_ids=allowed_sticker_ids,
-            )
+            context = evaluation.context
+            model_call = evaluation.model_call
+            reaction = evaluation.reaction
+            state_before = evaluation.state_before
+            memories = evaluation.memories
+            sticker_retrieval = evaluation.sticker_retrieval
+            sticker_decisions = evaluation.sticker_decisions
+            image_decisions = evaluation.image_decisions
+            allowed_sticker_ids = evaluation.allowed_sticker_ids
+
             if autonomous:
                 autonomous_allowed = {
                     ActionType.MESSAGE,
@@ -429,7 +423,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 )
             else:
                 reaction = reaction.model_copy(update={"intent_candidates": []})
-            model_ms = _ms(model_started)
+            model_ms = evaluation.timings["model_ms"]
 
             state_after = (reaction.mental_state_update or "").strip() or state_before
             accepted_memories, memory_decisions = runtime._prepare_memory_writes(character_id, now, reaction.memory_candidates)
@@ -465,40 +459,19 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                         created_memory_ids.append(saved.id)
 
                 for index, action in enumerate(reaction.actions):
-                    if action.type not in EXPRESSIVE_ACTIONS:
+                    materialized = materialize_expressive_action(
+                        action,
+                        action_index=index,
+                        sticker_catalog=runtime.sticker_catalog,
+                        image_catalog=runtime.image_catalog,
+                        base_metadata={
+                            "source_conversation_event_id": source_event.id,
+                            "autonomous": bool(autonomous),
+                            "source": "GROUP_AUTONOMY" if autonomous else "USER_TURN",
+                        },
+                    )
+                    if materialized is None:
                         continue
-                    metadata = {
-                        "action": action.type.value,
-                        "action_index": index,
-                        "source_conversation_event_id": source_event.id,
-                        "autonomous": bool(autonomous),
-                        "source": "GROUP_AUTONOMY" if autonomous else "USER_TURN",
-                    }
-                    if action.type == ActionType.STICKER:
-                        sticker = runtime.sticker_catalog.get(action.sticker_id) if runtime.sticker_catalog is not None else None
-                        if sticker is None:
-                            continue
-                        content = f"[表情包：{sticker.label}]"
-                        metadata.update({
-                            "sticker_id": sticker.id,
-                            "sticker_label": sticker.label,
-                            "sticker_meaning": "、".join(sticker.tags) or sticker.description,
-                        })
-                    elif action.type == ActionType.IMAGE:
-                        image = runtime.image_catalog.get(action.image_id) if runtime.image_catalog is not None else None
-                        if image is None:
-                            continue
-                        content = f"[图片：{image.label}]"
-                        metadata.update({"image_id": image.id, "image_label": image.label})
-                    elif action.type == ActionType.VOICE_MESSAGE:
-                        if not (action.message or "").strip():
-                            continue
-                        content = (action.message or "").strip()
-                        metadata.update(voice_pending_fields())
-                    else:
-                        if not (action.message or "").strip():
-                            continue
-                        content = (action.message or "").strip()
                     saved_event = self.repo.append_event(
                         GroupEvent(
                             conversation_id=group.id,
@@ -507,8 +480,8 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                             actor_id=character_id,
                             event_type="CHARACTER_MESSAGE",
                             event_time=now,
-                            content=content,
-                            metadata=metadata,
+                            content=materialized.content,
+                            metadata=materialized.metadata,
                         )
                     )
                     emitted_events.append(saved_event)
@@ -540,6 +513,31 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "total_ms": _ms(started),
                 }
                 self.repo.add_trace(group.id, source_event.turn_id, character_id, int(source_event.id), now, trace)
+
+            generation_action = next(
+                (action for action in reaction.actions if action.type == ActionType.GENERATE_IMAGE),
+                None,
+            )
+            if generation_action is not None and not autonomous:
+                try:
+                    from character_memory.group_autonomous_visual import submit_group_image
+                    submit_group_image(
+                        self,
+                        group=group,
+                        source_event=source_event,
+                        character_id=character_id,
+                        action=generation_action,
+                    )
+                except Exception as exc:
+                    # Visible text/state has already committed; optional image
+                    # generation follows the same failure boundary as Direct.
+                    logger.exception(
+                        "group.visual submit_failed conversation=%s character=%s source_event=%s error=%s",
+                        group.id,
+                        character_id,
+                        source_event.id,
+                        exc,
+                    )
 
             logger.info(
                 "group.member conversation=%s turn=%s character=%s actions=%s sticker_candidates=%d memories=%d model_ms=%.1f total_ms=%.1f",

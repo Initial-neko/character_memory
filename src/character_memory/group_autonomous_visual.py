@@ -3,9 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 import threading
-from typing import Any
-
-from character_memory.application import group_conversation_service as group_service_module
 from character_memory.application.async_conversation import group_channel
 from character_memory.application.group_conversation_service import GroupConversationService
 from character_memory.domain.models import ActionDecision, ActionType
@@ -17,9 +14,6 @@ from character_memory.visual_runtime import direct_visual_available
 
 logger = logging.getLogger("character_memory.group_autonomous_visual")
 _access = None
-_installed = False
-_original_group_compile_context = group_service_module.compile_context
-_original_react_member = GroupConversationService._react_member
 
 
 def _latest_group_user_id(service: GroupConversationService, conversation_id: str) -> int | None:
@@ -186,7 +180,7 @@ def _generate_group_image(
     return event
 
 
-def _submit_group_image(service: GroupConversationService, *, group, source_event: GroupEvent, character_id: str, action: ActionDecision) -> threading.Thread:
+def submit_group_image(service: GroupConversationService, *, group, source_event: GroupEvent, character_id: str, action: ActionDecision) -> threading.Thread:
     def worker() -> None:
         try:
             _generate_group_image(
@@ -214,41 +208,6 @@ def _submit_group_image(service: GroupConversationService, *, group, source_even
     )
     thread.start()
     return thread
-
-
-def _group_compile_context(*args, **kwargs):
-    # Group Character reactions use the same GENERATE_IMAGE contract as direct
-    # USER_MESSAGE turns whenever the configured visual provider is available.
-    kwargs["allow_generate_image"] = bool(direct_visual_available())
-    return _original_group_compile_context(*args, **kwargs)
-
-
-def _react_member_with_visual(self: GroupConversationService, *args, **kwargs) -> dict[str, Any]:
-    decision = _original_react_member(self, *args, **kwargs)
-    group = kwargs.get("group")
-    source_event = kwargs.get("source_event")
-    character_id = kwargs.get("character_id")
-    if group is None or source_event is None or not character_id:
-        return decision
-
-    generation = None
-    for raw in decision.get("actions") or []:
-        if str(raw.get("type") or "").upper() != ActionType.GENERATE_IMAGE.value:
-            continue
-        try:
-            generation = ActionDecision.model_validate(raw)
-        except Exception:
-            logger.exception("group.visual invalid_action conversation=%s character=%s raw=%s", group.id, character_id, raw)
-        break
-    if generation is not None:
-        _submit_group_image(
-            self,
-            group=group,
-            source_event=source_event,
-            character_id=str(character_id),
-            action=generation,
-        )
-    return decision
 
 
 def _attach_generated_media_image_route(app) -> None:
@@ -287,16 +246,12 @@ def _attach_generated_media_image_route(app) -> None:
 
 
 def install_group_autonomous_visual(app) -> None:
-    global _access, _installed
+    """Bind the visual runtime and media route without replacing Group methods."""
+
+    global _access
     access = getattr(app.state, "character_memory", None)
     if access is None:
         raise RuntimeError("create_api() must expose app.state.character_memory before group visual install")
     _access = access
-
-    if not _installed:
-        group_service_module.compile_context = _group_compile_context
-        GroupConversationService._react_member = _react_member_with_visual
-        _installed = True
-
     _attach_generated_media_image_route(app)
-    logger.info("group.visual installed")
+    logger.info("group.visual installed without runtime monkey patches")

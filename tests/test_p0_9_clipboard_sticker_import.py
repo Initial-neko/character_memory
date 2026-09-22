@@ -96,15 +96,15 @@ def test_sticker_import_rejects_unsafe_zip_paths(tmp_path):
         import_sticker_bundle(persona, output.getvalue())
 
 
-def test_web_supports_clipboard_images_and_core_sticker_rendering():
+def test_web_supports_clipboard_images_and_shared_sticker_rendering():
     images = (WEB / "images.js").read_text(encoding="utf-8")
-    core = (WEB / "app.js").read_text(encoding="utf-8")
+    common = (WEB / "message_content.js").read_text(encoding="utf-8")
     assert 'addEventListener("paste"' in images
     assert 'item.kind === "file"' in images
     assert 'startsWith("image/")' in images
     assert 'source:"CLIPBOARD"' in images
-    assert "/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset" in core
-    assert ".sticker-bubble img" in core
+    assert "/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset" in common
+    assert ".sticker-bubble img" in common
 
 
 def test_sticker_picker_has_global_pack_tabs_and_small_previews():

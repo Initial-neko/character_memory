@@ -10,6 +10,7 @@ import time
 
 from pydantic import BaseModel, Field, model_validator
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.app import AppBundle, build_app, build_model
 from character_memory.application.proactive_service import ProactiveService
 from character_memory.config import (
@@ -500,7 +501,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             # remote model download (local embeddings are strict-offline).
             logger.exception("api.runtime warmup_failed")
 
-    @app.on_event("startup")
+    @on_app_event(app, "startup")
     def _startup():
         nonlocal proactive_thread, warmup_thread
         eager_warmup = os.getenv("CHARACTER_MEMORY_EAGER_WARMUP", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -519,7 +520,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             )
             proactive_thread.start()
 
-    @app.on_event("shutdown")
+    @on_app_event(app, "shutdown")
     def _shutdown():
         proactive_stop.set()
         if proactive_thread is not None and proactive_thread.is_alive():

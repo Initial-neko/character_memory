@@ -34,7 +34,7 @@
     const messages = Array.isArray(candidate.messages) ? candidate.messages : [];
     if (!messages.length) return "";
     return messages.map(item => `
-      <div class="encounter-message ${item.role === "USER" ? "user" : "character"}">
+      <div class="encounter-message ${item.role === "USER" ? "user" : "encounter-character"}">
         <span>${item.role === "USER" ? "你" : CM.escapeHtml(candidate.draft?.name || "TA")}</span>
         <div>${CM.escapeHtml(item.content)}</div>
       </div>
@@ -81,7 +81,7 @@
         ${full && !accepted ? `<div class="encounter-limit-note">正式聊天列表最多 ${candidate.active_character_limit || state.active_character_limit || 10} 位。你仍然可以和 TA 临时聊聊；想留下 TA 时先归档一位现有角色。</div>` : ""}
         <div class="encounter-chat-panel ${candidate.status === "CHATTING" ? "" : "hidden"}" data-encounter-panel>
           <div class="encounter-chat-log" data-encounter-log>
-            <div class="encounter-message character"><span>${CM.escapeHtml(draft.name || "TA")}</span><div>${CM.escapeHtml(candidate.opening_message || "")}</div></div>
+            <div class="encounter-message encounter-character"><span>${CM.escapeHtml(draft.name || "TA")}</span><div>${CM.escapeHtml(candidate.opening_message || "")}</div></div>
             ${messagesHtml(candidate)}
           </div>
           <form class="encounter-chat-form" data-encounter-form="${candidate.id}">

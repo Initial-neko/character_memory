@@ -73,6 +73,47 @@ class RuntimeServices:
             logger.exception("runtime_services avatar_store close_failed")
 
 
+
+@dataclass
+class CharacterRuntimeAccess:
+    """Typed core access object exposed through app.state.character_memory.
+
+    Feature modules may still attach their process-local runtime handles
+    (scheduler, stream hub, etc.) while the stable infrastructure contract stays
+    explicit and type-readable here.
+    """
+
+    settings: Any
+    get_bundle: Callable[[], Any]
+    require_bundle: Callable[[], Any]
+    store: Callable[[], Any]
+    read_store: Any
+    media_storage: Any
+    services: RuntimeServices
+    character_profiles: Callable[[], list[dict[str, str]]]
+    global_sticker_catalog: Callable[[], Any]
+    refresh_runtime_sticker_catalog: Callable[[Any], None]
+
+    @property
+    def avatar_store(self):
+        return self.services.avatar_store
+
+    @property
+    def avatar_search(self):
+        return self.services.avatar_search
+
+    @property
+    def image_generation_providers(self):
+        return self.services.image_generation_providers
+
+    @property
+    def world_fetcher(self):
+        return self.services.world_fetcher
+
+    @property
+    def world_observer(self):
+        return self.services.world_observer
+
 def build_runtime_services(settings) -> RuntimeServices:
     search_provider = build_search_provider(settings)
     avatar_store = AvatarStore(

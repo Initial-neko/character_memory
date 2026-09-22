@@ -207,10 +207,20 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
     @app.get("/v1/groups")
     def list_groups(archived: bool = False):
         profiles = profiles_by_id()
+        # A normal GroupConversation can only be created with 2+ members.
+        # Older Ensemble Builder versions temporarily created zero-member real
+        # groups before research finished; if the drawer/browser was closed they
+        # could remain forever as "BUILDING" rows in the sidebar. Keep those
+        # legacy construction artifacts out of the normal group surface.
+        visible = [
+            group
+            for group in repo().list_groups(archived=archived)
+            if len(group.member_ids) >= 2
+        ]
         return {
             "groups": [
                 group_payload(group, profiles=profiles)
-                for group in repo().list_groups(archived=archived)
+                for group in visible
             ]
         }
 

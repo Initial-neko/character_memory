@@ -39,6 +39,7 @@ from urllib.parse import quote
 import numpy as np
 from pydantic import BaseModel, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.qwen3_tts_experiment import float_audio_to_wav
 
 
@@ -360,7 +361,7 @@ def create_voice_design_app(runtime: VoiceDesignRuntime | None = None):
     app = FastAPI(title="Character Memory Qwen3 VoiceDesign Experiment", version="0.1")
     app.state.voice_design = engine
 
-    @app.on_event("startup")
+    @on_app_event(app, "startup")
     def startup():
         if engine.preload:
             try:

@@ -2,7 +2,14 @@
   const CM = window.CM;
   if (!CM) throw new Error("CM core must load before message_content.js");
 
-  CM.messageContentHtml = message => {
+  // Group bubbles size images and stickers differently from direct chat, and
+  // p0_11.css keeps that sizing on group-only classes. The caller has to say
+  // which surface it is rendering for; without the hook those rules are dead
+  // and a group image falls back to the direct-chat width.
+  CM.messageContentHtml = (message, options) => {
+    const isGroup = (options && options.variant) === "group";
+    const stickerClass = isGroup ? ' class="group-message-sticker"' : "";
+    const imageClass = isGroup ? ' class="group-message-image"' : "";
     const sticker = message.sticker || (
       message.sticker_id
         ? {
@@ -21,10 +28,10 @@
     const text = hideStoredResourceText ? "" : String(message.content || "").trim();
     const textHtml = text ? `<div class="bubble">${CM.escapeHtml(text)}</div>` : "";
     const stickerHtml = sticker?.url
-      ? `<div class="sticker-bubble"><img src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>`
+      ? `<div class="sticker-bubble"><img${stickerClass} src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>`
       : "";
     const imageHtml = image?.url
-      ? `<div class="image-bubble"><img src="${CM.escapeHtml(image.url)}" alt="${CM.escapeHtml(image.label || "图片")}" loading="lazy"><div class="image-caption">${CM.escapeHtml(image.label || "图片")}</div></div>`
+      ? `<div class="image-bubble"><img${imageClass} src="${CM.escapeHtml(image.url)}" alt="${CM.escapeHtml(image.label || "图片")}" loading="lazy"><div class="image-caption">${CM.escapeHtml(image.label || "图片")}</div></div>`
       : "";
     const voiceHtml = CM.voiceMessageHtml(message);
     return `${textHtml}${stickerHtml}${imageHtml}${voiceHtml}`;

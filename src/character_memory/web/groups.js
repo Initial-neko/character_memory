@@ -126,7 +126,7 @@
     row.dataset.messageId = message.id ?? "";
     const speaker = message.role === "assistant" ? `<div class="group-speaker-name">${CM.escapeHtml(message.actor_name || message.actor_id)}</div>` : "";
     const avatar = groupMessageAvatar(message);
-    const contentHtml = CM.messageContentHtml(message);
+    const contentHtml = CM.messageContentHtml(message, {variant: "group"});
     row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${speaker}${contentHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${turnButton(message)}</div></div>`;
     CM.bindMessageContent(row);
     CM.dom.chat.appendChild(row);

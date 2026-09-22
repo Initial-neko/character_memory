@@ -38,6 +38,7 @@ src/character_memory/
 - `chat_service.py` — direct application service / per-character lock。
 - `async_conversation.py` — ReactionScheduler、watermark、SSE hub。
 - `group_conversation_service.py` — group member ordering、shared-room reaction、member fault isolation、autonomous channel contract。
+- `action_materialization.py` — Direct/Group 共用：模型 action → 持久化事件（MESSAGE / EMOJI / VOICE_MESSAGE / STICKER / IMAGE 的唯一物料化门禁）。
 - `group_autonomy.py` — bounded autonomous Group opportunity + restart-safe scheduler。
 - `proactive_service.py` — persisted Intent execution。
 - `wake_service.py` — process-local character wake opportunity。
@@ -52,6 +53,7 @@ src/character_memory/
 ### `runtime/`
 
 - `person_runtime.py` — Event → Recall → LLM → derived persistence。
+- `reaction_engine.py` — Direct/Group 共用的 reaction 求值与 action 过滤。
 - `person_context.py` — Direct/Group/Space/World shared read-only Persona + Mental State + Recall + Recent Events snapshot。
 - `context.py` — channel-aware compiled character prompt。
 - `sticker_retrieval.py` — Sticker 候选检索。
@@ -78,6 +80,7 @@ async_web.py            async message accept + SSE routes
 group_web.py            group HTTP surface
 group_autonomy_web.py   autonomous Group status/config/manual opportunity HTTP surface
 history_web.py          history APIs
+message_projection.py   shared message projection for history/group HTTP surfaces
 memory_web.py           minimal Memory Inspector / pin / forget / correct APIs
 search_web.py           durable message search APIs
 world_web.py            World Observation diagnostic HTTP surface
@@ -226,6 +229,7 @@ voice.js                call UI + ASR validity gate + optional Visual Capture
 visual_capture.js       Camera/Display sampling/keyframe selection
 visual_client.js        visual request helper
 time_format.js          shared MM-DD HH:mm:ss timestamp formatter
+message_content.js      Direct/Group shared message body renderer
 ```
 
 重要原则：
@@ -233,6 +237,7 @@ time_format.js          shared MM-DD HH:mm:ss timestamp formatter
 - `app.js` 是 conversation/composer 的核心 owner；feature module 不重复注册相互竞争的主 submit handler。
 - `images.js` 管普通图片 draft；`ai_images.js` 只负责生成来源，最终复用同一 image draft/send path。
 - `groups.js` 管 group-specific UX，但 durable group facts 仍由后端 `conversation_events` 管理。
+- `message_content.js` 是 Direct/Group 共用的消息正文渲染器；两侧差异（例如群图/群表情的尺寸类）由调用方传 `{variant: "group"}` 表达，不要为了差异分叉出第二份渲染器。
 - Visual Capture frame bytes 只做本轮模型上下文，不变成普通图片附件。
 - 历史 `p0_*.css` 仍被正式页面加载，是待整理样式债务；V1 不重命名。
 

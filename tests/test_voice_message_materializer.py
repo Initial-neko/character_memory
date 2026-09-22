@@ -199,8 +199,12 @@ def test_voice_message_frontend_has_native_shared_bubble_not_audio_controls():
     assert "new Audio(" in app
     assert "<audio controls" not in app
     assert "CM.voiceMessageHtml(message)" in common
-    assert "CM.messageContentHtml(message)" in app
-    assert "CM.messageContentHtml(message)" in groups
+    # Both surfaces render through the one shared body renderer. The exact
+    # argument list is not pinned here: Group passes its surface variant, and
+    # the markup that variant produces is asserted behaviourally in
+    # tests/test_p0_11_group_conversation.py.
+    assert "CM.messageContentHtml(" in app
+    assert "CM.messageContentHtml(" in groups
     assert "CM.bindMessageContent(row)" in app
     assert "CM.bindMessageContent(row)" in groups
     assert ".voice-bubble" in css

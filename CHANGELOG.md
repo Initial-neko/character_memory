@@ -30,6 +30,7 @@ First release candidate for the **Persistent Person Runtime Baseline**.
 
 ### Engineering
 
+- Split the former core `api.py` route bucket into explicit Character, Resource, and Direct HTTP modules with typed route dependencies; `api.py` is now the composition/lifecycle root.
 - Full Linux pytest, Windows-sensitive smoke, and browser smoke are release gates.
 - Started FastAPI lifecycle-warning cleanup by replacing the deprecated `@app.on_event` registration path with centralized lifecycle registration.
 - Added an explicit release/version policy; stable baselines are immutable tags/releases rather than a moving stable branch.

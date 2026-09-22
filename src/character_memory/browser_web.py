@@ -79,14 +79,24 @@ class HeadlessBrowserWebFetcher(WebFetcher):
 
     def fetch_many(self, urls: list[str], *, max_chars: int = 12000) -> tuple[list[FetchedPage], list[dict[str, str]]]:
         targets: list[str] = []
+        errors: list[dict[str, str]] = []
         for raw in urls:
             url = str(raw or "").strip()
             if not url or url in targets:
                 continue
-            self._guard(url)
+            try:
+                self._guard(url)
+            except (ValueError, RuntimeError) as exc:
+                # Skipping an unusable candidate is safer than opening it, and
+                # one bad host (a candidate that does not resolve here) must not
+                # abort a batch whose other candidates are fine. The rejection
+                # stays visible to the caller through errors.
+                logger.warning("world.browser target_rejected url=%s error=%s", url, exc)
+                errors.append({"url": url, "error": str(exc)[:800]})
+                continue
             targets.append(url)
         if not targets:
-            return [], []
+            return [], errors
 
         try:
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -97,7 +107,6 @@ class HeadlessBrowserWebFetcher(WebFetcher):
             ) from exc
 
         pages: list[FetchedPage] = []
-        errors: list[dict[str, str]] = []
         timeout_ms = int(self.timeout_seconds * 1000)
 
         with self._lock:
@@ -207,7 +216,13 @@ class HeadlessBrowserWebFetcher(WebFetcher):
         return pages, errors
 
     def fetch(self, url: str, *, max_chars: int = 12000) -> FetchedPage:
-        pages, errors = self.fetch_many([url], max_chars=max_chars)
+        target = str(url or "").strip()
+        if target:
+            # Keep the single-target contract: an unusable URL is reported as a
+            # ValueError (the dev route maps it to 400) before anything is
+            # opened, while the batch path above fails soft per candidate.
+            self._guard(target)
+        pages, errors = self.fetch_many([target], max_chars=max_chars)
         if pages:
             return pages[0]
         detail = errors[-1]["error"] if errors else "browser returned no page"

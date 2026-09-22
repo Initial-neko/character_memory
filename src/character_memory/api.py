@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 import os
 from pathlib import Path
+import shutil
 import threading
 import time
 
@@ -36,7 +37,8 @@ from character_memory.web_assets import attach_static_assets
 
 logger = logging.getLogger("character_memory.api")
 _PROACTIVE_POLL_SECONDS = 30.0
-MAX_ACTIVE_CHARACTERS = 10
+SOFT_ACTIVE_CHARACTERS = 10
+MAX_ACTIVE_CHARACTERS = 20
 _STICKER_VISION_MIME = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -87,6 +89,49 @@ class PersonaDraftRequest(BaseModel):
 class CreateCharacterRequest(BaseModel):
     draft: PersonaDraft
     character_id: str = Field(default="", max_length=32)
+    confirm_over_soft_limit: bool = False
+
+
+class CharacterCapacityConfirmationRequired(ValueError):
+    def __init__(self, active_count: int, add_count: int):
+        self.active_count = int(active_count)
+        self.add_count = int(add_count)
+        super().__init__(
+            f"当前已有 {active_count} 位角色；继续新增会超过 {SOFT_ACTIVE_CHARACTERS} 位提醒阈值。"
+        )
+
+    def detail(self) -> dict:
+        return {
+            "code": "ACTIVE_CHARACTER_SOFT_LIMIT",
+            "message": str(self),
+            "active_count": self.active_count,
+            "add_count": self.add_count,
+            "soft_limit": SOFT_ACTIVE_CHARACTERS,
+            "hard_limit": MAX_ACTIVE_CHARACTERS,
+            "result_count": self.active_count + self.add_count,
+            "confirmation_required": True,
+        }
+
+
+class CharacterCapacityExceeded(ValueError):
+    def __init__(self, active_count: int, add_count: int):
+        self.active_count = int(active_count)
+        self.add_count = int(add_count)
+        super().__init__(
+            f"角色已达到容量上限：当前 {active_count} 位，本次新增 {add_count} 位，最多 {MAX_ACTIVE_CHARACTERS} 位。"
+        )
+
+    def detail(self) -> dict:
+        return {
+            "code": "ACTIVE_CHARACTER_HARD_LIMIT",
+            "message": str(self),
+            "active_count": self.active_count,
+            "add_count": self.add_count,
+            "soft_limit": SOFT_ACTIVE_CHARACTERS,
+            "hard_limit": MAX_ACTIVE_CHARACTERS,
+            "result_count": self.active_count + self.add_count,
+            "confirmation_required": False,
+        }
 
 
 def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = None):
@@ -168,7 +213,12 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         if app_bundle is not None and hasattr(app_bundle, "characters"):
             app_bundle.characters[:] = discover_character_profiles(settings)
 
-    def _set_archived(character_id: str, *, archived: bool) -> dict:
+    def _set_archived(
+        character_id: str,
+        *,
+        archived: bool,
+        confirm_over_soft_limit: bool = False,
+    ) -> dict:
         """Archive or restore one character. Idempotent, like the group routes."""
 
         with character_write_lock:
@@ -184,10 +234,16 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 if len(active_profiles) <= 1:
                     raise HTTPException(status_code=409, detail="至少保留一个未归档人物")
             if not archived and target is not None and "archived_at" in target:
-                if len(active_profiles) >= MAX_ACTIVE_CHARACTERS:
+                active_count = len(active_profiles)
+                if active_count >= MAX_ACTIVE_CHARACTERS:
                     raise HTTPException(
                         status_code=409,
-                        detail=f"聊天列表最多保留 {MAX_ACTIVE_CHARACTERS} 位角色，请先归档一位再恢复。",
+                        detail=CharacterCapacityExceeded(active_count, 1).detail(),
+                    )
+                if active_count >= SOFT_ACTIVE_CHARACTERS and not confirm_over_soft_limit:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=CharacterCapacityConfirmationRequired(active_count, 1).detail(),
                     )
 
             try:
@@ -426,12 +482,39 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         refresh_runtime_sticker_catalog(stickers)
         refresh_character_cache()
 
-    def create_character_from_draft(draft: PersonaDraft, requested_id: str = "") -> dict:
+    def check_character_capacity(
+        add_count: int = 1,
+        *,
+        confirm_over_soft_limit: bool = False,
+    ) -> dict:
+        count = max(0, int(add_count))
+        active_count = len(split_archived(character_profiles(), False))
+        result_count = active_count + count
+        if result_count > MAX_ACTIVE_CHARACTERS:
+            raise CharacterCapacityExceeded(active_count, count)
+        if count and result_count > SOFT_ACTIVE_CHARACTERS and not confirm_over_soft_limit:
+            raise CharacterCapacityConfirmationRequired(active_count, count)
+        return {
+            "active_count": active_count,
+            "add_count": count,
+            "result_count": result_count,
+            "soft_limit": SOFT_ACTIVE_CHARACTERS,
+            "hard_limit": MAX_ACTIVE_CHARACTERS,
+            "warning": result_count > SOFT_ACTIVE_CHARACTERS,
+        }
+
+    def create_character_from_draft(
+        draft: PersonaDraft,
+        requested_id: str = "",
+        *,
+        confirm_over_soft_limit: bool = False,
+        skip_capacity_check: bool = False,
+    ) -> dict:
         with character_write_lock:
-            active_profiles = split_archived(character_profiles(), False)
-            if len(active_profiles) >= MAX_ACTIVE_CHARACTERS:
-                raise ValueError(
-                    f"聊天列表最多保留 {MAX_ACTIVE_CHARACTERS} 位角色，请先归档一位再留下新角色。"
+            if not skip_capacity_check:
+                check_character_capacity(
+                    1,
+                    confirm_over_soft_limit=confirm_over_soft_limit,
                 )
             character_id = normalize_character_id(draft.name, requested_id)
             path = save_persona(settings.persona_path, draft, character_id)
@@ -453,6 +536,28 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 app_bundle is not None,
             )
             return profile
+
+    def rollback_created_character(character_id: str) -> None:
+        """Best-effort rollback for a character created inside a batch build."""
+        with character_write_lock:
+            profile = next(
+                (item for item in discover_character_profiles(settings) if item["id"] == character_id),
+                None,
+            )
+            if profile is None:
+                return
+            if app_bundle is not None:
+                if hasattr(app_bundle, "runtimes"):
+                    app_bundle.runtimes.pop(character_id, None)
+                runtime_map = getattr(getattr(app_bundle, "chat", None), "runtime", None)
+                if isinstance(runtime_map, dict):
+                    runtime_map.pop(character_id, None)
+            persona_path = Path(profile["persona_path"])
+            try:
+                shutil.rmtree(persona_path.parent)
+            except FileNotFoundError:
+                pass
+            refresh_character_cache()
 
     def dispatch_proactive_once() -> list[dict]:
         if not getattr(settings, "api_key", ""):
@@ -526,6 +631,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     # Encounter is a candidate layer, not a second character registry. It uses
     # these callbacks only when the user explicitly keeps a candidate.
     app.state.character_memory.create_character_from_draft = create_character_from_draft
+    app.state.character_memory.rollback_created_character = rollback_created_character
+    app.state.character_memory.check_character_capacity = check_character_capacity
+    app.state.character_memory.soft_active_characters = SOFT_ACTIVE_CHARACTERS
     app.state.character_memory.max_active_characters = MAX_ACTIVE_CHARACTERS
 
     def warm_runtime() -> None:
@@ -601,12 +709,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     @app.get("/v1/characters")
     def characters(archived: bool = False):
         listed = split_archived(character_profiles(), archived)
-        visible = listed if archived else listed[:MAX_ACTIVE_CHARACTERS]
+        active_total = len(split_archived(character_profiles(), False))
         return {
-            "characters": [public_profile(profile) for profile in visible],
+            "characters": [public_profile(profile) for profile in listed],
+            "soft_limit": SOFT_ACTIVE_CHARACTERS,
             "active_limit": MAX_ACTIVE_CHARACTERS,
-            "active_total": len(split_archived(character_profiles(), False)),
-            "overflow_count": 0 if archived else max(0, len(listed) - MAX_ACTIVE_CHARACTERS),
+            "active_total": active_total,
+            "overflow_count": 0 if archived else max(0, active_total - SOFT_ACTIVE_CHARACTERS),
         }
 
     @app.get("/v1/characters/summaries")
@@ -619,8 +728,12 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         return _set_archived(character_id, archived=True)
 
     @app.post("/v1/characters/{character_id}/restore")
-    def restore_character(character_id: str):
-        return _set_archived(character_id, archived=False)
+    def restore_character(character_id: str, confirm_over_soft_limit: bool = False):
+        return _set_archived(
+            character_id,
+            archived=False,
+            confirm_over_soft_limit=confirm_over_soft_limit,
+        )
 
     @app.get("/v1/stickers")
     def stickers(character_id: str | None = None):
@@ -723,7 +836,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         path = media_storage.asset_path(asset)
         if path is None:
             raise HTTPException(status_code=404, detail="media file not found")
-        if str(asset.mime_type).startswith("audio/"):
+        if str(asset.mime_type).startswith(("audio/", "image/")):
             return FileResponse(
                 path,
                 media_type=asset.mime_type,
@@ -756,10 +869,17 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     @app.post("/v1/characters")
     def create_character(req: CreateCharacterRequest):
         try:
-            profile = create_character_from_draft(req.draft, req.character_id)
+            profile = create_character_from_draft(
+                req.draft,
+                req.character_id,
+                confirm_over_soft_limit=req.confirm_over_soft_limit,
+            )
+        except CharacterCapacityConfirmationRequired as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
+        except CharacterCapacityExceeded as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except ValueError as exc:
-            status = 409 if "最多保留" in str(exc) else 400
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileExistsError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:

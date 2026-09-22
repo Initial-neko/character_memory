@@ -108,7 +108,7 @@
           <button class="secondary space-preset" data-minutes="1440" type="button">24H / 正式</button>
           <button class="primary" id="applySpaceConfig" type="button">应用测试配置</button>
         </div>
-        <p class="subtle">应用后会写入 config.yaml，并立即热应用到当前 Character Runtime。修改 Interval 时默认从“现在”重新计算下一次时间；Poll 只影响检查延迟，不会增加 Opportunity 次数。Max Posts / Day 是每天发布上限，0 = 不限——它只是上限，不会强制发帖。</p>
+        <p class="subtle">这里仅热应用到当前 Character Runtime，不写 config.yaml；重启后会回到 Settings Center 保存的正式配置。修改 Interval 时默认从“现在”重新计算下一次时间；Poll 只影响检查延迟，不会增加 Opportunity 次数。Max Posts / Day 是每天发布上限，0 = 不限——它只是上限，不会强制发帖。</p>
 
         <div class="visual-provider-row">
           <label>Character<select id="spaceCharacter"><option value="rin">rin</option></select></label>
@@ -190,7 +190,7 @@
           <button class="secondary" id="forceGroupAutonomyDue" type="button">让选中群立即到期</button>
           <button class="secondary" id="refreshGroupAutonomyStatus" type="button">刷新调度状态</button>
         </div>
-        <p class="subtle">手动触发会忽略 User Quiet Guard，方便验收；正式 Scheduler 会遵守 Quiet Guard。自主消息仍写入原来的 conversation_events，群聊页面/SSE 无需第二套渲染。</p>
+        <p class="subtle">这里的调参只作用于当前 Character Runtime，不写 config.yaml；重启后恢复 Settings Center 的正式配置。手动触发会忽略 User Quiet Guard，正式 Scheduler 会遵守 Quiet Guard。</p>
         <p class="subtle" id="groupAutonomyStatusAge">尚未读取调度状态。</p>
         <details class="debug-output">
           <summary>原始调度状态（调试用）</summary>
@@ -202,17 +202,32 @@
         </details>
       </article>
 
-      <article class="card">
-        <div class="card-title-row"><h2>TTS</h2><span class="pill">media</span></div>
-        <label for="ttsText">Text</label>
-        <textarea id="ttsText" rows="5">你好，这是 Character Memory 的语音测试。</textarea>
-        <div class="two-col">
-          <label>Speaker ID<input id="speakerId" type="number" min="0" value="0" /></label>
-          <label>Speed<input id="ttsSpeed" type="number" min="0.5" max="2" step="0.1" value="1.0" /></label>
+      <article class="card wide" id="encounterDiagnosticsCard">
+        <div class="card-title-row">
+          <div><h2>Random Encounter</h2><p class="subtle">这里只做状态观察和手动触发；正式 Interval / Web Probability / Pending 上限请在 Settings Center 保存。</p></div>
+          <span class="pill">discovery</span>
         </div>
-        <div class="actions"><button class="primary" id="runTts">Generate</button><span id="ttsLatency" class="metric-inline">-</span></div>
-        <audio id="ttsAudio" controls></audio>
-        <pre id="ttsResult" class="result">等待请求...</pre>
+        <div class="visual-provider-row">
+          <label>Source
+            <select id="encounterSource">
+              <option value="AUTO">AUTO · 按正式概率</option>
+              <option value="WEB">WEB · 强制互联网资料</option>
+              <option value="GENERATED">GENERATED · 强制系统生成</option>
+            </select>
+          </label>
+          <button class="primary" id="runEncounterOpportunity" type="button">立即生成一次邂逅</button>
+          <button class="secondary" id="forceEncounterDue" type="button">让 Scheduler 立即到期</button>
+          <button class="secondary" id="refreshEncounterStatus" type="button">刷新状态</button>
+        </div>
+        <p class="subtle" id="encounterStatusAge">尚未读取邂逅调度状态。</p>
+        <details class="debug-output">
+          <summary>原始调度状态（调试用）</summary>
+          <pre id="encounterStatus" class="result">等待读取 Random Encounter 状态...</pre>
+        </details>
+        <details class="debug-output">
+          <summary>原始执行结果（调试用）</summary>
+          <pre id="encounterResult" class="result">等待测试...</pre>
+        </details>
       </article>
 
       <article class="card wide" id="visualCaptureCard">

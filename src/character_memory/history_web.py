@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
-from character_memory.message_projection import common_chat_message_fields
+from character_memory.message_projection import project_direct_message
 from character_memory.storage.chat_history import ChatHistoryRepository
 
 
@@ -63,48 +63,22 @@ def attach_history_routes(app):
         }
 
     def message_payload(event, has_trace: bool, sticker_catalog, image_catalog):
-        if event.event_type == EventType.USER_MESSAGE:
-            role = "user"
-            source_event_id = event.id
-            source_event_type = EventType.USER_MESSAGE.value
-            content = event.metadata.get("display_text", event.content)
-        else:
-            role = "assistant"
-            source_event_id = event.metadata.get("source_event_id")
-            source_event_type = event.metadata.get("source_event_type")
-            content = event.content
-
-        sticker_id = event.metadata.get("sticker_id")
-        sticker = sticker_payload(sticker_catalog, sticker_id)
-        image = image_payload(event.character_id, image_catalog, event.metadata.get("image_id"))
+        sticker = sticker_payload(sticker_catalog, event.metadata.get("sticker_id"))
+        image = image_payload(
+            event.character_id,
+            image_catalog,
+            event.metadata.get("image_id"),
+        )
         media_id = event.metadata.get("media_id")
         if media_id:
             image = media_payload(media_id)
+        return project_direct_message(
+            event,
+            sticker=sticker,
+            image=image,
+            has_trace=has_trace,
+        )
 
-        preview = content
-        if sticker is not None and (not str(content or "").strip() or event.metadata.get("action") == "STICKER"):
-            preview = f"[表情包] {sticker['label']}"
-        if image is not None and (not str(content or "").strip() or event.metadata.get("action") == "IMAGE" or media_id):
-            prefix = str(content or "").strip()
-            media_preview = f"[图片] {image['label']}"
-            preview = f"{prefix} {media_preview}".strip() if prefix else media_preview
-
-        return {
-            "id": event.id,
-            "role": role,
-            "content": content,
-            "preview": preview,
-            "event_time": event.event_time.isoformat(),
-            **common_chat_message_fields(
-                event.metadata,
-                sticker=sticker,
-                image=image,
-            ),
-            "source_event_type": source_event_type,
-            "source_event_id": source_event_id,
-            "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,
-            "has_trace": has_trace,
-        }
 
     @app.get("/v1/chat/history-page")
     def direct_history_page(character_id: str = "rin", limit: int = 50, before_id: int | None = None):

@@ -84,6 +84,9 @@ class DevSpaceConfigRequest(BaseModel):
     media_max_items: int = Field(default=3, ge=0, le=9)
     image_search_enabled: bool = True
     image_generation_enabled: bool = True
+    world_observation_enabled: bool = True
+    world_max_pages: int = Field(default=2, ge=1, le=4)
+    world_max_chars_per_page: int = Field(default=6000, ge=500, le=16000)
     audience_size: int = Field(ge=0, le=10)
     poll_seconds: float = Field(ge=10.0, le=3600.0)
     rearm: bool = True
@@ -96,6 +99,17 @@ class DevSpaceMediaRequest(BaseModel):
     query: str = Field(default="", max_length=300)
     purpose: str = Field(default="SCENE", pattern=r"^(SELFIE|SCENE)$")
     visual_intent: str = Field(default="", max_length=800)
+
+
+class DevWorldFetchRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    max_chars: int = Field(default=6000, ge=500, le=16000)
+
+
+class DevWorldSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=240)
+    max_pages: int = Field(default=2, ge=1, le=4)
+    max_chars_per_page: int = Field(default=6000, ge=500, le=16000)
 
 
 def create_dev_app(
@@ -282,6 +296,9 @@ def create_dev_app(
                 "space_media_max_items": req.media_max_items,
                 "space_image_search_enabled": req.image_search_enabled,
                 "space_image_generation_enabled": req.image_generation_enabled,
+                "space_world_observation_enabled": req.world_observation_enabled,
+                "space_world_max_pages": req.world_max_pages,
+                "space_world_max_chars_per_page": req.world_max_chars_per_page,
                 "space_audience_size": req.audience_size,
                 "space_scheduler_poll_seconds": req.poll_seconds,
             }
@@ -297,6 +314,34 @@ def create_dev_app(
             "persisted": persisted,
             "runtime": runtime,
         }
+
+    @app.get("/v1/dev/world/status")
+    def dev_world_status():
+        return request_character("GET", "/v1/world/status", operation="world-status", timeout=10.0)
+
+    @app.post("/v1/dev/world/fetch")
+    def dev_world_fetch(req: DevWorldFetchRequest):
+        return request_character(
+            "POST",
+            "/v1/world/dev/fetch",
+            operation="world-fetch",
+            json=req.model_dump(),
+            timeout=max(30.0, float(getattr(cfg, "web_browser_timeout_seconds", 20.0)) + 15.0),
+        )
+
+    @app.post("/v1/dev/world/search")
+    def dev_world_search(req: DevWorldSearchRequest):
+        timeout = (
+            max(30.0, float(getattr(cfg, "web_browser_timeout_seconds", 20.0)) + 10.0)
+            * max(1, int(req.max_pages))
+        )
+        return request_character(
+            "POST",
+            "/v1/world/dev/search",
+            operation="world-search",
+            json=req.model_dump(),
+            timeout=timeout,
+        )
 
     @app.post("/v1/dev/space/due/{character_id}")
     def dev_space_force_due(character_id: str):

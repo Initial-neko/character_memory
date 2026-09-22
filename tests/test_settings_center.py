@@ -845,8 +845,10 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
         "space_autonomy_enabled",
         "space_opportunity_interval_minutes",
         "space_max_posts_per_day",
+        "space_media_enabled",
         "space_media_max_items",
         "space_image_search_enabled",
+        "space_image_generation_enabled",
         "space_audience_size",
         "space_scheduler_poll_seconds",
     }

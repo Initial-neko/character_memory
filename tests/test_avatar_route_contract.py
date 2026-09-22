@@ -18,7 +18,9 @@ def test_avatar_routes_do_not_expose_general_web_tools_to_chat_runtime():
     assert 'import character_memory.runtime' not in planner
     assert 'search_web' not in routes
     assert 'WebFetcher' in search
-    assert 'web_search is reserved for a later phase' in search
-    assert 'web_fetch is reserved for a later phase' in search
+    assert 'def search_web' in search
+    # General web discovery/rendering now exists, but it remains outside the
+    # avatar route and PersonRuntime tool surface.
     assert 'SearchProvider' not in runtime
     assert 'WebFetcher' not in runtime
+    assert 'HeadlessBrowserWebFetcher' not in runtime

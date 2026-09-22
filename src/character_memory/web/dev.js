@@ -257,6 +257,95 @@
     }
   }
 
+
+  async function refreshWorldActivity() {
+    try {
+      const [status, pulse] = await Promise.all([
+        jsonFetch("/v1/dev/world/activity"),
+        jsonFetch("/v1/dev/world/pulse"),
+      ]);
+      $("worldActivityStatus").textContent = pretty({status, pulse});
+      const latest = pulse.topics?.[0];
+      if (latest?.id && !$("worldPulseTopicId").value) {
+        $("worldPulseTopicId").value = String(latest.id);
+      }
+    } catch (error) {
+      $("worldActivityStatus").textContent = `ERROR: ${error.message}`;
+    }
+  }
+
+  async function refreshWorldPulse() {
+    const button = $("refreshWorldPulse");
+    button.disabled = true;
+    $("spaceResult").textContent = "正在读取聚合站点并汇总 World Pulse...";
+    try {
+      const data = await jsonFetch("/v1/dev/world/pulse/refresh", {method:"POST"});
+      $("spaceResult").textContent = pretty(data);
+      const latest = data.topics?.[0];
+      if (latest?.id) $("worldPulseTopicId").value = String(latest.id);
+      await refreshWorldActivity();
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function discussWorldPulse() {
+    const button = $("discussWorldPulse");
+    const topicId = Number($("worldPulseTopicId").value || 0);
+    if (!topicId) {
+      $("spaceResult").textContent = "ERROR: 请先刷新 Pulse 或填写 Topic ID。";
+      return;
+    }
+    button.disabled = true;
+    $("spaceResult").textContent = `正在让角色判断是否评论 World Pulse #${topicId}...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/world/pulse/${topicId}/discuss`, {method:"POST"});
+      $("spaceResult").textContent = pretty(data);
+      await refreshWorldActivity();
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function browseWorldAsCharacter() {
+    const button = $("browseWorldAsCharacter");
+    const characterId = $("spaceCharacter").value;
+    if (!characterId) {
+      $("spaceResult").textContent = "ERROR: 请先选择 Character。";
+      return;
+    }
+    button.disabled = true;
+    $("spaceResult").textContent = `正在让 ${characterId} 独立上网浏览...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/world/browse/${encodeURIComponent(characterId)}`, {method:"POST"});
+      $("spaceResult").textContent = pretty(data);
+      await refreshWorldActivity();
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runWorldActivity() {
+    const button = $("runWorldActivity");
+    button.disabled = true;
+    $("spaceResult").textContent = "正在执行所有已经到期的 World Activity...";
+    try {
+      const data = await jsonFetch("/v1/dev/world/activity/run", {method:"POST"});
+      $("spaceResult").textContent = pretty(data);
+      await refreshWorldActivity();
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function runSpaceAudience() {
     const button = $("runSpaceAudience");
     const postId = Number($("spacePostId").value || 0);
@@ -684,7 +773,7 @@
     }
   }
 
-  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); refreshGroupAutonomyStatus(); });
+  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); refreshWorldActivity(); refreshGroupAutonomyStatus(); });
   $("runLlm").addEventListener("click", runLlm);
   $("runSpaceOpportunity").addEventListener("click", runSpaceOpportunity);
   $("forceSpaceDue").addEventListener("click", forceSpaceDue);
@@ -698,6 +787,11 @@
   $("runSpaceMedia").addEventListener("click", runSpaceMedia);
   $("runWorldSearch").addEventListener("click", runWorldSearch);
   $("runWorldFetch").addEventListener("click", runWorldFetch);
+  $("refreshWorldPulse").addEventListener("click", refreshWorldPulse);
+  $("discussWorldPulse").addEventListener("click", discussWorldPulse);
+  $("browseWorldAsCharacter").addEventListener("click", browseWorldAsCharacter);
+  $("runWorldActivity").addEventListener("click", runWorldActivity);
+  $("refreshWorldActivity").addEventListener("click", refreshWorldActivity);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);
   $("applyGroupAutonomyConfig").addEventListener("click", applyGroupAutonomyConfig);
   $("runGroupAutonomyOpportunity").addEventListener("click", runGroupAutonomyOpportunity);
@@ -726,6 +820,7 @@
   refreshResources();
   loadSpaceCharacters();
   refreshSpaceStatus();
+  refreshWorldActivity();
   loadGroupAutonomyGroups();
   refreshGroupAutonomyStatus();
   scheduleResourceRefresh();
@@ -741,6 +836,7 @@
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) {
       refreshSpaceStatus();
+      refreshWorldActivity();
       loadSpaceCharacters();
     }
   });

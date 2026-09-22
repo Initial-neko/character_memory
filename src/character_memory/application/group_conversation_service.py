@@ -10,7 +10,6 @@ from uuid import uuid4
 from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.runtime.context import compile_context
-from character_memory.runtime.person_context import PersonContextBuilder
 from character_memory.voice_message_fields import voice_pending_fields
 
 
@@ -313,7 +312,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             if source_event.metadata.get("action") == ActionType.STICKER.value:
                 recall_query = f"{source_event.metadata.get('sticker_label') or '表情包'} {source_event.metadata.get('sticker_meaning') or ''}".strip()
             recent = self._recent_as_events(group.id)
-            person_context = PersonContextBuilder(self.store, runtime.recall, runtime.persona).build(
+            person_context = runtime.context_builder.build(
                 character_id,
                 query=recall_query,
                 at=now,

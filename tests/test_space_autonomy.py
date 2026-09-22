@@ -630,6 +630,9 @@ def test_dev_console_exposes_space_autonomy_controls():
     assert "dataset.devBooted" in html
     assert 'document.body.dataset.devBooted = "1"' in script
     assert '.boot-warning' in (web / "dev.css").read_text(encoding="utf-8")
+    assert 'value="VOICE"' in html
+    assert "spaceMediaVoiceText" in script
+
     for token in [
         "/v1/dev/space/status",
         "/v1/dev/space/opportunity/",

@@ -80,9 +80,22 @@ class DevSpaceConfigRequest(BaseModel):
     enabled: bool
     interval_minutes: float = Field(ge=10.0, le=10080.0)
     max_posts_per_day: int = Field(ge=0, le=200)
+    media_enabled: bool = True
+    media_max_items: int = Field(default=3, ge=0, le=9)
+    image_search_enabled: bool = True
+    image_generation_enabled: bool = True
     audience_size: int = Field(ge=0, le=10)
     poll_seconds: float = Field(ge=10.0, le=3600.0)
     rearm: bool = True
+
+
+class DevSpaceMediaRequest(BaseModel):
+    type: str = Field(pattern=r"^(SEARCH_IMAGE|GENERATE_IMAGE)$")
+    content: str = Field(default="", max_length=4000)
+    count: int = Field(default=1, ge=1, le=9)
+    query: str = Field(default="", max_length=300)
+    purpose: str = Field(default="SCENE", pattern=r"^(SELFIE|SCENE)$")
+    visual_intent: str = Field(default="", max_length=800)
 
 
 def create_dev_app(
@@ -265,6 +278,10 @@ def create_dev_app(
                 "space_autonomy_enabled": req.enabled,
                 "space_opportunity_interval_minutes": req.interval_minutes,
                 "space_max_posts_per_day": req.max_posts_per_day,
+                "space_media_enabled": req.media_enabled,
+                "space_media_max_items": req.media_max_items,
+                "space_image_search_enabled": req.image_search_enabled,
+                "space_image_generation_enabled": req.image_generation_enabled,
                 "space_audience_size": req.audience_size,
                 "space_scheduler_poll_seconds": req.poll_seconds,
             }
@@ -299,6 +316,17 @@ def create_dev_app(
             f"/v1/space/dev/opportunity/{safe_id}",
             operation="space-opportunity",
             timeout=300.0,
+        )
+
+    @app.post("/v1/dev/space/media/{character_id}")
+    def dev_space_media(character_id: str, req: DevSpaceMediaRequest):
+        safe_id = quote(character_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/space/dev/media/{safe_id}",
+            operation="space-media",
+            json=req.model_dump(),
+            timeout=max(120.0, float(getattr(cfg, "image_generation_timeout_seconds", 180.0)) + 60.0),
         )
 
     @app.post("/v1/dev/space/audience/{post_id}")

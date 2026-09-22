@@ -13,6 +13,7 @@ from character_memory.visual_generation import ImageGenerationResult
 
 
 PNG = b"\x89PNG\r\n\x1a\nspace-test"
+WAV = b"RIFF" + (b"\x00" * 4) + b"WAVEfmt " + (b"\x00" * 24)
 
 
 class FakeSearchProvider:
@@ -42,6 +43,32 @@ class FakeFetcher:
 class FailingFetcher(FakeFetcher):
     def fetch_image(self, url: str):
         raise RuntimeError("network unavailable")
+
+
+class FakeTTSResponse:
+    def __init__(self, *, status_code=200, content=WAV, detail=""):
+        self.status_code = status_code
+        self.content = content
+        self.headers = {"x-media-audio-ms": "2450"}
+        self.text = detail
+
+    def json(self):
+        if not self.text:
+            return {}
+        return {"detail": self.text}
+
+
+class FakeTTSClient:
+    def __init__(self, response=None):
+        self.response = response or FakeTTSResponse()
+        self.calls = []
+
+    def post(self, url, json):
+        self.calls.append((url, json))
+        return self.response
+
+    def close(self):
+        pass
 
 
 class FakeVisualModel:
@@ -75,6 +102,7 @@ def _access(tmp_path, *, max_items=3):
         space_image_search_enabled=True,
         space_image_generation_enabled=True,
         image_generation_provider="fake",
+        tts_provider="kokoro",
     )
     access = SimpleNamespace(
         settings=settings,
@@ -203,4 +231,63 @@ def test_space_generated_image_uses_existing_visual_provider_and_media_store(tmp
     assert asset is not None
     assert asset.source == "SPACE_GENERATED_SCENE"
     assert access.media_storage.asset_path(asset) is not None
+    store.close()
+
+
+def test_space_voice_uses_formal_tts_and_persists_transcript_metadata(tmp_path):
+    access, store = _access(tmp_path)
+    client = FakeTTSClient()
+    executor = SpaceMediaExecutor(
+        access,
+        tts_client=client,
+        media_base="http://127.0.0.1:8001",
+    )
+
+    result = executor.execute(
+        "c00",
+        [SpaceMediaIntent(type="VOICE", voice_text="今天其实有点想偷懒，就直接说啦。")],
+        now=datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc),
+    )
+
+    assert result["errors"] == []
+    assert client.calls == [
+        (
+            "http://127.0.0.1:8001/v1/tts",
+            {"text": "今天其实有点想偷懒，就直接说啦。", "voice": "c00"},
+        )
+    ]
+    assert len(result["relations"]) == 1
+    relation = result["relations"][0]
+    assert relation["media_type"] == "VOICE"
+    assert relation["source_type"] == "GENERATED"
+    assert relation["metadata"]["transcript"] == "今天其实有点想偷懒，就直接说啦。"
+    assert relation["metadata"]["duration_ms"] == 2450
+    assert relation["metadata"]["provider"] == "kokoro"
+    asset = store.get_media_asset(relation["media_id"])
+    assert asset is not None
+    assert asset.source == "SPACE_VOICE"
+    assert asset.mime_type == "audio/wav"
+    assert access.media_storage.asset_path(asset) is not None
+    store.close()
+
+
+def test_space_voice_failure_is_fail_soft_and_does_not_create_asset(tmp_path):
+    access, store = _access(tmp_path)
+    client = FakeTTSClient(FakeTTSResponse(status_code=503, content=b"", detail="tts unavailable"))
+    executor = SpaceMediaExecutor(
+        access,
+        tts_client=client,
+        media_base="http://127.0.0.1:8001",
+    )
+
+    result = executor.execute(
+        "c00",
+        [SpaceMediaIntent(type="VOICE", voice_text="这次应该失败。")],
+        now=datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc),
+    )
+
+    assert result["relations"] == []
+    assert result["errors"][0]["type"] == "VOICE"
+    assert "tts unavailable" in result["errors"][0]["error"]
+    assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
     store.close()

@@ -480,7 +480,6 @@ class SpaceRepository:
         status: str,
         post_id: int | None = None,
         error: str = "",
-        details: dict[str, Any] | None = None,
     ) -> None:
         normalized = str(status or "").strip().upper()
         if normalized not in {"POSTED", "NO_POST", "FAILED"}:
@@ -636,6 +635,7 @@ class SpaceRepository:
         status: str,
         post_id: int | None = None,
         error: str = "",
+        details: dict[str, Any] | None = None,
     ) -> None:
         normalized = str(status or "").strip().upper()
         if normalized not in {"POSTED", "NO_POST", "FAILED"}:

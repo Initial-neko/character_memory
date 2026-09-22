@@ -3,7 +3,6 @@
   const state = {
     asrBlob: null,
     asrUrl: null,
-    ttsUrl: null,
     recorder: null,
     resourceTimer: null,
   };
@@ -117,7 +116,7 @@
   async function applySpaceConfig() {
     const button = $("applySpaceConfig");
     button.disabled = true;
-    $("spaceResult").textContent = "正在保存并热应用 Space 测试配置...";
+    $("spaceResult").textContent = "正在热应用 Space 临时配置（仅当前 Runtime）...";
     try {
       const data = await jsonFetch("/v1/dev/space/config", {
         method: "POST",
@@ -323,7 +322,7 @@
   async function applyGroupAutonomyConfig() {
     const button = $("applyGroupAutonomyConfig");
     button.disabled = true;
-    $("groupAutonomyResult").textContent = "正在保存并热应用自主群聊配置...";
+    $("groupAutonomyResult").textContent = "正在热应用自主群聊临时配置（仅当前 Runtime）...";
     try {
       const data = await jsonFetch("/v1/dev/group-autonomy/config", {
         method:"POST",
@@ -381,51 +380,6 @@
       await refreshGroupAutonomyStatus();
     } catch (error) {
       $("groupAutonomyResult").textContent = `ERROR: ${error.message}`;
-    } finally {
-      button.disabled = false;
-    }
-  }
-
-  async function runTts() {
-    const button = $("runTts");
-    button.disabled = true;
-    $("ttsResult").textContent = "生成中...";
-    $("ttsLatency").textContent = "-";
-    try {
-      const started = performance.now();
-      const response = await fetch("/v1/dev/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: $("ttsText").value,
-          speaker_id: Number($("speakerId").value || 0),
-          speed: Number($("ttsSpeed").value || 1),
-        }),
-      });
-      if (!response.ok) throw await responseError(response);
-      const blob = await response.blob();
-      if (state.ttsUrl) URL.revokeObjectURL(state.ttsUrl);
-      state.ttsUrl = URL.createObjectURL(blob);
-      $("ttsAudio").src = state.ttsUrl;
-      const inference = response.headers.get("x-media-inference-ms");
-      const audioMs = response.headers.get("x-media-audio-ms");
-      const total = response.headers.get("x-dev-total-ms") || (performance.now() - started).toFixed(1);
-      const rtf = inference && audioMs ? (Number(inference) / Number(audioMs)).toFixed(3) : "-";
-      $("ttsLatency").textContent = `${total} ms total`;
-      $("ttsResult").textContent = pretty({
-        provider: response.headers.get("x-media-provider"),
-        device: response.headers.get("x-media-device"),
-        inference_ms: inference,
-        audio_ms: audioMs,
-        sample_rate: response.headers.get("x-media-sample-rate"),
-        rtf,
-        total_ms: total,
-      });
-      refreshStatus();
-      refreshMetrics();
-      refreshResources();
-    } catch (error) {
-      $("ttsResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;
     }
@@ -654,6 +608,51 @@
     }
   }
 
+  async function refreshEncounterStatus() {
+    const status = $("encounterStatus");
+    if (!status) return;
+    try {
+      const data = await jsonFetch("/v1/dev/encounters/status");
+      status.textContent = pretty(data);
+      if ($("encounterStatusAge")) $("encounterStatusAge").textContent = `读取时间 ${new Date().toLocaleTimeString()}`;
+    } catch (error) {
+      status.textContent = `ERROR: ${error.message}`;
+    }
+  }
+
+  async function runEncounterOpportunity() {
+    const button = $("runEncounterOpportunity");
+    const source = $("encounterSource")?.value || "AUTO";
+    button.disabled = true;
+    $("encounterResult").textContent = `正在生成 ${source} 邂逅...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/encounters/opportunity?source_type=${encodeURIComponent(source)}`, {
+        method:"POST",
+      });
+      $("encounterResult").textContent = pretty(data);
+      await refreshEncounterStatus();
+    } catch (error) {
+      $("encounterResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function forceEncounterDue() {
+    const button = $("forceEncounterDue");
+    button.disabled = true;
+    $("encounterResult").textContent = "正在让 Random Encounter Scheduler 立即到期...";
+    try {
+      const data = await jsonFetch("/v1/dev/encounters/due", {method:"POST"});
+      $("encounterResult").textContent = pretty(data);
+      await refreshEncounterStatus();
+    } catch (error) {
+      $("encounterResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function refreshMetrics() {
     const body = $("metricsBody");
     try {
@@ -684,7 +683,7 @@
     }
   }
 
-  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); refreshGroupAutonomyStatus(); });
+  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); refreshGroupAutonomyStatus(); refreshEncounterStatus(); });
   $("runLlm").addEventListener("click", runLlm);
   $("runSpaceOpportunity").addEventListener("click", runSpaceOpportunity);
   $("forceSpaceDue").addEventListener("click", forceSpaceDue);
@@ -703,12 +702,14 @@
   $("runGroupAutonomyOpportunity").addEventListener("click", runGroupAutonomyOpportunity);
   $("forceGroupAutonomyDue").addEventListener("click", forceGroupAutonomyDue);
   $("refreshGroupAutonomyStatus").addEventListener("click", refreshGroupAutonomyStatus);
+  $("runEncounterOpportunity").addEventListener("click", runEncounterOpportunity);
+  $("forceEncounterDue").addEventListener("click", forceEncounterDue);
+  $("refreshEncounterStatus").addEventListener("click", refreshEncounterStatus);
   document.querySelectorAll(".group-autonomy-preset").forEach((button) => {
     button.addEventListener("click", () => {
       $("groupAutonomyInterval").value = button.dataset.minutes || "360";
     });
   });
-  $("runTts").addEventListener("click", runTts);
   $("runAsr").addEventListener("click", runAsr);
   $("runMediaSmoke").addEventListener("click", runMediaSmoke);
   $("recordAsr").addEventListener("click", () => startRecording().catch((error) => { $("asrResult").textContent = `ERROR: ${error.message}`; }));
@@ -728,6 +729,7 @@
   refreshSpaceStatus();
   loadGroupAutonomyGroups();
   refreshGroupAutonomyStatus();
+  refreshEncounterStatus();
   scheduleResourceRefresh();
 
   // Every control above is wired, so the failure banner in the markup can stand
@@ -742,6 +744,7 @@
     if (event.persisted) {
       refreshSpaceStatus();
       loadSpaceCharacters();
+      refreshEncounterStatus();
     }
   });
 })();

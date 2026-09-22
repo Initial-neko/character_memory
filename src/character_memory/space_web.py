@@ -5,21 +5,37 @@ from datetime import datetime
 from pydantic import BaseModel, Field, model_validator
 
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
+from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
 
 
 class CreateSpacePostRequest(BaseModel):
     character_id: str = Field(min_length=1, max_length=64)
     content: str = Field(default="", max_length=4000)
+    # Legacy single-media input remains accepted while callers migrate to the
+    # ordered media_ids contract.
     media_id: str | None = Field(default=None, max_length=120)
+    media_ids: list[str] = Field(default_factory=list, max_length=MAX_SPACE_MEDIA_PER_POST)
     source_event_id: int | None = None
 
     @model_validator(mode="after")
     def require_content_or_media(self):
         self.content = self.content.strip()
-        self.media_id = (self.media_id or "").strip() or None
-        if not self.content and self.media_id is None:
-            raise ValueError("content or media_id is required")
+        ordered: list[str] = []
+        candidates = []
+        if self.media_id:
+            candidates.append(self.media_id)
+        candidates.extend(self.media_ids)
+        for value in candidates:
+            media_id = str(value or "").strip()
+            if media_id and media_id not in ordered:
+                ordered.append(media_id)
+        if len(ordered) > MAX_SPACE_MEDIA_PER_POST:
+            raise ValueError(f"a Space post may contain at most {MAX_SPACE_MEDIA_PER_POST} media items")
+        self.media_ids = ordered
+        self.media_id = ordered[0] if ordered else None
+        if not self.content and not self.media_ids:
+            raise ValueError("content or media_ids is required")
         return self
 
 
@@ -55,6 +71,7 @@ def attach_space_routes(app):
         raise RuntimeError("create_api() must expose app.state.character_memory before space routes are attached")
 
     repository = SpaceRepository(access.read_store)
+    media_repository = SpacePostMediaRepository(access.read_store)
     autonomy = SpaceAutonomyService(access, repository)
     scheduler = SpaceAutonomyScheduler(
         access,
@@ -76,6 +93,7 @@ def attach_space_routes(app):
 
     # Expose the feature runtime for tests/diagnostics without initializing LLM.
     access.space_repository = repository
+    access.space_media_repository = media_repository
     access.space_autonomy = autonomy
     access.space_scheduler = scheduler
 
@@ -104,23 +122,93 @@ def attach_space_routes(app):
             "archived": "archived_at" in profile,
         }
 
-    def media_payload(media_id: str | None) -> dict | None:
-        if not media_id:
-            return None
-        asset = access.store().get_media_asset(media_id)
-        if asset is None or access.media_storage.asset_path(asset) is None:
-            return None
+    def relation_for_asset(asset) -> dict:
+        mime_type = str(asset.mime_type or "").lower()
+        if mime_type.startswith("image/"):
+            media_type = "IMAGE"
+        elif mime_type.startswith("audio/"):
+            media_type = "VOICE"
+        else:
+            raise HTTPException(status_code=400, detail=f"unsupported Space media mime type: {asset.mime_type}")
+
+        raw_source = str(asset.source or "").strip().upper()
+        if "SEARCH" in raw_source:
+            source_type = "SEARCH"
+        elif raw_source in {"GENERATED", "IMAGEGEN", "AI_GENERATED", "TTS", "VOICE_SYNTH"}:
+            source_type = "GENERATED"
+        elif raw_source in {"WEB", "FETCHED", "WEB_FETCH"}:
+            source_type = "WEB"
+        else:
+            source_type = "CHARACTER"
+
         return {
-            "id": asset.id,
+            "media_id": asset.id,
+            "media_type": media_type,
+            "source_type": source_type,
+            "metadata": {"asset_source": asset.source},
+        }
+
+    def media_item_payload(item) -> dict:
+        asset = access.read_store.get_media_asset(item.media_id)
+        base = {
+            "id": item.media_id,
+            "media_id": item.media_id,
+            "media_type": item.media_type,
+            "source_type": item.source_type,
+            "sort_order": item.sort_order,
+            "metadata": item.metadata,
+            "available": False,
+            "url": None,
+        }
+        if asset is None:
+            return base
+        path = access.media_storage.asset_path(asset)
+        if path is None:
+            return {
+                **base,
+                "label": asset.original_name,
+                "mime_type": asset.mime_type,
+                "size_bytes": asset.size_bytes,
+                "asset_source": asset.source,
+            }
+        return {
+            **base,
+            "available": True,
             "label": asset.original_name,
             "mime_type": asset.mime_type,
             "size_bytes": asset.size_bytes,
+            "asset_source": asset.source,
             "url": f"/v1/media/{asset.id}",
         }
+
+    def legacy_media_payload(media_id: str) -> dict | None:
+        asset = access.read_store.get_media_asset(media_id)
+        if asset is None:
+            return None
+        mime_type = str(asset.mime_type or "").lower()
+        media_type = "IMAGE" if mime_type.startswith("image/") else "VOICE" if mime_type.startswith("audio/") else "IMAGE"
+        relation = type(
+            "LegacySpaceMedia",
+            (),
+            {
+                "media_id": asset.id,
+                "media_type": media_type,
+                "source_type": "LEGACY",
+                "sort_order": 0,
+                "metadata": {"asset_source": asset.source},
+            },
+        )()
+        return media_item_payload(relation)
 
     def post_payload(repository: SpaceRepository, post) -> dict:
         comments = repository.list_comments(post.id)
         likes = repository.list_reactions(post.id, "LIKE")
+        media_items = [media_item_payload(item) for item in media_repository.list_for_post(post.id)]
+        if not media_items and post.media_id:
+            legacy = legacy_media_payload(post.media_id)
+            if legacy is not None:
+                media_items = [legacy]
+        first_media = next((item for item in media_items if item.get("available")), None)
         commenter_ids = []
         for comment in comments:
             if comment.character_id not in commenter_ids:
@@ -131,8 +219,13 @@ def attach_space_routes(app):
             "author": profile_payload(post.character_id),
             "content": post.content,
             "created_at": post.created_at.isoformat(),
-            "media_id": post.media_id,
-            "media": media_payload(post.media_id),
+            # Compatibility fields for old clients. New clients should consume
+            # media_items, which is ordered and can contain up to nine assets.
+            "media_id": post.media_id or (media_items[0]["media_id"] if media_items else None),
+            "media": first_media,
+            "media_items": media_items,
+            "media_count": len(media_items),
+            "media_limit": MAX_SPACE_MEDIA_PER_POST,
             "source_event_id": post.source_event_id,
             "visibility": post.visibility,
             "comments": [
@@ -179,6 +272,7 @@ def attach_space_routes(app):
             "character_id": character_id,
             "active_character_count": active_count,
             "max_feed_items": 10,
+            "max_media_per_post": MAX_SPACE_MEDIA_PER_POST,
         }
 
     @app.get("/v1/space/posts/{post_id}")
@@ -192,19 +286,27 @@ def attach_space_routes(app):
     @app.post("/v1/space/posts")
     def create_space_post(req: CreateSpacePostRequest):
         require_known(req.character_id, active=True)
-        if req.media_id:
-            asset = access.store().get_media_asset(req.media_id)
+        relations: list[dict] = []
+        for media_id in req.media_ids:
+            asset = access.read_store.get_media_asset(media_id)
             if asset is None or access.media_storage.asset_path(asset) is None:
-                raise HTTPException(status_code=400, detail="media not found")
+                raise HTTPException(status_code=400, detail=f"media not found: {media_id}")
+            relations.append(relation_for_asset(asset))
+
         repository = repo()
+        now = datetime.now().astimezone()
         try:
             post = repository.create_post(
                 req.character_id,
                 req.content,
-                datetime.now().astimezone(),
-                media_id=req.media_id,
+                now,
+                media_id=req.media_ids[0] if req.media_ids else None,
                 source_event_id=req.source_event_id,
             )
+            if relations:
+                media_repository.replace_for_post(post.id, relations, now)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"post": post_payload(repository, post)}

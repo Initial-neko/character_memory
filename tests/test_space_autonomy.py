@@ -11,6 +11,8 @@ from character_memory.domain.models import (
     Event,
     EventType,
     PersonReaction,
+    SpacePostPlan,
+    SpaceMediaIntent,
 )
 from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
@@ -55,12 +57,11 @@ class SpaceModel(PersonModel):
         return PersonReaction(actions=[])
 
     def structured_for_session(self, prompt, schema, session_id):
-        assert schema is DailyLifePlan
+        assert schema is SpacePostPlan
         self.opportunities += 1
-        return DailyLifePlan(
-            events=[],
+        return SpacePostPlan(
             social_post="今天想安静一点，晚点再做别的。",
-            image_prompt=None,
+            media_intents=[],
         )
 
     def plan_day(self, context):
@@ -68,6 +69,18 @@ class SpaceModel(PersonModel):
 
     def write_diary(self, context):
         return DiaryResult(diary="", mental_state_update="")
+
+
+class FailingMediaModel(SpaceModel):
+    def structured_for_session(self, prompt, schema, session_id):
+        assert schema is SpacePostPlan
+        self.opportunities += 1
+        return SpacePostPlan(
+            social_post="图如果拿不到也没关系，文字还是想发。",
+            media_intents=[
+                SpaceMediaIntent(type="SEARCH_IMAGE", query="Tokyo rain night", count=1)
+            ],
+        )
 
 
 class WrongChannelModel(SpaceModel):
@@ -181,6 +194,22 @@ def test_space_autonomy_runs_view_reaction_comment_and_author_reply(tmp_path):
     store.close()
 
 
+def test_space_media_failure_does_not_block_text_post(tmp_path):
+    access, store, _ = _access(tmp_path, ids=("c00",), model=FailingMediaModel())
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    now = datetime(2026, 9, 21, 20, 0, tzinfo=timezone.utc)
+
+    outcome = service.run_opportunity("c00", now=now, cascade=False, source="DEV")
+
+    assert outcome["posted"] is True
+    assert outcome["post"]["content"] == "图如果拿不到也没关系，文字还是想发。"
+    assert outcome["post"]["media_count"] == 0
+    assert outcome["media_errors"]
+    assert outcome["media_errors"][0]["type"] == "SEARCH_IMAGE"
+    store.close()
+
+
 def test_interval_scheduler_runs_again_after_one_hour_and_manual_dev_does_not_consume_it(tmp_path):
     access, store, model = _access(tmp_path, ids=("c00",))
     access.settings.space_opportunity_interval_minutes = 60
@@ -260,6 +289,12 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="spacePostId"',
         'id="spaceIntervalMinutes"',
         'id="spaceMaxPostsPerDay"',
+        'id="spaceMediaEnabled"',
+        'id="spaceMediaMaxItems"',
+        'id="spaceImageSearchEnabled"',
+        'id="spaceImageGenerationEnabled"',
+        'id="spaceMediaType"',
+        'id="runSpaceMedia"',
         'id="spaceAudienceSize"',
         'id="spacePollSeconds"',
         'id="applySpaceConfig"',
@@ -281,6 +316,7 @@ def test_dev_console_exposes_space_autonomy_controls():
         "/v1/dev/space/status",
         "/v1/dev/space/opportunity/",
         "/v1/dev/space/audience/",
+        "/v1/dev/space/media/",
         "/v1/dev/space/config",
         "/v1/dev/space/due/",
     ]:

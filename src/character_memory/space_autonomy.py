@@ -75,7 +75,7 @@ class SpaceAutonomyService:
         media_enabled = bool(getattr(self.access.settings, "space_media_enabled", True))
         media_max = max(0, min(9, int(getattr(self.access.settings, "space_media_max_items", 3))))
         media_instruction = (
-            f"当前允许媒体，单条最多 {media_max} 个图片资源。"
+            f"当前允许媒体，单条最多 {media_max} 个媒体资源（图片或语音）。"
             if media_enabled and media_max > 0
             else "当前媒体能力关闭，media_intents 必须返回 []。"
         )
@@ -103,13 +103,15 @@ class SpaceAutonomyService:
 
 本次只规划 Space 动态：
 - social_post 可以为空；没有自然想公开表达的文字就返回 null。
-- media_intents 可以为空；不要为了展示功能而强行配图。
-- 如果既没有自然想表达的文字，也没有自然想分享的图片，social_post=null 且 media_intents=[]。
+- media_intents 可以为空；不要为了展示功能而强行配图或发语音。
+- 如果既没有自然想表达的文字，也没有自然想分享的图片/语音，social_post=null 且 media_intents=[]。
 - 如果发文字，写成这个人物自己会公开发出的自然短动态，不要写“根据我的记忆/状态”等系统口吻。
 - SEARCH_IMAGE 用于现实中已经存在、适合从互联网搜索的图片；query 必须是简短公开搜索词，不能泄露私聊原句、用户隐私或长期记忆里的秘密。
 - GENERATE_IMAGE 用于角色自拍或需要创作出来的场景；purpose 只能是 SELFIE 或 SCENE，并给出简洁 visual_intent。
-- count 表示自然需要的图片数量，不是目标配额；总图片数不要超过系统上限。
-- 可以只有图片没有文字，也可以文字+图片。
+- VOICE 表示这条动态更适合直接说出来；voice_text 必须是角色真正会公开说出的完整连续表达，而不是 TTS 指令、幕后说明或文字动态的机械朗读。单条动态最多一条 VOICE。
+- social_post 与 VOICE 可以二选一，也可以是简短文字说明 + 一条语音；不要把同一句话原样重复两遍。
+- count 只表示图片自然需要的数量，不是目标配额；VOICE 的 count 固定为 1；总媒体数不要超过系统上限。
+- 可以只有图片、只有语音，也可以文字+媒体。
 - {media_instruction}
 """
 
@@ -348,7 +350,25 @@ Sources:
                 "source": source,
             }
 
-        event_content = content or f"[图片动态 · {len(relations)} 张]"
+        voice_relations = [
+            item for item in relations if str(item.get("media_type") or "").upper() == "VOICE"
+        ]
+        image_relations = [
+            item for item in relations if str(item.get("media_type") or "").upper() == "IMAGE"
+        ]
+        voice_transcript = ""
+        if voice_relations:
+            voice_transcript = str(
+                (voice_relations[0].get("metadata") or {}).get("transcript") or ""
+            ).strip()
+        if content:
+            event_content = content
+        elif voice_transcript:
+            event_content = f"[语音动态] {voice_transcript}"
+        elif image_relations:
+            event_content = f"[图片动态 · {len(image_relations)} 张]"
+        else:
+            event_content = "[媒体动态]"
         try:
             source_event = self.access.store().append_event(
                 Event(
@@ -360,6 +380,7 @@ Sources:
                         "channel": "SPACE",
                         "source": source,
                         "media_count": len(relations),
+                        "media_types": [item["media_type"] for item in relations],
                         "media_sources": [item["source_type"] for item in relations],
                     },
                 )
@@ -489,10 +510,21 @@ Sources:
             if runtime is None:
                 continue
             self.repository.record_view(post.id, character_id, now)
-            media_count = len(self.media_repository.list_for_post(post.id))
-            visible_summary = post.content or "[图片动态]"
-            if media_count:
-                visible_summary = f"{visible_summary}（附 {media_count} 张图片）"
+            media_items = self.media_repository.list_for_post(post.id)
+            image_count = sum(1 for item in media_items if item.media_type == "IMAGE")
+            voice_items = [item for item in media_items if item.media_type == "VOICE"]
+            visible_parts = []
+            if post.content:
+                visible_parts.append(post.content)
+            if voice_items:
+                transcript = str((voice_items[0].metadata or {}).get("transcript") or "").strip()
+                if transcript:
+                    visible_parts.append(f"语音里说：“{transcript[:800]}”")
+                else:
+                    visible_parts.append("附了一条语音")
+            if image_count:
+                visible_parts.append(f"附 {image_count} 张图片")
+            visible_summary = "；".join(visible_parts) or "[媒体动态]"
             result = runtime.handle(
                 Event(
                     character_id=character_id,

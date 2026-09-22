@@ -5,6 +5,7 @@ import os
 import httpx
 from pydantic import BaseModel, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.config import DEFAULT_VOICE_SILENCE_MS, load_settings
 from character_memory.media_runtime import MediaRuntime, build_media_runtime_from_env
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_SET, provider_spec
@@ -57,7 +58,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         allow_headers=["Content-Type"],
     )
 
-    @app.on_event("shutdown")
+    @on_app_event(app, "shutdown")
     def shutdown():
         if owns_provider_client:
             provider_client.close()

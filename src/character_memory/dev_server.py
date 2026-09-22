@@ -407,6 +407,67 @@ def create_dev_app(
             timeout=timeout,
         )
 
+
+    @app.get("/v1/dev/world/activity")
+    def dev_world_activity_status():
+        return request_character(
+            "GET",
+            "/v1/world/activity/status",
+            operation="world-activity-status",
+            timeout=10.0,
+        )
+
+    @app.get("/v1/dev/world/pulse")
+    def dev_world_pulse():
+        return request_character(
+            "GET",
+            "/v1/world/pulse?limit=20",
+            operation="world-pulse",
+            timeout=10.0,
+        )
+
+    @app.post("/v1/dev/world/pulse/refresh")
+    def dev_world_pulse_refresh():
+        timeout = max(
+            60.0,
+            float(getattr(cfg, "web_browser_timeout_seconds", 20.0))
+            * max(1, len(getattr(cfg, "world_pulse_sources", []) or [])),
+        )
+        return request_character(
+            "POST",
+            "/v1/world/pulse/dev/refresh",
+            operation="world-pulse-refresh",
+            timeout=timeout,
+        )
+
+    @app.post("/v1/dev/world/pulse/{topic_id}/discuss")
+    def dev_world_pulse_discuss(topic_id: int):
+        return request_character(
+            "POST",
+            f"/v1/world/pulse/{topic_id}/dev/discuss",
+            operation="world-pulse-discuss",
+            timeout=300.0,
+        )
+
+    @app.post("/v1/dev/world/browse/{character_id}")
+    def dev_world_personal_browse(character_id: str):
+        safe_id = quote(character_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/world/dev/browse/{safe_id}",
+            operation="world-personal-browse",
+            timeout=300.0,
+        )
+
+    @app.post("/v1/dev/world/activity/run")
+    def dev_world_activity_run():
+        return request_character(
+            "POST",
+            "/v1/world/activity/dev/run",
+            operation="world-activity-run",
+            timeout=300.0,
+        )
+
     @app.post("/v1/dev/space/due/{character_id}")
     def dev_space_force_due(character_id: str):
         safe_id = quote(character_id, safe="")

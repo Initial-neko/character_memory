@@ -5,6 +5,7 @@
   const MEDIA_BASE_KEY = "character-memory:media-base-url";
   const mediaBase = () => localStorage.getItem(MEDIA_BASE_KEY) || "http://127.0.0.1:8001";
   const button = document.getElementById("voiceInputButton");
+  const callButton = document.getElementById("voiceCallButton");
   const state = {
     recording: false,
     busy: false,
@@ -14,6 +15,16 @@
     processor: null,
     chunks: [],
   };
+  // A start that is still waiting on the permission prompt is only wanted until the user
+  // aims at the call instead: the call takes the microphone for itself, and this module must
+  // not hold a second capture open next to it. Starting a call retires the generation the
+  // start came in with, so the answer to the prompt is judged against what was wanted when
+  // the request was made, not against what is wanted after the browser replies. It is this
+  // module's own "still wanted" marker rather than an ownership token: dictation always
+  // keeps the right to stop what it adopted, and only a call may retire a start that has
+  // not adopted a stream yet.
+  let wantedGeneration = 0;
+  const callOwnsMicrophone = () => Boolean(CM.features.voice?.state?.active);
 
   function setButton(mode) {
     if (!button) return;
@@ -164,17 +175,32 @@
 
   async function startRecording() {
     if (state.recording || state.busy) return;
-    if (CM.features.voice?.state?.active) {
+    if (callOwnsMicrophone()) {
       alert("请先结束语音通话，再使用聊天语音输入。");
       return;
     }
     if (CM.dom.input?.disabled) return;
     setButton("starting");
+    const generation = wantedGeneration;
     try {
       await checkAsr();
+      if (generation !== wantedGeneration) {
+        // The call was asked for while the runtime was still being checked, so the
+        // microphone prompt this start was about to open is not wanted any more.
+        setButton("idle");
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
       });
+      if (generation !== wantedGeneration || callOwnsMicrophone()) {
+        // The call was asked for while the permission prompt was open, so this capture
+        // stopped being wanted before the browser answered it. The granted stream is real
+        // hardware: hand it straight back instead of leaving a second microphone running.
+        stream.getTracks().forEach(track => track.stop());
+        setButton("idle");
+        return;
+      }
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       const context = new AudioContextClass();
       const source = context.createMediaStreamSource(stream);
@@ -215,7 +241,10 @@
     event.preventDefault();
     toggleRecording().catch(console.error);
   });
-  document.getElementById("voiceCallButton")?.addEventListener("click", () => {
+  callButton?.addEventListener("click", () => {
+    // A call takes the microphone, so it also retires a start that has not adopted a
+    // stream yet. This listener sees the click before voice.js starts the call.
+    wantedGeneration += 1;
     if (state.recording) stopRecording({recognize:false}).catch(console.error);
   }, {capture:true});
   CM.on("conversationChanged", () => {

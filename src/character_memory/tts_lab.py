@@ -19,6 +19,7 @@ import numpy as np
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.media_runtime import float_audio_to_wav
 from character_memory.tts_registry import provider_spec
 from character_memory.voices import template_root
@@ -1009,7 +1010,7 @@ def create_tts_lab_app(
     app = FastAPI(title="Character Memory TTS Provider Lab", version="0.1")
     attach_static_assets(app, web_dir)
 
-    @app.on_event("shutdown")
+    @on_app_event(app, "shutdown")
     def shutdown():
         lab.close()
         voice_design_tool.close()

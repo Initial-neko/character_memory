@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -137,7 +138,8 @@ class SpaceRepository:
                     status TEXT NOT NULL,
                     post_id INTEGER,
                     source TEXT NOT NULL DEFAULT 'SCHEDULED',
-                    error TEXT NOT NULL DEFAULT ''
+                    error TEXT NOT NULL DEFAULT '',
+                    details_json TEXT NOT NULL DEFAULT '{}'
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_space_daily_runs_schedule
@@ -158,6 +160,15 @@ class SpaceRepository:
                     ON space_views(post_id,viewed_at_epoch);
                 """
             )
+            columns = {
+                str(row["name"]) for row in self.store.conn.execute(
+                    "PRAGMA table_info(space_opportunity_runs)"
+                ).fetchall()
+            }
+            if "details_json" not in columns:
+                self.store.conn.execute(
+                    "ALTER TABLE space_opportunity_runs ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'"
+                )
             self.store._ensure_migration_table_locked()
             self.store.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
@@ -469,6 +480,7 @@ class SpaceRepository:
         status: str,
         post_id: int | None = None,
         error: str = "",
+        details: dict[str, Any] | None = None,
     ) -> None:
         normalized = str(status or "").strip().upper()
         if normalized not in {"POSTED", "NO_POST", "FAILED"}:
@@ -631,7 +643,7 @@ class SpaceRepository:
         now_epoch = epoch_us(now)
         with self.store._lock:
             self.store.conn.execute(
-                "UPDATE space_opportunity_runs SET completed_at=?,completed_at_epoch=?,status=?,post_id=?,error=? "
+                "UPDATE space_opportunity_runs SET completed_at=?,completed_at_epoch=?,status=?,post_id=?,error=?,details_json=? "
                 "WHERE id=? AND character_id=?",
                 (
                     now.isoformat(),
@@ -639,6 +651,7 @@ class SpaceRepository:
                     normalized,
                     post_id,
                     str(error or "")[:2000],
+                    json.dumps(details or {}, ensure_ascii=False, separators=(",", ":")),
                     int(run_id),
                     character_id,
                 ),
@@ -674,4 +687,12 @@ class SpaceRepository:
         args.append(max(1, min(int(limit), 500)))
         with self.store._lock:
             rows = self.store.conn.execute(sql, args).fetchall()
-        return [dict(row) for row in rows]
+        items = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["details"] = json.loads(item.pop("details_json", "{}") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                item["details"] = {}
+            items.append(item)
+        return items

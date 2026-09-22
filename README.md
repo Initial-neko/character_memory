@@ -10,9 +10,11 @@
 
 ## 项目状态
 
-这是一个快速迭代中的实验项目，目前没有稳定版本承诺。README 只描述可运行入口和已经落地的主能力；尚未完成端到端闭环的能力会明确标记为 foundation / in progress，而不是用实施计划冒充现状。
+这是一个快速迭代中的实验项目。当前包版本进入 **0.5.0rc1**，作为第一条 Persistent Person Runtime release-candidate 基线；稳定版仍以真实运行验收后的不可变 Git tag / GitHub Release 为准，而不是额外维护一个会漂移的 stable 分支。
 
-开发和贡献约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，仓库级工程规则见 [AGENTS.md](AGENTS.md)。文档索引见 [docs/README.md](docs/README.md)。
+README 只描述可运行入口和已经落地的主能力；尚未完成端到端闭环的能力会明确标记为 foundation / in progress，而不是用实施计划冒充现状。
+
+开发和贡献约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，仓库级工程规则见 [AGENTS.md](AGENTS.md)。文档索引见 [docs/README.md](docs/README.md)，版本与发布策略见 [docs/current/RELEASES.md](docs/current/RELEASES.md)，版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 当前能力
 

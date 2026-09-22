@@ -20,7 +20,7 @@ The current implementation provides:
 - autonomous audience reactions through the same PersonRuntime;
 - author reactions to received Space comments;
 - at most 10 distinct character commenters on one post;
-- a browser feed that fetches at most 10 posts per request, then follows the existing cursor automatically as the user scrolls so older posts remain continuously reachable;
+- a browser feed that still fetches at most 10 posts per request, but proactively prefetches an initial buffer and starts the next cursor page well before the user reaches the bottom; the bottom control is only a retry/fallback surface, not the normal way to continue reading;
 - archived characters retain historical Space activity but stop participating in new activity.
 
 All active (not archived) characters are conceptually eligible to see new Space posts. Eligibility is not the same as actually seeing a post; `space_views` records the latter.

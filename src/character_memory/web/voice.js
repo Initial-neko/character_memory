@@ -11,6 +11,7 @@
 
   const voice = {
     active: false,
+    micActive: false,
     minimized: false,
     phase: "idle",
     capturePhase: "idle",
@@ -61,6 +62,7 @@
     dockStatus: document.getElementById("voiceDockStatus"),
     dockVisual: document.getElementById("voiceDockVisual"),
     dockHangup: document.getElementById("voiceDockHangupButton"),
+    mic: document.getElementById("voiceMicButton"),
     camera: document.getElementById("voiceCameraButton"),
     screen: document.getElementById("voiceScreenButton"),
     visualStop: document.getElementById("voiceVisualStopButton"),
@@ -166,7 +168,7 @@
       setAvatar(dom.avatar, id, name);
       setAvatar(dom.dockAvatar, id, name);
       if (dom.name) dom.name.textContent = name;
-      if (dom.context) dom.context.textContent = "单聊语音";
+      if (dom.context) dom.context.textContent = "单聊通话";
       if (dom.dockTitle) dom.dockTitle.textContent = name;
     }
   }
@@ -174,7 +176,7 @@
   function updateCallButton() {
     if (!dom.button) return;
     dom.button.classList.toggle("active", voice.active);
-    dom.button.title = voice.active ? "返回正在进行的语音通话" : "语音通话";
+    dom.button.title = voice.active ? "返回正在进行的通话" : "语音/视频通话";
   }
 
   function setPhase(phase, text) {
@@ -188,6 +190,33 @@
     voice.capturePhase = phase;
   }
 
+  function updateMicUi() {
+    if (!dom.mic) return;
+    const active = Boolean(voice.active && voice.micActive);
+    dom.mic.classList.toggle("active", active);
+    dom.mic.classList.toggle("muted", voice.active && !voice.micActive);
+    dom.mic.setAttribute("aria-pressed", active ? "true" : "false");
+    dom.mic.textContent = active ? "🎙 麦克风" : "🔇 麦克风";
+    dom.mic.title = active ? "关闭麦克风" : "开启麦克风";
+    dom.mic.disabled = !voice.active;
+  }
+
+  function resumeInputState() {
+    if (!voice.active) return;
+    if (voice.micActive) {
+      setCapturePhase("listening");
+      setPhase("listening", "正在听…");
+      return;
+    }
+    setCapturePhase("idle");
+    const visual = voice.visualSession?.getState?.() || {active:false, source:null};
+    if (visual.active) {
+      setPhase("muted", (visual.source === "DISPLAY" ? "屏幕共享" : "摄像头") + "中 · 麦克风已关闭");
+    } else {
+      setPhase("muted", "麦克风已关闭");
+    }
+  }
+
   function updateVisualUi(snapshot = null) {
     const value = snapshot || voice.visualSession?.getState?.() || {active:false, source:null, candidateCount:0};
     const active = Boolean(value.active);
@@ -199,6 +228,9 @@
       dom.dockVisual.classList.toggle("hidden", !active);
       dom.dockVisual.textContent = value.source === "CAMERA" ? "📷" : value.source === "DISPLAY" ? "🖥" : "";
       dom.dockVisual.title = active ? `${value.source === "CAMERA" ? "摄像头" : "屏幕共享"} · ${value.candidateCount || 0} 个候选帧` : "";
+    }
+    if (voice.active && !voice.micActive && !["waiting", "speaking", "recording"].includes(voice.phase)) {
+      resumeInputState();
     }
   }
 

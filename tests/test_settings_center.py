@@ -818,6 +818,9 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
             "space_media_max_items",
             "space_image_search_enabled",
             "space_image_generation_enabled",
+            "space_world_observation_enabled",
+            "space_world_max_pages",
+            "space_world_max_chars_per_page",
             "space_audience_size",
             "space_scheduler_poll_seconds",
         ]
@@ -833,6 +836,9 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
                     "space_media_max_items": 4,
                     "space_image_search_enabled": False,
                     "space_image_generation_enabled": True,
+                    "space_world_observation_enabled": True,
+                    "space_world_max_pages": 3,
+                    "space_world_max_chars_per_page": 7500,
                     "space_audience_size": 2,
                     "space_scheduler_poll_seconds": 20,
                 }
@@ -849,6 +855,9 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
         "space_media_max_items",
         "space_image_search_enabled",
         "space_image_generation_enabled",
+        "space_world_observation_enabled",
+        "space_world_max_pages",
+        "space_world_max_chars_per_page",
         "space_audience_size",
         "space_scheduler_poll_seconds",
     }
@@ -859,6 +868,9 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
     assert settings.space_media_max_items == 4
     assert settings.space_image_search_enabled is False
     assert settings.space_image_generation_enabled is True
+    assert settings.space_world_observation_enabled is True
+    assert settings.space_world_max_pages == 3
+    assert settings.space_world_max_chars_per_page == 7500
     assert settings.space_audience_size == 2
     assert settings.space_scheduler_poll_seconds == 20
 

@@ -23,27 +23,22 @@ It is **not** the architecture source of truth and must not replace `docs/curren
 - Phase: **Autonomous Social Layer Phase 1**
 - Current slice: **World Observation through Headless Browser — merged to main**
 
-### Scope of this slice
+### Current phase state
 
-- replace the Space-only legacy image prompt with structured `SpacePostPlan.media_intents`;
-- support autonomous `SEARCH_IMAGE` and `GENERATE_IMAGE` intents;
-- keep media optional and character-driven rather than quota-driven;
-- make image-search providers composition-neutral while preserving avatar-specific filtering;
-- add a reusable SSRF-safe `RemoteMediaFetcher`;
-- persist searched/generated output as ordinary `MediaAsset` rows and attach through `space_post_media`;
-- fail soft per media intent so provider/network failure does not block a valid text post;
-- allow image-only Space posts when at least one image succeeds;
-- expose Space Media / max items / search / ImageGen controls in Settings and Dev;
-- add an explicit Dev smoke endpoint for search/generated image posts without changing scheduler state.
+- #70 Space multimedia attachment foundation: merged.
+- #71 autonomous Space image search + ImageGen: merged.
+- #72 Claude acceptance follow-up for legacy media type backfill: merged.
+- #73 headless-browser World Observation: merged.
+- `main` now contains the complete text + image + world-observation path for this phase.
 
-### Explicitly deferred from this slice
+### Next development candidates
 
-- general Web Search / Web Fetch and World Observation;
-- link-preview cards;
-- autonomous Space voice posts;
+- formal Space voice-post synthesis/playback;
+- link-preview media cards;
 - autonomous group-chat bursts;
-- semantic/vision appraisal of images by audience characters.
+- image/vision appraisal by Space audience characters.
 
+Do not treat any item above as automatically approved scope for a new PR; the active development session should choose one slice and rewrite this section before implementation.
 ## Implementation progress
 
 ### 2026-09-22 — implementation slice ready for acceptance

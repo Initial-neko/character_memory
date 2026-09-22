@@ -260,7 +260,7 @@ Vector Recall
 future Person context
 ```
 
-Event Log 永远优先于 Memory。Memory 是认知派生层，可以重建、合并、遗忘；不能反向篡改原始经历。
+Durable source fact 永远优先于 Memory。Memory 是认知派生层，可以重建、合并、遗忘；不能反向篡改 Direct / Group / Space 等原始经历。
 
 默认 local embedding 是 `BAAI/bge-small-zh-v1.5`。Character Web 进程启动后立即在后台 warm Person Runtime/Embedding，同时保持 `/health` 可用。SentenceTransformer runtime 使用 strict `local_files_only=True`；模型下载只允许出现在 setup/prefetch 阶段，不允许正常启动或第一句话临时访问 Hub。
 

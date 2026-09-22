@@ -84,6 +84,21 @@ def settings_server(tmp_path_factory):
         process.wait(timeout=3)
 
 
+def _wait_for_render(page) -> None:
+    """Wait until the Settings Center has rendered its field tree.
+
+    ``loadSettings()`` fetches ``/v1/settings`` and builds every card from the
+    response, so anything that reads the DOM straight after ``domcontentloaded``
+    races that fetch. Waiting for a rendered field is the page's own "loaded"
+    signal and not a sleep: ``renderSections`` is synchronous, so the first
+    field to appear means the whole tree is already built. Without this the
+    first-screen read sees an empty ``#settingsSections`` whenever the browser's
+    round trip beats the fetch, which is what a loaded CI runner does every time.
+    """
+
+    page.wait_for_selector("#settingsSections [data-setting]", state="attached")
+
+
 def _reveal(page, selector: str) -> None:
     """Open the collapsed level group that holds `selector`.
 
@@ -99,6 +114,7 @@ def _reveal(page, selector: str) -> None:
 def test_first_screen_shows_only_the_common_level(page, settings_server):
     page.set_default_timeout(10000)
     page.goto(f"{settings_server}/settings", wait_until="domcontentloaded")
+    _wait_for_render(page)
 
     # Every field that renders outside a group, i.e. what the page opens on.
     on_screen = page.evaluate(
@@ -127,6 +143,7 @@ def test_first_screen_shows_only_the_common_level(page, settings_server):
 def test_restart_requirement_shows_next_to_the_field_not_only_in_a_toast(page, settings_server):
     page.set_default_timeout(10000)
     page.goto(f"{settings_server}/settings", wait_until="domcontentloaded")
+    _wait_for_render(page)
 
     # A hot field must not claim to need a restart...
     assert page.locator('label[for="setting-tts_provider"] .field-restart').count() == 0
@@ -147,6 +164,7 @@ def test_restart_requirement_shows_next_to_the_field_not_only_in_a_toast(page, s
 def test_tts_provider_switch_updates_voice_device_and_persists_without_full_stack_restart(page, settings_server):
     page.set_default_timeout(10000)
     page.goto(f"{settings_server}/settings", wait_until="domcontentloaded")
+    _wait_for_render(page)
 
     _reveal(page, "#setting-tts_device")
     provider = page.locator("#setting-tts_provider")
@@ -174,6 +192,7 @@ def test_tts_provider_switch_updates_voice_device_and_persists_without_full_stac
 def test_non_hot_local_device_change_is_explicitly_restart_required(page, settings_server):
     page.set_default_timeout(10000)
     page.goto(f"{settings_server}/settings", wait_until="domcontentloaded")
+    _wait_for_render(page)
 
     _reveal(page, "#setting-tts_device")
     provider = page.locator("#setting-tts_provider")

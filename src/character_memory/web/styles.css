@@ -102,10 +102,7 @@ button,textarea { font:inherit; }
 .voice-glyph { display:inline-block; font-weight:750; letter-spacing:-2px; transform:rotate(180deg); }
 .message-row.user .voice-glyph { transform:none; }
 .voice-duration { font-size:12px; font-weight:650; white-space:nowrap; }
-.voice-tools { display:flex; gap:3px; padding:0 4px; }
-.voice-tools button { min-height:0; border:0; padding:2px 5px; background:transparent; color:var(--ui-muted); font-size:10px; cursor:pointer; }
-.voice-tools button:hover { color:var(--ui-text); }
-.voice-transcript,.voice-translation { max-width:320px; padding:7px 9px; border-radius:9px; background:var(--ui-surface-soft); color:var(--ui-muted); font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+.voice-transcript { max-width:320px; padding:7px 9px; border-radius:9px; background:var(--ui-surface-soft); color:var(--ui-muted); font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
 .voice-transcript-always { margin-top:1px; }
 .voice-failed .voice-bubble { width:auto; min-width:126px; }
 /* The cause, next to the fact. Same width as a transcript panel so a long

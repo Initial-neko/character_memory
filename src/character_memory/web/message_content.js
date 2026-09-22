@@ -5,8 +5,11 @@
   // Voice messages always carry canonical text. Unlike WeChat-style
   // transcription-on-demand, Character Memory shows that text immediately
   // below every voice bubble so listening is optional, not required for access.
-  // app.js still owns the shared audio player/binder; this renderer is loaded
-  // after app.js and becomes the canonical Direct/Group voice markup.
+  // app.js still owns the shared audio player and its click binding, but this
+  // is the only definition of CM.voiceMessageHtml. Nothing may define a second
+  // renderer for the same name: which one won would depend on script order
+  // alone, so a duplicate in app.js would silently restore the
+  // reveal-on-click transcript whenever the load order changed.
   CM.voiceMessageHtml = message => {
     if (message.action !== "VOICE_MESSAGE") return "";
     const status = message.voice_status || "pending";

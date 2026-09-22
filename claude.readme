@@ -46,15 +46,37 @@ Those features should reuse this attachment foundation rather than create parall
 
 ## Implementation progress
 
-### 2026-09-22 — started
+### 2026-09-22 — implementation slice ready for acceptance
 
-Status: `IN_PROGRESS`
+Status: `READY_FOR_ACCEPTANCE`
 
 Development started from `main@a22be1332e521ce27ba6e7654c60cede7d971597`.
+
+Pull request: **#70 — Add Character Space multimedia attachment foundation**
+
+Current PR head at handoff: `b2abd24b50e44b80c6f101fcdd2c620bed1fed8a`.
 
 Design choice: use a dedicated Space attachment-relation module backed by the same SQLite store and existing `MediaAsset` ids. This keeps media bytes in the existing MediaStorage layer and avoids coupling binary persistence to the social-feed repository.
 
 Compatibility rule: `space_posts.media_id` remains as a legacy first-media pointer for now; new reads use ordered `space_post_media`.
+
+Implemented in this slice:
+
+- `space_post_media` schema + `space/004-post-media` migration marker;
+- migration of legacy single-media Space rows to ordered attachment relations;
+- `media_ids` request contract with a hard limit of 9 and duplicate normalization;
+- legacy single `media_id` request/response compatibility;
+- ordered `media_items` response with media type, source/provenance, availability and sort order;
+- 1 / 2-4 / 5-9 image layouts in the browser;
+- fail-soft rendering for unavailable assets;
+- regression coverage in `tests/test_character_space.py`;
+- maintained contract update in `docs/current/CHARACTER_SPACE.md`.
+
+Validation state:
+
+- GitHub Actions CI for PR #70 was started for head `b2abd24b50e44b80c6f101fcdd2c620bed1fed8a`.
+- At the time of this handoff entry the CI run was still in progress; do not treat this line as a green-CI claim.
+- Autonomous Web Observation / image search / ImageGen / voice-post execution remain intentionally deferred.
 
 ## Claude acceptance findings
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -19,11 +20,20 @@ from character_memory.domain.models import (
     WorldObservationAppraisal,
     WorldObservationDisposition,
 )
-from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
+from character_memory.llm.client import (
+    ModelCallResult,
+    ModelCallTrace,
+    OpenAICompatibleModel,
+    PersonModel,
+)
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
-from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService
+from character_memory.space_autonomy import (
+    MAX_RAW_MODEL_OUTPUT_CHARS,
+    SpaceAutonomyScheduler,
+    SpaceAutonomyService,
+)
 from character_memory.space_store import SpaceRepository
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.stickers import Sticker, StickerCatalog
@@ -847,4 +857,198 @@ def test_space_scheduler_persists_world_and_plan_observability(tmp_path):
     assert status["metrics"]["browser_rendered"] >= 1
     assert "memory_metrics" in status
     assert "created_last_24h_by_channel" in status["memory_metrics"]
+    store.close()
+
+
+class RawTextSpaceModel(SpaceModel):
+    """Provider-shaped fake that hands back the text the model emitted.
+
+    The parsed value is derived from the same text, so the ledger and the
+    decision can never disagree about what the model said.
+    """
+
+    def __init__(self, raw_by_schema):
+        super().__init__()
+        self.raw_by_schema = raw_by_schema
+
+    def structured_call_for_session(self, prompt, schema, session_id):
+        raw = self.raw_by_schema[schema]
+        return ModelCallResult(
+            value=schema.model_validate(json.loads(raw)),
+            trace=ModelCallTrace(
+                request_messages=[{"role": "user", "content": prompt}],
+                response_text=raw,
+                attempt=1,
+                model="space-raw-fake",
+            ),
+        )
+
+    def structured_for_session(self, prompt, schema, session_id):
+        raise AssertionError("the observability path must use structured_call_for_session")
+
+
+class ScriptedProviderSpaceModel(OpenAICompatibleModel):
+    """Runs the real provider repair loop against scripted raw replies."""
+
+    def __init__(self, replies):
+        super().__init__("test-key", model="space-test", attempts=2)
+        self.replies = iter(replies)
+        self.requests = 0
+
+    def _request(self, messages, **kwargs):
+        self.requests += 1
+        return next(self.replies)
+
+
+def test_space_ledger_keeps_the_raw_output_of_every_autonomous_model_call(tmp_path):
+    explore_raw = json.dumps(
+        {"explore": True, "query": "agent memory systems research"},
+        ensure_ascii=False,
+    )
+    appraisal_raw = json.dumps(
+        {
+            "disposition": "MEMORY_AND_EXPRESS",
+            "summary": "看到一篇公开文章讨论角色型 Agent 的长期记忆设计。",
+            "expression_angle": "从角色如何形成持续记忆这件事谈一点自己的兴趣。",
+            "personal_memory": "我发现自己会持续关注角色如何形成长期记忆这件事。",
+        },
+        ensure_ascii=False,
+    )
+    plan_raw = json.dumps(
+        {
+            "social_post": "刚看到有人在认真讨论长期记忆设计。",
+            "media_intents": [
+                {"type": "SEARCH_IMAGE", "query": "Tokyo rain night", "count": 1}
+            ],
+        },
+        ensure_ascii=False,
+    )
+    model = RawTextSpaceModel(
+        {
+            WorldExplorePlan: explore_raw,
+            WorldObservationAppraisal: appraisal_raw,
+            SpacePostPlan: plan_raw,
+        }
+    )
+    access, store, _ = _access(tmp_path, ids=("c00",), model=model)
+    access.settings.space_world_observation_enabled = True
+    access.settings.space_opportunity_interval_minutes = 30
+    access.world_observer = FakeWorldObserver()
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    start = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+    scheduler.status(start)
+
+    outcomes = scheduler.run_once(datetime(2026, 9, 22, 8, 30, tzinfo=timezone.utc))
+    assert len(outcomes) == 1
+    run = repository.list_opportunity_runs(character_id="c00")[0]
+    calls = run["details"]["model_calls"]
+
+    assert calls["world_explore"]["raw_response"] == explore_raw
+    assert calls["world_appraisal"]["raw_response"] == appraisal_raw
+    assert calls["space_plan"]["raw_response"] == plan_raw
+    for stage, raw in (
+        ("world_explore", explore_raw),
+        ("world_appraisal", appraisal_raw),
+        ("space_plan", plan_raw),
+    ):
+        assert calls[stage]["raw_response_chars"] == len(raw)
+        assert calls[stage]["raw_response_truncated"] is False
+        assert calls[stage]["attempt"] == 1
+        assert calls[stage]["repaired"] is False
+        assert calls[stage]["error"] == ""
+        assert calls[stage]["model"] == "space-raw-fake"
+    assert calls["space_plan"]["schema"] == "SpacePostPlan"
+    assert "rejected_raw_response" not in calls["space_plan"]
+
+    # The decision shape the existing consumers read is untouched: the plan
+    # payload still carries the parsed intent next to the raw text.
+    assert run["details"]["plan"]["media_intents"][0]["query"] == "Tokyo rain night"
+    assert run["details"]["plan"]["has_text"] is True
+    store.close()
+
+
+def test_space_ledger_marks_a_repaired_media_intent_instead_of_losing_it(tmp_path):
+    """The suspected silent downgrade must be readable in the ledger.
+
+    Attempt 1 asks for an image without a query, so validation fails. The
+    generic repair prompt tells the model to use empty values, and the repaired
+    plan is a valid text-only post -- indistinguishable from a deliberate one
+    unless the ledger keeps the rejected output and the attempt number.
+    """
+    plan_first = json.dumps(
+        {"social_post": "想发一张雨夜的照片。", "media_intents": [{"type": "SEARCH_IMAGE", "count": 1}]},
+        ensure_ascii=False,
+    )
+    plan_repaired = json.dumps(
+        {"social_post": "想发一张雨夜的照片。", "media_intents": []},
+        ensure_ascii=False,
+    )
+    model = ScriptedProviderSpaceModel([plan_first, plan_repaired])
+    access, store, _ = _access(tmp_path, ids=("c00",), model=model)
+    service = SpaceAutonomyService(access, SpaceRepository(store))
+    now = datetime(2026, 9, 22, 10, 0, tzinfo=timezone.utc)
+
+    try:
+        outcome = service.run_opportunity("c00", now=now, cascade=False, source="DEV")
+    finally:
+        model.close()
+
+    assert model.requests == 2
+    assert outcome["plan"]["media_intents"] == []
+    assert outcome["plan"]["has_text"] is True
+
+    record = outcome["model_calls"]["space_plan"]
+    assert record["attempt"] == 2
+    assert record["repaired"] is True
+    assert record["raw_response"] == plan_repaired
+    assert "SEARCH_IMAGE" in record["rejected_raw_response"]
+    assert record["validation_error"]
+    store.close()
+
+
+def test_space_ledger_bounds_a_long_raw_output_and_marks_the_cut(tmp_path):
+    plan_raw = json.dumps(
+        {"social_post": "长" * 2500, "media_intents": []},
+        ensure_ascii=False,
+    )
+    assert len(plan_raw) > MAX_RAW_MODEL_OUTPUT_CHARS
+    model = RawTextSpaceModel({SpacePostPlan: plan_raw})
+    access, store, _ = _access(tmp_path, ids=("c00",), model=model)
+    service = SpaceAutonomyService(access, SpaceRepository(store))
+    now = datetime(2026, 9, 22, 11, 0, tzinfo=timezone.utc)
+
+    outcome = service.run_opportunity("c00", now=now, cascade=False, source="DEV")
+
+    record = outcome["model_calls"]["space_plan"]
+    assert record["raw_response_chars"] == len(plan_raw)
+    assert record["raw_response_truncated"] is True
+    assert len(record["raw_response"]) < len(plan_raw)
+    assert record["raw_response"].startswith(plan_raw[:MAX_RAW_MODEL_OUTPUT_CHARS])
+    assert "truncated" in record["raw_response"]
+    store.close()
+
+
+def test_failed_run_still_keeps_the_model_output_that_broke_it(tmp_path):
+    # Neither attempt is JSON: the repair round trip cannot save this one.
+    model = ScriptedProviderSpaceModel(["我想想该发什么。", "还是想不出来。"])
+    access, store, _ = _access(tmp_path, ids=("c00",), model=model)
+    access.settings.space_opportunity_interval_minutes = 30
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    start = datetime(2026, 9, 22, 9, 0, tzinfo=timezone.utc)
+    scheduler.status(start)
+
+    outcomes = scheduler.run_once(datetime(2026, 9, 22, 9, 30, tzinfo=timezone.utc))
+    model.close()
+
+    assert outcomes == []
+    run = repository.list_opportunity_runs(character_id="c00")[0]
+    assert model.requests == 2
+    assert run["status"] == "FAILED"
+    assert run["error"]
+    record = run["details"]["model_calls"]["space_plan"]
+    assert record["error"]
+    assert record["raw_response"] == "还是想不出来。"
+    assert record["repaired"] is False
     store.close()

@@ -24,6 +24,14 @@ class ModelCallTrace:
     response_text: str = ""
     attempt: int = 0
     model: str = ""
+    # Output of the first attempt when it failed schema validation, kept so a
+    # caller can tell a repaired result from a clean one. The generic repair
+    # prompt resolves an invalid field by asking for empty values, so a caller
+    # that only sees the final value cannot tell a deliberate empty list from a
+    # silently dropped one. Both fields stay empty when the first attempt
+    # validated.
+    rejected_response_text: str = ""
+    validation_error: str = ""
 
 
 @dataclass(frozen=True)
@@ -40,6 +48,20 @@ class ProviderHTTPError(RuntimeError):
         self.request_id = request_id
         suffix = f" | request_id={request_id}" if request_id else ""
         super().__init__(f"Provider HTTP {status_code} from {url}: {body}{suffix}")
+
+
+class StructuredOutputError(RuntimeError):
+    """Structured output stayed invalid after every attempt.
+
+    The message keeps the validation error (as before). The last provider text
+    rides along too, because a caller that only logs the message cannot tell a
+    model that returned broken JSON from one that returned prose.
+    """
+
+    def __init__(self, message: str, *, response_text: str = "", attempts: int = 0):
+        super().__init__(message)
+        self.response_text = response_text
+        self.attempts = attempts
 
 
 class PersonModel(ABC):
@@ -76,6 +98,20 @@ class PersonModel(ABC):
 
     def structured_for_session(self, prompt: str, schema: type[BaseModel], session_id: str):
         return self.structured_with_images_for_session(prompt, [], schema, session_id)
+
+    def structured_call_for_session(
+        self, prompt: str, schema: type[BaseModel], session_id: str
+    ) -> ModelCallResult:
+        """Structured call that also returns the provider trace.
+
+        Mirrors react_call_for_session. Models that can surface the provider
+        text override this; the default keeps duck-typed models working with an
+        empty trace instead of forcing every caller to know the difference.
+        """
+        return ModelCallResult(
+            value=self.structured_for_session(prompt, schema, session_id),
+            trace=ModelCallTrace(model=str(getattr(self, "model", "") or "")),
+        )
 
     def complete_text_for_session(self, messages: list[dict], session_id: str) -> str:
         """Public provider-neutral raw text completion used by tool UIs.
@@ -341,9 +377,16 @@ class OpenAICompatibleModel(PersonModel):
             raise RuntimeError("vision_model is required for image input")
         messages = self.preview_messages(prompt, schema, image_data_urls=image_data_urls)
         last_error: Exception | None = None
+        # Kept for the trace so a repaired call is distinguishable from a clean
+        # one; only the first rejected output is kept, since that is the version
+        # the model produced without being told to fix anything.
+        rejected_text = ""
+        rejected_error = ""
+        last_text = ""
         for attempt in range(self.attempts):
             safe_messages = self._trace_safe_messages(messages)
             attempt_number = attempt + 1
+            attempt_text = ""
             # Compatibility fields are best-effort only. Per-call ModelCallTrace
             # is authoritative and remains isolated even when calls overlap.
             with self._debug_lock:
@@ -366,6 +409,7 @@ class OpenAICompatibleModel(PersonModel):
                     json_object=True,
                     model=selected_model,
                 )
+                attempt_text = text
                 with self._debug_lock:
                     self.last_response_text = text
                 result = schema.model_validate(self._json(text))
@@ -382,10 +426,16 @@ class OpenAICompatibleModel(PersonModel):
                         response_text=text,
                         attempt=attempt_number,
                         model=selected_model,
+                        rejected_response_text=rejected_text,
+                        validation_error=rejected_error,
                     ),
                 )
             except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
                 last_error = exc
+                last_text = attempt_text
+                if not rejected_text:
+                    rejected_text = attempt_text
+                    rejected_error = str(exc)
                 logger.warning(
                     "provider.structured_call invalid attempt=%d/%d schema=%s error=%s",
                     attempt_number,
@@ -397,8 +447,10 @@ class OpenAICompatibleModel(PersonModel):
                     break
                 messages.append({"role": "assistant", "content": text if "text" in locals() else "{}"})
                 messages.append({"role": "user", "content": self._repair_prompt(schema, exc)})
-        raise RuntimeError(
-            f"Model returned invalid structured output after {self.attempts} attempts: {last_error}"
+        raise StructuredOutputError(
+            f"Model returned invalid structured output after {self.attempts} attempts: {last_error}",
+            response_text=last_text,
+            attempts=self.attempts,
         ) from last_error
 
     def _call(
@@ -443,6 +495,11 @@ class OpenAICompatibleModel(PersonModel):
 
     def structured_for_session(self, prompt: str, schema: type[BaseModel], session_id: str):
         return self._call(prompt, schema, conversation_id=session_id)
+
+    def structured_call_for_session(
+        self, prompt: str, schema: type[BaseModel], session_id: str
+    ) -> ModelCallResult:
+        return self._call_result(prompt, schema, conversation_id=session_id)
 
     def complete_text_for_session(self, messages: list[dict], session_id: str) -> str:
         return self._request(messages, conversation_id=session_id)

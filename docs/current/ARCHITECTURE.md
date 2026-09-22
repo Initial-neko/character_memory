@@ -114,6 +114,22 @@ RuntimeServices
 
 Avatar、Space Image Search 与 World Observation 可以共享同一个 SearchProvider，但 ownership 不属于 Avatar route；Visual/Space 共用 ImageGen provider，也不依赖 `attach_visual_routes()` 是否先执行。Route module 只暴露 HTTP adapter，不能再用 attach 顺序充当依赖注入机制。
 
+核心 HTTP 也采用同样原则。历史上接近千行的 `api.py` 不再同时承担 Character/Sticker/Image/Direct route 实现；现在：
+
+```text
+create_api()
+├─ lazy AppBundle / RuntimeServices / lifecycle
+├─ ApiCharacterService
+├─ ApiResourceService
+├─ CharacterRuntimeAccess      -> feature modules
+└─ CoreApiRouteAccess          -> core route modules
+    ├─ core_character_web.py
+    ├─ core_resource_web.py
+    └─ core_direct_web.py
+```
+
+因此并行开发 Character、资源管理、Direct diagnostics 时不需要反复修改同一个 composition-root 文件。新增 endpoint 应进入所属 route module；只有新增跨 feature 依赖或生命周期 ownership 时才修改 `api.py`。
+
 并发边界：
 
 ```text

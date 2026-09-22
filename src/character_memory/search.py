@@ -36,12 +36,13 @@ class WebSearchResult:
 
 @dataclass(frozen=True)
 class FetchedPage:
-    """Reserved result contract for the later web_fetch capability."""
+    """Rendered public page returned by the formal headless-browser boundary."""
 
     url: str
     title: str
     content: str
     content_type: str = "text/plain"
+    description: str = ""
 
 
 class SearchProvider(ABC):
@@ -50,7 +51,7 @@ class SearchProvider(ABC):
         ...
 
     def search_web(self, query: str, *, limit: int = 5) -> list[WebSearchResult]:
-        raise NotImplementedError("web_search is reserved for a later phase")
+        raise NotImplementedError("web_search is not implemented by this provider")
 
     def close(self) -> None:
         pass
@@ -60,7 +61,7 @@ class WebFetcher(ABC):
     """Separate from SearchProvider on purpose: searching and fetching pages are different trust boundaries."""
 
     def fetch(self, url: str, *, max_chars: int = 12000) -> FetchedPage:
-        raise NotImplementedError("web_fetch is reserved for a later phase")
+        raise NotImplementedError("web_fetch is not implemented by this fetcher")
 
 
 def _dimension(value) -> int | None:
@@ -189,6 +190,61 @@ class SearchApiProvider(SearchProvider):
         logger.info("search.images provider=searchapi query_chars=%d returned=%d", len(query), len(results))
         return results
 
+    def search_web(self, query: str, *, limit: int = 5) -> list[WebSearchResult]:
+        query = " ".join(str(query or "").split()).strip()
+        if not query:
+            raise ValueError("web search query must not be empty")
+        if not self.api_key:
+            raise RuntimeError("search_api_key is empty; configure a SearchAPI.io API key first")
+
+        count = max(1, min(int(limit), 10))
+        params = {
+            "engine": "google",
+            "q": query,
+            "hl": self.language,
+            "safe": self.safe_search,
+        }
+        if self.country:
+            params["gl"] = self.country
+        response = self.client.get(
+            self.IMAGE_SEARCH_URL,
+            params=params,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "User-Agent": "character-memory/0.4 world-search",
+            },
+        )
+        if response.is_error:
+            body = (response.text or "").strip()[:1200]
+            raise RuntimeError(
+                f"SearchAPI web search failed with HTTP {response.status_code}: {body or '<empty>'}"
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError("SearchAPI web search returned invalid JSON") from exc
+
+        results: list[WebSearchResult] = []
+        for item in payload.get("organic_results") or []:
+            url = str(item.get("link") or "").strip()
+            if not url:
+                continue
+            domain = urlparse(url).hostname or ""
+            results.append(
+                WebSearchResult(
+                    title=str(item.get("title") or domain or url).strip(),
+                    url=url,
+                    snippet=str(item.get("snippet") or "").strip(),
+                    source_domain=domain,
+                    published_at=str(item.get("date") or "").strip() or None,
+                )
+            )
+            if len(results) >= count:
+                break
+        logger.info("search.web provider=searchapi query_chars=%d returned=%d", len(query), len(results))
+        return results
+
     def close(self) -> None:
         if self._owns_client:
             self.client.close()
@@ -276,6 +332,58 @@ class BraveSearchProvider(SearchProvider):
                 break
 
         logger.info("search.images provider=brave query_chars=%d returned=%d", len(query), len(results))
+        return results
+
+    WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+
+    def search_web(self, query: str, *, limit: int = 5) -> list[WebSearchResult]:
+        query = " ".join(str(query or "").split()).strip()
+        if not query:
+            raise ValueError("web search query must not be empty")
+        if not self.api_key:
+            raise RuntimeError("search_api_key is empty; configure a Brave Search API key first")
+
+        count = max(1, min(int(limit), 10))
+        response = self.client.get(
+            self.WEB_SEARCH_URL,
+            params={
+                "q": query,
+                "count": count,
+                "country": self.country,
+                "search_lang": self.language,
+                "safesearch": self.safe_search,
+            },
+            headers={
+                "Accept": "application/json",
+                "Accept-Encoding": "gzip",
+                "X-Subscription-Token": self.api_key,
+                "User-Agent": "character-memory/0.4 world-search",
+            },
+        )
+        if response.is_error:
+            body = (response.text or "").strip()[:1200]
+            raise RuntimeError(
+                f"Brave web search failed with HTTP {response.status_code}: {body or '<empty>'}"
+            )
+        payload = response.json()
+        results: list[WebSearchResult] = []
+        for item in (payload.get("web") or {}).get("results") or []:
+            url = str(item.get("url") or "").strip()
+            if not url:
+                continue
+            domain = urlparse(url).hostname or ""
+            results.append(
+                WebSearchResult(
+                    title=str(item.get("title") or domain or url).strip(),
+                    url=url,
+                    snippet=str(item.get("description") or "").strip(),
+                    source_domain=domain,
+                    published_at=str(item.get("age") or "").strip() or None,
+                )
+            )
+            if len(results) >= count:
+                break
+        logger.info("search.web provider=brave query_chars=%d returned=%d", len(query), len(results))
         return results
 
     def close(self) -> None:

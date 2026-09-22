@@ -18,6 +18,7 @@ from character_memory.application.chat_service import build_user_event
 from character_memory.application.group_conversation_service import build_group_user_event, resolve_group_mentions
 from character_memory.group_store import GroupRepository
 from character_memory.group_web import GroupChatRequest
+from character_memory.message_projection import upload_caption
 
 
 logger = logging.getLogger("character_memory.async_web")
@@ -136,7 +137,7 @@ def attach_async_routes(app):
         if image:
             image_payload = {
                 "id": image.get("id"),
-                "label": image.get("original_name") or "图片",
+                "label": upload_caption(image.get("original_name")),
                 "mime_type": image.get("mime_type"),
                 "size_bytes": image.get("size_bytes"),
                 "source": image.get("source"),
@@ -171,7 +172,7 @@ def attach_async_routes(app):
         if image:
             image_payload = {
                 "id": image.get("id"),
-                "label": image.get("original_name") or "图片",
+                "label": upload_caption(image.get("original_name")),
                 "mime_type": image.get("mime_type"),
                 "size_bytes": image.get("size_bytes"),
                 "source": image.get("source"),

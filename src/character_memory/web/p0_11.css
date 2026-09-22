@@ -237,14 +237,11 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
   display: block;
 }
 
-.group-message-sticker {
-  width: auto;
-  height: auto;
-  max-width: 112px;
-  max-height: 112px;
-  display: block;
-  object-fit: contain;
-}
+/* The group surface deliberately does not size stickers on its own: a sticker
+ * is the same message in both surfaces, so p0_7.css owns the box and this hook
+ * only has to exist. It stays because message_content.js emits it for the
+ * group variant and because the mobile override below shares the one size. */
+.group-message-sticker { display: block; }
 
 .group-pending-note {
   color: var(--ui-muted);
@@ -254,6 +251,6 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
 }
 
 @media (max-width: 720px) {
-  .group-message-sticker { max-width: 96px; max-height: 96px; }
+  .group-message-sticker { --sticker-size: 96px; }
   .group-message-image { max-width: 72vw; }
 }

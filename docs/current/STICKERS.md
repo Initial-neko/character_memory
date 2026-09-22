@@ -213,6 +213,8 @@ STICKER action
 
 随项目提供的 default pack，作为所有人物的基础资源。
 
+每个内置 SVG 都带 `width`/`height`（与 `viewBox` 同为 160），因为它们只给 `viewBox` 时没有 intrinsic width：消息气泡里的 `img` 会先按 0×0 布局、再被 shrink-to-fit 的容器框住，贴纸于是渲染成时间戳的宽度而不是气泡的上限。CSS 侧另有显式尺寸盒（`--sticker-size`），两者合起来保证贴纸在私聊和群聊里是同一个大小。
+
 ### Global imported
 
 当前正式用户扩展资源。Web import 和 CLI import 都写到 `sticker_dir`，所有人物/群聊共享。
@@ -270,6 +272,7 @@ Sticker 与 ImageGen 是不同资源路径：
 - manifest-last atomic publication；
 - runtime catalog refresh；
 - unknown Sticker ID 不成为合法 outward action；
-- legacy asset route 继续兼容。
+- legacy asset route 继续兼容；
+- 贴纸在私聊和群聊中渲染为同一个显式尺寸盒（`--sticker-size`），不随容器 shrink-to-fit 缩水。
 
 相关回归清单见 [`EVALS.md`](EVALS.md)。

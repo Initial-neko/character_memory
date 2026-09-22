@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from character_memory.application.group_conversation_service import GroupConversationService
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.images import load_image_catalog
-from character_memory.message_projection import project_group_message
+from character_memory.message_projection import project_group_message, upload_caption
 
 
 logger = logging.getLogger("character_memory.group_web")
@@ -167,7 +167,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             return None
         return {
             "id": asset.id,
-            "label": asset.original_name,
+            "label": upload_caption(asset.original_name),
             "mime_type": asset.mime_type,
             "size_bytes": asset.size_bytes,
             "source": asset.source,

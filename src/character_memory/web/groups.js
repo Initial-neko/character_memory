@@ -114,9 +114,13 @@
   function turnButton(message) {
     if (message.role !== "user" || !message.turn_id) return "";
     const summary = message.turn_summary || null;
-    const label = summary
-      ? `本轮反应 · ${summary.replied || 0} 回复 / ${summary.silent || 0} 沉默`
-      : "本轮反应 · 等待判断";
+    // No summary yet means no member has finished deciding, so there is nothing
+    // to report. The permanent "本轮反应 · 等待判断" placeholder was a line of
+    // grey text under every user message saying only that nothing had happened;
+    // the summary lands on the first group_member_complete (and is rebuilt from
+    // the stored turn traces on reload), and the button arrives with it.
+    if (!summary) return "";
+    const label = `本轮反应 · ${summary.replied || 0} 回复 / ${summary.silent || 0} 沉默`;
     return `<button class="group-turn-debug" type="button" data-group-turn="${CM.escapeHtml(message.turn_id)}">${CM.escapeHtml(label)}</button>`;
   }
 

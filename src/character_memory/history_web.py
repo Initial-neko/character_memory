@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
-from character_memory.message_projection import project_direct_message
+from character_memory.message_projection import project_direct_message, upload_caption
 from character_memory.storage.chat_history import ChatHistoryRepository
 
 
@@ -55,7 +55,9 @@ def attach_history_routes(app):
             return None
         return {
             "id": asset.id,
-            "label": asset.original_name,
+            # Not asset.original_name: that is the name the file arrived under,
+            # and it was printed under the picture as its caption.
+            "label": upload_caption(asset.original_name),
             "mime_type": asset.mime_type,
             "size_bytes": asset.size_bytes,
             "source": asset.source,

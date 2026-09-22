@@ -201,6 +201,7 @@
           query: $("spaceMediaQuery").value,
           purpose: $("spaceMediaPurpose").value,
           visual_intent: $("spaceMediaVisualIntent").value,
+          voice_text: $("spaceMediaVoiceText").value,
           content: $("spaceMediaPostText").value,
         }),
       });

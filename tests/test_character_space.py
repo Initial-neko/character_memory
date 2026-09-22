@@ -491,7 +491,7 @@ def test_uploaded_image_media_is_inline_for_space_lightbox(tmp_path: Path):
     attach_space_routes(app)
 
     with TestClient(app) as client:
-        asset = _save_test_media(app, "c00", 99, source="GENERATED")
+        asset = _save_test_media(app, "c00", 9, source="GENERATED")
         response = client.get(f"/v1/media/{asset.id}")
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("image/")

@@ -123,6 +123,30 @@ class Settings(BaseModel):
     space_audience_size: int = Field(default=5, ge=0, le=10)
     space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 
+    # World Activity is intentionally decoupled from Space posting cadence.
+    # Pulse reads information-aggregation pages and lets the model compress them
+    # into shared topics; Personal Browse lets each character independently
+    # explore public topics without automatically publishing a Space post.
+    world_activity_enabled: bool = True
+    world_pulse_enabled: bool = True
+    world_pulse_sources: list[str] = Field(
+        default_factory=lambda: [
+            "https://tophub.today/",
+            "https://news.ycombinator.com/",
+            "https://github.com/trending",
+        ],
+        max_length=12,
+    )
+    world_pulse_refresh_minutes: float = Field(default=60.0, ge=10.0, le=10080.0)
+    world_pulse_discussion_interval_minutes: float = Field(default=360.0, ge=10.0, le=10080.0)
+    world_pulse_source_max_chars: int = Field(default=8000, ge=1000, le=20000)
+    world_pulse_max_topics: int = Field(default=8, ge=1, le=12)
+    world_pulse_commenter_count: int = Field(default=4, ge=0, le=10)
+    world_browse_enabled: bool = True
+    world_browse_interval_minutes: float = Field(default=90.0, ge=10.0, le=10080.0)
+    world_browse_max_pages: int = Field(default=2, ge=1, le=4)
+    world_activity_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
+
     # Autonomous Group Chat is intentionally sparse: an opportunity only asks
     # whether one rotating seed member naturally starts a short room exchange.
     # A new user message always has priority and can supersede the autonomous run.

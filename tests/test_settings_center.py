@@ -903,3 +903,41 @@ def test_space_autonomy_settings_reject_too_short_interval(tmp_path: Path, monke
 
     with pytest.raises(ValueError):
         store.save_values({"space_opportunity_interval_minutes": 5})
+
+
+def test_settings_center_exposes_random_encounter_formal_configuration(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "encounter_enabled: true\n"
+        "encounter_interval_minutes: 1440\n"
+        "encounter_web_probability: 0.5\n"
+        "encounter_poll_seconds: 60\n"
+        "encounter_max_pending: 3\n",
+        encoding="utf-8",
+    )
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    snapshot = store.snapshot()
+    section = next(item for item in snapshot["schema"] if item["id"] == "encounter")
+    names = {field["name"] for field in section["fields"]}
+    assert names == {
+        "encounter_enabled",
+        "encounter_interval_minutes",
+        "encounter_web_probability",
+        "encounter_max_pending",
+        "encounter_poll_seconds",
+    }
+
+    result = store.save_values(
+        {
+            "encounter_interval_minutes": 720,
+            "encounter_web_probability": 0.75,
+            "encounter_max_pending": 2,
+        }
+    )
+    assert result["changed"] is True
+    loaded = load_settings(str(config))
+    assert loaded.encounter_interval_minutes == 720
+    assert loaded.encounter_web_probability == 0.75
+    assert loaded.encounter_max_pending == 2

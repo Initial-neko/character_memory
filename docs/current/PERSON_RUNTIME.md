@@ -62,6 +62,7 @@ PersonReaction
 当前可见表达 Action：
 
 - `MESSAGE`
+- `VOICE_MESSAGE`
 - `EMOJI`
 - `STICKER`
 - `IMAGE`
@@ -252,6 +253,8 @@ otherwise -> write
 - 默认约每 60 分钟一次机会
 - 用于 direct character，不 wake group chat
 - 不是 durable distributed job queue
+
+TIME_TICK Wake 与到期 PROACTIVE_INTENT 都允许人物在自然需要时选择 `VOICE_MESSAGE`；这不是强制语音。语音 action 仍先落成 durable pending message，再复用 Direct 的 VoiceMessageMaterializer 生成音频并更新同一 Event。
 
 Wake/Intent 当前不自动获得自主 ImageGen 权限。自主生成图像只发生在用户消息 reaction 中，避免后台无配额地消耗图片 Provider。
 

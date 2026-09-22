@@ -248,6 +248,55 @@ class GroupRepository:
             archived_at=None,
         )
 
+    def replace_members(
+        self,
+        conversation_id: str,
+        member_ids: list[str],
+        now: datetime,
+    ) -> GroupConversation:
+        cleaned = list(dict.fromkeys(str(value).strip() for value in member_ids if str(value).strip()))
+        if len(cleaned) > MAX_GROUP_CHARACTERS:
+            raise ValueError(f"group supports at most {MAX_GROUP_CHARACTERS} characters")
+        if self.get_group(conversation_id, include_archived=True) is None:
+            raise KeyError("group not found")
+        stamp = epoch_us(now)
+        with self.store.transaction():
+            self.store.conn.execute(
+                "DELETE FROM conversation_members WHERE conversation_id=? AND actor_type='CHARACTER'",
+                (conversation_id,),
+            )
+            for position, character_id in enumerate(cleaned, start=1):
+                self.store.conn.execute(
+                    "INSERT INTO conversation_members(conversation_id,actor_type,actor_id,position,joined_at,joined_at_epoch) VALUES(?,?,?,?,?,?)",
+                    (conversation_id, "CHARACTER", character_id, position, now.isoformat(), stamp),
+                )
+            self.store.conn.execute(
+                "UPDATE conversations SET updated_at=?,updated_at_epoch=? WHERE id=? AND type='GROUP'",
+                (now.isoformat(), stamp, conversation_id),
+            )
+        group = self.get_group(conversation_id, include_archived=True)
+        if group is None:
+            raise KeyError("group not found")
+        return group
+
+    def delete_empty_group(self, conversation_id: str) -> bool:
+        with self.store.transaction():
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) AS total FROM conversation_events WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchone()
+            if int(row["total"] if row else 0) > 0:
+                return False
+            self.store.conn.execute(
+                "DELETE FROM conversation_members WHERE conversation_id=?",
+                (conversation_id,),
+            )
+            cur = self.store.conn.execute(
+                "DELETE FROM conversations WHERE id=? AND type='GROUP'",
+                (conversation_id,),
+            )
+            return cur.rowcount > 0
+
     def rename_group(self, conversation_id: str, name: str, now: datetime) -> GroupConversation | None:
         cleaned_name = name.strip()
         if not cleaned_name:

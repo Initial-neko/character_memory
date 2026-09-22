@@ -23,7 +23,67 @@ real system environment > adjacent project .env > legacy config.yaml secret
 
 `character-stack` does **not** promote the whole project `.env` into every child process. Doing so would make persisted values look like immutable system overrides and would hide later Settings edits. Only the GSV sidecar receives its persisted `GSV_TTS_*` values as process environment because the upstream runtime consumes that contract.
 
-## 2. Persistence guarantees
+## 2. Configuration levels
+
+Every schema field and every secret carries a **level**, served in `GET /v1/settings`.
+The page renders `common` inline and the other two as real, closed `<details>`
+groups, so what the first screen shows is decided by the schema and not by the
+frontend.
+
+```text
+common      8 fields + the two keys a user must supply   -> first screen
+advanced   15 fields                                     -> one closed group
+diagnostic 29 fields                                     -> one closed group
+```
+
+Where a field goes:
+
+```text
+common     nothing works, or nothing is understandable, without the user deciding
+           (chat temperature, TTS provider/voice/speed, the autonomy switches,
+            the LLM and embedding API keys)
+advanced   a defensible default exists, but the value changes behaviour
+           (chat/vision model, GSV runtime assets, provider choice, intervals,
+            recall limit, voice-call pause)
+diagnostic transport, path, ceiling and polling plumbing -- the first place to
+           look when something is wrong (base URLs, attempt count, timeouts,
+           browser channel, storage paths, poll intervals, per-day ceilings)
+```
+
+A field without a `level` is served as `diagnostic`. The default is deliberately
+the *hidden* level: a new field that forgets to declare one is under-exposed
+rather than promoted onto the first screen the user opens on.
+
+Levels are a projection of the schema, not a claim that a hidden field is
+unsupported. Every field stays reachable by opening its group, and each group's
+summary names what is inside it (`高级设置（2 项）：Chat Model · Vision Model`) --
+never "更多设置". Secondary actions follow the same rule: `重新读取 / 刷新健康状态`
+is advanced, `迁移旧 config Key` is diagnostic, and `保存配置` is common.
+
+### 2.1 Secrets follow the selected providers
+
+Secrets carry levels too, and two of them depend on the current selection:
+
+```text
+OPENCODE_GO_API_KEY / EMBEDDING_API_KEY        common
+the selected provider's key                    advanced   (search_provider,
+                                                           image_generation_provider)
+the other providers' keys + HF_TOKEN           diagnostic
+```
+
+Only the key of the provider that is selected stays on the advanced level; the
+other provider's key drops into the diagnostic group instead of being removed,
+because a key has to exist *before* its provider can be switched to. Within a
+level, configured keys sort before unconfigured ones.
+
+### 2.2 Restart requirement is part of the field
+
+`restart_required` is served per field (`true` unless the field is in
+`HOT_APPLY_FIELDS`) and the page marks those fields with a `需重启` chip next to
+the label. The save response still lists only the fields that save actually
+changed, but the information no longer vanishes with the toast.
+
+## 3. Persistence guarantees
 
 Normal YAML saves:
 
@@ -39,7 +99,7 @@ GSV runtime fields are updated in `.env` as one atomic multi-key edit. Unrelated
 
 Existing secrets are never returned to the browser. Secret status exposes only metadata such as `configured`, `source`, and `stored_in_env`.
 
-### 2.1 Character Space test controls
+### 3.1 Character Space test controls
 
 Settings Center exposes a dedicated **Character Space** card for the current test stage:
 
@@ -62,7 +122,7 @@ The interval accepts `10..10080` minutes. `1440` is the normal 24H default; `60`
 
 These fields persist in `config.yaml`. Settings Center changes still report a Character Runtime restart requirement; Dev Console can persist the same values and hot-apply them immediately for testing. Changing the poll interval changes scheduler latency only; it never changes the Opportunity interval.
 
-## 3. Search / World Browser
+## 4. Search / World Browser
 
 The Search / ImageGen card also owns the headless World Browser transport settings:
 
@@ -78,7 +138,7 @@ Playwright's Python package is part of the canonical all environment. A managed 
 
 Without managed Chromium, auto may use an installed desktop Chrome. If neither browser is available, World Observation fails soft and normal Space autonomy continues.
 
-## 4. Formal TTS selection
+## 5. Formal TTS selection
 
 Formal browser voice always calls:
 
@@ -114,7 +174,7 @@ Settings probes the four formal providers individually through `:9002/v1/provide
 
 The Voice card also has **测试当前 TTS**, which calls `POST /v1/tts-preview` and performs a real synthesis through `:9002`.
 
-## 5. Hot-apply semantics
+## 6. Hot-apply semantics
 
 Not every field called “device” can truthfully hot-apply.
 
@@ -151,7 +211,7 @@ The save response separates persistence from runtime application:
 
 If persistence succeeds but a GSV reload fails (for example CUDA OOM), Settings returns the durable configuration together with `runtime_apply.applied=false`. It does not misreport that situation as “save failed”.
 
-## 6. GSV runtime configuration
+## 7. GSV runtime configuration
 
 These values persist in the project `.env`:
 
@@ -175,7 +235,7 @@ A GSV sidecar can start health-checkable with incomplete global assets. Settings
 
 A normal Settings workflow therefore does not require shell exports. Manual `GSV_TTS_*` system variables remain deployment overrides and intentionally win over project `.env`.
 
-## 7. Legacy secret migration
+## 8. Legacy secret migration
 
 Recognized legacy plaintext fields include:
 
@@ -189,7 +249,7 @@ msimg_api_key      -> MSIMG_API_KEY
 
 Migration writes the secret to `.env`, removes plaintext YAML values, and keeps only a sanitized YAML backup. Settings never creates a historical `.env.bak.*` chain.
 
-## 8. HTTP surface
+## 9. HTTP surface
 
 ```text
 GET    /health
@@ -203,7 +263,7 @@ POST   /v1/settings/migrate
 GET    /v1/runtime-status
 ```
 
-## 9. Startup
+## 10. Startup
 
 ```bash
 bash scripts/setup-media-models.sh

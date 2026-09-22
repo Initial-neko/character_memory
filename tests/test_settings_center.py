@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 from character_memory.config import load_settings
 from character_memory.envfile import parse_env_file
 from character_memory.settings_server import create_settings_app
-from character_memory.settings_store import SettingsStore
+from character_memory.settings_store import HOT_APPLY_FIELDS, SettingsStore, field_level
 
 
 def _clear_secret_env(monkeypatch):
@@ -903,3 +904,157 @@ def test_space_autonomy_settings_reject_too_short_interval(tmp_path: Path, monke
 
     with pytest.raises(ValueError):
         store.save_values({"space_opportunity_interval_minutes": 5})
+
+
+def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypatch):
+    """The page opens on eight fields, and every other field is behind a group.
+
+    Levels decide what the first screen is, so they are a contract rather than a
+    styling choice: promoting a field (or forgetting to mark a new one) changes
+    what a user has to read before doing anything.
+    """
+
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('chat_model: "deepseek-flash"\n', encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    schema = store.snapshot()["schema"]
+    common = [field["name"] for section in schema for field in section["fields"] if field["level"] == "common"]
+    assert common == [
+        "chat_temperature",
+        "tts_provider",
+        "tts_voice",
+        "tts_speed",
+        "proactive_wake_enabled",
+        "space_autonomy_enabled",
+        "space_media_enabled",
+        "group_autonomy_enabled",
+    ]
+
+    levels = Counter(field["level"] for section in schema for field in section["fields"])
+    assert levels == {"common": 8, "advanced": 15, "diagnostic": 29}
+    # Both other levels ship as real groups, so nothing is merely hidden.
+    assert {"advanced", "diagnostic"} <= set(levels)
+
+
+def test_a_field_without_a_level_is_hidden_rather_than_promoted():
+    """The default has to be the *quiet* level, or a new field clutters the screen.
+
+    Asserted on the function rather than the schema because the schema is
+    exactly the place where every field is expected to have been marked.
+    """
+
+    assert field_level({"name": "brand_new_setting"}) == "diagnostic"
+    assert field_level({"name": "brand_new_setting", "level": "typo"}) == "diagnostic"
+    assert field_level({"name": "brand_new_setting", "level": "common"}) == "common"
+
+
+def test_the_restart_marker_matches_what_saving_actually_reports(tmp_path: Path, monkeypatch):
+    """A field's in-page restart marker must agree with the save response.
+
+    The marker is the durable half of ``restart_required`` (the toast is gone as
+    soon as the next notice replaces it), so the two have to be derived from the
+    same rule -- for the hot fields and for the ones that need a restart.
+    """
+
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        'chat_model: "deepseek-flash"\n'
+        'tts_provider: "kokoro"\n'
+        'tts_voice: "zf_001"\n',
+        encoding="utf-8",
+    )
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+    marked = {
+        field["name"]: field["restart_required"]
+        for section in store.snapshot()["schema"]
+        for field in section["fields"]
+    }
+
+    hot = store.save_values({"tts_voice": "zf_002"})
+    assert hot["restart_required"] == []
+    assert marked["tts_voice"] is False
+
+    persisted = store.save_values({"chat_model": "deepseek-chat"})
+    assert persisted["restart_required"] == ["chat_model"]
+    assert marked["chat_model"] is True
+
+    # The rule is "hot on the wire" for exactly these six, nothing else.
+    assert sorted(name for name, value in marked.items() if not value) == sorted(HOT_APPLY_FIELDS)
+
+
+def test_secrets_follow_the_selected_providers_and_list_unconfigured_keys_last(tmp_path: Path, monkeypatch):
+    """Only the two providers in use keep their key on the advanced level.
+
+    The other provider's key is not deleted from the page -- a key has to exist
+    before its provider can be switched to -- but it drops into the diagnostic
+    group instead of sitting next to the live one.
+    """
+
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    env = tmp_path / ".env"
+    config.write_text(
+        'chat_model: "deepseek-flash"\n'
+        'search_provider: "brave"\n'
+        'image_generation_provider: "msimg"\n',
+        encoding="utf-8",
+    )
+    env.write_text('BRAVE_SEARCH_API_KEY="configured"\nEMBEDDING_API_KEY="configured"\n', encoding="utf-8")
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "configured")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "configured")
+
+    store = SettingsStore(str(config), str(env))
+    secrets = {item["name"]: item for item in store.snapshot()["secrets"]}
+
+    assert secrets["OPENCODE_GO_API_KEY"]["level"] == "common"
+    assert secrets["EMBEDDING_API_KEY"]["level"] == "common"
+    # The selected search/image providers, and only those.
+    assert secrets["BRAVE_SEARCH_API_KEY"]["level"] == "advanced"
+    assert secrets["MSIMG_API_KEY"]["level"] == "advanced"
+    assert secrets["SEARCHAPI_API_KEY"]["level"] == "diagnostic"
+    assert secrets["AGNES_API_KEY"]["level"] == "diagnostic"
+    assert secrets["HF_TOKEN"]["level"] == "diagnostic"
+
+    # Order is level first, then configured keys before unconfigured ones, and
+    # the declared order breaks ties (SEARCHAPI and AGNES are both unconfigured).
+    rank = {item["name"]: index for index, item in enumerate(store.snapshot()["secrets"])}
+    assert rank["EMBEDDING_API_KEY"] < rank["OPENCODE_GO_API_KEY"], "configured key first inside a level"
+    assert rank["BRAVE_SEARCH_API_KEY"] < rank["MSIMG_API_KEY"], "configured key first inside a level"
+    assert rank["MSIMG_API_KEY"] < rank["SEARCHAPI_API_KEY"], "advanced level before diagnostic"
+    assert rank["SEARCHAPI_API_KEY"] < rank["AGNES_API_KEY"], "declared order breaks ties"
+
+
+def test_switching_the_provider_moves_its_key_up_without_any_secret_being_lost(tmp_path: Path, monkeypatch):
+    """Swapping the selected provider swaps which key sits in the advanced group."""
+
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    env = tmp_path / ".env"
+    config.write_text(
+        'chat_model: "deepseek-flash"\n'
+        'search_provider: "searchapi"\n'
+        'image_generation_provider: "agnes"\n',
+        encoding="utf-8",
+    )
+    store = SettingsStore(str(config), str(env))
+
+    def levels():
+        return {item["name"]: item["level"] for item in store.snapshot()["secrets"]}
+
+    before = levels()
+    assert before["SEARCHAPI_API_KEY"] == "advanced"
+    assert before["AGNES_API_KEY"] == "advanced"
+    assert before["BRAVE_SEARCH_API_KEY"] == "diagnostic"
+    assert before["MSIMG_API_KEY"] == "diagnostic"
+
+    store.save_values({"search_provider": "brave", "image_generation_provider": "msimg"})
+
+    after = levels()
+    assert after["BRAVE_SEARCH_API_KEY"] == "advanced"
+    assert after["MSIMG_API_KEY"] == "advanced"
+    assert after["SEARCHAPI_API_KEY"] == "diagnostic"
+    assert after["AGNES_API_KEY"] == "diagnostic"
+    assert set(after) == set(before), "no key may disappear from the page"

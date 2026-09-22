@@ -9,8 +9,12 @@ code, .mono { font-family: var(--ui-mono); }
 .settings-topbar h1 { margin: 3px 0 6px; font-size: 30px; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 
-.toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px 18px; margin-bottom: 14px; }
-.toolbar-actions { display: flex; gap: 8px; }
+.toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 14px; }
+.toolbar > div:first-child { flex: 1 1 auto; min-width: 0; }
+#configPath { overflow-wrap: anywhere; }
+/* Column so the advanced-actions summary is never squeezed by the save button
+ * sitting next to it, and stays right-aligned even when the row wraps. */
+.toolbar-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin-left: auto; }
 .hidden { display: none !important; }
 
 .runtime-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
@@ -23,6 +27,27 @@ code, .mono { font-family: var(--ui-mono); }
 .section-heading h2 { margin: 0 0 5px; font-size: 18px; }
 .section-heading p { margin: 0; color: var(--ui-muted); font-size: 13px; line-height: 1.5; }
 .field-help { margin-top: 5px; font-size: 11px; line-height: 1.45; }
+
+/* Level groups. Every advanced/diagnostic field and secondary action lives in a
+ * real <details>, closed by default: the first screen is the common list, and
+ * opening a group is how you say you want the rest. The summary names what is
+ * inside instead of saying "more settings". */
+.level-group { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ui-line); }
+.level-group > summary { cursor: pointer; color: var(--ui-muted); font-size: 12px; line-height: 1.5; }
+.level-group > summary:hover { color: var(--ui-text); }
+.level-group[open] > summary { color: var(--ui-text); font-weight: 600; }
+.level-group[data-level="diagnostic"] > summary { color: var(--ui-faint); }
+.level-group[data-level="diagnostic"] > summary:hover { color: var(--ui-muted); }
+.level-group > .field-grid { margin-top: 12px; }
+.level-group > .secret-list { margin-top: 4px; }
+
+.toolbar-actions .level-group { margin-top: 0; padding-top: 0; border-top: 0; }
+.toolbar-actions .level-group > summary { text-align: right; }
+.toolbar-actions .level-group > button { display: block; margin: 8px 0 0 auto; }
+
+/* Restart marker: the save toast lists the fields that need a restart once and
+ * is then gone; this stays next to the field. */
+.field-restart { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--ui-line); border-radius: var(--ui-r-xs); background: var(--ui-surface-soft); color: var(--ui-muted); font-size: 10px; font-weight: 600; white-space: nowrap; }
 .tts-health-status { margin-top: 2px; font-size: 11px; line-height: 1.45; }
 .tts-preview-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ui-line); display: grid; grid-template-columns: auto minmax(220px, 1fr); gap: 10px 12px; align-items: center; }
 .tts-preview-row audio { width: 100%; min-width: 0; height: 38px; }

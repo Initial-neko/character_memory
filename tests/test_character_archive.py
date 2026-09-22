@@ -262,7 +262,15 @@ def test_archive_frontend_surfaces_a_failed_voice_registry_refresh():
     ``voice_registry`` was in the archive and restore payloads the whole time,
     but the module awaited them as bare statements: a 200 meaning "the sidecar
     never picked this up" looked exactly like a clean archive. The responses are
-    held now, and a failed refresh reaches the drawer the user is looking at.
+    held now, and a failed refresh reaches the user instead of the console.
+
+    Telling the user is a message, not a flow change, and the first attempt at
+    this conflated the two: it kept the drawer open so the failure had somewhere
+    to live. Every archive in a browser without a GSV sidecar then failed to
+    reload, so the drawer never closed, its backdrop covered the sidebar, and
+    the browser smoke test could no longer click ``.character-archive-entry``
+    (``Locator.click: Timeout 10000ms exceeded``). The pins below are the two
+    halves that have to stay separate.
     """
 
     web = Path(__file__).resolve().parents[1] / "src" / "character_memory" / "web"
@@ -274,6 +282,27 @@ def test_archive_frontend_surfaces_a_failed_voice_registry_refresh():
         assert f"= {call}" in script, f"the {endpoint} response is awaited but discarded"
     assert "voice_registry" in script
     assert "reloaded !== false" in script
+
+    # The message: a notice pinned to the page, which a failure can show without
+    # touching the drawer the flow already decided what to do with.
+    assert "showVoiceReloadWarning(result);" in script
+    assert "archive-voice-notice" in script
+    styles = (web / "styles.css").read_text(encoding="utf-8")
+    assert re.search(r"\.archive-voice-notice\s*\{", styles), "the notice is styled where the shell can load it"
+    assert re.search(r"\.archive-voice-notice\s*\{[^}]*pointer-events:\s*none", styles), (
+        "the notice must not stand between the user and a control underneath it"
+    )
+
+    # The flow: archiving closes the drawer on the failing path exactly as it
+    # does on a clean one. Presence alone is not enough -- the regressed version
+    # still closed the drawer, one early ``return`` further down -- so nothing
+    # may leave the function between showing the warning and closing the drawer.
+    archive_body = script.split("async function archiveCharacter", 1)[1].split("function renderArchivedDrawer", 1)[0]
+    assert "CM.closeDrawer();" in archive_body, "a failed refresh must not hold the drawer open"
+    assert "return" not in archive_body.split("showVoiceReloadWarning(result);", 1)[1], (
+        "the warning must not be an early exit out of archiving"
+    )
+    assert "drawerBody" not in archive_body, "the drawer is not the warning's channel any more"
 
 
 def test_archive_keeps_voice_reference_and_refreshes_live_gsv_registry(tmp_path: Path, monkeypatch):

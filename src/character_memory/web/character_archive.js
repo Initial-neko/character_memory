@@ -100,7 +100,32 @@
     const registry = result?.voice_registry;
     if (!registry || registry.reloaded !== false) return "";
     const reason = String(registry.reason || "").trim();
-    return `<div class="error">语音注册表没有刷新${reason ? `：${CM.escapeHtml(reason)}` : ""}。人物列表已经更新，但运行中的 GSV sidecar 可能仍按旧名单合成语音；修好 voices 模板后重新归档或恢复一次，或重启 GSV sidecar。</div>`;
+    return `语音注册表没有刷新${reason ? `：${CM.escapeHtml(reason)}` : ""}。人物列表已经更新，但运行中的 GSV sidecar 可能仍按旧名单合成语音；修好 voices 模板后重新归档或恢复一次，或重启 GSV sidecar。`;
+  }
+
+  // The warning gets a channel of its own, because it is a message and not a
+  // flow change. Archiving closes the drawer on every path -- that is what the
+  // confirm card is for -- and holding it open just to have somewhere to put
+  // the text leaves a full-viewport backdrop over the sidebar: the next archive
+  // or restore is unreachable until the user finds the one button that dismisses
+  // it. So the notice is pinned to the page, above the drawer and transparent to
+  // the pointer, and the drawer closes exactly as it did before the reload
+  // result was read at all. It clears on the next archive or restore that
+  // reloads cleanly, which is the same event that makes it untrue.
+  const voiceNotice = document.createElement("div");
+  voiceNotice.className = "archive-voice-notice hidden";
+  voiceNotice.setAttribute("role", "status");
+  document.body.appendChild(voiceNotice);
+
+  function showVoiceReloadWarning(result) {
+    const warning = voiceReloadWarning(result);
+    if (!warning) {
+      voiceNotice.innerHTML = "";
+      voiceNotice.classList.add("hidden");
+      return;
+    }
+    voiceNotice.innerHTML = warning;
+    voiceNotice.classList.remove("hidden");
   }
 
   async function archiveCharacter(characterId) {
@@ -119,12 +144,7 @@
     }
     await reloadCharacters();
     await refreshArchiveCount().catch(console.error);
-    const warning = voiceReloadWarning(result);
-    if (warning) {
-      // Closing the drawer would leave the only explanation nowhere to be seen.
-      CM.dom.drawerBody.innerHTML = `<section class="archive-confirm-card"><strong>归档已完成，但语音注册表没有刷新</strong>${warning}<div class="archive-confirm-actions"><button type="button" data-character-archive-cancel>知道了</button></div></section>`;
-      return;
-    }
+    showVoiceReloadWarning(result);
     CM.closeDrawer();
   }
 
@@ -166,9 +186,7 @@
     await reloadCharacters();
     renderArchivedDrawer();
     renderArchiveListButton();
-    // The archived list stays open, so the warning goes above it.
-    const warning = voiceReloadWarning(result);
-    if (warning) CM.dom.drawerBody.insertAdjacentHTML("afterbegin", warning);
+    showVoiceReloadWarning(result);
   }
 
   CM.dom.characterList?.addEventListener("click", event => {

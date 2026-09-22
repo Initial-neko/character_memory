@@ -190,7 +190,9 @@ Dev ImageGen 可以持久化测试 MediaAsset，方便继续做 avatar/media 检
 - 对它设置语音返回 409；
 - 运行中的 GSV sidecar 拒绝为它合成，重载后不再解析这个 id。
 
-`POST /v1/characters/{id}/archive` 与 `/restore` 的响应带一个 `voice_registry` 字段，报告这次 best-effort 重载的结果。voices 树里只要有一个模板不可解析，重载就整体回滚，该字段是 `{"ok": false, "reloaded": false, "reason": ...}`，而归档本身仍然返回 200——这时 sidecar 还在按旧名单合成。Character Archive 抽屉会把这条失败直接显示出来；修好模板后再归档/恢复一次，或重启 GSV sidecar。
+`POST /v1/characters/{id}/archive` 与 `/restore` 的响应带一个 `voice_registry` 字段，报告这次 best-effort 重载的结果。voices 树里只要有一个模板不可解析，重载就整体回滚，该字段是 `{"ok": false, "reloaded": false, "reason": ...}`，而归档本身仍然返回 200——这时 sidecar 还在按旧名单合成。
+
+失败要被用户看到，但提示不改变交互流程，两者是分开的：归档照旧关闭抽屉（原来就是这样），失败落在一个固定在页面上的提示条里。这条提示不接收指针事件，也不会因为它是唯一的显示位置而把抽屉留在打开状态——抽屉遮罩盖住侧边栏时，用户连下一次归档/恢复都点不到。修好模板后再归档/恢复一次，或重启 GSV sidecar。
 
 restore 复活原来的映射：`voice.yaml` 从未被改写，重载成功后该 id 立即重新可用。
 

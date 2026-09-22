@@ -37,6 +37,11 @@ button,textarea { font:inherit; }
 .character-archive-copy small { color:var(--ui-muted); font-size:10px; }
 .character-archive-card button { min-height:0; padding:6px 12px; border-radius:var(--ui-r-sm); }
 .character-archive-empty { color:var(--ui-muted); font-size:12px; padding:10px; }
+/* Archive/restore reloaded the character list but not the GSV voice registry.
+ * Pinned to the page rather than put inside the drawer: archiving still closes
+ * the drawer, so the message has to outlive it, and `pointer-events:none` keeps
+ * it from ever standing between the user and a control underneath. */
+.archive-voice-notice { position:fixed; left:50%; top:84px; transform:translateX(-50%); z-index:40; max-width:min(560px,calc(100vw - 32px)); padding:11px 14px; border:1px solid var(--ui-danger-line); border-radius:var(--ui-r-md); background:var(--ui-danger-bg); color:var(--ui-danger); font-size:12px; line-height:1.6; box-shadow:0 10px 26px rgba(25,30,40,.16); pointer-events:none; }
 .character-list { display:grid; gap:4px; overflow:auto; }
 /* The 38px right padding is the lane the row's ⋯ button sits in. It used to be
  * a separate `padding-right` declaration above this one, which this shorthand

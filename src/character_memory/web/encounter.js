@@ -24,7 +24,7 @@
 
   const list = section.querySelector("[data-encounter-list]");
   const capacity = section.querySelector("[data-encounter-capacity]");
-  let state = {encounters: [], active_character_count: 0, active_character_limit: 10};
+  let state = {encounters: [], active_character_count: 0, active_character_limit: 20, active_character_soft_limit: 10};
 
   function sourceLabel(candidate) {
     return candidate.source_type === "WEB" ? "🌐 来自互联网" : "✨ 世界生成";
@@ -52,7 +52,7 @@
 
   function cardHtml(candidate) {
     const draft = candidate.draft || {};
-    const full = Number(candidate.active_character_count || state.active_character_count) >= Number(candidate.active_character_limit || state.active_character_limit || 10);
+    const full = Number(candidate.active_character_count || state.active_character_count) >= Number(candidate.active_character_limit || state.active_character_limit || 20);
     const accepted = candidate.status === "ACCEPTED";
     const closed = ["DISMISSED", "EXPIRED", "FAILED"].includes(candidate.status);
     const canAccept = Boolean(candidate.can_accept) && !full && !accepted && !closed;
@@ -78,7 +78,7 @@
           <button type="button" class="encounter-keep" data-encounter-accept="${candidate.id}" ${canAccept ? "" : "disabled"}>${acceptLabel}</button>
           <button type="button" class="encounter-dismiss" data-encounter-dismiss="${candidate.id}" ${accepted || closed ? "disabled" : ""}>错过</button>
         </div>
-        ${full && !accepted ? `<div class="encounter-limit-note">正式聊天列表最多 ${candidate.active_character_limit || state.active_character_limit || 10} 位。你仍然可以和 TA 临时聊聊；想留下 TA 时先归档一位现有角色。</div>` : ""}
+        ${full && !accepted ? `<div class="encounter-limit-note">正式聊天列表最多 ${candidate.active_character_limit || state.active_character_limit || 20} 位。你仍然可以和 TA 临时聊聊；想留下 TA 时先归档一位现有角色。</div>` : ""}
         <div class="encounter-chat-panel ${candidate.status === "CHATTING" ? "" : "hidden"}" data-encounter-panel>
           <div class="encounter-chat-log" data-encounter-log>
             <div class="encounter-message encounter-character"><span>${CM.escapeHtml(draft.name || "TA")}</span><div>${CM.escapeHtml(candidate.opening_message || "")}</div></div>
@@ -96,7 +96,7 @@
 
   function render() {
     const total = Number(state.active_character_count || 0);
-    const limit = Number(state.active_character_limit || 10);
+    const limit = Number(state.active_character_limit || 20);
     capacity.textContent = `正式角色 ${Math.min(total, limit)}/${limit}`;
     list.innerHTML = state.encounters.length
       ? state.encounters.map(cardHtml).join("")
@@ -137,7 +137,17 @@
       const card = accept.closest("[data-encounter-id]");
       accept.disabled = true;
       try {
-        await CM.api(`/v1/encounters/${accept.dataset.encounterAccept}/accept`, {method:"POST"});
+        const current = Number(state.active_character_count || 0);
+        const soft = Number(state.active_character_soft_limit || 10);
+        const hard = Number(state.active_character_limit || 20);
+        if (current >= hard) throw new Error(`角色已达到 ${hard} 位上限，请先归档一位人物。`);
+        const needsConfirm = current >= soft;
+        if (needsConfirm && !window.confirm(`当前已有 ${current} 位角色。留下 TA 后会超过 10 位提醒阈值，是否继续？`)) {
+          accept.disabled = false;
+          return;
+        }
+        const query = needsConfirm ? "?confirm_over_soft_limit=true" : "";
+        await CM.api(`/v1/encounters/${accept.dataset.encounterAccept}/accept${query}`, {method:"POST"});
         await CM.loadCharacters();
         await refresh();
       } catch (error) {

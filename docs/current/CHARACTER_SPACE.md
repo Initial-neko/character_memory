@@ -12,6 +12,7 @@ The current implementation provides:
 - ordered `space_post_media` attachment relations backed by the existing MediaAsset/MediaStorage layer;
 - text-only posts, legacy single-media posts, and posts containing up to 9 persisted media assets;
 - browser rendering for 1 large image, 2-4 image grids, and 5-9 image nine-grid layouts;
+- autonomous image search and AI-generated Space images through the same media attachment contract;
 - explicit seen/like/comment state;
 - autonomous interval-based Space opportunities for active characters;
 - autonomous audience reactions through the same PersonRuntime;
@@ -80,9 +81,48 @@ WEB
 LEGACY
 ```
 
-This slice only completes image-grid display. Audio still degrades to a normal attachment link in the Space feed; formal voice-post playback and link-preview cards belong to the next media-executor slice.
+Image-grid display and autonomous image execution are now both implemented. Audio still degrades to a normal attachment link in the Space feed; formal voice-post playback and link-preview cards remain later work.
 
 A missing/broken MediaAsset never makes the whole Space feed unreadable. The attachment is projected as unavailable and the rest of the post still renders.
+
+## Autonomous image expression
+
+One Space Opportunity now produces a structured `SpacePostPlan` instead of treating images as a single legacy `image_prompt`:
+
+```text
+SpacePostPlan
+  social_post: optional text
+  media_intents[]
+    SEARCH_IMAGE
+      query
+      count
+    GENERATE_IMAGE
+      purpose: SELFIE | SCENE
+      visual_intent
+      count
+```
+
+The character may choose text only, image only, text + images, or silence. Media is never a quota. `SpaceMediaExecutor` executes the optional intents after the character has decided they are natural:
+
+```text
+SEARCH_IMAGE
+  -> configured SearchProvider
+  -> SSRF-safe RemoteMediaFetcher
+  -> MediaStorage / MediaAsset
+  -> space_post_media(source=SEARCH)
+
+GENERATE_IMAGE
+  -> existing VisualPromptPlanner
+  -> configured ImageGenerationProvider
+  -> MediaStorage / MediaAsset
+  -> space_post_media(source=GENERATED)
+```
+
+Image-search providers are composition-neutral. Avatar-specific aspect-ratio filtering stays inside `AvatarSearchService`, so Space may search landscapes, screenshots or other wide/tall imagery without changing avatar behavior.
+
+Media execution is fail-soft per intent. Search or ImageGen outages are returned as `media_errors`; a valid text post still publishes. If the post was image-only and every media intent fails, the Opportunity resolves to `NO_POST` instead of creating an empty post.
+
+The execution cap is `space_media_max_items` (default 3, hard range 0..9). The durable post-media schema still has the hard maximum of 9.
 
 ## Interval autonomy
 
@@ -119,6 +159,10 @@ Settings Center persists:
 space_autonomy_enabled
 space_opportunity_interval_minutes
 space_max_posts_per_day
+space_media_enabled
+space_media_max_items
+space_image_search_enabled
+space_image_generation_enabled
 space_audience_size
 space_scheduler_poll_seconds
 ```
@@ -218,6 +262,7 @@ GET  /v1/space/dev/status
 POST /v1/space/dev/config
 POST /v1/space/dev/due/{character_id}
 POST /v1/space/dev/opportunity/{character_id}
+POST /v1/space/dev/media/{character_id}
 POST /v1/space/dev/audience/{post_id}
 ```
 
@@ -227,7 +272,6 @@ Dev Console proxies them under `/v1/dev/space/*`.
 
 - relationship/interest-aware audience ranking;
 - Browser/Web observations as possible Space material;
-- autonomous image search or ImageGen attachment from a Space Opportunity;
 - autonomous voice-post synthesis/playback;
 - Link Preview fetching/rendering;
 - push/SSE updates for Space;
@@ -242,6 +286,12 @@ src/character_memory/space_store.py
 
 src/character_memory/space_media.py
     ordered Space -> MediaAsset relations + legacy single-media migration
+
+src/character_memory/space_media_executor.py
+    fail-soft SEARCH_IMAGE / GENERATE_IMAGE execution into durable MediaAssets
+
+src/character_memory/remote_media.py
+    reusable SSRF-safe public image downloader
 
 src/character_memory/space_autonomy.py
     interval opportunity scheduler + autonomous audience/social loop

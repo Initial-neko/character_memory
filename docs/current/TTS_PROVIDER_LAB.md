@@ -52,6 +52,8 @@ gsv    -> :9002/v1/tts -> :9014 GSV-TTS-Lite
 
 Workbench selection is audition-only and does not change formal chat configuration. Production selection is changed in Settings Center.
 
+Per-provider status, synthesis timing and A/B results reach the page as raw JSON only inside the collapsed `<details class="debug-output">` blocks from `ui.css`; the badge, the device/inference line and the audio player stay visible without a click.
+
 Provider/Voice/Speed are hot on the next formal synthesis request. Device semantics are provider-specific:
 
 - GSV device can be reconfigured/reloaded through `:9014`;

@@ -41,15 +41,24 @@
     <section class="grid status-grid" aria-label="System status">
       <article class="card status-card">
         <div class="card-title-row"><h2>Character Runtime</h2><span id="characterBadge" class="badge">unknown</span></div>
-        <pre id="characterStatus" class="status-block">等待检测...</pre>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="characterStatus" class="status-block">等待检测...</pre>
+        </details>
       </article>
       <article class="card status-card">
         <div class="card-title-row"><h2>Media Runtime</h2><span id="mediaBadge" class="badge">unknown</span></div>
-        <pre id="mediaStatus" class="status-block">等待检测...</pre>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="mediaStatus" class="status-block">等待检测...</pre>
+        </details>
       </article>
       <article class="card status-card">
         <div class="card-title-row"><h2>Configured Models</h2><span id="llmBadge" class="badge">unknown</span></div>
-        <pre id="modelStatus" class="status-block">等待检测...</pre>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="modelStatus" class="status-block">等待检测...</pre>
+        </details>
       </article>
     </section>
 
@@ -61,7 +70,11 @@
         <label for="llmPrompt">Prompt</label>
         <textarea id="llmPrompt" rows="7">请只回复：LLM 接口正常。</textarea>
         <div class="actions"><button class="primary" id="runLlm">Run LLM</button><span id="llmLatency" class="metric-inline">-</span></div>
-        <pre id="llmResult" class="result">等待请求...</pre>
+        <pre id="llmReply" class="result">等待请求...</pre>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="llmResult" class="result">等待请求...</pre>
+        </details>
       </article>
 
       <article class="card wide" id="spaceAutonomyCard">
@@ -212,7 +225,10 @@
         </div>
         <div class="actions"><button class="primary" id="runTts">Generate</button><span id="ttsLatency" class="metric-inline">-</span></div>
         <audio id="ttsAudio" controls></audio>
-        <pre id="ttsResult" class="result">等待请求...</pre>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="ttsResult" class="result">等待请求...</pre>
+        </details>
       </article>
 
       <article class="card wide" id="visualCaptureCard">
@@ -246,7 +262,11 @@
         <label for="visionPrompt">Vision Prompt</label>
         <textarea id="visionPrompt" rows="4">请按时间顺序看看这些关键帧，简洁说明你看到了什么，以及画面是否发生了明显变化。</textarea>
         <div class="actions"><button class="primary" id="runVision">Run Vision Test</button><span id="visionLatency" class="metric-inline">-</span></div>
-        <pre id="visionResult" class="result">等待视觉测试...</pre>
+        <pre id="visionReply" class="result">等待视觉测试...</pre>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="visionResult" class="result">等待视觉测试...</pre>
+        </details>
       </article>
 
       <article class="card wide" id="imageGenCard">
@@ -275,8 +295,14 @@
         <div class="visual-grid">
           <div class="visual-preview-wrap"><img id="imageGenPreview" class="visual-preview" alt="ImageGen 预览" hidden /></div>
           <div>
-            <pre id="imageProviderStatus" class="result visual-provider-status">等待 Provider 状态...</pre>
-            <pre id="imageGenResult" class="result">等待请求...</pre>
+            <details class="debug-output">
+              <summary>Provider 原始状态（调试用）</summary>
+              <pre id="imageProviderStatus" class="result visual-provider-status">等待 Provider 状态...</pre>
+            </details>
+            <details class="debug-output">
+              <summary>原始响应（调试用）</summary>
+              <pre id="imageGenResult" class="result">等待请求...</pre>
+            </details>
           </div>
         </div>
       </article>
@@ -293,16 +319,27 @@
           <span id="asrSource">尚未选择音频</span>
           <span id="asrDuration">-</span>
           <span id="asrLatency" class="metric-inline">-</span>
+          <span id="asrText" class="subtle">尚未识别</span>
         </div>
         <audio id="asrAudio" controls></audio>
-        <pre id="asrResult" class="result">等待请求...</pre>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="asrResult" class="result">等待请求...</pre>
+        </details>
       </article>
 
       <article class="card wide">
         <div class="card-title-row"><h2>Media Live Smoke</h2><span class="pill">real inference</span></div>
         <p class="subtle">真实执行 TTS → WAV → ASR。它不是 mock；失败时会显示 Media Runtime 的原始状态码与 detail。</p>
-        <div class="actions"><button class="primary" id="runMediaSmoke">Run Media Smoke</button><span id="mediaSmokeLatency" class="metric-inline">-</span></div>
-        <pre id="mediaSmokeResult" class="result">等待请求...</pre>
+        <div class="actions">
+          <button class="primary" id="runMediaSmoke">Run Media Smoke</button>
+          <span id="mediaSmokeLatency" class="metric-inline">-</span>
+          <span id="mediaSmokeText" class="subtle">尚未运行</span>
+        </div>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="mediaSmokeResult" class="result">等待请求...</pre>
+        </details>
       </article>
 
       <article class="card wide">
@@ -323,7 +360,10 @@
           </div>
         </div>
         <p class="subtle">默认 60 秒采样一次；平时也可以关闭自动刷新，仅在需要观察 RAM / VRAM 峰值时手动刷新。</p>
-        <pre id="resourceSummary" class="result">等待采样...</pre>
+        <details class="debug-output">
+          <summary>原始采样数据（调试用）</summary>
+          <pre id="resourceSummary" class="result">等待采样...</pre>
+        </details>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Process</th><th>PID</th><th>RAM RSS</th><th>GPU VRAM</th><th>State</th></tr></thead>

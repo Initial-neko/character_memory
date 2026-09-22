@@ -378,6 +378,14 @@ pre, .ui-pre {
   overflow: auto;
 }
 
+/* Collapsed raw output: a debug JSON dump or raw response body stays behind a
+ * click, so no page opens onto (or dumps) a wall of raw payload. Lives in the
+ * baseline, not dev.css, because the chat drawer (app.js on index.html) shows
+ * the same raw blocks and index.html never loads dev.css. */
+.debug-output { margin-top: 10px; }
+.debug-output > summary { cursor: pointer; color: var(--ui-muted); font-size: 12px; }
+.debug-output[open] > summary { margin-bottom: 6px; }
+
 .ui-empty { padding: 48px 0; color: var(--ui-muted); text-align: center; font-size: 13px; }
 
 /* Page-level status banner: the Settings Center's save/reload result. */

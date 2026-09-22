@@ -43,6 +43,8 @@ space_posts
 
 `space_posts.media_id` is intentionally retained as a compatibility pointer to the first attachment. Existing rows are migrated into `space_post_media` with `source_type=LEGACY`, and old clients may still submit one `media_id`.
 
+The migrated `media_type` is read from the asset's own `media_assets.mime_type` (`audio/*` becomes `VOICE`, otherwise `IMAGE`); it is never assumed to be an image, because the media store also holds voice clips. The migration key is `UNIQUE(post_id, media_id)` behind an `INSERT OR IGNORE`, so a row is written once and never reconsidered — which is why the same pass also repairs `LEGACY` rows an earlier build wrote as `IMAGE` when the asset is audio. An asset that is missing, or neither image nor audio, still lands as `IMAGE`: `SPACE_MEDIA_TYPES` has no neutral value to fall back to.
+
 New clients should use:
 
 ```json

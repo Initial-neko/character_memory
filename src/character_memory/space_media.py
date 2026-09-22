@@ -64,15 +64,41 @@ class SpacePostMediaRepository:
             # Gradual migration: existing single-media posts keep their legacy
             # space_posts.media_id field, while the new relation becomes the
             # canonical ordered read path.
+            #
+            # The kind is read from the asset's own mime type instead of being
+            # assumed. A legacy attachment is not necessarily an image -- the
+            # media store holds voice clips too -- and because the INSERT is
+            # OR IGNORE against UNIQUE(post_id,media_id), a wrong guess here is
+            # never revisited: the row is written once and skipped forever.
+            # An asset that is missing or neither image nor audio still lands as
+            # IMAGE, which is the only remaining guess SPACE_MEDIA_TYPES allows.
             self.store.conn.execute(
                 """
                 INSERT OR IGNORE INTO space_post_media(
                     post_id,media_id,media_type,source_type,sort_order,
                     metadata_json,created_at,created_at_epoch
                 )
-                SELECT id,media_id,'IMAGE','LEGACY',0,'{}',created_at,created_at_epoch
-                FROM space_posts
-                WHERE media_id IS NOT NULL AND TRIM(media_id) <> ''
+                SELECT p.id,p.media_id,
+                       CASE WHEN LOWER(COALESCE(m.mime_type,'')) LIKE 'audio/%'
+                            THEN 'VOICE' ELSE 'IMAGE' END,
+                       'LEGACY',0,'{}',p.created_at,p.created_at_epoch
+                FROM space_posts p
+                LEFT JOIN media_assets m ON m.id=p.media_id
+                WHERE p.media_id IS NOT NULL AND TRIM(p.media_id) <> ''
+                """
+            )
+            # Repair rows a previous build already wrote as IMAGE. Without this
+            # the OR IGNORE above leaves them wrong forever, since the unique
+            # key means they are never reconsidered.
+            self.store.conn.execute(
+                """
+                UPDATE space_post_media
+                SET media_type='VOICE'
+                WHERE source_type='LEGACY' AND media_type='IMAGE'
+                  AND media_id IN (
+                      SELECT id FROM media_assets
+                      WHERE LOWER(COALESCE(mime_type,'')) LIKE 'audio/%'
+                  )
                 """
             )
             self.store._ensure_migration_table_locked()

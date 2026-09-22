@@ -12,6 +12,7 @@ from character_memory.ensemble_builder import (
     EnsembleRepository,
     EnsembleResearch,
 )
+from character_memory.ensemble_web import attach_ensemble_routes
 from character_memory.group_store import GroupRepository
 from character_memory.storage.sqlite import SQLiteStore
 

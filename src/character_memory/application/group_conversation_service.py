@@ -8,7 +8,7 @@ from typing import Callable
 from uuid import uuid4
 
 from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory
-from character_memory.group_store import GroupEvent, GroupRepository
+from character_memory.group_store import GroupEvent, GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.runtime.context import compile_context
 from character_memory.voice_message_fields import voice_pending_fields
 
@@ -192,8 +192,8 @@ class GroupConversationService:
             character_id = str(value).strip()
             if character_id and character_id not in unique:
                 unique.append(character_id)
-        if len(unique) < 2 or len(unique) > 4:
-            raise ValueError("group must contain 2 to 4 distinct characters")
+        if len(unique) < 2 or len(unique) > MAX_GROUP_CHARACTERS:
+            raise ValueError(f"group must contain 2 to {MAX_GROUP_CHARACTERS} distinct characters")
         unknown = [character_id for character_id in unique if character_id not in self.runtimes]
         if unknown:
             raise KeyError(f"unknown group characters: {', '.join(unknown)}")

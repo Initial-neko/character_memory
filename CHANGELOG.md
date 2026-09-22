@@ -14,13 +14,18 @@ First release candidate for the **Persistent Person Runtime Baseline**.
 
 - Converged Direct and Group reaction evaluation onto a shared reaction engine while retaining channel-specific policies and persistence.
 - Centralized expressive Action -> Message materialization for text, emoji, sticker, image, and voice messages.
-- Centralized Direct/Group incoming user fact normalization so sticker/image semantics and media metadata cannot drift by channel.
+- Centralized Direct/Group incoming user fact normalization so sticker/image semantics and media metadata cannot drift by channel. A pure-sticker user turn now carries `action="STICKER"` in message payloads where it used to carry no action; clients that branch on `action` for user turns should read it instead of assuming sticker turns have none.
+- The core API reports the installed package version instead of a hardcoded string that had drifted from `pyproject.toml`.
 - Centralized Direct/Group message projection and shared browser message-content rendering.
 - Removed Group ImageGen runtime monkey-patching and made user-triggered Group visual generation an explicit runtime path.
 - Preserved Direct Intent/Wake/Proactive semantics and Group ordering/mention/privacy/autonomy semantics as intentional policy differences.
 
 ### Product baseline
 
+- One-prompt ensemble groups: build a whole group from a single prompt through `POST /v1/ensembles` -> `/research` -> `/confirm`, with candidates researched from the web and created once the user confirms them.
+- Character capacity raised to a soft threshold of 10 and a hard ceiling of 20; the character list no longer truncates, and the ceiling is enforced by the API rather than by what the UI happens to show.
+- Group member ceiling raised from 4 to 12. Note the cost shape: a user message is answered by every member, so a full group costs up to 12 model calls per turn, while an autonomous opportunity stays capped at 4.
+- Character Space feed pages through older posts with the existing cursor instead of stopping at the first 10, and media open in an in-app lightbox.
 - Persistent Persona, Memory, Mental State, Intent and Runtime Trace.
 - Direct and Group chat with async durable acceptance and SSE reconciliation.
 - Character Space with autonomous posts, audience reactions, search/world observation, image and voice media.

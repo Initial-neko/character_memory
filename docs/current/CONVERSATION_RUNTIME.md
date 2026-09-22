@@ -150,7 +150,15 @@ member C -> ...
 
 这保留角色之间的公开因果关系，因此不直接并行所有成员。
 
+**成本形状**：一条 user message 会让**每个成员各产生一次模型调用**（`group_conversation_service.py` 的 user-turn 循环没有提前 break），而自主机会有硬上限（`cap = 1..4`）。群成员上限是 `MAX_GROUP_CHARACTERS = 12`，所以满员群里一句用户消息最坏是 12 次模型调用 + 12 条回复；这不是 bug，但改动群上限或给群加人时要按这个数量级算成本。
+
 `group_character_event` 在每个成员提交后立刻 SSE 推送，不需要等整个群组结束才展示第一条回复。
+
+### Ensemble groups（一键建群）
+
+`POST /v1/ensembles` 建一个空的 `BUILDING` 群，`/research` 联网抓资料并生成候选 Persona 草稿，`/confirm` 由用户勾选后一次性建角色并填充成员，`/cancel` 放弃。confirm **不会自动开聊**——它只建角色、写成员，进群后仍需用户自己发第一句。
+
+一次 confirm 的模型调用量级：每名成员一次 Persona 生成（上限 12 名）加数页网页抓取。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
 
 ### Member failure isolation
 

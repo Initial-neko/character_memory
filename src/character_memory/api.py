@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version as package_version
 import logging
 import os
 from pathlib import Path
@@ -42,6 +43,19 @@ from character_memory.web_lifecycle import on_app_event
 
 
 logger = logging.getLogger("character_memory.api")
+
+
+def _package_version() -> str:
+    """The installed package version, so the API cannot advertise a stale one.
+
+    This string used to be hardcoded and had drifted years of nominal versions
+    behind `pyproject.toml`, which makes /openapi.json and any client that reads
+    it lie about what is running.
+    """
+    try:
+        return package_version("character-memory")
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
 _PROACTIVE_POLL_SECONDS = 30.0
 
 def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = None):
@@ -235,7 +249,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             proactive_stop.wait(_PROACTIVE_POLL_SECONDS)
         logger.info("api.proactive loop_stop")
 
-    app = FastAPI(title="character-memory", version="0.12.0")
+    app = FastAPI(title="character-memory", version=_package_version())
     web_dir = Path(__file__).with_name("web")
     attach_static_assets(app, web_dir)
 

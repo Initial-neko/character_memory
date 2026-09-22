@@ -9,6 +9,19 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "character_memory"
 
 
+def test_core_api_reports_the_installed_package_version():
+    """The API version must be the installed one, not a separate string.
+
+    A hardcoded version had drifted far behind pyproject.toml, so /openapi.json
+    and every client reading it disagreed with what was actually running.
+    """
+    from importlib.metadata import version as package_version
+
+    from character_memory.api import _package_version
+
+    assert _package_version() == package_version("character-memory")
+
+
 def test_no_runtime_module_uses_deprecated_fastapi_on_event_decorator():
     offenders = []
     for path in SRC.rglob("*.py"):

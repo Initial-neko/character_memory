@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.encounter import EncounterScheduler, EncounterService
 from character_memory.encounter_store import EncounterRepository
 
@@ -33,14 +34,14 @@ def attach_encounter_routes(app):
     access.encounter_service = service
     access.encounter_scheduler = scheduler
 
-    @app.on_event("startup")
+    @on_app_event(app, "startup")
     def _start_encounter_scheduler():
         # Keep the worker alive when an API key exists; runtime settings can
         # enable/disable encounters without a restart.
         if getattr(access.settings, "api_key", ""):
             scheduler.start()
 
-    @app.on_event("shutdown")
+    @on_app_event(app, "shutdown")
     def _stop_encounter_scheduler():
         scheduler.stop()
 

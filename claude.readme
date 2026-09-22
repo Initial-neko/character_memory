@@ -13,10 +13,17 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 ## Current baseline
 
 - Repository: `Initial-neko/character_memory`
-- Base: `main@c58a6254fffcbb216bfda8ff45f49b36a25c4dae` (Space Voice merged)
-- Active branch: `feature/autonomous-group-chat`
+- Base: `main@2033493fb43471b5d8c06516fdd45ba87297f8c4`
+- Active branch: none
 - Current slice: **Bounded Autonomous Group Chat**
-- Status: **CI / acceptance pending**
+- Status: **MERGED**
+
+## Validation
+
+- PR #77 merged to `main` as `2033493fb43471b5d8c06516fdd45ba87297f8c4`.
+- Final PR CI run #404 passed `test`, `windows-smoke`, and `browser-smoke` on head `da2d36651ca3d88410ac8f7f51702085b39a6805`.
+- The final fix added missing Dev preset CSS coverage and a 24H interval preset.
+- Autonomous Group Chat frequency is configurable: 10..10080 minutes; each interval is an Opportunity, not a forced message.
 
 ## Current slice
 

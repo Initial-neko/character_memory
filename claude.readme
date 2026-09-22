@@ -13,55 +13,79 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 ## Current baseline
 
 - Repository: `Initial-neko/character_memory`
-- Base: current `main`
-- Active branch: `feature/space-voice`
-- Current slice: **Space Voice**
+- Base: `main@c58a6254fffcbb216bfda8ff45f49b36a25c4dae` (Space Voice merged)
+- Active branch: `feature/autonomous-group-chat`
+- Current slice: **Bounded Autonomous Group Chat**
 - Status: **CI / acceptance pending**
 
 ## Current slice
 
-### Autonomous Space Voice
+### Shared-room autonomy
 
-- `SpaceMediaIntentType.VOICE` is a first-class Space media intent.
-- One VOICE intent contains one complete `voice_text`; duplicate VOICE intents in one post plan are collapsed to the first.
-- SpaceMediaExecutor sends one formal `:8001/v1/tts` request using the character id as the voice owner.
-- Resulting WAV/MP3 is persisted through existing MediaStorage / MediaAsset and attached through `space_post_media(type=VOICE, source=GENERATED)`.
-- Transcript + duration metadata stay on the durable Space media relation.
-- TTS failure is fail-soft: valid text still publishes; voice-only failure becomes NO_POST rather than an empty post.
+- Existing Group rooms can receive sparse autonomous opportunities without fabricating a User message.
+- Each opportunity persists one hidden `GROUP_OPPORTUNITY` SYSTEM fact for provenance.
+- A rotating seed member judges first.
+- Seed silence ends the opportunity immediately.
+- If seed speaks, remaining active members each judge at most once.
+- Each member may emit at most one visible action; total visible messages are hard-capped to 1..4.
+- V1 allows MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / existing IMAGE.
+- V1 explicitly drops GENERATE_IMAGE; existing generated-image stale semantics remain user-watermark based.
 
-### Social semantics
+### Same Persistent Person
 
-- Voice-only post persists a local SOCIAL_POST event containing the spoken transcript.
-- Caption + voice preserves both in the local social fact.
-- Autonomous Audience receives the safe voice transcript in the visible Space observation, so another Person can react to what was actually said.
-- Manual existing audio assets already accepted by Space API now project as VOICE media.
+- Autonomous Group uses the existing GroupConversationService + each member's existing PersonRuntime/PersonContext.
+- No group-specific Persona/Memory/Mental-State system exists.
+- Later members see earlier committed autonomous Character messages as real shared facts.
+- Private Direct memories remain subject to the existing group privacy contract.
 
-### Browser / Dev
+### Ordering and durability
 
-- Space feed renders native voice bubbles with play/pause and optional transcript expansion.
-- It does not degrade autonomous voice to a generic attachment link.
-- Dev Console Media Test includes VOICE and sends Voice Text through the same formal TTS route.
+- New User facts can be persisted while autonomy is generating.
+- Commit guards compare the latest USER event and supersede stale autonomous derived state.
+- Already-committed earlier member facts remain durable; uncommitted later work is stopped.
+- Hidden GROUP_OPPORTUNITY is excluded from normal history, message search and Recent Group context.
+- Visible autonomous Character messages remain ordinary `conversation_events`.
+- Group SSE reuses `group_character_event / group_member_complete / reaction_complete`.
+- Autonomous VOICE_MESSAGE reuses the existing pending -> TTS -> ready/failed materializer.
+
+### Restart-safe scheduling
+
+- Migration `group/004-autonomy-scheduler` adds:
+  - `group_autonomy_state`
+  - `group_autonomy_runs`
+- Run states: CHATTED / NO_CHAT / SKIPPED / SUPERSEDED / FAILED.
+- Default interval 360 min, max messages 3, user quiet guard 30 min, poll 60 s.
+- Archived Groups do not schedule; archived Characters do not participate.
+- Scheduler is stopped before core SQLite/model resources close.
+
+### Dev / settings
+
+- Settings schema exposes enabled / interval / max messages / quiet guard / poll.
+- Dev Console supports hot apply, manual opportunity, force due and status/run inspection.
+- Manual opportunity bypasses quiet guard for acceptance; scheduled run obeys it.
 
 ## Acceptance focus
 
-1. VOICE schema requires non-empty voice_text, forces count=1, and does not leak image-only fields.
-2. Exactly one formal TTS request is made for one Space VOICE intent.
-3. WAV/MP3 asset and VOICE relation are persisted with transcript/duration provenance.
-4. TTS failures are fail-soft and do not leak media files/DB rows.
-5. Voice-only autonomous post creates a real Space post and local SOCIAL_POST transcript fact.
-6. Audience observation contains the spoken transcript.
-7. Space API projects audio assets as VOICE.
-8. Browser Space voice uses native bubble playback and optional transcript.
-9. Dev Console can force a VOICE media test.
-10. Main pytest, Windows smoke and browser smoke are green.
+1. Seed silence causes NO_CHAT and does not call every member.
+2. Seed rotation + sequential follow-up preserves shared causal history.
+3. Max visible messages 1..4 and per-member max one action.
+4. GENERATE_IMAGE is dropped in autonomous V1.
+5. VOICE_MESSAGE reuses existing group voice materialization.
+6. New USER event supersedes stale autonomous commits/state/memory.
+7. Hidden GROUP_OPPORTUNITY never leaks into browser history/search/recent context.
+8. Scheduler state survives new repository/scheduler objects and User Quiet Guard works.
+9. Archived Groups/Characters do not autonomously participate.
+10. Empty group UI can receive autonomous messages over existing SSE without User speaking first.
+11. Dev Console controls are wired.
+12. Main pytest, Windows smoke and browser smoke are green.
 
 ## Deliberately deferred
 
-- Space SSE/push refresh;
-- link preview cards;
-- full post-detail interaction page;
-- multi-step social reply threads;
-- autonomous Group Chat (next feature after this merge).
+- autonomous Group background GENERATE_IMAGE;
+- unbounded multi-turn character-to-character loops;
+- relationship graph / society scoring;
+- distributed scheduler / Redis/Celery;
+- unified background-service lifecycle owner (still tracked as technical debt).
 
 ## Claude acceptance findings
 

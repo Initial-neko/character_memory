@@ -155,7 +155,10 @@ class WorldPulseRepository:
 
     @staticmethod
     def _fingerprint(title: str, category: str) -> str:
-        normalized = " ".join(f"{category.lower()} {title.lower()}".split())
+        # Category is descriptive metadata and may drift between refreshes.
+        # Identity follows the normalized topic title so a classifier change
+        # does not create a duplicate durable topic.
+        normalized = " ".join(str(title or "").lower().split())
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     @staticmethod
@@ -470,15 +473,29 @@ class WorldActivityService:
     def refresh_pulse(self, *, now: datetime | None = None) -> dict:
         now = now or datetime.now().astimezone()
         settings = self.access.settings
-        sources = list(
+        configured_sources = list(
             dict.fromkeys(
                 str(url).strip()
                 for url in getattr(settings, "world_pulse_sources", [])
                 if str(url).strip()
             )
         )[:12]
+        config_errors = []
+        sources = []
+        for url in configured_sources:
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                config_errors.append(
+                    {"stage": "config", "url": url, "error": "pulse source must be an absolute http(s) URL"}
+                )
+                continue
+            sources.append(url)
         if not sources:
-            return {"refreshed": False, "topics": [], "errors": [{"stage": "config", "error": "no pulse sources"}]}
+            return {
+                "refreshed": False,
+                "topics": [],
+                "errors": config_errors or [{"stage": "config", "error": "no pulse sources"}],
+            }
 
         max_chars = max(
             1000,
@@ -500,6 +517,7 @@ class WorldActivityService:
                 except Exception as exc:
                     errors.append({"url": url, "error": str(exc)[:800]})
 
+        errors = config_errors + list(errors)
         if not pages:
             return {"refreshed": False, "topics": [], "errors": errors}
 
@@ -914,7 +932,7 @@ class WorldActivityScheduler:
                 subject_id,
                 exc,
             )
-        completed = datetime.now().astimezone()
+        completed = now
         next_minutes = self._next_interval(
             base_minutes,
             f"{kind}:{subject_id}",
@@ -982,10 +1000,22 @@ class WorldActivityScheduler:
             )
             if self.repository.due("DISCUSS", "global", now):
                 topics = self.repository.list_topics(limit=10)
-                if topics:
+                comment_cap = max(
+                    0,
+                    min(
+                        10,
+                        int(getattr(self.access.settings, "world_pulse_commenter_count", 4)),
+                    ),
+                )
+                eligible_topics = [
+                    item
+                    for item in topics
+                    if comment_cap > 0 and len(item.get("comments") or []) < comment_cap
+                ]
+                if eligible_topics:
                     # Prefer a fresh topic with the fewest existing comments.
                     topic = min(
-                        topics,
+                        eligible_topics,
                         key=lambda item: (
                             len(item.get("comments") or []),
                             -int(item["id"]),

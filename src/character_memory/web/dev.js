@@ -278,6 +278,114 @@
     }
   }
 
+  async function loadGroupAutonomyGroups() {
+    const select = $("groupAutonomyGroup");
+    if (!select) return;
+    try {
+      const data = await jsonFetch("/v1/dev/groups");
+      const items = data.groups || [];
+      const current = select.value;
+      select.replaceChildren(...items.map((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.name ? `${item.name} · ${item.id}` : item.id;
+        return option;
+      }));
+      if (!items.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "暂无群聊";
+        select.appendChild(option);
+      } else if (items.some((item) => item.id === current)) {
+        select.value = current;
+      }
+    } catch (error) {
+      $("groupAutonomyResult").textContent = `ERROR loading groups: ${error.message}`;
+    }
+  }
+
+  async function refreshGroupAutonomyStatus() {
+    try {
+      const data = await jsonFetch("/v1/dev/group-autonomy/status");
+      $("groupAutonomyStatus").textContent = pretty(data);
+      $("groupAutonomyStatusAge").textContent = `读取时间 ${new Date().toLocaleTimeString()}`;
+      $("groupAutonomyEnabled").checked = Boolean(data.enabled);
+      $("groupAutonomyInterval").value = String(data.interval_minutes ?? 360);
+      $("groupAutonomyMaxMessages").value = String(data.max_messages ?? 3);
+      $("groupAutonomyQuietMinutes").value = String(data.user_quiet_minutes ?? 30);
+      $("groupAutonomyPollSeconds").value = String(data.poll_seconds ?? 60);
+      await loadGroupAutonomyGroups();
+    } catch (error) {
+      $("groupAutonomyStatus").textContent = `ERROR: ${error.message}`;
+    }
+  }
+
+  async function applyGroupAutonomyConfig() {
+    const button = $("applyGroupAutonomyConfig");
+    button.disabled = true;
+    $("groupAutonomyResult").textContent = "正在保存并热应用自主群聊配置...";
+    try {
+      const data = await jsonFetch("/v1/dev/group-autonomy/config", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          enabled:$("groupAutonomyEnabled").checked,
+          interval_minutes:Number($("groupAutonomyInterval").value || 360),
+          max_messages:Number($("groupAutonomyMaxMessages").value || 3),
+          user_quiet_minutes:Number($("groupAutonomyQuietMinutes").value || 0),
+          poll_seconds:Number($("groupAutonomyPollSeconds").value || 60),
+          rearm:true,
+        }),
+      });
+      $("groupAutonomyResult").textContent = pretty(data);
+      await refreshGroupAutonomyStatus();
+    } catch (error) {
+      $("groupAutonomyResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runGroupAutonomyOpportunity() {
+    const button = $("runGroupAutonomyOpportunity");
+    const groupId = $("groupAutonomyGroup").value;
+    if (!groupId) {
+      $("groupAutonomyResult").textContent = "ERROR: 请先创建并选择一个群聊。";
+      return;
+    }
+    button.disabled = true;
+    $("groupAutonomyResult").textContent = "正在执行一次手动自主群聊 Opportunity...";
+    try {
+      const data = await jsonFetch(`/v1/dev/group-autonomy/opportunity/${encodeURIComponent(groupId)}`, {method:"POST"});
+      $("groupAutonomyResult").textContent = pretty(data);
+      await refreshGroupAutonomyStatus();
+    } catch (error) {
+      $("groupAutonomyResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function forceGroupAutonomyDue() {
+    const button = $("forceGroupAutonomyDue");
+    const groupId = $("groupAutonomyGroup").value;
+    if (!groupId) {
+      $("groupAutonomyResult").textContent = "ERROR: 请先创建并选择一个群聊。";
+      return;
+    }
+    button.disabled = true;
+    $("groupAutonomyResult").textContent = "正在让选中群的 next opportunity 到期...";
+    try {
+      const data = await jsonFetch(`/v1/dev/group-autonomy/due/${encodeURIComponent(groupId)}`, {method:"POST"});
+      $("groupAutonomyResult").textContent = pretty(data);
+      await refreshGroupAutonomyStatus();
+    } catch (error) {
+      $("groupAutonomyResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function runTts() {
     const button = $("runTts");
     button.disabled = true;
@@ -576,7 +684,7 @@
     }
   }
 
-  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); });
+  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); refreshGroupAutonomyStatus(); });
   $("runLlm").addEventListener("click", runLlm);
   $("runSpaceOpportunity").addEventListener("click", runSpaceOpportunity);
   $("forceSpaceDue").addEventListener("click", forceSpaceDue);
@@ -591,6 +699,15 @@
   $("runWorldSearch").addEventListener("click", runWorldSearch);
   $("runWorldFetch").addEventListener("click", runWorldFetch);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);
+  $("applyGroupAutonomyConfig").addEventListener("click", applyGroupAutonomyConfig);
+  $("runGroupAutonomyOpportunity").addEventListener("click", runGroupAutonomyOpportunity);
+  $("forceGroupAutonomyDue").addEventListener("click", forceGroupAutonomyDue);
+  $("refreshGroupAutonomyStatus").addEventListener("click", refreshGroupAutonomyStatus);
+  document.querySelectorAll(".group-autonomy-preset").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("groupAutonomyInterval").value = button.dataset.minutes || "360";
+    });
+  });
   $("runTts").addEventListener("click", runTts);
   $("runAsr").addEventListener("click", runAsr);
   $("runMediaSmoke").addEventListener("click", runMediaSmoke);
@@ -609,6 +726,8 @@
   refreshResources();
   loadSpaceCharacters();
   refreshSpaceStatus();
+  loadGroupAutonomyGroups();
+  refreshGroupAutonomyStatus();
   scheduleResourceRefresh();
 
   // Every control above is wired, so the failure banner in the markup can stand

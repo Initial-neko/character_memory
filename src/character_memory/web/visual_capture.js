@@ -49,6 +49,15 @@
       startedAt: 0,
       lastError: "",
     };
+    // Every acquisition (camera or screen) takes a ticket from one counter, and a stream may
+    // only be attached by a ticket newer than the one that owns the session. stop() takes a
+    // fresh ticket for itself, which retires every answer the browser still owes us; a start
+    // that succeeds claims the ticket it came in with, which retires the requests queued
+    // behind it. A permission prompt can be answered long after the user gave up on it --
+    // possibly after the call itself ended -- so whoever comes back has to prove, on the
+    // ticket it holds, that it is still wanted.
+    let requestSeq = 0;
+    let ownerSeq = 0;
 
     function snapshot() {
       return {
@@ -81,8 +90,20 @@
       }
     }
 
+    function claimTicket() {
+      requestSeq += 1;
+      return requestSeq;
+    }
+
+    function releaseStream(stream) {
+      // A held stream is real hardware: an acquisition that lost its ticket still has to
+      // hand the camera or screen back, or its indicator stays lit with nothing left in
+      // the page that could switch it off.
+      stream?.getTracks?.().forEach(track => track.stop());
+    }
+
     function stopTracks() {
-      state.stream?.getTracks?.().forEach(track => track.stop());
+      releaseStream(state.stream);
       state.stream = null;
       if (preview) {
         try { preview.pause(); } catch (_) {}
@@ -96,12 +117,17 @@
       if (clearCandidates) state.candidates = [];
     }
 
-    function stop({clearCandidates = false, reason = "视觉已关闭"} = {}) {
+    function resetSession({clearCandidates = false} = {}) {
       clearTimer();
       stopTracks();
       state.source = null;
       state.startedAt = 0;
       resetAnalysis({clearCandidates});
+    }
+
+    function stop({clearCandidates = false, reason = "视觉已关闭"} = {}) {
+      ownerSeq = claimTicket(); // whatever the browser is still asking permission for is void now
+      resetSession({clearCandidates});
       notify(reason);
     }
 
@@ -148,8 +174,17 @@
       notify(`${state.source === "CAMERA" ? "摄像头" : "屏幕"} · 已缓存 ${state.candidates.length} 个候选帧`);
     }
 
-    async function startStream(source, stream) {
-      stop({clearCandidates:true, reason:"正在切换视觉来源…"});
+    async function startStream(source, stream, ticket) {
+      if (ticket <= ownerSeq) {
+        // The user hung up -- or aimed at another source -- while the browser still held the
+        // permission prompt, and only now answered it. This stream is live hardware that no
+        // session owns any more: release it, and never touch the preview.
+        releaseStream(stream);
+        return snapshot();
+      }
+      ownerSeq = ticket;
+      resetSession({clearCandidates:true});
+      notify("正在切换视觉来源…");
       state.source = source;
       state.stream = stream;
       state.startedAt = performance.now();
@@ -169,12 +204,13 @@
 
     async function startCamera() {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器不支持摄像头采集");
+      const ticket = claimTicket();
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video:{facingMode:{ideal:"user"}, width:{ideal:1280}, height:{ideal:720}},
           audio:false,
         });
-        return await startStream("CAMERA", stream);
+        return await startStream("CAMERA", stream, ticket);
       } catch (error) {
         state.lastError = error?.message || String(error);
         notify(`摄像头失败：${state.lastError}`);
@@ -184,12 +220,13 @@
 
     async function startDisplay() {
       if (!navigator.mediaDevices?.getDisplayMedia) throw new Error("当前浏览器不支持屏幕共享");
+      const ticket = claimTicket();
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({
           video:{displaySurface:"window", frameRate:{ideal:5, max:10}},
           audio:false,
         });
-        return await startStream("DISPLAY", stream);
+        return await startStream("DISPLAY", stream, ticket);
       } catch (error) {
         state.lastError = error?.message || String(error);
         notify(`屏幕共享失败：${state.lastError}`);

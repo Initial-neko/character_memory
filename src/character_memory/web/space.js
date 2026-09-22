@@ -171,6 +171,7 @@
 
   async function loadFeed() {
     feed.innerHTML = '<div class="space-loading">正在读取空间…</div>';
+    CM.features.encounter?.refresh?.().catch?.(console.warn);
     const params = new URLSearchParams({limit:"10"});
     if (filterCharacterId) params.set("character_id", filterCharacterId);
     try {

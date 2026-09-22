@@ -47,14 +47,16 @@ class CreateSpaceCommentRequest(BaseModel):
     # Omitted character_id means the human user is commenting from the browser.
     # Character-authored comments keep using an explicit, validated character id.
     character_id: str | None = Field(default=None, min_length=1, max_length=64)
-    content: str = Field(min_length=1, max_length=1000)
+    content: str = Field(default="", max_length=1000)
+    sticker_id: str | None = Field(default=None, min_length=1, max_length=64)
     reply_to_comment_id: int | None = None
 
     @model_validator(mode="after")
     def clean_content(self):
         self.content = self.content.strip()
-        if not self.content:
-            raise ValueError("comment must not be empty")
+        self.sticker_id = str(self.sticker_id or "").strip() or None
+        if not self.content and self.sticker_id is None:
+            raise ValueError("comment requires content or sticker_id")
         return self
 
 
@@ -157,6 +159,23 @@ def attach_space_routes(app):
                 "archived": False,
             }
         return profile_payload(comment.character_id)
+
+    def comment_sticker_payload(sticker_id: str | None) -> dict | None:
+        clean_id = str(sticker_id or "").strip()
+        if not clean_id:
+            return None
+        catalog_factory = getattr(access, "global_sticker_catalog", None)
+        if not callable(catalog_factory):
+            return {"id": clean_id, "label": "表情包", "url": f"/v1/stickers/{clean_id}/asset"}
+        catalog = catalog_factory()
+        sticker = catalog.get(clean_id)
+        if sticker is None or catalog.asset_path(clean_id) is None:
+            return None
+        return {
+            "id": sticker.id,
+            "label": sticker.label,
+            "url": f"/v1/stickers/{sticker.id}/asset",
+        }
 
     def relation_for_asset(asset) -> dict:
         mime_type = str(asset.mime_type or "").lower()
@@ -272,6 +291,8 @@ def attach_space_routes(app):
                     "actor_type": item.actor_type,
                     "author": comment_author_payload(item),
                     "content": item.content,
+                    "sticker_id": item.sticker_id,
+                    "sticker": comment_sticker_payload(item.sticker_id),
                     "created_at": item.created_at.isoformat(),
                     "reply_to_comment_id": item.reply_to_comment_id,
                 }
@@ -354,15 +375,24 @@ def attach_space_routes(app):
         commenter_id = req.character_id or "user"
         if req.character_id:
             require_known(req.character_id, active=True)
+        if req.sticker_id and comment_sticker_payload(req.sticker_id) is None:
+            raise HTTPException(status_code=400, detail="sticker not found")
         repository = repo()
+        now = datetime.now().astimezone()
         try:
             comment = repository.add_comment(
                 post_id,
                 commenter_id,
                 req.content,
-                datetime.now().astimezone(),
+                now,
                 actor_type=actor_type,
                 reply_to_comment_id=req.reply_to_comment_id,
+                sticker_id=req.sticker_id,
+            )
+            thread_replies = autonomy.process_comment_thread(
+                post_id,
+                comment.id,
+                now=now,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -372,7 +402,9 @@ def attach_space_routes(app):
             "comment": {
                 **comment.model_dump(mode="json"),
                 "author": comment_author_payload(comment),
+                "sticker": comment_sticker_payload(comment.sticker_id),
             },
+            "thread_replies": thread_replies,
             "post": post_payload(repository, repository.get_post(post_id)),
         }
 

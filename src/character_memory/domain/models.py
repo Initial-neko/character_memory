@@ -45,6 +45,7 @@ class ActionType(str, Enum):
     # EXPRESSIVE_ACTIONS, so PersonRuntime never persists them as chat messages.
     SPACE_LIKE = "SPACE_LIKE"
     SPACE_COMMENT = "SPACE_COMMENT"
+    SPACE_STICKER = "SPACE_STICKER"
 
 
 # Actions that produce a visible outward message. Every action gate consults
@@ -149,9 +150,9 @@ class ActionDecision(BaseModel):
             self.image_purpose = None
             self.visual_intent = None
             return self
-        if self.type == ActionType.STICKER:
+        if self.type in {ActionType.STICKER, ActionType.SPACE_STICKER}:
             if not (self.sticker_id or "").strip():
-                raise ValueError("STICKER requires sticker_id")
+                raise ValueError(f"{self.type.value} requires sticker_id")
             self.message = None
             self.image_id = None
             self.image_purpose = None

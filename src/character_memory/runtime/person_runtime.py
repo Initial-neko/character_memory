@@ -166,7 +166,7 @@ class PersonRuntime:
         sanitized = []
         generated_seen = False
         for action in reaction.actions:
-            if action.type == ActionType.STICKER:
+            if action.type in {ActionType.STICKER, ActionType.SPACE_STICKER}:
                 if allowed_sticker_ids is not None and action.sticker_id not in allowed_sticker_ids:
                     sticker_decisions.append({"sticker_id": action.sticker_id, "decision": "DROP_NOT_RETRIEVED_STICKER"})
                     logger.warning("runtime.sticker drop_not_retrieved sticker_id=%s", action.sticker_id)
@@ -216,9 +216,9 @@ class PersonRuntime:
         changes: a Space event may never create a private CHARACTER_MESSAGE.
         """
         if event.event_type == EventType.SPACE_POST_SEEN:
-            allowed = {ActionType.SPACE_LIKE, ActionType.SPACE_COMMENT}
+            allowed = {ActionType.SPACE_LIKE, ActionType.SPACE_COMMENT, ActionType.SPACE_STICKER}
         elif event.event_type == EventType.SPACE_COMMENT_RECEIVED:
-            allowed = {ActionType.SPACE_COMMENT}
+            allowed = {ActionType.SPACE_COMMENT, ActionType.SPACE_STICKER}
         elif event.event_type == EventType.WORLD_OBSERVATION:
             # External observations may update cognition/memory through the same
             # PersonRuntime, but they are never themselves a chat channel.

@@ -18,10 +18,10 @@ It is **not** the architecture source of truth and must not replace `docs/curren
 
 - Repository: `Initial-neko/character_memory`
 - Base branch: `main`
-- Base commit: 7d7283664543a94dc2e3ce77804c6d389930eea2 (PR #71 merged; #72 acceptance fix merged)
-- Active development branch: feature/space-world-observation-browser
+- Base commit: 8930dafb661477f2e04f2daa2cf2209f531c1859 (PR #73 merged)
+- Active development branch: none
 - Phase: **Autonomous Social Layer Phase 1**
-- Current slice: **World Observation through Headless Browser**
+- Current slice: **World Observation through Headless Browser — merged to main**
 
 ### Scope of this slice
 
@@ -126,7 +126,7 @@ Acceptance focus for this slice:
 
 ### 2026-09-22 — World Observation through Headless Browser
 
-Status: READY_FOR_ACCEPTANCE
+Status: MERGED
 
 Pull request: **#73 — Let Character Space observe the web through headless Chromium**
 
@@ -177,6 +177,14 @@ Acceptance focus:
 8. Search/browser/appraisal failure does not fail the normal Space opportunity.
 9. Settings/Dev controls expose World enablement, page cap and text cap.
 10. Main tests, Windows smoke and real browser smoke must all be green before READY_FOR_ACCEPTANCE.
+
+## Acceptance bridge audit
+
+- PR #70 was merged by the implementation-side ChatGPT workflow.
+- PR #71 was merged after its green CI/acceptance handoff; the GitHub connector does not expose a reliable `merged_by` actor in the retrieved snapshot, so this file does not guess the exact merger identity.
+- PR #72 is the concrete Claude acceptance follow-up: it fixes the legacy Space media type backfill after #71 and its commit records Claude Code co-authorship.
+- PR #73 was merged by the implementation-side ChatGPT workflow as main@8930dafb661477f2e04f2daa2cf2209f531c1859 after CI #374 was fully green.
+- Gap found: the acceptance process produced a real fix PR (#72), but did not append a stable `CLAUDE-*` finding below. Future Claude acceptance passes should record the finding first, then reference the fix PR/commit and mark it PASS after retest.
 
 ## Claude acceptance findings
 

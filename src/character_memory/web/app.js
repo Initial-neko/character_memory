@@ -12,6 +12,7 @@
       directHistory: {messages: [], hasMore: false, nextBeforeId: null, loadingOlder: false},
       directStream: null,
       directStreamKey: null,
+      runtimeMemories: [],
     },
     features: {},
     listeners: new Map(),
@@ -461,16 +462,71 @@
     } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
   };
 
+  CM.memorySourceText = memory => {
+    const source = memory.source || {};
+    if (source.kind === "GROUP") return `群聊 · ${source.conversation_id || "unknown"} · #${source.event_id || "?"}`;
+    if (source.event_id) return `${source.kind || source.event_type || "Event"} · #${source.event_id}`;
+    const origin = memory.metadata?.origin;
+    return origin ? String(origin) : "来源未记录";
+  };
+
+  CM.memoryCardHtml = memory => {
+    const inactive = !memory.active;
+    const superseded = Boolean(memory.superseded_by);
+    const status = superseded ? `已被 #${memory.superseded_by} 纠正` : inactive ? "已忘记" : memory.pinned ? "已固定" : "普通";
+    const sourceContent = memory.source?.content ? `<div class="memory-source-content">${CM.escapeHtml(memory.source.content)}</div>` : "";
+    const actions = superseded
+      ? ""
+      : inactive
+        ? `<button type="button" data-memory-action="restore" data-memory-id="${memory.id}">恢复</button>`
+        : `<button type="button" data-memory-action="pin" data-memory-id="${memory.id}">${memory.pinned ? "取消固定" : "📌 固定"}</button><button type="button" data-memory-action="correct" data-memory-id="${memory.id}">纠正</button><button type="button" data-memory-action="forget" data-memory-id="${memory.id}">忘记</button>`;
+    return `<article class="memory-card ${inactive ? "inactive" : ""}">
+      <div class="memory-card-head"><div><strong>${CM.escapeHtml(memory.memory_type)}</strong><span class="memory-status">${CM.escapeHtml(status)}</span></div><span>#${memory.id} · importance ${Number(memory.importance || 0).toFixed(2)}</span></div>
+      <div class="memory-content">${CM.escapeHtml(memory.content)}</div>
+      <div class="memory-source"><span>${CM.escapeHtml(CM.memorySourceText(memory))}</span><span>${CM.escapeHtml(CM.fmtDate(memory.event_time))} ${CM.escapeHtml(CM.fmtTime(memory.event_time))}</span></div>
+      ${sourceContent}
+      <div class="memory-actions">${actions}</div>
+    </article>`;
+  };
+
+  CM.handleMemoryAction = async button => {
+    const id = Number(button.dataset.memoryId || 0);
+    const memory = CM.state.runtimeMemories.find(item => Number(item.id) === id);
+    if (!memory || !id) return;
+    const characterId = CM.state.characterId;
+    const base = `/v1/characters/${encodeURIComponent(characterId)}/memories/${id}`;
+    const action = button.dataset.memoryAction;
+    if (action === "forget") {
+      if (!window.confirm("让这个人物不再把这条内容作为长期记忆 Recall？原始经历不会删除。")) return;
+      await CM.api(`${base}/active`, {method:"POST", body:JSON.stringify({active:false})});
+    } else if (action === "restore") {
+      await CM.api(`${base}/active`, {method:"POST", body:JSON.stringify({active:true})});
+    } else if (action === "pin") {
+      await CM.api(`${base}/pin`, {method:"POST", body:JSON.stringify({pinned:!memory.pinned})});
+    } else if (action === "correct") {
+      const corrected = window.prompt("纠正后的记忆：原记忆会保留为历史版本，不修改原始 Event。", memory.content);
+      if (corrected == null || !corrected.trim() || corrected.trim() === memory.content.trim()) return;
+      await CM.api(`${base}/correct`, {method:"POST", body:JSON.stringify({content:corrected.trim()})});
+    } else {
+      return;
+    }
+    await CM.showRuntime();
+  };
+
   CM.showRuntime = async () => {
     if (CM.isGroupConversation()) return;
     const requested = CM.state.characterId;
-    CM.openDrawer(`${CM.currentProfile().name} · Runtime`, "按需读取当前人物状态");
+    CM.openDrawer(`${CM.currentProfile().name} · Runtime`, "人物状态与 Memory Inspector");
     CM.dom.drawerBody.innerHTML = "<p>正在加载…</p>";
     try {
-      const data = await CM.api(`/v1/runtime/${encodeURIComponent(requested)}`);
+      const [data, memoryData] = await Promise.all([
+        CM.api(`/v1/runtime/${encodeURIComponent(requested)}`),
+        CM.api(`/v1/characters/${encodeURIComponent(requested)}/memories?include_inactive=true&limit=80`),
+      ]);
       if (CM.isGroupConversation() || requested !== CM.state.characterId) return;
       const p = data.provider || {};
-      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>Runtime 初始化耗时</h3>${CM.timingHtml(data.runtime_init_timings)}</section><section class="section"><h3>Provider</h3><div class="kv"><div>Chat Model</div><div>${CM.escapeHtml(p.chat_model)}</div><div>Embedding</div><div>${CM.escapeHtml(`${p.embedding_provider} / ${p.embedding_model}`)}</div><div>Runtime Loaded</div><div>${CM.escapeHtml(data.runtime_loaded)}</div></div></section><section class="section"><h3>Mental State</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.mental_state))}</pre></section><section class="section"><h3>Persona</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.persona))}</pre></section><section class="section"><h3>Memory · 最近 ${data.memories.length} 条</h3><div class="card-list">${data.memories.map(m => `<div class="card"><strong>${CM.escapeHtml(m.memory_type)}</strong><span> · ${CM.escapeHtml(CM.fmtTime(m.event_time))}</span><div>${CM.escapeHtml(m.content)}</div></div>`).join("") || "<p>暂无 Memory。</p>"}</div></section><section class="section"><h3>Intent · 最近 ${data.intents.length} 条</h3><pre>${CM.escapeHtml(JSON.stringify(data.intents, null, 2))}</pre></section>`;
+      CM.state.runtimeMemories = memoryData.memories || [];
+      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>Runtime 初始化耗时</h3>${CM.timingHtml(data.runtime_init_timings)}</section><section class="section"><h3>Provider</h3><div class="kv"><div>Chat Model</div><div>${CM.escapeHtml(p.chat_model)}</div><div>Embedding</div><div>${CM.escapeHtml(`${p.embedding_provider} / ${p.embedding_model}`)}</div><div>Runtime Loaded</div><div>${CM.escapeHtml(data.runtime_loaded)}</div></div></section><section class="section"><h3>Mental State</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.mental_state))}</pre></section><section class="section"><h3>Persona</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.persona))}</pre></section><section class="section"><h3>Memory Inspector · 最近 ${CM.state.runtimeMemories.length} 条</h3><p class="memory-help">固定会提高 Recall 优先级；忘记只停用派生 Memory，不删除原始经历；纠正会创建新版本并保留旧版本。</p><div class="memory-list">${CM.state.runtimeMemories.map(CM.memoryCardHtml).join("") || "<p>暂无 Memory。</p>"}</div></section><section class="section"><h3>Intent · 最近 ${data.intents.length} 条</h3><pre>${CM.escapeHtml(JSON.stringify(data.intents, null, 2))}</pre></section>`;
     } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
   };
 
@@ -478,6 +534,12 @@
     const d = CM.dom;
     d.drawerClose.addEventListener("click", CM.closeDrawer);
     d.drawerBackdrop.addEventListener("click", CM.closeDrawer);
+    d.drawerBody.addEventListener("click", event => {
+      const memoryAction = event.target.closest("[data-memory-action]");
+      if (memoryAction) CM.handleMemoryAction(memoryAction).catch(error => {
+        CM.dom.drawerBody.insertAdjacentHTML("afterbegin", `<div class="error">${CM.escapeHtml(error.message)}</div>`);
+      });
+    });
     d.runtimeButton.addEventListener("click", CM.showRuntime);
     d.characterList.addEventListener("click", event => { const button = event.target.closest("[data-character]"); if (button) CM.switchCharacter(button.dataset.character).catch(console.error); });
     d.chat.addEventListener("click", event => {

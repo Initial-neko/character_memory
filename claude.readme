@@ -126,7 +126,11 @@ Acceptance focus for this slice:
 
 ### 2026-09-22 — World Observation through Headless Browser
 
-Status: IN_PROGRESS
+Status: READY_FOR_ACCEPTANCE
+
+Pull request: **#73 — Let Character Space observe the web through headless Chromium**
+
+Implementation head before this coordination update: 2f69834f317a0e503e4b9106ce075b4843bab521.
 
 Development starts from main@7d7283664543a94dc2e3ce77804c6d389930eea2, after #71 and the Claude acceptance fix #72 were merged.
 
@@ -152,6 +156,14 @@ Explicitly deferred:
 - generic browsing tools in direct/private chat;
 - autonomous group-chat bursts;
 - image/vision appraisal by Space audience.
+
+Validation state:
+
+- CI run **#373** passed all three jobs: test, windows-smoke and browser-smoke.
+- Main test result: **704 passed, 9 skipped**.
+- Browser smoke result: **9 passed**, including the new delayed-JavaScript World Browser fixture.
+- The first CI attempt intentionally exposed two categories of drift: legacy tests still asserting that web search did not exist, and pytest-playwright running the sync browser smoke inside its own asyncio loop. The fixes preserve the product boundary: general web tools remain outside PersonRuntime, and the real browser smoke invokes the sync fetcher from the same worker-thread boundary used by scheduler/FastAPI sync paths.
+- CI proves Playwright Chromium installs, executes JavaScript and yields rendered text. It does not prove the user's live SearchAPI/Brave credentials or arbitrary third-party site compatibility; Dev World Search/Fetch is the local-provider/live-network acceptance surface.
 
 Acceptance focus:
 

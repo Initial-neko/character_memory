@@ -75,8 +75,15 @@ src/character_memory/
 当前有一些 `*_web.py` 留在 package 顶层。这是历史演进留下的薄 route layer，**V1 不为了目录美观搬动它们**，也不要继续把新的大型 domain/runtime 逻辑塞进 route 文件。
 
 ```text
-api.py                  core FastAPI app + direct/common APIs
-server.py               application assembly / attach routes
+api.py                  Character Runtime composition root + lifecycle only
+api_contracts.py        legacy/core HTTP request + character-capacity contracts
+api_route_access.py     explicit dependency adapter for core route modules
+api_character_service.py character registry/capacity/filesystem mutation helper
+api_resource_service.py sticker/image/media catalogs + core wire projection helper
+core_character_web.py   character list/archive/draft/create HTTP surface
+core_resource_web.py    sticker/image/media HTTP surface
+core_direct_web.py      root/health/legacy direct/runtime diagnostic HTTP surface
+server.py               application assembly / attach feature routes
 async_web.py            async message accept + SSE routes
 group_web.py            group HTTP surface
 group_autonomy_web.py   autonomous Group status/config/manual opportunity HTTP surface
@@ -92,7 +99,9 @@ visual_capture_web.py   Camera/Screen transient Vision routes
 wake_web.py             wake/debug HTTP surface
 ```
 
-`server.py` 是查看 Character Runtime route 装配的最快入口；真正的 Search/Avatar/ImageGen/World infrastructure 在 `runtime_services.py` / `create_api()` 中先完成 composition。Feature route 之间不应依赖“谁先 attach”来获得 provider。
+`api.py` 只保留 Character Runtime composition、共享 lifecycle、lazy runtime 和少量跨 route orchestration；不要再把新 endpoint 直接堆回这个文件。核心历史 route 已按 Character / Resource / Direct 三个 surface 拆到 `core_*_web.py`，通过 `CoreApiRouteAccess` 显式取得依赖。
+
+`server.py` 是查看 Character Runtime feature route 装配的最快入口；真正的 Search/Avatar/ImageGen/World infrastructure 在 `runtime_services.py` / `create_api()` 中先完成 composition。Feature route 之间不应依赖“谁先 attach”来获得 provider。
 
 后续如果 route 数量继续明显增长，可以在大版本单独迁移到 `web_routes/` 或 `transport/http/`；当前不要制造全仓 import churn。
 

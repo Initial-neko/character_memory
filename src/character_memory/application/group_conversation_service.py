@@ -594,7 +594,13 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             }
 
         cap = max(1, min(4, int(max_messages)))
-        seed_index = max(0, int(source_event.id or 1) - 1) % len(members)
+        # One member advances per opportunity, so every member seeds and every
+        # member sits out in turn. Deriving the seed from the source event id
+        # does not rotate -- ids advance by 1 + (messages the previous round
+        # emitted), so a round that filled the cap in a four-member group moved
+        # the index by four and pinned the same member as seed forever.
+        opportunity_index = max(0, self.repo.count_opportunities(group.id) - 1)
+        seed_index = opportunity_index % len(members)
         ordered = members[seed_index:] + members[:seed_index]
         decisions: list[dict] = []
         emitted: list[GroupEvent] = []

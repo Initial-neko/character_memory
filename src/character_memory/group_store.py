@@ -463,6 +463,23 @@ class GroupRepository:
             ).fetchone()
         return dict(row)
 
+    def count_opportunities(self, conversation_id: str) -> int:
+        """Opportunities this group has been given, oldest first.
+
+        This is the seed rotation cursor. It advances by exactly one per
+        opportunity, which neither the event id nor the run id does: those are
+        global counters that advance by 1 + (messages the previous round
+        emitted), so a round that fills the cap in a four-member group advanced
+        by exactly four and handed every later opportunity to the same member.
+        """
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) AS total FROM conversation_events "
+                "WHERE conversation_id=? AND event_type='GROUP_OPPORTUNITY'",
+                (conversation_id,),
+            ).fetchone()
+        return int(row["total"] if row is not None else 0)
+
     def claim_due_autonomy_opportunity(
         self,
         conversation_id: str,

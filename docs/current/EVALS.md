@@ -226,7 +226,7 @@ CI green **不等于**以下真实链路已经验证：
 持续覆盖：
 
 - seed silence 会直接结束 Opportunity，不机械唤醒全群；
-- seed rotation 不是固定一个人物永远先说；
+- seed rotation 不是固定一个人物永远先说：四人群里每轮打满上限也不能让同一个人一直当 seed，也不能让排最后的成员永远轮不到（`test_each_member_seeds_in_turn_instead_of_one_member_forever`）；
 - 每个成员一次 Opportunity 最多一个 visible action，总消息硬上限 1..4；
 - hidden GROUP_OPPORTUNITY 不进入 history/search/recent person context；
 - Autonomous V1 丢弃 GENERATE_IMAGE，不触发 user-watermark ImageGen 路径；

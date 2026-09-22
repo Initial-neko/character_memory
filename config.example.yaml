@@ -91,6 +91,25 @@ space_world_max_chars_per_page: 6000      # extracted readable text cap for each
 space_audience_size: 5                    # 0 disables automatic distribution; hard max 10
 space_scheduler_poll_seconds: 60          # check latency only; does not change interval
 
+# World Activity runs independently from Space posting. Pulse reads a few
+# information-aggregation pages and asks the model only to dedupe/summarize them;
+# Personal Browse lets each character browse more often without auto-posting.
+world_activity_enabled: true
+world_pulse_enabled: true
+world_pulse_sources:
+  - "https://tophub.today/"
+  - "https://news.ycombinator.com/"
+  - "https://github.com/trending"
+world_pulse_refresh_minutes: 60             # refresh shared topic pool
+world_pulse_discussion_interval_minutes: 360 # let a few interested characters comment
+world_pulse_source_max_chars: 8000
+world_pulse_max_topics: 8
+world_pulse_commenter_count: 4              # candidates; uninterested characters may still stay silent
+world_browse_enabled: true
+world_browse_interval_minutes: 90           # per-character clock; actual next run is jittered
+world_browse_max_pages: 2
+world_activity_poll_seconds: 60
+
 # Autonomous Group Chat. One due opportunity chooses one rotating seed member;
 # if that member naturally speaks, at most a few other members may respond once.
 # New user messages always take priority. No infinite character-to-character loop.

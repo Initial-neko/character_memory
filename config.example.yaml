@@ -101,7 +101,7 @@ group_autonomy_user_quiet_minutes: 30      # skip/rearm when the user spoke too 
 group_autonomy_poll_seconds: 60            # check latency only; does not change interval
 
 # Random Encounter. Candidates live outside the formal chat list until the user
-# explicitly keeps one. The formal direct-chat list has a hard 10-character cap;
+# explicitly keeps one. Formal characters warn after 10 active entries and hard-stop at 20;
 # a full list does not stop discovery or temporary encounter chat.
 encounter_enabled: true
 encounter_interval_minutes: 1440           # 24H default; 10/30/60 useful for soak tests

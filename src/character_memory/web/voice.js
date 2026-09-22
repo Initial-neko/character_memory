@@ -251,6 +251,7 @@
     const session = ensureVisualSession();
     await session.startCamera();
     updateVisualUi();
+    resumeInputState();
   }
 
   async function startScreenVisual() {
@@ -258,11 +259,36 @@
     const session = ensureVisualSession();
     await session.startDisplay();
     updateVisualUi();
+    resumeInputState();
   }
 
   function stopVisual({clearCandidates = false} = {}) {
     voice.visualSession?.stop?.({clearCandidates, reason:"视觉已关闭"});
     updateVisualUi();
+    resumeInputState();
+  }
+
+  function visualFramesForCurrentConversation() {
+    if (!voice.active || !isViewingTarget()) return [];
+    const session = voice.visualSession;
+    if (!session?.getState?.().active) return [];
+    const now = performance.now();
+    return session.selectFrames({
+      fromMs:Math.max(0, now - 15000),
+      toMs:now,
+      maxFrames:4,
+    });
+  }
+
+  async function sendTextWithVisual(message) {
+    const text = String(message || "").trim();
+    if (!text) return {handled:false};
+    const visualFrames = visualFramesForCurrentConversation();
+    if (!visualFrames.length) return {handled:false};
+    const sent = await sendTranscript(text, visualFrames);
+    appendCallLog("user", text, sent.message?.id ?? sent.event_id ?? null);
+    if (dom.transcript) dom.transcript.textContent = "你：" + text + " · 附 " + visualFrames.length + " 个视觉关键帧";
+    return {handled:true, result:sent, frameCount:visualFrames.length};
   }
 
   function formatMetrics() {

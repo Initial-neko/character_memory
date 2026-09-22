@@ -22,6 +22,7 @@ class CoreApiRouteAccess:
     current_bundle: Callable[[], Any | None]
     require_bundle: Callable[[], Any]
     runtime_status: Callable[[], dict[str, Any]]
+    proactive_poll_seconds: float
 
     character_profiles: Callable[[], list[dict[str, Any]]]
     public_profile: Callable[[dict[str, Any]], dict[str, Any]]

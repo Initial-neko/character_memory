@@ -218,7 +218,11 @@ function boot() {
   // 📞 reaches dictation's capture listener first and this one second.
   elementFor("voiceCallButton").addEventListener("click", () => { startCall(); });
 
-  return {click, releaseHealth, releaseMic, snapshot, flush};
+  function switchConversation() {
+    CM.events.conversationChanged({type: "DIRECT", characterId: "someone-else"});
+  }
+
+  return {click, releaseHealth, releaseMic, snapshot, flush, switchConversation};
 }
 
 async function dictationAlone() {
@@ -294,6 +298,32 @@ async function callDuringRecording() {
   return h.snapshot();
 }
 
+async function switchDuringPrompt() {
+  const h = boot();
+  h.click("voiceInputButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.switchConversation();
+  await h.flush(2);
+  h.releaseMic(0, "dictation-mic");
+  await h.flush(2);
+  return h.snapshot();
+}
+
+async function switchDuringRecording() {
+  const h = boot();
+  h.click("voiceInputButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.releaseMic(0, "dictation-mic");
+  await h.flush(2);
+  h.switchConversation();
+  await h.flush(2);
+  return h.snapshot();
+}
+
 async function main() {
   process.stdout.write(JSON.stringify({
     dictationAlone: await dictationAlone(),
@@ -301,6 +331,8 @@ async function main() {
     dictationThenCall: await dictationThenCall(),
     callClickDuringRuntimeCheck: await callClickDuringRuntimeCheck(),
     callDuringRecording: await callDuringRecording(),
+    switchDuringPrompt: await switchDuringPrompt(),
+    switchDuringRecording: await switchDuringRecording(),
   }));
 }
 
@@ -377,4 +409,23 @@ def test_late_permission_answer_cannot_leave_a_second_microphone_on(tmp_path):
     assert while_recording["asrCalls"] == []
     assert while_recording["busy"] is False
     assert while_recording["button"] == IDLE_BUTTON
+
+    # Switching conversation retires the start too: the capture was asked for in the
+    # conversation the user just left, so the late "Allow" is released, not adopted, and
+    # nothing is sent to ASR for the conversation that is now on screen.
+    switched_while_pending = payload["switchDuringPrompt"]
+    assert switched_while_pending["requests"] == ["dictation"]
+    assert switched_while_pending["stopped"] == ["dictation-mic"], "switching conversation left the microphone on"
+    assert switched_while_pending["recording"] is False
+    assert switched_while_pending["asrCalls"] == []
+    assert switched_while_pending["button"] == IDLE_BUTTON
+
+    # Unchanged path: a recording that is already live is dropped on the same event,
+    # without a transcript.
+    switched_while_recording = payload["switchDuringRecording"]
+    assert switched_while_recording["stopped"] == ["dictation-mic"]
+    assert switched_while_recording["recording"] is False
+    assert switched_while_recording["asrCalls"] == []
+    assert switched_while_recording["busy"] is False
+    assert switched_while_recording["button"] == IDLE_BUTTON
 

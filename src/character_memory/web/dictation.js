@@ -248,6 +248,10 @@
     if (state.recording) stopRecording({recognize:false}).catch(console.error);
   }, {capture:true});
   CM.on("conversationChanged", () => {
+    // A capture belongs to the conversation it was asked for, so moving on retires a start
+    // that is still waiting for the permission prompt as well: the answer arrives in another
+    // context and must be released rather than adopted.
+    wantedGeneration += 1;
     if (state.recording) stopRecording({recognize:false}).catch(console.error);
   });
   window.addEventListener("beforeunload", cleanupCapture);

@@ -74,6 +74,10 @@ proactive_wake_minutes: 60
 space_autonomy_enabled: true
 space_opportunity_interval_minutes: 1440  # 1440=24H, 60=1H, 30=30min, 10=10min
 space_max_posts_per_day: 0                # publishing ceiling per local day; 0 = unlimited
+space_media_enabled: true                 # character may naturally choose image media
+space_media_max_items: 3                  # execution cap per post; hard max 9
+space_image_search_enabled: true          # use configured image-search provider
+space_image_generation_enabled: true      # use configured ImageGen provider
 space_audience_size: 5                    # 0 disables automatic distribution; hard max 10
 space_scheduler_poll_seconds: 60          # check latency only; does not change interval
 

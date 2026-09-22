@@ -82,7 +82,7 @@ class MessageSearchRepository:
             sql = (
                 "SELECT e.id,e.conversation_id,e.turn_id,e.actor_type,e.actor_id,e.event_type,e.event_time,e.event_time_epoch,e.content,e.metadata_json,c.name AS conversation_name "
                 "FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id "
-                "WHERE e.event_time_epoch IS NOT NULL "
+                "WHERE e.event_time_epoch IS NOT NULL AND e.actor_type IN ('USER','CHARACTER') "
             )
             args: list = []
             if not include_archived:
@@ -149,13 +149,15 @@ class MessageSearchRepository:
     def jump_before_group(self, conversation_id: str, event_id: int, *, newer_context: int = 20) -> int | None:
         with self.store._lock:
             target = self.store.conn.execute(
-                "SELECT event_time_epoch,id FROM conversation_events WHERE id=? AND conversation_id=? AND event_time_epoch IS NOT NULL",
+                "SELECT event_time_epoch,id FROM conversation_events WHERE id=? AND conversation_id=? "
+                "AND event_time_epoch IS NOT NULL AND actor_type IN ('USER','CHARACTER')",
                 (int(event_id), conversation_id),
             ).fetchone()
             if target is None:
                 return None
             rows = self.store.conn.execute(
                 "SELECT id FROM conversation_events WHERE conversation_id=? AND event_time_epoch IS NOT NULL "
+                "AND actor_type IN ('USER','CHARACTER') "
                 "AND (event_time_epoch>? OR (event_time_epoch=? AND id>?)) "
                 "ORDER BY event_time_epoch ASC,id ASC LIMIT ?",
                 (

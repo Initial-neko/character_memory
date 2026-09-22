@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import hashlib
+import json
 import logging
 import threading
 
@@ -649,6 +650,53 @@ class SpaceAutonomyScheduler:
             self.interval_minutes(),
         )
 
+    def memory_metrics(self, now: datetime | None = None) -> dict:
+        """Small operational view of Memory growth; not a quality score."""
+        now = now or datetime.now().astimezone()
+        cutoff = epoch_us(now - timedelta(hours=24))
+        store = self.access.read_store
+        with store._lock:
+            totals = store.conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN active=1 THEN 1 ELSE 0 END) AS active_total,
+                    SUM(CASE WHEN active=0 THEN 1 ELSE 0 END) AS inactive_total,
+                    SUM(CASE WHEN pinned=1 THEN 1 ELSE 0 END) AS pinned_total,
+                    SUM(CASE WHEN superseded_by IS NOT NULL THEN 1 ELSE 0 END) AS superseded_total
+                FROM memories
+                """
+            ).fetchone()
+            rows = store.conn.execute(
+                """
+                SELECT m.id,e.event_type,e.metadata_json
+                FROM memories m
+                LEFT JOIN events e ON e.id=m.source_event_id
+                WHERE m.event_time_epoch>=?
+                ORDER BY m.event_time_epoch DESC,m.id DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+        by_channel = {"DIRECT": 0, "GROUP": 0, "SPACE": 0, "WORLD": 0, "OTHER": 0}
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}") if row["metadata_json"] else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                metadata = {}
+            channel = str(metadata.get("channel") or "").strip().upper()
+            if not channel and str(row["event_type"] or "").upper() == "WORLD_OBSERVATION":
+                channel = "WORLD"
+            if channel not in by_channel:
+                channel = "OTHER"
+            by_channel[channel] += 1
+        return {
+            "active_total": int((totals["active_total"] if totals else 0) or 0),
+            "inactive_total": int((totals["inactive_total"] if totals else 0) or 0),
+            "pinned_total": int((totals["pinned_total"] if totals else 0) or 0),
+            "superseded_total": int((totals["superseded_total"] if totals else 0) or 0),
+            "created_last_24h": len(rows),
+            "created_last_24h_by_channel": by_channel,
+        }
+
     def status(self, now: datetime | None = None) -> dict:
         now = now or datetime.now().astimezone()
         items = []
@@ -726,6 +774,7 @@ class SpaceAutonomyScheduler:
             "characters": items,
             "recent_runs": recent_runs,
             "metrics": metrics,
+            "memory_metrics": self.memory_metrics(now),
         }
 
     def apply_runtime_config(

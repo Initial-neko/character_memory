@@ -13,7 +13,7 @@ h2 { margin: 0; font-size: 18px; }
 
 .grid { display: grid; gap: 16px; }
 .status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
-.feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 .wide { grid-column: 1 / -1; }
 .future { margin-top: 16px; }
 .card-title-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
@@ -73,6 +73,29 @@ th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--ui-
 th { color: var(--ui-muted); font-weight: 600; }
 td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
 .future p { margin: 0; color: var(--ui-muted); }
+
+/* Levels. Every control declares one in the markup (`data-level`), dev_levels.js
+ * names the group it landed in, and this is what the declared groups look like.
+ * The first screen is `common`; `advanced` and `diagnostic` are real, closed
+ * groups the page can still reach in one click, which is the same three-level
+ * contract the Settings Center serves. See web/dev_levels.js. */
+.level-group { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ui-line); }
+.level-group > summary { cursor: pointer; color: var(--ui-muted); font-size: 12px; line-height: 1.6; }
+.level-group > summary:hover { color: var(--ui-text); }
+.level-group[open] > summary { margin-bottom: 12px; color: var(--ui-text); font-weight: 600; }
+.level-group[data-level="diagnostic"] > summary { color: var(--ui-faint); }
+.level-group[data-level="diagnostic"] > summary:hover { color: var(--ui-muted); }
+
+/* The controls a level shows inline. One wrapping row, no label margins, so a
+ * card's remaining controls sit on one line under its title instead of
+ * spreading into a form. */
+.level-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.level-row > label { margin: 0; }
+
+/* A debug pane is a pane, not the page: it scrolls once it has something to
+ * say, so a long JSON dump cannot push the next card off the screen. */
+.dev-console .result { min-height: 52px; max-height: 200px; overflow-y: auto; }
+.dev-console .status-block { min-height: 64px; max-height: 260px; overflow-y: auto; }
 
 @media (max-width: 900px) {
   .status-grid, .feature-grid { grid-template-columns: 1fr; }

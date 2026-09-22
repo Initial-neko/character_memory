@@ -432,6 +432,29 @@ def attach_visual_routes(app) -> None:
             purpose=VisualPurpose.AVATAR,
             use_avatar_reference=True,
         )
+        created_assets = []
+
+        def rollback_created_assets() -> None:
+            store = access.store()
+            for asset in reversed(created_assets):
+                try:
+                    store.delete_media_asset(asset.id)
+                except Exception:
+                    logger.exception(
+                        "visual.avatar rollback_db_failed character=%s media_id=%s",
+                        character_id,
+                        asset.id,
+                    )
+                    continue
+                try:
+                    access.media_storage.delete(asset)
+                except Exception:
+                    logger.exception(
+                        "visual.avatar rollback_file_failed character=%s media_id=%s",
+                        character_id,
+                        asset.id,
+                    )
+
         try:
             # Reuse the exact same prompt-polish path as /images/rewrite so
             # avatar generation does not grow a second style/prompt compiler.
@@ -466,6 +489,7 @@ def attach_visual_routes(app) -> None:
                     created_at=datetime.now().astimezone(),
                     source="GENERATED_AVATAR_CANDIDATE",
                 )
+                created_assets.append(asset)
                 access.store().add_media_asset(asset)
                 candidates.append(
                     {
@@ -481,10 +505,13 @@ def attach_visual_routes(app) -> None:
                     }
                 )
         except HTTPException:
+            rollback_created_assets()
             raise
         except ValueError as exc:
+            rollback_created_assets()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
+            rollback_created_assets()
             logger.exception(
                 "visual.avatar generate_failed character=%s provider=%s style=%s count=%s error=%s",
                 character_id,

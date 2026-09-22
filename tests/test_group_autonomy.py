@@ -340,8 +340,8 @@ def test_group_autonomy_schema_migration_and_dev_console_contract(tmp_path):
 
     store = SQLiteStore(tmp_path / "group-autonomy-migration.db")
     try:
-        assert "group/004-autonomy-scheduler" in store.list_schema_migrations()
         repo = GroupRepository(store)
+        assert "group/004-autonomy-scheduler" in store.list_schema_migrations()
         now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
         group = repo.create_group("迁移验证", ["c00", "c01"], now)
         state = repo.ensure_autonomy_state(group.id, now, 60)

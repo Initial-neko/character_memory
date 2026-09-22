@@ -237,6 +237,8 @@ class GroupConversationService:
     def _recent_as_events(self, group_id: str, *, limit: int = 14) -> list[Event]:
         result = []
         for item in self.repo.list_events(group_id, limit=limit):
+            if item.actor_type not in {"USER", "CHARACTER"}:
+                continue
             actor = self._name(item.actor_id)
             event_type = EventType.USER_MESSAGE if item.actor_type == "USER" else EventType.CHARACTER_MESSAGE
             content = item.metadata.get("display_text", item.content)
@@ -260,8 +262,36 @@ class GroupConversationService:
             )
         return result
 
-    def _group_contract(self, group, character_id: str, mentioned_ids: list[str] | None = None) -> str:
+    def _group_contract(
+        self,
+        group,
+        character_id: str,
+        mentioned_ids: list[str] | None = None,
+        *,
+        autonomous: bool = False,
+        autonomous_phase: str = "",
+    ) -> str:
         names = "、".join(self._name(member_id) for member_id in group.member_ids)
+        if autonomous:
+            phase_text = (
+                "你是这次机会的起始人物。没有自然想说的话就保持沉默，整个群聊可以什么都不发生。"
+                if autonomous_phase == "SEED"
+                else "已经有另一位群成员自然开口了。只有你真的想接这句话、补充、吐槽、问一句或表达情绪时才说；否则保持沉默。"
+            )
+            return f"""
+
+# Autonomous Group Conversation Contract
+你现在位于群聊「{group.name}」。群成员包括 User、{names}。
+这是一次群聊自然活动机会，不是 User 刚发来消息，也不是系统要求你完成任务。
+你是 {self._name(character_id)}，只代表自己。{phase_text}
+- 群聊不需要为了“活跃”而说话，actions=[] 完全合法。
+- 一旦表达，本轮最多一个可见动作：MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / IMAGE。
+- 不允许 GENERATE_IMAGE；自主群聊 V1 不在后台启动慢速 AI 生图。
+- 不创建未来主动 Intent，intent_candidates 必须为 []。
+- 可以参考 Recent Events 中真实发生的群消息，但不要凭空制造“刚才有人说过”的事实。
+- 私聊 Memory 只可帮助你理解自己与 User 的关系；除非相关内容已经在这个群公开，否则不能把私人信息带进群里。
+- 不要替其他人物说话，不要总结成客服式群公告，也不要用“大家好我来活跃一下”这种任务口吻。
+"""
         mentions = list(mentioned_ids or [])
         explicitly_mentioned = "*" in mentions or character_id in mentions
         if explicitly_mentioned:
@@ -300,6 +330,8 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         image_data_urls: list[str] | None = None,
         commit_guard: Callable[[], bool] | None = None,
         mentioned_ids: list[str] | None = None,
+        autonomous: bool = False,
+        autonomous_phase: str = "",
     ) -> dict:
         runtime = self.runtimes[character_id]
         started = time.perf_counter()
@@ -307,6 +339,11 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             now = source_event.event_time
             self.store.set_world_time(character_id, now)
             recall_query = str(source_event.metadata.get("display_text") or source_event.content or "").strip()
+            if autonomous:
+                recent_for_query = self._recent_as_events(group.id, limit=10)
+                recall_query = "\n".join(
+                    item.content for item in recent_for_query[-6:] if str(item.content or "").strip()
+                ) or "群聊最近的共同经历与当前状态"
             if source_event.metadata.get("media_id"):
                 recall_query = f"{recall_query} 群聊图片".strip()
             if source_event.metadata.get("action") == ActionType.STICKER.value:
@@ -328,9 +365,13 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             allowed_sticker_ids = {match.sticker_id for match in sticker_retrieval.matches} if sticker_retrieval is not None else set()
             synthetic = Event(
                 character_id=character_id,
-                event_type=EventType.USER_MESSAGE,
+                event_type=EventType.TIME_TICK if autonomous else EventType.USER_MESSAGE,
                 event_time=now,
-                content=f"群聊当前最新用户事实：{source_event.content}",
+                content=(
+                    "这是一次群聊自主交流机会。结合最近真实群聊和你当前状态，判断是否自然想说一句。"
+                    if autonomous
+                    else f"群聊当前最新用户事实：{source_event.content}"
+                ),
                 metadata={
                     "conversation_id": group.id,
                     "group_turn_id": source_event.turn_id,
@@ -348,7 +389,13 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 last_chat_event=None,
                 sticker_catalog=prompt_stickers,
                 image_catalog=runtime.image_catalog,
-            ) + self._group_contract(group, character_id, mentioned_ids)
+            ) + self._group_contract(
+                group,
+                character_id,
+                mentioned_ids,
+                autonomous=autonomous,
+                autonomous_phase=autonomous_phase,
+            )
             session_id = f"group:{group.id}:{character_id}"
             model_started = time.perf_counter()
             if image_data_urls:
@@ -360,7 +407,28 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 reaction,
                 allowed_sticker_ids=allowed_sticker_ids,
             )
-            reaction = reaction.model_copy(update={"intent_candidates": []})
+            if autonomous:
+                autonomous_allowed = {
+                    ActionType.MESSAGE,
+                    ActionType.VOICE_MESSAGE,
+                    ActionType.EMOJI,
+                    ActionType.STICKER,
+                    ActionType.IMAGE,
+                }
+                kept = [
+                    action for action in reaction.actions
+                    if action.type in autonomous_allowed
+                ][:1]
+                normalized = kept[0] if kept else None
+                reaction = reaction.model_copy(
+                    update={
+                        "actions": kept,
+                        "action": normalized,
+                        "intent_candidates": [],
+                    }
+                )
+            else:
+                reaction = reaction.model_copy(update={"intent_candidates": []})
             model_ms = _ms(model_started)
 
             state_after = (reaction.mental_state_update or "").strip() or state_before
@@ -403,6 +471,8 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                         "action": action.type.value,
                         "action_index": index,
                         "source_conversation_event_id": source_event.id,
+                        "autonomous": bool(autonomous),
+                        "source": "GROUP_AUTONOMY" if autonomous else "USER_TURN",
                     }
                     if action.type == ActionType.STICKER:
                         sticker = runtime.sticker_catalog.get(action.sticker_id) if runtime.sticker_catalog is not None else None
@@ -454,6 +524,8 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "created_memory_ids": created_memory_ids,
                     "mentions": list(mentioned_ids or []),
                     "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
+                    "autonomous": bool(autonomous),
+                    "autonomous_phase": autonomous_phase if autonomous else "",
                     "sticker_retrieval": {
                         "query": sticker_retrieval.query,
                         "matches": [match.__dict__ for match in sticker_retrieval.matches],
@@ -490,7 +562,108 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 "reaction": reaction.reaction,
                 "model_ms": model_ms,
                 "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
+                "autonomous": bool(autonomous),
             }
+
+    def react_autonomous(
+        self,
+        source_event: GroupEvent,
+        *,
+        active_member_ids: list[str] | None = None,
+        max_messages: int = 3,
+        commit_guard: Callable[[], bool] | None = None,
+        on_member: Callable[[dict], None] | None = None,
+    ) -> dict:
+        group = self.repo.get_group(source_event.conversation_id)
+        if group is None:
+            raise KeyError(f"unknown group: {source_event.conversation_id}")
+        members = [
+            value for value in group.member_ids
+            if active_member_ids is None or value in set(active_member_ids)
+        ]
+        members = [value for value in members if value in self.runtimes]
+        if len(members) < 2:
+            return {
+                "conversation_id": group.id,
+                "turn_id": source_event.turn_id,
+                "source_event_id": source_event.id,
+                "speaker_order": [],
+                "decisions": [],
+                "events": [],
+                "message_count": 0,
+            }
+
+        cap = max(1, min(4, int(max_messages)))
+        seed_index = max(0, int(source_event.id or 1) - 1) % len(members)
+        ordered = members[seed_index:] + members[:seed_index]
+        decisions: list[dict] = []
+        emitted: list[GroupEvent] = []
+
+        def current() -> bool:
+            return commit_guard is None or bool(commit_guard())
+
+        if not current():
+            raise SupersededGroupReaction("autonomous group opportunity superseded before seed")
+
+        seed = self._react_member(
+            group=group,
+            source_event=source_event,
+            character_id=ordered[0],
+            commit_guard=current,
+            mentioned_ids=[],
+            autonomous=True,
+            autonomous_phase="SEED",
+        )
+        decisions.append(seed)
+        if on_member is not None:
+            on_member(seed)
+        emitted.extend(
+            GroupEvent.model_validate(item) for item in (seed.get("emitted_events") or [])
+        )
+        if not emitted:
+            return {
+                "conversation_id": group.id,
+                "turn_id": source_event.turn_id,
+                "source_event_id": source_event.id,
+                "speaker_order": ordered,
+                "decisions": decisions,
+                "events": [],
+                "message_count": 0,
+            }
+
+        for character_id in ordered[1:]:
+            if len(emitted) >= cap:
+                break
+            if not current():
+                raise SupersededGroupReaction(
+                    f"autonomous group opportunity {source_event.id} superseded before {character_id}"
+                )
+            decision = self._react_member(
+                group=group,
+                source_event=source_event,
+                character_id=character_id,
+                commit_guard=current,
+                mentioned_ids=[],
+                autonomous=True,
+                autonomous_phase="FOLLOWUP",
+            )
+            decisions.append(decision)
+            if on_member is not None:
+                on_member(decision)
+            emitted.extend(
+                GroupEvent.model_validate(item)
+                for item in (decision.get("emitted_events") or [])
+            )
+
+        return {
+            "conversation_id": group.id,
+            "turn_id": source_event.turn_id,
+            "source_event_id": source_event.id,
+            "speaker_order": ordered,
+            "decisions": decisions,
+            "events": emitted[:cap],
+            "message_count": min(len(emitted), cap),
+        }
 
     def react_from_event(
         self,

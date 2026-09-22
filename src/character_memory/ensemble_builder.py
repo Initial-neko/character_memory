@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -192,6 +193,46 @@ class EnsembleRepository:
             raise KeyError("ensemble build not found")
         return build
 
+    def activate(
+        self,
+        build_id: str,
+        group_id: str,
+        now: datetime,
+        *,
+        created_character_ids: list[str],
+    ) -> dict[str, Any]:
+        with self.store.transaction():
+            cur = self.store.conn.execute(
+                """
+                UPDATE ensemble_builds SET
+                    group_id=?,status='ACTIVE',created_character_ids_json=?,error='',
+                    updated_at=?,updated_at_epoch=?
+                WHERE group_id=?
+                """,
+                (
+                    group_id,
+                    json.dumps(created_character_ids, ensure_ascii=False),
+                    now.isoformat(),
+                    epoch_us(now),
+                    build_id,
+                ),
+            )
+            if cur.rowcount <= 0:
+                raise KeyError("ensemble build not found")
+        build = self.get(group_id)
+        if build is None:
+            raise KeyError("activated ensemble build not found")
+        return build
+
+    def delete(self, group_id: str) -> bool:
+        with self.store._lock:
+            cur = self.store.conn.execute(
+                "DELETE FROM ensemble_builds WHERE group_id=? AND status!='ACTIVE'",
+                (group_id,),
+            )
+            self.store._maybe_commit()
+            return cur.rowcount > 0
+
 
 class EnsembleBuilderService:
     def __init__(self, access, repository: EnsembleRepository):
@@ -256,10 +297,20 @@ class EnsembleBuilderService:
         if len(clean) < 3:
             raise ValueError("先描述要复刻或生成的群聊")
         hint = self._group_name_hint(clean)
-        group = self.groups.create_group(hint, [], now)
-        build = self.repository.create(group.id, clean, hint, now)
-        logger.info("ensemble.start group=%s prompt_chars=%d", group.id, len(clean))
+        build_id = f"ensemble-{uuid4().hex[:12]}"
+        build = self.repository.create(build_id, clean, hint, now)
+        logger.info("ensemble.start build=%s prompt_chars=%d", build_id, len(clean))
         return self.payload(build)
+
+    def prepare(self, prompt: str, *, now: datetime | None = None) -> dict[str, Any]:
+        now = now or datetime.now().astimezone()
+        build = self.start(prompt, now=now)
+        build_id = build["group_id"]
+        try:
+            return self.research(build_id, now=now)
+        except Exception:
+            self.repository.delete(build_id)
+            raise
 
     def _observe(self, prompt: str) -> tuple[str, list[Any], list[dict[str, str]]]:
         query = f"{prompt} 角色 成员 人物 资料 wiki"
@@ -332,8 +383,10 @@ Content:
         build = self.repository.get(group_id)
         if build is None:
             raise KeyError("ensemble build not found")
-        if build["status"] == "ACTIVE":
+        if build["status"] in {"ACTIVE", "READY"}:
             return self.payload(build)
+        if build["status"] == "CANCELLED":
+            raise ValueError("这次群像构建已经取消")
         try:
             query, observations, sources = self._observe(build["prompt"])
             research = self._research(build["prompt"], observations, now)
@@ -366,7 +419,8 @@ Content:
                 )
             if len(drafts) < 2:
                 raise RuntimeError("公开资料不足以确认至少两位群成员")
-            self.groups.rename_group(group_id, research.group_name, now)
+            if self.groups.get_group(group_id, include_archived=True) is not None:
+                self.groups.rename_group(group_id, research.group_name, now)
             build = self.repository.save_research(
                 group_id,
                 group_name=research.group_name,
@@ -400,9 +454,11 @@ Content:
         build = self.repository.get(group_id)
         if build is None:
             raise KeyError("ensemble build not found")
-        if build["status"] not in {"READY", "FAILED"}:
+        if build["status"] != "READY":
             if build["status"] == "ACTIVE":
                 return self.payload(build)
+            if build["status"] == "FAILED":
+                raise ValueError("上次资料整理失败，请重新开始这次 AI 建群")
             raise ValueError("群像资料还没有准备好")
 
         drafts = list(build.get("drafts") or [])
@@ -434,6 +490,9 @@ Content:
 
         created_ids: list[str] = []
         member_ids: list[str] = []
+        legacy_group = self.groups.get_group(group_id, include_archived=True)
+        created_group_id: str | None = None
+        active_group_id = group_id
         try:
             for item in selected:
                 existing = str(item.get("existing_character_id") or "").strip()
@@ -450,10 +509,16 @@ Content:
                 character_id = str(profile["id"])
                 created_ids.append(character_id)
                 member_ids.append(character_id)
-            self.groups.replace_members(group_id, member_ids, now)
-            self.repository.set_status(
+            if legacy_group is not None:
+                self.groups.rename_group(group_id, build["group_name"], now)
+                self.groups.replace_members(group_id, member_ids, now)
+            else:
+                group = self.groups.create_group(build["group_name"], member_ids, now)
+                active_group_id = group.id
+                created_group_id = group.id
+            self.repository.activate(
                 group_id,
-                "ACTIVE",
+                active_group_id,
                 now,
                 created_character_ids=created_ids,
             )
@@ -469,18 +534,28 @@ Content:
                             character_id,
                         )
             try:
-                self.groups.replace_members(group_id, [], now)
+                if created_group_id is not None:
+                    self.groups.delete_empty_group(created_group_id)
+                elif legacy_group is not None:
+                    self.groups.replace_members(group_id, [], now)
             except Exception:
-                logger.exception("ensemble.rollback group_members failed group=%s", group_id)
+                logger.exception(
+                    "ensemble.rollback group_members failed build=%s group=%s",
+                    group_id,
+                    created_group_id or group_id,
+                )
             raise
 
         logger.info(
-            "ensemble.confirm group=%s members=%d new_characters=%d",
+            "ensemble.confirm build=%s group=%s members=%d new_characters=%d",
             group_id,
+            active_group_id,
             len(member_ids),
             len(created_ids),
         )
-        build = self.repository.get(group_id)
+        build = self.repository.get(active_group_id)
+        if build is None:
+            raise KeyError("activated ensemble build not found")
         return self.payload(build)
 
     def cancel(self, group_id: str, *, now: datetime | None = None) -> dict[str, Any]:
@@ -490,6 +565,7 @@ Content:
             raise KeyError("ensemble build not found")
         if build["status"] == "ACTIVE":
             raise ValueError("已经完成的群聊不能作为构建草稿取消")
-        deleted = self.groups.delete_empty_group(group_id)
+        legacy_group = self.groups.get_group(group_id, include_archived=True)
+        deleted = self.groups.delete_empty_group(group_id) if legacy_group is not None else False
         updated = self.repository.set_status(group_id, "CANCELLED", now)
         return {**self.payload(updated), "group_deleted": bool(deleted)}

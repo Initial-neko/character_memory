@@ -34,6 +34,8 @@ def test_feature_routes_consume_composed_services_instead_of_other_routes():
     server = (ROOT / "src" / "character_memory" / "server.py").read_text(encoding="utf-8")
 
     assert "build_runtime_services(settings)" in api
+    assert "CharacterRuntimeAccess(" in api
+    assert "SimpleNamespace" not in api
     assert "services=services" in api
 
     assert "services = access.services" in avatar

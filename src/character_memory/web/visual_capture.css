@@ -15,6 +15,8 @@
   box-shadow: 0 0 0 3px rgba(103,151,255,.18);
 }
 .voice-visual-button.active { border-color: rgba(103,151,255,.65); background: rgba(94,129,244,.26); color: #fff; }
+.voice-visual-button.muted { border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: #c8cfdb; }
+.voice-visual-button:disabled { opacity: .5; cursor: default; }
 .voice-visual-button.stop { color: #ffc8c8; }
 .voice-visual-button.hidden { display: none; }
 .voice-visual-panel { margin: 0 0 14px; overflow: hidden; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; background: #0e1118; }

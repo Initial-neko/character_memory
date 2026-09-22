@@ -24,7 +24,7 @@
 - Direct Chat + Group Chat；群聊共享事实只保存一次，成员按因果顺序逐个判断。
 - 异步消息接受：用户消息先持久化并立即返回 202，人物反应通过 SSE 渐进推送。
 - Message Search、Group Mentions、Unread、Intent Preview、Group Archive/Restore。
-- Character Space：独立空间入口 + 角色动态小入口，共享帖子/评论/点赞/已查看事实；未归档角色默认每 24H 获得一次可沉默的自主发帖机会（测试时可调成 1H/30min/10min），动态发布后最多选择 10 个候选角色（默认最多 5 个，可配置）经同一 PersonRuntime 自主决定忽略/点赞/评论，作者可对评论自主回复；Dev Console 可立即触发完整闭环。
+- Character Space：共享帖子/评论/点赞/已查看/媒体事实；未归档角色默认每 24H 获得一次可沉默的自主发帖机会（测试时可调成 1H/30min/10min），可自然选择文字、互联网搜图、AI 生图，并可在发帖前通过 Search + Headless Chromium 做受限 World Observation；Audience 最多 10 个候选角色，经同一人物状态决定忽略/点赞/评论，作者可自主回复。
 - 用户图片输入 + Vision；浏览器 Camera / Display Capture 会选择关键帧作为本轮 transient Vision context，不把帧二进制长期写进聊天事实。
 - ImageGen：Direct 与 Group 中 Character 都可以自主选择 `SELFIE / SCENE`；同时保留用户显式“AI 生成图片”草稿工具。
 - Avatar Search / Avatar Generate / 从聊天图片设头像。
@@ -33,7 +33,7 @@
 - GSV-TTS-Lite：独立 `:9014` sidecar；音色统一保存为 `voices/<name>.yaml` 模板，`personas/<character>/voice.yaml` 只引用模板；VoiceDesign freeze 会把试听结果固化成可复用模板。
 - Settings Center：`config.yaml` 管正式运行选择，`.env` 管 Secret 与 GSV runtime 资产；测试阶段可直接调整 Character Space 自主开关、Opportunity Interval（默认24H，可测1H等）、Audience 数量（0~10）和 scheduler poll。Provider/Voice/Speed 与 GSV runtime 配置支持热生效；Space 行为配置当前重启 Character Runtime 生效。
 - Dev Console：统一测试 LLM、ASR/TTS、ImageGen、资源与运行状态。
-- Voice Message 基础契约已落地：WAV/MP3 持久化、`VOICE_MESSAGE` action 与 `pending/ready/failed` 状态存在；自动合成、播放器与群聊状态迁移仍在后续实现中。
+- Voice Message V1 已形成 Direct/Group 完整链路：`VOICE_MESSAGE` 先持久化 pending 文本事件，再走正式 TTS 合成 WAV/MP3、更新同一事件为 ready/failed，并由浏览器语音气泡播放或展示失败原因。
 - pytest、Browser Smoke、JSONL Eval regression。
 
 ## 运行架构
@@ -52,6 +52,7 @@ Character Runtime :8000                                         │
 ├─ Persona / Memory / Mental State / Intent                     │
 ├─ Vision / Visual Capture context                              │
 ├─ ImageGen / autonomous visual                                 │
+├─ Character Space / World Observation / Headless Browser       │
 └─ SQLite + local media metadata/files                          │
                                                                 │
 Media Runtime :8001 <-------------------------------------------┘
@@ -146,7 +147,7 @@ uv run python scripts/benchmark_media.py --wav path/to/test.wav --iterations 20
 uv run character-memory eval evals/p0_relationship.jsonl
 ```
 
-Browser Smoke 在 CI 的独立 job 中安装 Playwright/Chromium，不放入默认 `all` extra。
+Playwright Python runtime 已进入 canonical `all` extra，因为 World Observation 正式使用它；Chromium 浏览器二进制仍由独立安装步骤（CI browser job 或 `uv run playwright install chromium`）准备。
 
 ## 仓库目录
 
@@ -193,7 +194,7 @@ Browser Smoke 在 CI 的独立 job 中安装 Playwright/Chromium，不放入默�
 
 ## 核心工程原则
 
-1. **Event 是事实源。** Memory、Mental State、Diary、Trace 都是派生层。
+1. **Durable Facts 是事实源。** Direct Event、Group shared event、Space shared facts 等真实发生的记录优先；Memory、Mental State、Diary、Trace 都是派生认知层。
 2. **人物可以沉默。** 用户输入不意味着必须回复。
 3. **辅助认知失败不应轻易吞掉有效主回复。** 但 outward action 本身仍需要明确合法。
 4. **群聊事实只保存一次。** 不把同一房间消息复制成多个彼此独立的“事实”。

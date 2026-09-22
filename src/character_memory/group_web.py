@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from character_memory.application.group_conversation_service import GroupConversationService
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.images import load_image_catalog
-from character_memory.message_projection import common_chat_message_fields
+from character_memory.message_projection import project_group_message
 
 
 logger = logging.getLogger("character_memory.group_web")
@@ -177,30 +177,22 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
     def event_payload(event, resources: dict, turn_summary: dict | None = None) -> dict:
         profile = resources["profiles"].get(event.actor_id, {})
         role = "user" if event.actor_type == "USER" else "assistant"
-        content = event.metadata.get("display_text", event.content) if role == "user" else event.content
         sticker = sticker_payload(resources, event.metadata.get("sticker_id"))
-        image = image_payload(resources, event.actor_id, event.metadata.get("image_id")) if role == "assistant" else None
+        image = (
+            image_payload(resources, event.actor_id, event.metadata.get("image_id"))
+            if role == "assistant"
+            else None
+        )
         if event.metadata.get("media_id"):
             image = uploaded_media_payload(event.metadata.get("media_id"))
-        return {
-            "id": event.id,
-            "conversation_id": event.conversation_id,
-            "turn_id": event.turn_id,
-            "role": role,
-            "actor_type": event.actor_type,
-            "actor_id": event.actor_id,
-            "actor_name": "我" if role == "user" else (profile.get("name") or event.actor_id),
-            "content": content,
-            "event_time": event.event_time.isoformat(),
-            **common_chat_message_fields(
-                event.metadata,
-                sticker=sticker,
-                image=image,
-            ),
-            "mentions": event.metadata.get("mentions", []) if role == "user" else [],
-            "source_conversation_event_id": event.metadata.get("source_conversation_event_id"),
-            "turn_summary": turn_summary if role == "user" else None,
-        }
+        return project_group_message(
+            event,
+            actor_name="我" if role == "user" else (profile.get("name") or event.actor_id),
+            sticker=sticker,
+            image=image,
+            turn_summary=turn_summary,
+        )
+
 
     def refresh_member_resources(bundle, member_ids: list[str]) -> None:
         profiles = profiles_by_id()

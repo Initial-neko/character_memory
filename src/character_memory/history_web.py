@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
+from character_memory.message_projection import common_chat_message_fields
 from character_memory.storage.chat_history import ChatHistoryRepository
-from character_memory.voice_message_fields import voice_fields
 
 
 def attach_history_routes(app):
@@ -95,16 +95,11 @@ def attach_history_routes(app):
             "content": content,
             "preview": preview,
             "event_time": event.event_time.isoformat(),
-            "action": event.metadata.get("action"),
-            "action_index": event.metadata.get("action_index"),
-            "sticker_id": sticker_id,
-            "sticker": sticker,
-            "image_id": event.metadata.get("image_id"),
-            "media_id": media_id,
-            "image": image,
-            # Deliberately a distinct key from "media_id" above, which drives
-            # image rendering.
-            **voice_fields(event.metadata),
+            **common_chat_message_fields(
+                event.metadata,
+                sticker=sticker,
+                image=image,
+            ),
             "source_event_type": source_event_type,
             "source_event_id": source_event_id,
             "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,

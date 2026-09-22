@@ -126,26 +126,30 @@ Avatar、Space Image Search 与 World Observation 可以共享同一个 SearchPr
 
 ## 4. Person Runtime
 
-主入口：
+Direct 主入口仍是：
 
 ```python
 result = person_runtime.handle(event)
 ```
 
-核心信息流：
+Direct 与 Group 不再各自维护一整套 reaction pipeline。当前边界是：
 
 ```text
-Event / Channel Opportunity
+User text/sticker/image
   ↓
-PersonContextBuilder
-  ├─ Persona
-  ├─ Mental State
-  ├─ Memory Recall
-  └─ Recent Events
+IncomingMessageNormalizer
   ↓
-Relationship Time + Available Resources
+Direct Event / Group Event
   ↓
-Person Model
+ReactionEngine
+  ├─ PersonContextBuilder
+  │   ├─ Persona
+  │   ├─ Mental State
+  │   ├─ Memory Recall
+  │   └─ Recent Events
+  ├─ base + channel context
+  ├─ Person Model
+  └─ resource sanitization
   ↓
 PersonReaction
   ├─ perception / reaction
@@ -154,12 +158,18 @@ PersonReaction
   ├─ memory_candidates[]
   └─ intent_candidates[]
   ↓
-validation / resource sanitization / admission
+channel policy
   ↓
-transactional derived persistence
+shared Action materialization
+  ↓
+Direct / Group persistence + derived-state commit
+  ↓
+canonical Message projection
 ```
 
-Direct、Group、Space/World planning 现在共享同一个 `PersonContextBuilder` 读取人物状态；Channel 仍保留各自 Action/Prompt/persistence contract，不把所有行为强塞进一种 Reaction schema。
+因此“人物如何读取状态、调用模型、校验资源、把 outward action 变成消息”的主要机制是共享的；“事实存哪张表、Group 多成员顺序/@mention/privacy、Direct Intent/Wake/Proactive”仍是显式 channel policy。
+
+Space/World planning 继续共享 `PersonContextBuilder`，但还没有完全进入 `ReactionEngine`；这个差异是已登记的后续 cognition convergence，而不是用 Group/Direct schema 强行套住 Space。
 
 当前 outward primitives：
 

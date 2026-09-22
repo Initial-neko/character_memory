@@ -416,9 +416,9 @@ otherwise                  -> reject
 
 ## 9.5 Voice messages
 
-Voice Message 与 Voice Call 共用正式 TTS Provider，但当前仍是独立的 durable-message 能力。主线已经有 WAV/MP3 存储、`VOICE_MESSAGE` action 和 `pending/ready/failed` 元数据契约；自动 synthesis worker、Browser voice bubble/player、group transition 与 stale-pending recovery 尚未完成。
+Voice Message 与 Voice Call 共用正式 TTS Provider，但生命周期独立。当前主线已经完成 Direct/Group 的 `VOICE_MESSAGE` durable flow：先持久化 pending 文本事件，再由 materializer 调用正式 `:8001/v1/tts`、保存 WAV/MP3 MediaAsset、把同一事件更新为 ready/failed，并由 Browser voice bubble 合并状态和播放。
 
-因此当前正式 voice-call pipeline 不会自动把普通 spoken reply 转成 Voice Message，也不要让 Voice Message 依赖 call session state。完整边界见 [VOICE_MESSAGES.md](VOICE_MESSAGES.md)。
+普通 `MESSAGE` 不会因为 Voice Call 开启就自动转成 durable Voice Message；两者不要依赖彼此的 UI session state。完整边界见 [VOICE_MESSAGES.md](VOICE_MESSAGES.md)。
 
 ## 10. Resource policy
 

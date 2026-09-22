@@ -117,4 +117,5 @@ Append findings below this line.
   - final media intents
   - media failures and audience follow-up error
   - status() aggregates posted/no-post/failed, web exploration/browser render, image-search/ImageGen/voice intent counts.
+  - status() also exposes lightweight Memory growth metrics: active/inactive/pinned/superseded totals plus 24H creation counts by DIRECT/GROUP/SPACE/WORLD source channel.
 - Main Space UI includes 今日邂逅 cards with source provenance, trial chat, keep/dismiss actions, and 10-slot capacity display.

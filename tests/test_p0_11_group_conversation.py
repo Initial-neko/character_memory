@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import shutil
 import subprocess
 
+import pytest
 from fastapi.testclient import TestClient
 
 from character_memory.api import create_api
@@ -214,12 +216,85 @@ def test_web_has_one_submit_owner_and_group_module_never_installs_competing_subm
     assert "/v1/groups/" in groups
     assert "sendSticker" in groups
     assert "group-message-sticker" in css
+    # The CSS above is only worth anything if the group surface asks for the
+    # group variant; the renderer behaviour itself is asserted in
+    # test_group_message_rendering_keeps_its_own_media_classes.
+    assert '"group"' in groups
 
     node = shutil.which("node")
     if node:
         for path in [core_path, web / "persona.js", web / "unread.js", web / "stickers.js", web / "images.js", groups_path, web / "intent.js"]:
             checked = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
             assert checked.returncode == 0, f"{path.name}: {checked.stderr}"
+
+
+# Runs the real web/message_content.js in a stubbed browser realm (node's `vm`)
+# and reports the markup it produces for each surface. Behavioural on purpose:
+# grepping the script for a class name says nothing about whether group rows
+# actually carry it.
+MESSAGE_CONTENT_HARNESS = r"""
+const fs = require("fs");
+const vm = require("vm");
+
+const source = fs.readFileSync(process.argv[2], "utf8");
+const sandbox = {
+  window: {
+    CM: {
+      escapeHtml: value => String(value === undefined || value === null ? "" : value),
+      voiceMessageHtml: () => "",
+    },
+  },
+};
+sandbox.globalThis = sandbox;
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const CM = sandbox.window.CM;
+
+const image = {action: "IMAGE", image: {url: "/v1/media/1", label: "图"}};
+const sticker = {action: "STICKER", sticker: {id: "s1", label: "表情", url: "/v1/stickers/s1/asset"}};
+
+process.stdout.write(JSON.stringify({
+  groupImage: CM.messageContentHtml(image, {variant: "group"}),
+  directImage: CM.messageContentHtml(image),
+  groupSticker: CM.messageContentHtml(sticker, {variant: "group"}),
+  directSticker: CM.messageContentHtml(sticker),
+}));
+"""
+
+
+def test_group_message_rendering_keeps_its_own_media_classes(tmp_path):
+    """Group media keeps the classes p0_11.css sizes it with.
+
+    Group images and stickers are deliberately smaller than direct-chat ones,
+    and those rules hang on group-only classes. A shared renderer that stops
+    emitting them leaves the CSS dead and silently widens every group image to
+    the direct-chat size.
+    """
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to render message_content.js behaviourally")
+
+    harness = tmp_path / "message_content_harness.cjs"
+    harness.write_text(MESSAGE_CONTENT_HARNESS, encoding="utf-8")
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "character_memory" / "web" / "message_content.js"
+    )
+    completed = subprocess.run(
+        [node, str(harness), str(script)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+
+    assert "group-message-image" in payload["groupImage"]
+    assert "group-message-sticker" in payload["groupSticker"]
+    # Direct chat keeps the plain sizing; the hook is group-only on purpose.
+    assert "group-message-image" not in payload["directImage"]
+    assert "group-message-sticker" not in payload["directSticker"]
 
 
 def test_old_version_override_scripts_are_removed():

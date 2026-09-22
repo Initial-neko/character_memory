@@ -47,11 +47,11 @@ class ActionType(str, Enum):
     SPACE_COMMENT = "SPACE_COMMENT"
 
 
-# Actions that produce a visible outward message. All four action gates --
-# runtime/person_runtime.py, application/group_conversation_service.py,
-# application/proactive_service.py and eval/runner.py -- consult this one set.
-# It used to be duplicated verbatim in each of them, where editing one copy
-# silently dropped the action in the other three.
+# Actions that produce a visible outward message. Every action gate consults
+# this one set: application/action_materialization.py (the persistence gate
+# Direct and Group now share), application/proactive_service.py and
+# eval/runner.py. It used to be duplicated verbatim in each gate, where editing
+# one copy silently dropped the action in the others.
 EXPRESSIVE_ACTIONS = frozenset({
     ActionType.REPLY,
     ActionType.MINIMAL_RESPONSE,

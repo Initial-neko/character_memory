@@ -13,10 +13,16 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 ## Current baseline
 
 - Repository: `Initial-neko/character_memory`
-- Base: `main@66231ef45fccb5bc685ae6b0969237cd836ebd2a`
-- Active branch: `feature/memory-governance-context`
+- Base: `main@caf24d34ec90a501b46bdcf6d5323544d5a09d42`
+- Active branch: none
 - Pull request: **#75 — Add minimal Memory governance and shared Person context**
-- Status: **CI / acceptance pending**
+- Status: **MERGED**
+
+## Validation
+
+- PR #75 merged to `main` as `caf24d34ec90a501b46bdcf6d5323544d5a09d42`.
+- Final PR CI run #397 passed `test`, `windows-smoke`, and `browser-smoke` on head `d703e6feab325580f1cc26ac11c137c646bc6539`.
+- CI caught and the PR fixed two implementation regressions before merge: missing SQLite bindings for pinned candidates and one stale Space context call.
 
 ## Current slice
 

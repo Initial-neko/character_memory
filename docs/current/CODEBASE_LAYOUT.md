@@ -51,7 +51,8 @@ src/character_memory/
 ### `runtime/`
 
 - `person_runtime.py` — Event → Recall → LLM → derived persistence。
-- `context.py` — compiled character context。
+- `person_context.py` — Direct/Group/Space/World shared read-only Persona + Mental State + Recall + Recent Events snapshot。
+- `context.py` — channel-aware compiled character prompt。
 - `sticker_retrieval.py` — Sticker 候选检索。
 
 ### `memory/`
@@ -75,6 +76,7 @@ server.py               application assembly / attach routes
 async_web.py            async message accept + SSE routes
 group_web.py            group HTTP surface
 history_web.py          history APIs
+memory_web.py           minimal Memory Inspector / pin / forget / correct APIs
 search_web.py           durable message search APIs
 world_web.py            World Observation diagnostic HTTP surface
 space_web.py            Character Space HTTP surface
@@ -256,7 +258,7 @@ time_format.js          shared MM-DD HH:mm:ss timestamp formatter
 | Group chat | `group_store.py` → `application/group_conversation_service.py` → `group_web.py` → `web/groups.js` |
 | Character Space | `space_store.py` → `space_autonomy.py` → `space_media_executor.py` / `world_observation.py` → `space_web.py` → `web/space.js` |
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
-| Memory/Recall | `memory/embedding.py` → `memory/recall.py` → `storage/sqlite.py` |
+| Memory/Recall/Governance | `runtime/person_context.py` → `memory/recall.py` → `storage/sqlite.py` → `memory_web.py` → `web/app.js` |
 | Formal TTS registry/routing | `tts_registry.py` → `settings_server.py` / `media_server.py` → `tts_lab.py` |
 | Character GSV voice | `voices.py` → `gsv_tts_experiment.py` → `tts_lab.py` VoiceDesign freeze |
 | Sticker | `stickers.py` → `runtime/sticker_retrieval.py` → `web/stickers.js` |

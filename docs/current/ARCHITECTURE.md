@@ -17,6 +17,7 @@ Character Runtime :8000                                         │
 ├─ FastAPI / Direct / Group / SSE                               │
 ├─ ReactionScheduler / PersonRuntime                            │
 ├─ SpaceAutonomyScheduler / GroupAutonomyScheduler              │
+├─ WorldActivityScheduler (Pulse / Personal Browse)             │
 ├─ Persona / Memory / Mental State / Intent                     │
 ├─ Vision + Visual Capture context                              │
 ├─ ImageGen / autonomous visual                                 │
@@ -247,6 +248,8 @@ Direct fact        -> events
 Group shared fact  -> conversation_events
 Group autonomy     -> hidden GROUP_OPPORTUNITY provenance + CHARACTER_MESSAGE
 Space shared fact  -> space_*
+World Pulse topic  -> world_pulse_topics / world_pulse_comments
+Personal browsing  -> WORLD_OBSERVATION Event
 Media fact         -> media_assets
                      ↓
 Derived cognition  -> Memory / Mental State / Intent / Trace
@@ -271,6 +274,10 @@ Derived cognition  -> Memory / Mental State / Intent / Trace
 - `conversation_members`
 - `conversation_events`
 - `conversation_runtime_traces`
+- `world_pulse_topics`
+- `world_pulse_comments`
+- `world_activity_state`
+- `world_activity_runs`
 
 SQLite 是当前单机事实源。连接由进程内 `RLock` 保护，并通过 migration ledger 做幂等 schema 演进。
 
@@ -391,6 +398,29 @@ World Search、Browser Render、Memory、Public Expression 是四个不同边界
 **尚未定案的架构问题：** Space/World 的 planning/appraisal 目前仍有一部分在 `SpaceAutonomyService` 自己编译上下文并直接调用 model，而不是完全复用 PersonRuntime 的 Context/Recall pipeline。这个问题与“哪些 World 信息值得长期记忆、用户如何干预 Memory”绑在一起，当前只登记，不在本轮 composition-root 重构中擅自统一。
 
 详见 [`CHARACTER_SPACE.md`](CHARACTER_SPACE.md) 与 [`MEMORY.md`](MEMORY.md)。
+
+### World Activity: browse often, post rarely
+
+互联网观察现在还有一条与 Space 发帖机会解耦的正式路径：
+
+```text
+Aggregation pages
+  -> World Pulse
+  -> deduped shared topics
+  -> a few interested character comments
+
+Persona / Mental State / Memory
+  -> Personal Browse
+  -> Search + rendered pages
+  -> recent WORLD_OBSERVATION
+
+Space Opportunity
+  -> remains its own lower-frequency publish decision
+```
+
+`WorldActivityScheduler` 为 Pulse refresh、Pulse discussion 和每个 Character 的 Personal Browse 维护独立 durable clock。Pulse 不重新发明“全网热度算法”，而是读取配置的信息聚合/热榜页面，再让 LLM 做有限的去重与摘要。
+
+Personal Browse 可以比发帖高频，但不会自动发 Space、Direct message 或长期 Memory。详见 [`WORLD_ACTIVITY.md`](WORLD_ACTIVITY.md)。
 
 ## 12. Media Runtime and formal TTS
 

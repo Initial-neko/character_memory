@@ -5,7 +5,6 @@ import logging
 from pydantic import BaseModel, Field
 
 from character_memory.avatar_intent import AvatarIntentPlanner, AvatarSearchIntent
-from character_memory.avatars import AvatarSearchService, AvatarStore
 from character_memory.config import load_persona, split_archived
 from character_memory.domain.models import EventType
 

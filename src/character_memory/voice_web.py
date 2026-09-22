@@ -94,6 +94,8 @@ def voice_snapshot(*, characters: Iterable[dict], voices_root: Path) -> dict:
     by_name = {entry["name"]: entry for entry in templates}
     status_by_character: dict[str, dict] = {}
     for item in characters:
+        if "archived_at" in item:
+            continue
         character_id = item["id"]
         persona_path = Path(item["persona_path"])
         try:
@@ -155,7 +157,7 @@ def attach_voice_routes(app) -> None:
 
     from fastapi import HTTPException
 
-    from character_memory.config import discover_character_profiles
+    from character_memory.config import discover_character_profiles, split_archived
     from character_memory.tts_lab import GsvVoiceReloader
     from character_memory.voices import template_root
 
@@ -168,13 +170,8 @@ def attach_voice_routes(app) -> None:
     settings = access.settings
     reloader = GsvVoiceReloader()
 
-    def _persona_dir(character_id: str) -> Path:
-        """Resolve through the discovered whitelist; never join the raw id.
-
-        ``character_id`` is ``data.get("id") or path.parent.name`` upstream, so
-        the directory name is not authoritative and the client string must not
-        reach the filesystem.
-        """
+    def _profile(character_id: str) -> dict:
+        """Resolve through the discovered whitelist; never join the raw id."""
 
         profile = next(
             (item for item in discover_character_profiles(settings) if item["id"] == character_id),
@@ -182,7 +179,10 @@ def attach_voice_routes(app) -> None:
         )
         if profile is None:
             raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}")
-        return Path(profile["persona_path"]).parent
+        return profile
+
+    def _persona_dir(character_id: str) -> Path:
+        return Path(_profile(character_id)["persona_path"]).parent
 
     def _reload() -> tuple[bool, str | None]:
         """Non-fatal: the file is already on disk and GSV picks it up at next start.
@@ -203,12 +203,15 @@ def attach_voice_routes(app) -> None:
     @app.get("/v1/voice-templates")
     def voice_templates():
         return voice_snapshot(
-            characters=discover_character_profiles(settings),
+            characters=split_archived(discover_character_profiles(settings), False),
             voices_root=template_root(None),
         )
 
     @app.post("/v1/characters/{character_id}/voice")
     def set_character_voice(character_id: str, req: CharacterVoiceRequest):
+        profile = _profile(character_id)
+        if "archived_at" in profile:
+            raise HTTPException(status_code=409, detail="archived characters do not participate in active voice synthesis")
         persona_dir = _persona_dir(character_id)
         try:
             write_character_voice(

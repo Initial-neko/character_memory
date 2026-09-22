@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Any
+from typing import Any, Callable
 
 from character_memory.domain.models import Event
 from character_memory.runtime.context import compile_context
@@ -39,6 +39,7 @@ def evaluate_reaction(
     exclude_event_id: int | None = None,
     last_chat_event: Event | None = None,
     sticker_query: str | None = None,
+    sticker_query_builder: Callable[[list[Event]], str] | None = None,
     context_suffix: str = "",
     session_id: str | None = None,
     image_data_urls: list[str] | None = None,
@@ -64,6 +65,8 @@ def evaluate_reaction(
 
     stage = time.perf_counter()
     resolved_sticker_query = sticker_query
+    if sticker_query_builder is not None:
+        resolved_sticker_query = sticker_query_builder(recent)
     if resolved_sticker_query is None:
         resolved_sticker_query = runtime._sticker_query(event, recent)
     sticker_retrieval = runtime.sticker_retriever.retrieve(runtime.sticker_catalog, resolved_sticker_query)

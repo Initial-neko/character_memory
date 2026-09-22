@@ -225,6 +225,8 @@ The scheduler persists `space_opportunity_state` and `space_opportunity_runs`, s
 
 `space_opportunity_runs.details_json` records the World Observation outcome, the derived `plan` payload (has_text + media intents) and the media/audience errors. It also keeps `model_calls`: the raw structured output of each autonomous call (`world_explore`, `world_appraisal`, `space_plan`) with the model name, the attempt number, and the output rejected by schema validation. Raw output is truncated at 2000 characters per call and flagged when it was cut. `repaired: true` on a record means the first output failed validation and the generic repair prompt produced the kept one — the path where an invalid media intent comes back as an empty list instead of surfacing an error.
 
+The ledger is read at two sizes. `GET /v1/space/dev/status` reports `recent_runs` as a verdict per call (`attempt`, `chars`, plus `repaired` / `truncated` / `failed` only when true) so polling the status never carries raw model text, and `recent_run_details: "summary"` says so. `GET /v1/space/dev/opportunity/run/{run_id}` returns one run in full, raw output included; Dev Console's **决策账本** Run ID control reads that endpoint.
+
 Settings Center persists:
 
 ```text

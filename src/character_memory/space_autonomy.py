@@ -95,6 +95,36 @@ def _model_call_record(stage: str, schema: type[BaseModel], *, trace=None, error
     return record
 
 
+def _summarize_model_calls(details: dict) -> dict:
+    """Status-sized view of the ledger: never carries the raw model text.
+
+    The scheduling status polls up to 100 runs and the Dev Console dumps the
+    whole payload into one text pane, so each run reports only the verdict of
+    each call and the raw text stays behind the single-run endpoint
+    (``GET /v1/space/dev/opportunity/run/{run_id}``). ``attempt`` and ``chars``
+    are always present -- ``chars`` is what tells a reader the full text is
+    stored for that call -- while ``repaired``, ``truncated`` and ``failed``
+    appear only when they are true, so a clean run stays small and a scan of
+    recent runs surfaces the runs that need reading.
+    """
+    summary = {}
+    for stage, record in (details.get("model_calls") or {}).items():
+        if not isinstance(record, dict):
+            continue
+        entry = {
+            "attempt": int(record.get("attempt") or 0),
+            "chars": int(record.get("raw_response_chars") or 0),
+        }
+        if record.get("repaired"):
+            entry["repaired"] = True
+        if record.get("raw_response_truncated"):
+            entry["truncated"] = True
+        if str(record.get("error") or "").strip():
+            entry["failed"] = True
+        summary[stage] = entry
+    return {**details, "model_calls": summary}
+
+
 class SpaceAutonomyService:
     """Autonomous Space behavior for the same persistent PersonRuntime.
 
@@ -902,7 +932,10 @@ class SpaceAutonomyScheduler:
                     "due": epoch_us(now) >= int(state["next_opportunity_at_epoch"]),
                 }
             )
-        recent_runs = self.repository.list_opportunity_runs(limit=100)
+        recent_runs = [
+            {**run, "details": _summarize_model_calls(run.get("details") or {})}
+            for run in self.repository.list_opportunity_runs(limit=100)
+        ]
         metrics = {
             "opportunities": len(recent_runs),
             "posted": 0,
@@ -960,6 +993,10 @@ class SpaceAutonomyScheduler:
             ),
             "characters": items,
             "recent_runs": recent_runs,
+            # recent_runs carries a summary of each decision, not its raw model
+            # output; the full details are one request away.
+            "recent_run_details": "summary",
+            "run_detail_path": "/v1/space/dev/opportunity/run/{run_id}",
             "metrics": metrics,
             "memory_metrics": self.memory_metrics(now),
         }

@@ -777,6 +777,9 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="applySpaceConfig"',
         'id="forceSpaceDue"',
         'id="spaceStatusAge"',
+        'id="spaceRunId"',
+        'id="loadSpaceRunRaw"',
+        'id="spaceRunResult"',
         'data-minutes="60"',
     ]:
         assert token in html
@@ -795,6 +798,7 @@ def test_dev_console_exposes_space_autonomy_controls():
     for token in [
         "/v1/dev/space/status",
         "/v1/dev/space/opportunity/",
+        "/v1/dev/space/opportunity/run/",
         "/v1/dev/space/audience/",
         "/v1/dev/space/media/",
         "/v1/dev/space/config",
@@ -1052,3 +1056,93 @@ def test_failed_run_still_keeps_the_model_output_that_broke_it(tmp_path):
     assert record["raw_response"] == "还是想不出来。"
     assert record["repaired"] is False
     store.close()
+
+
+def test_status_reports_a_repair_as_a_verdict_and_keeps_the_raw_text_behind_one_run(tmp_path):
+    """The status stays light; the raw output is one request away.
+
+    recent_runs must not carry the raw text, but it must still say that this
+    run went through repair, and the full record has to remain readable for the
+    run it points at.
+    """
+    plan_first = json.dumps(
+        {"social_post": "想发一张雨夜的照片。", "media_intents": [{"type": "SEARCH_IMAGE", "count": 1}]},
+        ensure_ascii=False,
+    )
+    plan_repaired = json.dumps(
+        {"social_post": "想发一张雨夜的照片。", "media_intents": []},
+        ensure_ascii=False,
+    )
+    model = ScriptedProviderSpaceModel([plan_first, plan_repaired])
+    access, store, _ = _access(tmp_path, ids=("c00",), model=model)
+    access.settings.space_opportunity_interval_minutes = 30
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    start = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+    scheduler.status(start)
+
+    outcomes = scheduler.run_once(datetime(2026, 9, 22, 8, 30, tzinfo=timezone.utc))
+    model.close()
+    run_id = outcomes[0]["run_id"]
+
+    status = scheduler.status(datetime(2026, 9, 22, 8, 31, tzinfo=timezone.utc))
+    payload = json.dumps(status, ensure_ascii=False)
+    run = next(item for item in status["recent_runs"] if item["id"] == run_id)
+    verdict = run["details"]["model_calls"]["space_plan"]
+
+    assert "raw_response" not in verdict
+    assert "rejected_raw_response" not in verdict
+    assert verdict["repaired"] is True
+    assert verdict["attempt"] == 2
+    assert verdict["chars"] == len(plan_repaired)
+    assert "failed" not in verdict
+    assert plan_repaired not in payload
+    assert "SEARCH_IMAGE" not in payload
+    assert status["recent_run_details"] == "summary"
+    assert status["run_detail_path"] == "/v1/space/dev/opportunity/run/{run_id}"
+
+    # The same run still answers with everything the status left out.
+    detail = repository.get_opportunity_run(run_id)
+    record = detail["details"]["model_calls"]["space_plan"]
+    assert record["raw_response"] == plan_repaired
+    assert "SEARCH_IMAGE" in record["rejected_raw_response"]
+    assert record["validation_error"]
+    assert repository.get_opportunity_run(run_id + 999) is None
+    store.close()
+
+
+def _status_payload_bytes(tmp_path, folder, social_post):
+    (tmp_path / folder).mkdir()
+    plan_raw = json.dumps({"social_post": social_post, "media_intents": []}, ensure_ascii=False)
+    model = RawTextSpaceModel({SpacePostPlan: plan_raw})
+    access, store, _ = _access(tmp_path / folder, ids=("c00",), model=model)
+    access.settings.space_opportunity_interval_minutes = 30
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    scheduler.status(datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc))
+    scheduler.run_once(datetime(2026, 9, 22, 8, 30, tzinfo=timezone.utc))
+    run = repository.list_opportunity_runs(character_id="c00")[0]
+    stored_raw = run["details"]["model_calls"]["space_plan"]["raw_response"]
+    payload = json.dumps(
+        scheduler.status(datetime(2026, 9, 22, 8, 31, tzinfo=timezone.utc)),
+        ensure_ascii=False,
+    )
+    store.close()
+    return payload, stored_raw
+
+
+def test_status_payload_does_not_grow_with_raw_model_output(tmp_path):
+    """A 2500-character model output must not make the status payload bigger.
+
+    The run ledger keeps the raw text; the status reports the verdict only. The
+    two runs differ solely in how long the model's answer was, so equal payload
+    sizes prove the status no longer scales with it.
+    """
+    short_payload, short_raw = _status_payload_bytes(tmp_path, "short", "今天想安静一点。")
+    long_payload, long_raw = _status_payload_bytes(tmp_path, "long", "长" * 2500)
+
+    assert "今天想安静一点。" in short_raw
+    assert len(long_raw) > 2000
+    assert "长" * 200 not in short_payload and "长" * 200 not in long_payload
+    # Only wall-clock timestamps differ between the two payloads.
+    assert abs(len(long_payload) - len(short_payload)) < 200

@@ -195,6 +195,21 @@
     }
   }
 
+  async function loadSpaceRunRaw() {
+    const runId = Number($("spaceRunId").value || 0);
+    if (!runId) {
+      $("spaceRunResult").textContent = "先填一个 run id：刷新调度状态后，在 recent_runs 里能看到最近几次决策的 id。";
+      return;
+    }
+    $("spaceRunResult").textContent = `正在读取 run ${runId} ...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/space/opportunity/run/${encodeURIComponent(runId)}`);
+      $("spaceRunResult").textContent = pretty(data);
+    } catch (error) {
+      $("spaceRunResult").textContent = `ERROR: ${error.message}`;
+    }
+  }
+
   async function runSpaceMedia() {
     const button = $("runSpaceMedia");
     const characterId = $("spaceCharacter").value;
@@ -722,6 +737,7 @@
   $("runWorldSearch").addEventListener("click", runWorldSearch);
   $("runWorldFetch").addEventListener("click", runWorldFetch);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);
+  $("loadSpaceRunRaw").addEventListener("click", loadSpaceRunRaw);
   $("applyGroupAutonomyConfig").addEventListener("click", applyGroupAutonomyConfig);
   $("runGroupAutonomyOpportunity").addEventListener("click", runGroupAutonomyOpportunity);
   $("forceGroupAutonomyDue").addEventListener("click", forceGroupAutonomyDue);

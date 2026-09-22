@@ -740,6 +740,15 @@ class SpaceRepository:
             )
             self.store._maybe_commit()
 
+    @staticmethod
+    def _opportunity_run_row(row) -> dict[str, Any]:
+        item = dict(row)
+        try:
+            item["details"] = json.loads(item.pop("details_json", "{}") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            item["details"] = {}
+        return item
+
     def list_opportunity_runs(
         self,
         *,
@@ -755,12 +764,25 @@ class SpaceRepository:
         args.append(max(1, min(int(limit), 500)))
         with self.store._lock:
             rows = self.store.conn.execute(sql, args).fetchall()
-        items = []
-        for row in rows:
-            item = dict(row)
-            try:
-                item["details"] = json.loads(item.pop("details_json", "{}") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                item["details"] = {}
-            items.append(item)
-        return items
+        return [self._opportunity_run_row(row) for row in rows]
+
+    def get_opportunity_run(
+        self,
+        run_id: int,
+        *,
+        character_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """One run with its full details, including the raw model output.
+
+        The scheduling status deliberately reports a summary of the ledger and
+        points here instead, so reading one decision does not make every status
+        poll carry every raw output.
+        """
+        sql = "SELECT * FROM space_opportunity_runs WHERE id=?"
+        args: list[Any] = [int(run_id)]
+        if character_id:
+            sql += " AND character_id=?"
+            args.append(character_id)
+        with self.store._lock:
+            row = self.store.conn.execute(sql, args).fetchone()
+        return self._opportunity_run_row(row) if row is not None else None

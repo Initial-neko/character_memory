@@ -134,6 +134,16 @@
           <button class="secondary" id="refreshSpaceStatus" type="button">刷新调度状态</button>
         </div>
 
+        <div class="field-group">
+          <span class="field-group-label">决策账本</span>
+          <div class="visual-provider-row">
+            <label>Run ID<input id="spaceRunId" type="number" min="1" placeholder="调度状态 recent_runs 里的 id" /></label>
+          </div>
+          <div class="actions">
+            <button class="secondary" id="loadSpaceRunRaw" type="button">读取该次决策的原始模型输出</button>
+          </div>
+        </div>
+
         <div class="visual-provider-row">
           <label>Media Test
             <select id="spaceMediaType">
@@ -170,6 +180,10 @@
         <details class="debug-output">
           <summary>原始调度状态（调试用）</summary>
           <pre id="spaceStatus" class="result">等待读取 Space 调度状态...</pre>
+        </details>
+        <details class="debug-output">
+          <summary>单次决策的原始模型输出（调试用）</summary>
+          <pre id="spaceRunResult" class="result">等待读取...</pre>
         </details>
         <details class="debug-output">
           <summary>原始执行结果（调试用）</summary>

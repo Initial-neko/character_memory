@@ -624,3 +624,69 @@ def test_uploaded_image_media_is_inline_for_space_lightbox(tmp_path: Path):
         assert response.headers.get("content-disposition", "").startswith("inline;")
 
 
+
+
+def test_space_dev_status_summarizes_the_ledger_and_one_run_still_returns_the_raw_output(tmp_path: Path):
+    """The polling status stays light; one decision is still readable in full.
+
+    The Dev Console reads both: the status is polled (and dumped into one text
+    pane), so it must not carry every raw model output, while the run endpoint
+    is the drill-down that has to keep them.
+    """
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        store = app.state.character_memory.read_store
+        repository = SpaceRepository(store)
+        now = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+        repository.set_next_opportunity("c00", now, now)
+        run_id = repository.claim_due_opportunity("c00", now, 30.0, source="SCHEDULED")
+        raw = '{"social_post":"想发一张雨夜的照片。","media_intents":[{"type":"SEARCH_IMAGE","count":1}]}'
+        repository.finish_opportunity_run(
+            run_id,
+            "c00",
+            now,
+            status="NO_POST",
+            details={
+                "plan": {"has_text": True, "media_intents": []},
+                "model_calls": {
+                    "space_plan": {
+                        "stage": "space_plan",
+                        "schema": "SpacePostPlan",
+                        "model": "deepseek-flash",
+                        "attempt": 2,
+                        "repaired": True,
+                        "raw_response": raw,
+                        "raw_response_chars": len(raw),
+                        "raw_response_truncated": False,
+                        "error": "",
+                        "rejected_raw_response": raw,
+                        "rejected_raw_response_truncated": False,
+                        "validation_error": "SEARCH_IMAGE requires query",
+                    }
+                },
+            },
+        )
+
+        status = client.get("/v1/space/dev/status")
+        assert status.status_code == 200
+        payload = status.text
+        assert raw not in payload
+        assert "SEARCH_IMAGE" not in payload
+        run = next(item for item in status.json()["recent_runs"] if item["id"] == run_id)
+        verdict = run["details"]["model_calls"]["space_plan"]
+        assert verdict["repaired"] is True
+        assert verdict["attempt"] == 2
+        assert verdict["chars"] == len(raw)
+        assert "raw_response" not in verdict
+
+        detail = client.get(f"/v1/space/dev/opportunity/run/{run_id}")
+        assert detail.status_code == 200
+        record = detail.json()["details"]["model_calls"]["space_plan"]
+        assert record["raw_response"] == raw
+        assert record["rejected_raw_response"] == raw
+        assert record["validation_error"] == "SEARCH_IMAGE requires query"
+
+        assert client.get("/v1/space/dev/opportunity/run/999999").status_code == 404

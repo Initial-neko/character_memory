@@ -70,6 +70,42 @@ def _save_test_audio(app, character_id: str, index: int, *, source: str = "SPACE
     return asset
 
 
+def test_post_readers_do_not_depend_on_comment_only_columns(tmp_path: Path):
+    """Only comments carry an actor; a post read must not touch that column.
+
+    Reading a post used to ask the row for `actor_type`, a column that exists
+    on `space_comments` and never on `space_posts`, which raised IndexError and
+    turned the whole feed into a 500 for every client.
+    """
+    store = SQLiteStore(tmp_path / "post-readers.db")
+    posts = SpaceRepository(store)
+    now = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+    created = posts.create_post("c00", "只有角色会发动态。", now)
+
+    listed, _, _ = posts.list_posts(limit=5)
+    assert [item.id for item in listed] == [created.id]
+    assert posts.get_post(created.id).content == "只有角色会发动态。"
+    store.close()
+
+
+def test_comment_actor_survives_a_reload(tmp_path: Path):
+    """A browser comment must not come back as a character comment.
+
+    The actor decides whose name is shown and whether the comment spends one of
+    the ten character slots, so losing it on read changes both.
+    """
+    store = SQLiteStore(tmp_path / "comment-actors.db")
+    posts = SpaceRepository(store)
+    now = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+    post = posts.create_post("c00", "正文", now)
+    posts.add_comment(post.id, "user", "用户留言", now, actor_type="USER")
+    posts.add_comment(post.id, "c01", "角色留言", now, actor_type="CHARACTER")
+
+    actors = {item.character_id: item.actor_type for item in posts.list_comments(post.id)}
+    assert actors == {"user": "USER", "c01": "CHARACTER"}
+    store.close()
+
+
 def test_space_repository_keeps_shared_social_facts_and_caps_distinct_commenters(tmp_path: Path):
     store = SQLiteStore(tmp_path / "space-store.db")
     repo = SpaceRepository(store)

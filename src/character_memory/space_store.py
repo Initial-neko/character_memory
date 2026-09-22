@@ -203,7 +203,6 @@ class SpaceRepository:
         return SpacePost(
             id=int(row["id"]),
             character_id=str(row["character_id"]),
-            actor_type=str(row["actor_type"] or "CHARACTER"),
             content=str(row["content"]),
             created_at=parse_datetime(row["created_at"]),
             media_id=row["media_id"],
@@ -217,6 +216,10 @@ class SpaceRepository:
             id=int(row["id"]),
             post_id=int(row["post_id"]),
             character_id=str(row["character_id"]),
+            # A comment stored as written by the browser user must not come back
+            # as a character comment: the actor decides whose name is shown and
+            # whether the comment spends one of the ten character slots.
+            actor_type=str(row["actor_type"] or "CHARACTER"),
             content=str(row["content"]),
             created_at=parse_datetime(row["created_at"]),
             reply_to_comment_id=row["reply_to_comment_id"],

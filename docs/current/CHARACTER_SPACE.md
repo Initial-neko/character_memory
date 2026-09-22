@@ -306,6 +306,7 @@ The product should stay small-scale and legible even if many personas exist.
 - one automatic post audience must never exceed 10 characters;
 - one post may have at most 10 distinct character commenters;
 - human-user comments are durable shared facts but do not consume that 10-character commenter ceiling;
+- the comment actor (`CHARACTER` or `USER`) is stored and read back with the comment: it decides the shown name and whether the comment spends a character slot, so a reader that drops it silently reclassifies every user comment as a character one;
 - one post may reference at most 9 media assets;
 - 10 character commenters/audience members and 9 media assets are hard ceilings, not targets;
 - the autonomous selector normally processes the configured audience size (default 5), always capped at 10;

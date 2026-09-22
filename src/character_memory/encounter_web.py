@@ -48,12 +48,15 @@ def attach_encounter_routes(app):
         return sum(1 for item in access.character_profiles() if "archived_at" not in item)
 
     def payload(candidate: dict) -> dict:
-        limit = int(getattr(access, "max_active_characters", 10))
+        limit = int(getattr(access, "max_active_characters", 20))
+        soft_limit = int(getattr(access, "soft_active_characters", 10))
         return {
             **candidate,
             "messages": repository.list_messages(candidate["id"], limit=50),
             "active_character_count": active_count(),
             "active_character_limit": limit,
+            "active_character_soft_limit": soft_limit,
+            "needs_confirmation": active_count() >= soft_limit and active_count() < limit,
             "can_accept": (
                 candidate["status"] not in {"ACCEPTED", "DISMISSED", "EXPIRED", "FAILED"}
                 and active_count() < limit
@@ -66,12 +69,13 @@ def attach_encounter_routes(app):
             limit=max(1, min(int(limit), 50)),
             include_closed=bool(include_closed),
         )
-        character_limit = int(getattr(access, "max_active_characters", 10))
+        character_limit = int(getattr(access, "max_active_characters", 20))
         return {
             "encounters": [payload(item) for item in candidates],
             "pending_count": repository.pending_count(),
             "active_character_count": active_count(),
             "active_character_limit": character_limit,
+            "active_character_soft_limit": int(getattr(access, "soft_active_characters", 10)),
         }
 
     @app.get("/v1/encounters/status")
@@ -79,7 +83,8 @@ def attach_encounter_routes(app):
         return {
             **scheduler.status(),
             "active_character_count": active_count(),
-            "active_character_limit": int(getattr(access, "max_active_characters", 10)),
+            "active_character_limit": int(getattr(access, "max_active_characters", 20)),
+            "active_character_soft_limit": int(getattr(access, "soft_active_characters", 10)),
         }
 
     @app.post("/v1/encounters/dev/opportunity")
@@ -122,9 +127,12 @@ def attach_encounter_routes(app):
             raise HTTPException(status_code=502, detail=f"临时邂逅回复失败：{exc}") from exc
 
     @app.post("/v1/encounters/{candidate_id}/accept")
-    def accept_encounter(candidate_id: int):
+    def accept_encounter(candidate_id: int, confirm_over_soft_limit: bool = False):
         try:
-            accepted = service.accept(candidate_id)
+            accepted = service.accept(
+                candidate_id,
+                confirm_over_soft_limit=confirm_over_soft_limit,
+            )
             return {"candidate": payload(accepted)}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

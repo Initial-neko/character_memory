@@ -366,7 +366,7 @@ class WorldExplorePlan(BaseModel):
         query = " ".join(str(self.query or "").split()).strip()[:240]
         if self.explore and not query:
             raise ValueError("explore=true requires a public search query")
-        self.query = query or None if self.explore else None
+        self.query = query if self.explore else None
         return self
 
 

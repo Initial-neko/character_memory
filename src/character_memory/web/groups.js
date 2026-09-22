@@ -126,17 +126,9 @@
     row.dataset.messageId = message.id ?? "";
     const speaker = message.role === "assistant" ? `<div class="group-speaker-name">${CM.escapeHtml(message.actor_name || message.actor_id)}</div>` : "";
     const avatar = groupMessageAvatar(message);
-    const sticker = message.sticker || (message.sticker_id ? {id:message.sticker_id,label:message.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset`} : null);
-    const isVoiceMessage = message.action === "VOICE_MESSAGE";
-    const hideStoredResourceText = isVoiceMessage || (message.action === "STICKER" && sticker) || (message.action === "IMAGE" && message.image);
-    const text = hideStoredResourceText ? "" : String(message.content || "").trim();
-    const textHtml = text ? `<div class="bubble">${CM.escapeHtml(text)}</div>` : "";
-    const stickerHtml = sticker?.url ? `<div class="sticker-bubble"><img class="group-message-sticker" src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>` : "";
-    const imageHtml = message.image?.url ? `<div class="image-bubble"><img class="group-message-image" src="${CM.escapeHtml(message.image.url)}" alt="${CM.escapeHtml(message.image.label || "图片")}" loading="lazy"><div class="image-caption">${CM.escapeHtml(message.image.label || "图片")}</div></div>` : "";
-    const voiceHtml = CM.voiceMessageHtml(message);
-    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${speaker}${textHtml}${stickerHtml}${imageHtml}${voiceHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${turnButton(message)}</div></div>`;
-    row.querySelectorAll(".sticker-bubble img").forEach(img => img.addEventListener("error", () => img.closest(".sticker-bubble")?.classList.add("broken"), {once:true}));
-    CM.bindVoiceMessage(row);
+    const contentHtml = CM.messageContentHtml(message);
+    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${speaker}${contentHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${turnButton(message)}</div></div>`;
+    CM.bindMessageContent(row);
     CM.dom.chat.appendChild(row);
   }
 

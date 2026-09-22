@@ -2,24 +2,29 @@
 
 本文定义当前已经确认的 Memory 原则和 baseline。Memory 仍然是 Persistent Person 的核心研究面之一，但不会为了“更像长期记忆系统”提前堆复杂层次。
 
-## 1. Event Log 是历史事实源
+## 1. Durable Facts 是历史事实源
 
-原始经历首先进入 append-only Event Log。
+原始经历先进入它所属的 durable fact store，而不是为了形式统一全部复制进一个 `events` 表。
 
 ```text
-Event Log = Source of Truth
+Direct fact        -> events
+Group shared fact  -> conversation_events
+Space shared fact  -> space_*
+Media fact         -> media_assets
+
+Durable Facts = Source of Truth
 Memory / Mental State / Diary / Summary = derived cognition
 ```
 
 因此：
 
-- Memory 写错，不修改原始 Event；
-- Memory 策略未来换版本，可以从 Event 重建；
-- Diary 不能替代当天真实事件；
-- 每条派生 Memory 保留 `source_event_id`；
+- Memory 写错，不修改原始 durable fact；
+- Memory 策略未来换版本，可以从有 provenance 的事实重新推导；
+- Diary 不能替代当天真实经历；
+- 派生 Memory 应保留可追溯 source/provenance；
 - 图片/语音等媒体二进制不是 Memory，值得长期记住的意义应语言化后进入正常 Memory Candidate。
 
-群聊尤其要区分：房间里的共享事实只在 `conversation_events` 中保存一次，不为每个人复制一份“原始事实”；每个 Character 可以基于同一事实形成不同 Memory。
+群聊里的共享事实只在 `conversation_events` 保存一次；Space post/comment/like/view 也有自己的 shared fact 表。每个 Character 可以基于同一共享事实形成不同的认知派生。
 
 ## 2. Memory 使用自然语言
 

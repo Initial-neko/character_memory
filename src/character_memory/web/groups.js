@@ -405,6 +405,16 @@
     if (!groupId || !message.trim()) return;
     CM.dom.input.value = "";
     CM.dom.input.style.height = "auto";
+    try {
+      const visual = await CM.features.voice?.sendTextWithVisual?.(message);
+      if (visual?.handled) return visual.result;
+    } catch (error) {
+      const box = document.createElement("div");
+      box.className = "error";
+      box.textContent = `发送失败：${error.message}`;
+      CM.dom.chat.appendChild(box);
+      throw error;
+    }
     return commitSend(groupId, {message});
   }
 

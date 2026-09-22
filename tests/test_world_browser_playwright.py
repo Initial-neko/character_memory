@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import threading
@@ -61,7 +62,11 @@ def test_headless_world_browser_reads_javascript_rendered_text(rendered_page_url
         timeout_seconds=10,
         allow_private_network=True,
     )
-    page = fetcher.fetch(rendered_page_url, max_chars=4000)
+    # pytest-playwright owns an asyncio loop in the test thread, while the
+    # formal Space scheduler/FastAPI sync routes call the World Browser from a
+    # normal worker thread. Exercise the same production boundary here.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        page = pool.submit(fetcher.fetch, rendered_page_url, max_chars=4000).result(timeout=15)
 
     assert page.title == "World Browser Fixture"
     assert "Rendered after JavaScript: world browser works" in page.content

@@ -83,7 +83,7 @@ Source Event 先成为 durable fact。Provider 超时或人物 reaction 失败�
 
 同一 conversation 的新用户事实可以 supersede 尚未提交的旧 generation。旧 generation 的派生状态不会在新事实之后错误落库。
 
-## 3. Application bundle
+## 3. Application bundle and feature-service composition
 
 `AppBundle` 持有或装配：
 
@@ -99,6 +99,19 @@ Source Event 先成为 durable fact。Provider 超时或人物 reaction 失败�
 - Clock
 
 不同人物共享 Provider、Embedding 与 SQLite，但 Persona、Memory、Mental State、聊天历史和 Runtime 行为按 Character 隔离。
+
+HTTP feature route 不再负责创建 Search / Avatar / ImageGen / World infrastructure。Character Runtime 在 `create_api()` 阶段通过 `RuntimeServices` 一次装配：
+
+```text
+RuntimeServices
+├─ shared SearchProvider
+├─ AvatarStore + AvatarSearchService
+├─ ImageGenerationProviders
+├─ HeadlessBrowserWebFetcher
+└─ WorldObservationService
+```
+
+Avatar、Space Image Search 与 World Observation 可以共享同一个 SearchProvider，但 ownership 不属于 Avatar route；Visual/Space 共用 ImageGen provider，也不依赖 `attach_visual_routes()` 是否先执行。Route module 只暴露 HTTP adapter，不能再用 attach 顺序充当依赖注入机制。
 
 并发边界：
 
@@ -158,7 +171,7 @@ transactional derived persistence
 
 `actions=[]` 是合法沉默。模型必须显式给出 `actions`，不能把缺失主行为字段自动猜成 silence。
 
-## 5. Direct vs Group facts
+## 5. Durable facts: Direct / Group / Space
 
 ### Direct
 
@@ -296,7 +309,30 @@ Group 不建立第二套 ImageGen。生成完成后以对应 Character 身份写
 
 详见 [`VISUAL_GENERATION.md`](VISUAL_GENERATION.md)。
 
-## 11. Media Runtime and formal TTS
+## 11. Character Space and World Observation
+
+Character Space 是同一个 Persistent Person 的公共表达渠道，不是第二套 Persona。
+
+```text
+Space Opportunity
+  -> optional WorldExplorePlan
+  -> SearchProvider.search_web
+  -> Headless Chromium rendered page
+  -> WorldObservationAppraisal
+  -> optional safe cognition/memory path
+  -> SpacePostPlan
+  -> optional Search Image / ImageGen
+  -> shared Space facts
+  -> sparse Audience reactions through PersonRuntime
+```
+
+World Search、Browser Render、Memory、Public Expression 是四个不同边界。搜索到页面不等于相信、记住或公开表达；原始网页文本是 untrusted data，不直接写进 Memory 或最终发帖 prompt。
+
+**尚未定案的架构问题：** Space/World 的 planning/appraisal 目前仍有一部分在 `SpaceAutonomyService` 自己编译上下文并直接调用 model，而不是完全复用 PersonRuntime 的 Context/Recall pipeline。这个问题与“哪些 World 信息值得长期记忆、用户如何干预 Memory”绑在一起，当前只登记，不在本轮 composition-root 重构中擅自统一。
+
+详见 [`CHARACTER_SPACE.md`](CHARACTER_SPACE.md) 与 [`MEMORY.md`](MEMORY.md)。
+
+## 12. Media Runtime and formal TTS
 
 `:8001` 独立拥有本地媒体能力：
 
@@ -330,7 +366,7 @@ Media Runtime 不 import / instantiate `PersonRuntime`。Main LLM、Vision、Mem
 
 Windows 上 native ONNX Runtime 必须来自项目 `.venv` / sherpa wheel，不允许静默退回 `C:\Windows\System32\onnxruntime.dll`。
 
-## 12. Settings Center
+## 13. Settings Center
 
 `:8003/settings` 是本地配置管理入口。
 
@@ -351,7 +387,7 @@ Settings Center 会迁移已知 legacy plaintext Secret，普通 config save 会
 
 配置不再采用“一律重启整个 stack”的策略。TTS Provider/Voice/Speed 由 Media Runtime 每次请求读取；GSV runtime 配置/device 通过 sidecar 热应用。Kokoro/Sherpa 的 device 属于模型进程初始化参数，变更时只重启对应 `:9002` / `:8001`。其他普通 LLM/storage 配置仍由 Settings 返回明确的 `restart_required`。
 
-## 13. TTS Provider Runtime + Lab
+## 14. TTS Provider Runtime + Lab
 
 `:9002` 当前 Workbench 暴露：
 
@@ -363,7 +399,7 @@ Lab 下拉选择只用于试听/benchmark，不会自动改变正式 TTS 默认�
 
 当前 Kokoro V1 默认 voice 为 `zf_001`，可选 `zf_001..zf_004`。模型与 voice 由 `scripts/setup-media-models.sh` 预下载，正常 request path 不应临时联网下载模型文件。
 
-## 14. Dev Console
+## 15. Dev Console
 
 `:8002/dev` 用于：
 
@@ -377,7 +413,7 @@ Lab 下拉选择只用于试听/benchmark，不会自动改变正式 TTS 默认�
 
 Dev Console 不持有云 API key，不是任意 URL/header 的 Postman 替代品。Secret 编辑归 Settings Center。
 
-## 15. Web UI
+## 16. Web UI
 
 正式聊天使用原生 HTML/CSS/JS，无 React 构建链。
 
@@ -399,7 +435,7 @@ Dev Console 不持有云 API key，不是任意 URL/header 的 Postman 替代品
 
 历史 `p0_*.css` 仍是正式加载资源，属于样式技术债。V1 不为了目录美观做大规模重命名；下个大版本再按 feature/layout 职责整理。
 
-## 16. Deliberate boundaries
+## 17. Deliberate boundaries
 
 当前没有因为功能增长而引入：
 

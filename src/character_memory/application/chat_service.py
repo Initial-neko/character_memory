@@ -8,7 +8,7 @@ import threading
 from character_memory.application.clock import Clock
 from character_memory.application.incoming_message import normalize_user_fact
 from character_memory.domain.models import Event, EventType
-from character_memory.voice_message_fields import voice_fields
+from character_memory.message_projection import project_direct_message
 
 
 logger = logging.getLogger("character_memory.application.chat")
@@ -233,36 +233,17 @@ class ChatService:
 
         messages = []
         for event in events:
-            if event.event_type == EventType.USER_MESSAGE:
-                role = "user"
-                source_event_id = event.id
-                content = event.metadata.get("display_text", event.content)
-            else:
-                role = "assistant"
-                source_event_id = event.metadata.get("source_event_id")
-                content = event.content
-
+            source_event_id = (
+                event.id
+                if event.event_type == EventType.USER_MESSAGE
+                else event.metadata.get("source_event_id")
+            )
             messages.append(
-                {
-                    "id": event.id,
-                    "role": role,
-                    "content": content,
-                    "event_time": event.event_time.isoformat(),
-                    "action": event.metadata.get("action"),
-                    "sticker_id": event.metadata.get("sticker_id"),
-                    "sticker_label": event.metadata.get("sticker_label"),
-                    "image_id": event.metadata.get("image_id"),
-                    "image_label": event.metadata.get("image_label"),
-                    "media_id": event.metadata.get("media_id"),
-                    "media_name": event.metadata.get("media_name"),
-                    # Deliberately distinct keys from "media_id"/"media_name"
-                    # above, which drive image rendering. None for every
-                    # non-voice message.
-                    **voice_fields(event.metadata),
-                    "source_event_type": event.metadata.get("source_event_type"),
-                    "source_event_id": source_event_id,
-                    "has_trace": source_event_id in trace_sources,
-                }
+                project_direct_message(
+                    event,
+                    has_trace=source_event_id in trace_sources,
+                    include_legacy_labels=True,
+                )
             )
 
         return {"character_id": character_id, "messages": messages}

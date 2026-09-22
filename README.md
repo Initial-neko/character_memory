@@ -27,6 +27,7 @@ README 只描述可运行入口和已经落地的主能力；尚未完成端到�
 - 异步消息接受：用户消息先持久化并立即返回 202，人物反应通过 SSE 渐进推送。
 - Message Search、Group Mentions、Unread、Intent Preview、Group Archive/Restore。
 - Character Space：共享帖子/评论/点赞/已查看/媒体事实；未归档角色默认每 24H 获得一次可沉默的自主发帖机会（测试时可调成 1H/30min/10min），可自然选择文字、互联网搜图、AI 生图或一条语音动态，并可在发帖前通过 Search + Headless Chromium 做受限 World Observation；Audience 最多 10 个候选角色，经同一人物状态决定忽略/点赞/评论，作者可自主回复。
+- World Activity：上网与发帖使用独立时钟。World Pulse 定期读取可配置的信息聚合/热榜页面并由 LLM 去重汇总，少量真正感兴趣的角色可评论；每个 Character 还可更高频地 Personal Browse，浏览结果只成为近期 World Observation，不会自动发布 Space。
 - 用户图片输入 + Vision；浏览器 Camera / Display Capture 会选择关键帧作为本轮 transient Vision context，不把帧二进制长期写进聊天事实。
 - ImageGen：Direct 与 Group 中 Character 都可以自主选择 `SELFIE / SCENE`；同时保留用户显式“AI 生成图片”草稿工具。
 - Avatar Search / Avatar Generate / 从聊天图片设头像。
@@ -54,7 +55,7 @@ Character Runtime :8000                                         │
 ├─ Persona / Memory / Mental State / Intent                     │
 ├─ Vision / Visual Capture context                              │
 ├─ ImageGen / autonomous visual                                 │
-├─ Character Space / World Observation / Headless Browser       │
+├─ Character Space / World Activity / Headless Browser          │
 └─ SQLite + local media metadata/files                          │
                                                                 │
 Media Runtime :8001 <-------------------------------------------┘

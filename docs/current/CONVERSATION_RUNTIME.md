@@ -200,6 +200,7 @@ remaining members each judge at most once
 hard cap 1..4 visible character messages
 ```
 
+- seed 每获得一次 Opportunity 就轮换一个成员，游标是该 Group 已有 Opportunity 的计数，不是事件 id——事件 id 每轮前进 `1 + 本轮消息数`，在成员数正好等于上限的群里会原地打转；
 - seed 沉默时不会为了 KPI 唤醒其他成员；
 - 每个成员本轮最多一个可见动作；
 - V1 允许 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / 已有 IMAGE；

@@ -145,6 +145,42 @@ def test_autonomous_group_seed_starts_one_bounded_shared_turn(tmp_path):
     store.close()
 
 
+def test_each_member_seeds_in_turn_instead_of_one_member_forever(tmp_path):
+    """Seeding rotates once per opportunity.
+
+    A round that fills the cap writes the opportunity event plus one event per
+    message, so an id-derived cursor moves by 1 + cap in a group of exactly
+    that size and lands on the same member every round. That pinned one member
+    as the permanent seed and left the member ordered last never called at all.
+    """
+    ids = ("c00", "c01", "c02", "c03")
+    model = AutonomousGroupModel(
+        {
+            character_id: [ActionDecision(type=ActionType.MESSAGE, message=f"{character_id} 说点什么。")]
+            for character_id in ids
+        }
+    )
+    access, store, _, _ = _access(tmp_path, ids=ids, model=model)
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    group = _group(store, ids, now)
+    service = GroupAutonomyService(access, GroupRepository(store))
+
+    seeds = []
+    for round_index in range(len(ids)):
+        before = len(model.calls)
+        outcome = service.run_opportunity(
+            group.id, now=now + timedelta(minutes=60 * round_index), source="DEV"
+        )
+        assert outcome["message_count"] == 3
+        seeds.append(model.calls[before])
+
+    assert seeds == list(ids)
+    # Rotation also means nobody stays the member who always sits out a capped
+    # round, so every member is called at least once across the four rounds.
+    assert sorted(set(model.calls)) == sorted(ids)
+    store.close()
+
+
 def test_seed_silence_ends_opportunity_without_waking_every_member(tmp_path):
     model = AutonomousGroupModel(
         {

@@ -329,6 +329,10 @@ Sources:
             SpacePostPlan,
             f"space-opportunity:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}",
         )
+        plan_payload = {
+            "has_text": bool(str(plan.social_post or "").strip()),
+            "media_intents": [item.model_dump(mode="json") for item in plan.media_intents],
+        }
         content = str(plan.social_post or "").strip()
         media_result = self.media_executor.execute(
             character_id,
@@ -347,6 +351,7 @@ Sources:
                 "audience": [],
                 "media_errors": media_errors,
                 "world": world,
+                "plan": plan_payload,
                 "source": source,
             }
 
@@ -434,6 +439,7 @@ Sources:
             "audience_error": audience_error,
             "media_errors": media_errors,
             "world": world,
+            "plan": plan_payload,
             "source": source,
         }
 
@@ -661,6 +667,44 @@ class SpaceAutonomyScheduler:
                     "due": epoch_us(now) >= int(state["next_opportunity_at_epoch"]),
                 }
             )
+        recent_runs = self.repository.list_opportunity_runs(limit=100)
+        metrics = {
+            "opportunities": len(recent_runs),
+            "posted": 0,
+            "no_post": 0,
+            "failed": 0,
+            "world_explored": 0,
+            "browser_rendered": 0,
+            "search_image_intents": 0,
+            "generated_image_intents": 0,
+            "voice_intents": 0,
+            "media_failures": 0,
+        }
+        for run in recent_runs:
+            status = str(run.get("status") or "").upper()
+            if status == "POSTED":
+                metrics["posted"] += 1
+            elif status == "NO_POST":
+                metrics["no_post"] += 1
+            elif status == "FAILED":
+                metrics["failed"] += 1
+            details = run.get("details") or {}
+            world = details.get("world") or {}
+            if world.get("explored"):
+                metrics["world_explored"] += 1
+            if world.get("observations"):
+                metrics["browser_rendered"] += 1
+            plan = details.get("plan") or {}
+            for intent in plan.get("media_intents") or []:
+                kind = str(intent.get("type") or "").upper()
+                if kind == "SEARCH_IMAGE":
+                    metrics["search_image_intents"] += 1
+                elif kind == "GENERATE_IMAGE":
+                    metrics["generated_image_intents"] += 1
+                elif kind == "VOICE":
+                    metrics["voice_intents"] += 1
+            metrics["media_failures"] += len(details.get("media_errors") or [])
+
         return {
             "enabled": autonomy_enabled(self.access),
             "interval_minutes": self.interval_minutes(),
@@ -680,7 +724,8 @@ class SpaceAutonomyScheduler:
                 max(0, int(getattr(self.access.settings, "space_audience_size", 5))),
             ),
             "characters": items,
-            "recent_runs": self.repository.list_opportunity_runs(limit=30),
+            "recent_runs": recent_runs,
+            "metrics": metrics,
         }
 
     def apply_runtime_config(
@@ -797,6 +842,12 @@ class SpaceAutonomyScheduler:
                     # published post; keep the reason in the ledger instead of
                     # downgrading the run to FAILED and losing the post id.
                     error=str(result.get("audience_error") or ""),
+                    details={
+                        "world": result.get("world") or {},
+                        "plan": result.get("plan") or {},
+                        "media_errors": result.get("media_errors") or [],
+                        "audience_error": result.get("audience_error") or "",
+                    },
                 )
                 outcomes.append({**result, "run_id": run_id})
             except Exception as exc:

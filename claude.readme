@@ -1,0 +1,84 @@
+# Claude Acceptance Bridge
+
+This file is a deliberately lightweight coordination surface requested by the project owner.
+
+It is **not** the architecture source of truth and must not replace `docs/current/`, tests, issues, or pull-request history. Its purpose is only to let the implementation agent and the later Claude acceptance pass exchange concise, durable status without losing context between sessions.
+
+## Working rules
+
+1. Keep entries factual and tied to a branch, commit, PR, test, screenshot, or reproducible behavior.
+2. Claude should append acceptance findings instead of rewriting implementation history.
+3. Every finding gets a stable id such as `CLAUDE-20260922-001`.
+4. Use one of these states: `OPEN`, `FIXED_NEEDS_RETEST`, `PASS`, `WONT_FIX`.
+5. A developer response should reference the same finding id and include the fixing commit/PR when available.
+6. Product/architecture decisions still belong in `docs/current/`. Long debugging transcripts do not belong here.
+7. Never put API keys, local absolute secret paths, model weights, private user data, or generated media binaries in this file.
+
+## Current development baseline
+
+- Repository: `Initial-neko/character_memory`
+- Base branch: `main`
+- Base commit: `a22be1332e521ce27ba6e7654c60cede7d971597`
+- Active development branch: `feature/space-multimedia-foundation`
+- Phase: **Autonomous Social Layer Phase 1**
+- Current slice: **Space multimedia foundation**
+
+### Scope of this slice
+
+- add ordered `space_post_media` persistence;
+- keep legacy `space_posts.media_id` readable during gradual migration;
+- allow one Space post to reference up to 9 media assets;
+- expose ordered media through the Space API;
+- render 1 image as a large image, 2-4 as a grid, and 5-9 as a nine-grid style layout;
+- preserve text-only posts and current Space autonomy behavior;
+- add regression tests for storage, API compatibility, the 9-item ceiling, and frontend contract.
+
+### Explicitly deferred from this slice
+
+- autonomous Web Observation;
+- image search execution;
+- autonomous AI ImageGen execution from Space opportunities;
+- autonomous voice posts;
+- link-preview fetching;
+- autonomous group-chat bursts.
+
+Those features should reuse this attachment foundation rather than create parallel post/message media models.
+
+## Implementation progress
+
+### 2026-09-22 — started
+
+Status: `IN_PROGRESS`
+
+Development started from `main@a22be1332e521ce27ba6e7654c60cede7d971597`.
+
+Design choice: use a dedicated Space attachment-relation module backed by the same SQLite store and existing `MediaAsset` ids. This keeps media bytes in the existing MediaStorage layer and avoids coupling binary persistence to the social-feed repository.
+
+Compatibility rule: `space_posts.media_id` remains as a legacy first-media pointer for now; new reads use ordered `space_post_media`.
+
+## Claude acceptance findings
+
+Claude: append findings below this line.
+
+<!--
+Example:
+
+### CLAUDE-20260922-001 — OPEN
+
+Severity: P1
+Area: Space API
+Branch/commit tested: feature/space-multimedia-foundation @ <sha>
+
+Expected:
+A post with 10 images is rejected with HTTP 422/400.
+
+Actual:
+The API accepted all 10.
+
+Evidence / reproduction:
+1. ...
+2. ...
+
+Developer response:
+Pending.
+-->

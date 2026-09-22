@@ -18,10 +18,10 @@ It is **not** the architecture source of truth and must not replace `docs/curren
 
 - Repository: `Initial-neko/character_memory`
 - Base branch: `main`
-- Base commit: `4ce2d1acce7d3c52881e1412fbf655c61f26c4ea` (PR #70 merged)
-- Active development branch: `feature/space-autonomous-images`
+- Base commit: 7d7283664543a94dc2e3ce77804c6d389930eea2 (PR #71 merged; #72 acceptance fix merged)
+- Active development branch: feature/space-world-observation-browser
 - Phase: **Autonomous Social Layer Phase 1**
-- Current slice: **Autonomous Space Images**
+- Current slice: **World Observation through Headless Browser**
 
 ### Scope of this slice
 
@@ -123,6 +123,48 @@ Acceptance focus for this slice:
 8. Dev media smoke does not move `next_opportunity_at`.
 9. Archive and Audience <=10 behavior remain unchanged.
 10. No Space media action leaks into private chat.
+
+### 2026-09-22 — World Observation through Headless Browser
+
+Status: IN_PROGRESS
+
+Development starts from main@7d7283664543a94dc2e3ce77804c6d389930eea2, after #71 and the Claude acceptance fix #72 were merged.
+
+Implemented in this slice:
+
+- SearchAPI and Brave now expose provider-neutral web-search discovery in addition to image search;
+- HeadlessBrowserWebFetcher renders public pages through Playwright Chromium, executes JavaScript and extracts readable article/main/body text;
+- localhost/private/link-local/reserved targets are rejected, redirects/subrequests stay behind the same public-network boundary, service workers are blocked, and media/font/image resources are skipped;
+- WorldObservationService separates URL discovery from rendered-page observation and keeps per-page failures fail-soft;
+- Space Opportunity now has a separate WorldExplorePlan before final publishing;
+- rendered webpage text is marked untrusted and is visible only to WorldObservationAppraisal;
+- appraisal supports IGNORE / MEMORY / EXPRESS / MEMORY_AND_EXPRESS;
+- only appraisal-safe summaries can reach PersonRuntime Memory or the final SpacePostPlan; raw webpage prompt-injection text never flows into the final publishing prompt;
+- WORLD_OBSERVATION goes through the same PersonRuntime for Memory/Mental State/Intent but has an empty outward channel, so it cannot create private chat messages;
+- Settings Center exposes browser transport controls and Space exploration caps;
+- Dev Console can test one headless URL or search -> render WorldObservation without moving scheduler state;
+- browser-smoke now includes a real JavaScript delayed-render page to prove Chromium executes JS before text extraction.
+
+Explicitly deferred:
+
+- Link Preview media cards;
+- autonomous Space voice posts;
+- generic browsing tools in direct/private chat;
+- autonomous group-chat bursts;
+- image/vision appraisal by Space audience.
+
+Acceptance focus:
+
+1. Real Chromium reads JavaScript-rendered text rather than only initial HTML.
+2. Formal browser rejects localhost/private targets and non-http(s) URLs.
+3. Search Provider only discovers URLs; browsing is a separate trust boundary.
+4. Raw page prompt-injection text may reach appraisal as data but never final Space publishing context.
+5. IGNORE / MEMORY / EXPRESS / MEMORY_AND_EXPRESS remain distinct.
+6. WORLD_OBSERVATION memory uses the same PersonRuntime and normal memory admission.
+7. WORLD_OBSERVATION can never leak MESSAGE/VOICE/IMAGE/STICKER actions into private chat.
+8. Search/browser/appraisal failure does not fail the normal Space opportunity.
+9. Settings/Dev controls expose World enablement, page cap and text cap.
+10. Main tests, Windows smoke and real browser smoke must all be green before READY_FOR_ACCEPTANCE.
 
 ## Claude acceptance findings
 

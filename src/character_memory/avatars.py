@@ -15,10 +15,19 @@ import uuid
 import httpx
 from pydantic import BaseModel
 
+from character_memory.remote_media import RemoteMediaFetcher
 from character_memory.search import ImageSearchResult, SearchProvider
 
 
 logger = logging.getLogger("character_memory.avatars")
+
+
+def _avatar_shape_ok(width: int | None, height: int | None) -> bool:
+    if not width or not height:
+        return True
+    ratio = width / max(height, 1)
+    return 0.45 <= ratio <= 2.2
+
 
 _CONTENT_EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -118,6 +127,7 @@ class AvatarStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self._owns_client = client is None
         self.client = client or httpx.Client(timeout=30.0, follow_redirects=False)
+        self.remote_fetcher = RemoteMediaFetcher(max_bytes=self.max_bytes, client=self.client)
 
     def _character_dir(self, character_id: str) -> Path:
         value = str(character_id or "").strip()
@@ -159,25 +169,8 @@ class AvatarStore:
         return str(path.stat().st_mtime_ns)
 
     def _download_image(self, url: str) -> tuple[bytes, str]:
-        _safe_public_http_url(url)
-        response = self.client.get(
-            url,
-            headers={"Accept": "image/*", "User-Agent": "character-memory/0.4 avatar-fetch"},
-            follow_redirects=False,
-        )
-        if 300 <= response.status_code < 400:
-            raise RuntimeError("avatar download redirect was rejected for safety")
-        if response.is_error:
-            raise RuntimeError(f"avatar download failed with HTTP {response.status_code}")
-        payload = response.content
-        if not payload:
-            raise RuntimeError("avatar download returned an empty body")
-        if len(payload) > self.max_bytes:
-            raise ValueError(f"avatar exceeds the {self.max_bytes} byte limit")
-        content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-        if content_type not in _CONTENT_EXTENSIONS:
-            raise ValueError(f"unsupported avatar content type: {content_type or '<missing>'}")
-        return payload, content_type
+        remote = self.remote_fetcher.fetch_image(url)
+        return remote.payload, remote.content_type
 
     def _save_payload(
         self,
@@ -389,6 +382,8 @@ class AvatarSearchService:
             raw = self.provider.search_images(query, limit=remaining)
             used_queries.append(query)
             for item in raw:
+                if not _avatar_shape_ok(item.width, item.height):
+                    continue
                 dedup_key = str(item.image_url or item.thumbnail_url or item.source_page_url).strip().casefold()
                 if not dedup_key or dedup_key in seen_images:
                     continue

@@ -78,6 +78,7 @@ class SpaceDevMediaRequest(BaseModel):
     query: str | None = Field(default=None, max_length=300)
     purpose: str | None = Field(default="SCENE", max_length=16)
     visual_intent: str | None = Field(default=None, max_length=800)
+    voice_text: str | None = Field(default=None, max_length=4000)
 
 
 def attach_space_routes(app):
@@ -463,7 +464,7 @@ def attach_space_routes(app):
             relations = list(result["relations"])
             if not relations:
                 raise RuntimeError(
-                    (result["errors"][-1]["error"] if result["errors"] else "media executor returned no image")
+                    (result["errors"][-1]["error"] if result["errors"] else "media executor returned no media")
                 )
             post = repository.create_post(
                 character_id,

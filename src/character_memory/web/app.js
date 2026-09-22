@@ -13,6 +13,7 @@
       directStream: null,
       directStreamKey: null,
       runtimeMemories: [],
+      characterCapacity: {activeTotal:0, softLimit:10, hardLimit:20},
     },
     features: {},
     listeners: new Map(),
@@ -231,7 +232,13 @@
 
   CM.renderCharacterList = () => {
     const unread = CM.features.unread;
-    CM.dom.characterList.innerHTML = CM.state.characters.slice(0, 10).map(profile => {
+    const all = CM.state.characters || [];
+    let visible = all.slice(0, 10);
+    if (!CM.isGroupConversation() && CM.state.characterId && !visible.some(item => item.id === CM.state.characterId)) {
+      const activeProfile = all.find(item => item.id === CM.state.characterId);
+      if (activeProfile) visible = [...visible.slice(0, 9), activeProfile];
+    }
+    const rows = visible.map(profile => {
       const pending = CM.state.pendingCharacters.has(profile.id);
       const hasUnread = unread?.isUnread?.(profile.id) || false;
       const preview = unread?.preview?.(profile) || profile.tagline || profile.identity || "Persistent AI Person";
@@ -239,6 +246,20 @@
       const id = CM.escapeHtml(profile.id);
       return `<div class="character-item-wrap" data-character-row="${id}"><button class="character-item ${active ? "active" : ""}" type="button" data-character="${id}"><span class="character-avatar">${CM.escapeHtml(CM.initialFor(profile))}</span><span class="character-copy"><span class="character-name character-name-line"><span>${CM.escapeHtml(profile.name)}${pending ? '<span class="character-pending"> · 输入中</span>' : ""}</span>${hasUnread ? '<span class="unread-dot" title="有新消息" aria-label="有新消息"></span>' : ""}</span><span class="character-tagline character-preview">${CM.escapeHtml(preview)}</span></span></button><button class="character-more-button" type="button" data-character-more="${id}" title="人物操作" aria-label="人物操作">···</button><div class="character-context-menu hidden" data-character-menu="${id}"><button type="button" data-character-archive="${id}">归档人物…</button></div></div>`;
     }).join("");
+    const hiddenCount = Math.max(0, all.length - visible.length);
+    const overflow = hiddenCount
+      ? `<button class="character-overflow-entry" type="button" data-character-overflow>查看更多人物（${hiddenCount}）</button>`
+      : "";
+    CM.dom.characterList.innerHTML = rows + overflow;
+  };
+
+  CM.showCharacterOverflow = () => {
+    const current = CM.state.characterId;
+    CM.openDrawer("全部人物", `当前 ${CM.state.characterCapacity.activeTotal || CM.state.characters.length} / ${CM.state.characterCapacity.hardLimit || 20} 位；侧边栏只展示最多 10 位`);
+    CM.dom.drawerBody.innerHTML = `<div class="character-overflow-list">${CM.state.characters.map(profile => {
+      const active = !CM.isGroupConversation() && profile.id === current;
+      return `<button type="button" class="character-overflow-card ${active ? "active" : ""}" data-overflow-character="${CM.escapeHtml(profile.id)}"><span class="character-avatar">${CM.escapeHtml(CM.initialFor(profile))}</span><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>${CM.escapeHtml(profile.identity || profile.tagline || "")}</small></span></button>`;
+    }).join("")}</div>`;
   };
 
   CM.updateComposerState = () => {
@@ -267,6 +288,11 @@
   CM.loadCharacters = async () => {
     const data = await CM.api("/v1/characters");
     CM.state.characters = data.characters || [];
+    CM.state.characterCapacity = {
+      activeTotal:Number(data.active_total ?? CM.state.characters.length),
+      softLimit:Number(data.soft_limit ?? 10),
+      hardLimit:Number(data.active_limit ?? 20),
+    };
     if (!CM.state.characters.length) throw new Error("没有发现任何 Persona");
     if (!CM.state.characters.some(item => item.id === CM.state.characterId)) CM.state.characterId = CM.state.characters[0].id;
     localStorage.setItem(activeCharacterKey, CM.state.characterId);
@@ -541,7 +567,18 @@
       });
     });
     d.runtimeButton.addEventListener("click", CM.showRuntime);
-    d.characterList.addEventListener("click", event => { const button = event.target.closest("[data-character]"); if (button) CM.switchCharacter(button.dataset.character).catch(console.error); });
+    d.characterList.addEventListener("click", event => {
+      if (event.target.closest("[data-character-overflow]")) { CM.showCharacterOverflow(); return; }
+      const button = event.target.closest("[data-character]");
+      if (button) CM.switchCharacter(button.dataset.character).catch(console.error);
+    });
+    d.drawerBody.addEventListener("click", event => {
+      const overflowCharacter = event.target.closest("[data-overflow-character]");
+      if (overflowCharacter) {
+        CM.closeDrawer();
+        CM.switchCharacter(overflowCharacter.dataset.overflowCharacter).catch(console.error);
+      }
+    });
     d.chat.addEventListener("click", event => {
       const older = event.target.closest("[data-load-older-direct]");
       if (older) { CM.loadOlderDirectHistory().catch(console.error); return; }

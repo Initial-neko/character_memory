@@ -618,7 +618,8 @@ class SQLiteStore:
             ).fetchall()
             pinned = self.conn.execute(
                 f"SELECT * FROM memories WHERE {where} AND pinned=1 "
-                "ORDER BY event_time_epoch DESC,id DESC"
+                "ORDER BY event_time_epoch DESC,id DESC",
+                args,
             ).fetchall()
 
             rows = {int(row["id"]): row for row in [*recent, *important, *pinned]}

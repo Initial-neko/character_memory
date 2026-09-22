@@ -338,10 +338,11 @@ class GroupRepository:
                     json.dumps(event.metadata, ensure_ascii=False),
                 ),
             )
-            self.store.conn.execute(
-                "UPDATE conversations SET updated_at=?,updated_at_epoch=? WHERE id=?",
-                (event.event_time.isoformat(), stamp, event.conversation_id),
-            )
+            if not bool((event.metadata or {}).get("hidden")):
+                self.store.conn.execute(
+                    "UPDATE conversations SET updated_at=?,updated_at_epoch=? WHERE id=?",
+                    (event.event_time.isoformat(), stamp, event.conversation_id),
+                )
             self.store._maybe_commit()
         return event.model_copy(update={"id": cur.lastrowid})
 

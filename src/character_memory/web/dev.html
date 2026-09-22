@@ -74,6 +74,10 @@
           <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked /> Autonomous Space</label>
           <label>Opportunity Interval (min)<input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="1440" /></label>
           <label>Max Posts / Day<input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="0" /></label>
+          <label class="visual-check"><input id="spaceMediaEnabled" type="checkbox" checked /> Space Media</label>
+          <label>Max Media / Post<input id="spaceMediaMaxItems" type="number" min="0" max="9" step="1" value="3" /></label>
+          <label class="visual-check"><input id="spaceImageSearchEnabled" type="checkbox" checked /> Web Image Search</label>
+          <label class="visual-check"><input id="spaceImageGenerationEnabled" type="checkbox" checked /> AI ImageGen</label>
           <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /></label>
           <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
         </div>
@@ -98,6 +102,27 @@
           <button class="secondary" id="runSpaceAudience" type="button">再次模拟 Audience</button>
           <button class="secondary" id="refreshSpaceStatus" type="button">刷新调度状态</button>
         </div>
+
+        <div class="visual-provider-row">
+          <label>Media Test
+            <select id="spaceMediaType">
+              <option value="SEARCH_IMAGE">SEARCH_IMAGE · 互联网图片</option>
+              <option value="GENERATE_IMAGE">GENERATE_IMAGE · AI 生图</option>
+            </select>
+          </label>
+          <label>Count<input id="spaceMediaCount" type="number" min="1" max="9" step="1" value="1" /></label>
+          <label>Purpose
+            <select id="spaceMediaPurpose">
+              <option value="SCENE">SCENE</option>
+              <option value="SELFIE">SELFIE</option>
+            </select>
+          </label>
+          <label>Search Query<input id="spaceMediaQuery" type="text" value="Tokyo night street photography" /></label>
+          <label>Visual Intent<input id="spaceMediaVisualIntent" type="text" value="夜晚街道的自然生活氛围" /></label>
+          <label>Post Text<input id="spaceMediaPostText" type="text" value="随手分享一下。" /></label>
+          <button class="secondary" id="runSpaceMedia" type="button">测试媒体动态</button>
+        </div>
+        <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图。</p>
         <p class="subtle">“手动触发”不改变正式 next opportunity；“立即到期”则用于测试真实 Scheduler：把选中角色的 next opportunity 设为现在，后台线程会按 Poll 周期自动执行。</p>
         <p class="subtle" id="spaceStatusAge">尚未读取调度状态。</p>
         <pre id="spaceStatus" class="result">等待读取 Space 调度状态...</pre>

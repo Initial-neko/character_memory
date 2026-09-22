@@ -194,11 +194,33 @@ def test_voice_message_frontend_has_native_shared_bubble_not_audio_controls():
     common = (web / "message_content.js").read_text(encoding="utf-8")
     css = (web / "styles.css").read_text(encoding="utf-8")
 
-    assert 'message.action !== "VOICE_MESSAGE"' in app
-    assert "voice-bubble" in app
+    # The renderer is defined exactly once. What this guards against is the bug
+    # that shipped the always-visible transcript: a second CM.voiceMessageHtml
+    # left behind in app.js. index.html loads message_content.js after app.js,
+    # so the duplicate merely lost the race -- changing the load order, or
+    # getting a 404 on message_content.js, restored the reveal-on-click
+    # transcript silently, with nothing failing anywhere.
+    defining_files = sorted(
+        path.name
+        for path in web.glob("*.js")
+        if "CM.voiceMessageHtml =" in path.read_text(encoding="utf-8")
+    )
+    assert defining_files == ["message_content.js"]
+
+    # app.js owns the shared audio player and nothing else voice-rendered: it
+    # must not carry the voice markup or the controls that revealed the text.
+    assert "voice-bubble" not in app
+    assert "data-voice-text" not in app
+    assert "data-voice-translation" not in app
     assert "new Audio(" in app
     assert "<audio controls" not in app
+
+    assert 'message.action !== "VOICE_MESSAGE"' in common
     assert "CM.voiceMessageHtml(message)" in common
+    assert "voice-transcript-always" in common
+    assert 'class="voice-transcript hidden"' not in common
+    assert "data-voice-text" not in common
+    assert "data-voice-translation" not in common
     # Both surfaces render through the one shared body renderer. The exact
     # argument list is not pinned here: Group passes its surface variant, and
     # the markup that variant produces is asserted behaviourally in
@@ -282,14 +304,15 @@ def test_a_failed_synthesis_falls_back_to_the_body_when_it_is_not_json(tmp_path)
 def test_the_failure_bubble_shows_the_reason_it_stored():
     """Stored and rendered are different things, and only one of them happened.
 
-    ``voice_error`` reached the payload from the day the field existed -- in
-    both renderers -- and no markup read it, so a failed voice message said
-    only that it had failed.
+    ``voice_error`` reached the payload from the day the field existed while no
+    markup read it, so a failed voice message said only that it had failed.
+    The assertion is against the renderer that produces that markup, which is
+    message_content.js -- app.js no longer defines one.
     """
     root = Path(__file__).resolve().parents[1]
-    app = (root / "src/character_memory/web/app.js").read_text(encoding="utf-8")
+    common = (root / "src/character_memory/web/message_content.js").read_text(encoding="utf-8")
     css = (root / "src/character_memory/web/styles.css").read_text(encoding="utf-8")
 
-    assert "message.voice_error" in app
-    assert 'class="voice-error"' in app
+    assert "message.voice_error" in common
+    assert 'class="voice-error"' in common
     assert ".voice-error" in css

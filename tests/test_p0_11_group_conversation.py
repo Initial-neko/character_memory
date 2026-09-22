@@ -241,7 +241,6 @@ const sandbox = {
   window: {
     CM: {
       escapeHtml: value => String(value === undefined || value === null ? "" : value),
-      voiceMessageHtml: () => "",
     },
   },
 };

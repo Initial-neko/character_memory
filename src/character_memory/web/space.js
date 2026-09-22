@@ -105,7 +105,7 @@
         <span class="space-voice-glyph" aria-hidden="true">)))</span>
         <span class="space-voice-duration">${seconds ? `${seconds}"` : "语音"}</span>
       </button>
-      ${transcript ? `<button class="space-voice-text-button" type="button" data-space-voice-text>文本</button><div class="space-voice-transcript hidden" data-space-voice-transcript>${CM.escapeHtml(transcript)}</div>` : ""}
+      ${transcript ? `<div class="space-voice-transcript" data-space-voice-transcript>${CM.escapeHtml(transcript)}</div>` : ""}
     </div>`;
   }
 
@@ -531,10 +531,6 @@
         console.warn("space voice playback failed", error);
       });
       return;
-    }
-    const textButton = event.target.closest("[data-space-voice-text]");
-    if (textButton) {
-      textButton.parentElement?.querySelector("[data-space-voice-transcript]")?.classList.toggle("hidden");
     }
   });
 

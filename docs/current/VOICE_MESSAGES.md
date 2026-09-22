@@ -18,7 +18,7 @@ PersonReaction VOICE_MESSAGE
        failed -> voice_error, text remains readable
   -> republish the same Direct/Group event id over SSE
   -> browser merges the update in place
-  -> compact voice bubble playback / text expansion
+  -> compact voice bubble playback + always-visible text underneath
 ```
 
 Canonical metadata is defined in `character_memory.voice_message_fields`:
@@ -65,8 +65,9 @@ They may use the same configured TTS provider, but a durable Voice Message does 
 - One `VOICE_MESSAGE` is one complete TTS request; no sentence/chunk splitting in V1.
 - Ordinary `MESSAGE` remains text-only and is not automatically materialized.
 - Audio is MediaAsset data, not Memory.
-- Translation has a browser UI slot but no required V1 backend translation service.
-- Space Voice Post is implemented as a separate social-channel media intent: one complete `VOICE` intent synthesizes through the same formal `:8001/v1/tts` route and persists as a Space MediaAsset. It does not reuse chat `VOICE_MESSAGE` event semantics.
+- Every Voice Message shows its canonical text directly below the voice bubble. There is no WeChat-style “tap to convert/show text” step and no placeholder “翻译” button.
+- The always-visible line is the canonical spoken text/transcript, not a separate machine-translation backend contract.
+- Space Voice Post is implemented as a separate social-channel media intent: one complete `VOICE` intent synthesizes through the same formal `:8001/v1/tts` route and persists as a Space MediaAsset. Its stored transcript is also shown directly below the voice bubble. It does not reuse chat `VOICE_MESSAGE` event semantics.
 - Raw microphone audio remains a transport/input concern and is not persisted as character memory by default.
 
 ## Main modules

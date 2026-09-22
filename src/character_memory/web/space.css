@@ -15,6 +15,9 @@
 .space-close-button { flex:0 0 auto; }
 .space-feed-wrap { width:min(720px,100%); margin:0 auto; padding:24px 24px 64px; }
 .space-feed-meta { min-height:20px; color:var(--ui-muted); font-size:11px; margin-bottom:8px; }
+.space-feed-more { width:100%; min-height:52px; border:0; background:transparent; color:var(--ui-muted); font-size:12px; cursor:pointer; }
+.space-feed-more:hover:not(:disabled), .space-feed-more:focus-visible { background:transparent; color:var(--ui-text); }
+.space-feed-more:disabled { cursor:default; opacity:.8; }
 .space-feed { display:grid; gap:0; }
 .space-post { display:grid; grid-template-columns:42px minmax(0,1fr); gap:12px; padding:22px 0; border-bottom:1px solid var(--ui-line); }
 .space-post-avatar { padding-top:1px; }

@@ -400,7 +400,7 @@ def test_browser_user_can_comment_and_reload_the_same_space_fact(tmp_path: Path)
         assert comments[-1]["author"]["name"] == "我"
 
 
-def test_space_feed_is_capped_to_ten_items_and_can_filter_one_character(tmp_path: Path):
+def test_space_feed_pages_ten_items_and_can_filter_one_character(tmp_path: Path):
     config = _config(tmp_path, count=2)
     app = create_api(str(config))
     attach_space_routes(app)
@@ -417,6 +417,18 @@ def test_space_feed_is_capped_to_ten_items_and_can_filter_one_character(tmp_path
         assert feed["max_media_per_post"] == 9
         assert feed["total"] == 13
         assert feed["has_more"] is True
+        assert feed["next_before_id"] is not None
+
+        older = client.get(
+            f"/v1/space/posts?limit=10&before_id={feed['next_before_id']}"
+        ).json()
+        assert len(older["posts"]) == 3
+        assert older["total"] == 13
+        assert older["has_more"] is False
+        assert older["next_before_id"] is None
+        assert {item["id"] for item in feed["posts"]}.isdisjoint(
+            {item["id"] for item in older["posts"]}
+        )
 
         filtered = client.get("/v1/space/posts?character_id=c01&limit=10").json()
         assert filtered["total"] == 6
@@ -438,6 +450,12 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "characterSpaceButton",
         "/v1/space/posts",
         'limit:"10"',
+        '"before_id"',
+        "feedHasMore",
+        "feedNextBeforeId",
+        "IntersectionObserver",
+        "space-feed-more",
+        'loadFeed({append:true})',
         'CM.registerFeature("space"',
         "media_items",
         "slice(0, 9)",
@@ -463,6 +481,7 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "space-post",
         "space-comments",
         "space-character-entry",
+        ".space-feed-more",
         ".space-media-grid",
         ".space-media-single",
         ".space-media-quad",

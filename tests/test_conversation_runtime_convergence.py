@@ -66,6 +66,10 @@ def test_direct_and_group_share_one_action_materializer_contract():
 
 def test_direct_and_group_share_one_incoming_user_fact_contract():
     sticker = normalize_user_fact(
+        "",
+        sticker={"id": "wave", "label": "挥手", "tags": ["问候"], "description": ""},
+    )
+    captioned_sticker = normalize_user_fact(
         "  看这个  ",
         sticker={"id": "wave", "label": "挥手", "tags": ["问候"], "description": ""},
     )
@@ -79,12 +83,16 @@ def test_direct_and_group_share_one_incoming_user_fact_contract():
         },
     )
 
-    assert sticker.display_text == "看这个"
+    assert sticker.display_text == ""
     assert sticker.metadata["action"] == "STICKER"
     assert sticker.metadata["sticker_id"] == "wave"
     assert sticker.metadata["sticker_meaning"] == "问候"
-    assert "看这个" in sticker.runtime_content
     assert "用户发送表情包" in sticker.runtime_content
+
+    assert captioned_sticker.display_text == "看这个"
+    assert "action" not in captioned_sticker.metadata
+    assert "看这个" in captioned_sticker.runtime_content
+    assert "用户发送表情包" in captioned_sticker.runtime_content
 
     assert image.display_text == "这是现场"
     assert image.metadata["media_id"] == "media-1"

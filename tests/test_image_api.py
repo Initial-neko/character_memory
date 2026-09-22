@@ -94,7 +94,10 @@ def test_image_chat_persists_asset_and_sends_real_image_to_vision_runtime(tmp_pa
     assert response.status_code == 200
     body = response.json()
     assert body["actions"][0]["message"] == "我看到了。"
-    assert body["input_image"]["label"] == "tiny.png"
+    # The upload's name is not a description of the picture, so it is not
+    # handed to the bubble as a caption. It used to be, and the bubble printed
+    # ``tiny.png`` under the image -- and the same name in the sidebar preview.
+    assert body["input_image"]["label"] is None
     assert model.images[-1]["urls"] == [data_url]
     assert model.images[-1]["session_id"] == "vision-test"
 
@@ -106,8 +109,8 @@ def test_image_chat_persists_asset_and_sends_real_image_to_vision_runtime(tmp_pa
     history = client.get("/v1/chat/history?character_id=rin").json()["messages"]
     user_message = history[0]
     assert user_message["content"] == "你看这个"
-    assert user_message["image"]["label"] == "tiny.png"
-    assert user_message["preview"] == "你看这个 [图片] tiny.png"
+    assert user_message["image"]["label"] is None
+    assert user_message["preview"] == "你看这个 [图片]"
 
     asset = client.get(user_message["image"]["url"])
     assert asset.status_code == 200

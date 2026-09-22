@@ -164,21 +164,30 @@
 .sticker-import-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .sticker-import-retry { padding: 0 12px 12px; text-align: center; }
 
+/* A sticker is a message, so it gets a message's footprint: one square box,
+ * the same in direct chat and in a group, chosen by --sticker-size alone.
+ *
+ * It used to be `width: auto` against a 112px cap, which relied on the image
+ * having an intrinsic width. The bundled stickers are SVGs with a viewBox and
+ * no width/height, so they have no intrinsic width at all: the lazy `img` was
+ * laid out 0x0 first, the shrink-to-fit .bubble-wrap locked onto its timestamp
+ * (70.8px), and the loaded sticker inherited that -- a 112px sticker rendering
+ * at 71px, next to a 360px image bubble. An explicit box cannot be talked down
+ * by whoever its containing block happens to be. */
 .sticker-bubble {
   position: relative;
   width: auto;
   max-width: 112px;
-  min-width: 42px;
-  min-height: 42px;
   padding: 0;
+  --sticker-size: 112px;
 }
 
 .sticker-bubble img {
   display: block;
-  width: auto;
-  max-width: 112px;
-  height: auto;
-  max-height: 112px;
+  width: var(--sticker-size);
+  height: var(--sticker-size);
+  max-width: var(--sticker-size);
+  max-height: var(--sticker-size);
   object-fit: contain;
 }
 
@@ -237,5 +246,5 @@
   .sticker-panel { width: min(360px, calc(100% - 20px)); }
   .sticker-grid { grid-template-columns: repeat(5, 52px); }
   .sticker-bubble,
-  .sticker-bubble img { max-width: 96px; max-height: 96px; }
+  .group-message-sticker { --sticker-size: 96px; }
 }

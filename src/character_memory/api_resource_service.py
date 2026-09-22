@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from character_memory.config import resolve_sticker_dir
 from character_memory.images import load_image_catalog
-from character_memory.message_projection import project_direct_message
+from character_memory.message_projection import project_direct_message, upload_caption
 from character_memory.stickers import StickerTagSuggestion, load_global_sticker_catalog
 
 
@@ -174,7 +174,7 @@ class ApiResourceService:
             return None
         return {
             "id": asset.id,
-            "label": asset.original_name,
+            "label": upload_caption(asset.original_name),
             "mime_type": asset.mime_type,
             "size_bytes": asset.size_bytes,
             "source": asset.source,

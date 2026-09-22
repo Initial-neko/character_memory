@@ -6,6 +6,25 @@ from character_memory.domain.models import EventType
 from character_memory.voice_message_fields import voice_fields
 
 
+def upload_caption(original_name: str | None) -> str | None:
+    """The caption a chat bubble may print for an uploaded or generated image.
+
+    ``original_name`` is the name a file arrived under, never a description of
+    what is in it: the file picker's ``photo.png``, a capture's
+    ``visual-camera-1758...jpg``, a generated image's uuid, the voice path's
+    ``voice-message-12``. Four payload builders handed that name to the bubble
+    as ``label`` and the bubble printed it under the picture, so a user's own
+    photo arrived captioned with its own filename and a generated one with a
+    uuid. No caption says less than a filename, and says it truthfully; this is
+    the one place that changes when an asset grows a real description.
+
+    Character-library images and stickers keep their labels -- those are
+    written for a reader, and are not routed through here.
+    """
+
+    return None
+
+
 def common_chat_message_fields(
     metadata: dict[str, Any],
     *,
@@ -58,7 +77,8 @@ def project_direct_message(
         or media_id
     ):
         prefix = str(content or "").strip()
-        media_preview = f"[图片] {image['label']}"
+        caption = str(image.get("label") or "").strip()
+        media_preview = f"[图片] {caption}".strip() if caption else "[图片]"
         preview = f"{prefix} {media_preview}".strip() if prefix else media_preview
 
     payload: dict[str, Any] = {

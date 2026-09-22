@@ -211,6 +211,97 @@ def test_archiving_a_character_stays_findable_behind_its_row_trigger():
     assert _declaration(groups, "opacity") not in (None, "0")
 
 
+_TOKEN_DEF = re.compile(r"--([a-z0-9-]+)\s*:\s*([^;]+);")
+
+
+def _tokens(css: str, block: str = "") -> dict[str, str]:
+    """Declared token values, from the whole sheet or from one opening block.
+
+    First declaration wins: the sheet restates the same names in more than one
+    block (the light `:root`, the dark override), and the value a reader gets
+    is the one the cascade resolves, not the last line in the file.
+    """
+
+    text = _uncommented(css)
+    if block:
+        start = text.index(block)
+        text = text[start : text.index("}", start)]
+    tokens: dict[str, str] = {}
+    for name, value in _TOKEN_DEF.findall(text):
+        tokens.setdefault(name, value.strip())
+    return tokens
+
+
+def _channel(value: float) -> float:
+    return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+
+
+def _relative_luminance(colour: str) -> float:
+    value = colour.lstrip("#")
+    if len(value) == 3:
+        value = "".join(char * 2 for char in value)
+    red, green, blue = (int(value[i : i + 2], 16) / 255 for i in (0, 2, 4))
+    return 0.2126 * _channel(red) + 0.7152 * _channel(green) + 0.0722 * _channel(blue)
+
+
+def _contrast(foreground: str, background: str) -> float:
+    high, low = sorted((_relative_luminance(foreground), _relative_luminance(background)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def test_muted_text_clears_wcag_aa_on_every_light_surface():
+    """The smallest type in the app is the type that has to clear 4.5:1.
+
+    ``--ui-muted`` paints timestamps, image captions and help text -- 10px and
+    11px -- and it was #7b7f87: 4.02:1 on white, 3.56:1 on the sunken surface
+    the image caption actually sits on. Both are under WCAG AA. Dark is fine
+    (#8b949e on #161b22 is 5.62:1) and is checked so a light-only fix cannot
+    quietly take it down with it.
+    """
+
+    css = (WEB / "ui.css").read_text(encoding="utf-8")
+    light = _tokens(css)
+    dark = _tokens(css, ':root[data-theme="dark"]')
+    assert light["ui-muted"] != dark["ui-muted"], "dark must keep its own muted"
+
+    for surface in ("ui-surface", "ui-surface-soft", "ui-bg", "ui-surface-sunken"):
+        ratio = _contrast(light["ui-muted"], light[surface])
+        assert ratio >= 4.5, f"--ui-muted on --{surface}: {ratio:.2f}:1"
+
+    for surface in ("ui-surface", "ui-surface-soft", "ui-bg"):
+        ratio = _contrast(dark["ui-muted"], dark[surface])
+        assert ratio >= 4.5, f"dark --ui-muted on --{surface}: {ratio:.2f}:1"
+
+
+def test_a_sticker_is_a_message_sized_box_not_a_shrink_to_fit_image():
+    """A sticker used to render at whatever its containing block allowed.
+
+    The bundled stickers are SVGs with a viewBox and no width/height, so they
+    have no intrinsic width: the lazy ``img`` was laid out 0x0 first, the
+    shrink-to-fit ``.bubble-wrap`` settled on its timestamp, and the loaded
+    sticker inherited 71px -- next to a 360px image bubble. An explicit box is
+    what keeps the message rhythm, so it is pinned here.
+    """
+
+    css = (WEB / "p0_7.css").read_text(encoding="utf-8")
+    img = _rule(css, ".sticker-bubble img")
+    size = "--sticker-size"
+    assert _declaration(img, "width") == f"var({size})"
+    assert _declaration(img, "height") == f"var({size})"
+    assert _declaration(img, "max-width") == f"var({size})"
+    assert _declaration(img, "max-height") == f"var({size})"
+    assert _declaration(img, "object-fit") == "contain", "an explicit box must not squash a wide sticker"
+    assert _declaration(_rule(css, ".sticker-bubble"), size) == "112px"
+
+    # Both surfaces take the one size, and both narrow together on mobile.
+    group = _rule((WEB / "p0_11.css").read_text(encoding="utf-8"), ".group-message-sticker")
+    assert _declaration(group, "width") is None, "the group must not size stickers on its own"
+
+    for sheet in ("p0_7.css", "p0_11.css"):
+        responsive = _AT_RULE.findall((WEB / sheet).read_text(encoding="utf-8"))
+        assert any(f"{size}: 96px" in block for block in responsive), sheet
+
+
 def _luminance(value: str) -> float:
     value = value.lstrip("#")
     if len(value) == 3:

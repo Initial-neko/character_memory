@@ -22,8 +22,14 @@
     const transcript = `<div class="voice-transcript voice-transcript-always" data-voice-transcript>${CM.escapeHtml(message.content || "")}</div>`;
 
     if (status === "failed") {
+      // The stored cause is a diagnostic, not something the character said. It
+      // arrives as the English exception sentence (with the sidecar URL still
+      // in it), and it used to be painted as a second grey pill the same width
+      // as the bubble above it, so the provider's error looked like a second
+      // message. It now lives behind a Chinese summary, in a line that is
+      // visibly not a bubble.
       const why = String(message.voice_error || "").trim();
-      return `<div class="voice-message voice-failed"><div class="voice-bubble voice-disabled">⚠ 语音生成失败</div>${why ? `<div class="voice-error">${CM.escapeHtml(why)}</div>` : ""}${transcript}</div>`;
+      return `<div class="voice-message voice-failed"><div class="voice-bubble voice-disabled">⚠ 语音生成失败</div>${why ? `<details class="voice-error"><summary>技术细节</summary><code>${CM.escapeHtml(why)}</code></details>` : ""}${transcript}</div>`;
     }
     if (status !== "ready" || !mediaUrl) {
       return `<div class="voice-message voice-pending"><div class="voice-bubble voice-disabled"><span class="voice-glyph">)))</span><span>语音生成中…</span></div>${transcript}</div>`;
@@ -64,8 +70,12 @@
     const stickerHtml = sticker?.url
       ? `<div class="sticker-bubble"><img${stickerClass} src="${CM.escapeHtml(sticker.url)}" alt="${CM.escapeHtml(sticker.label || "表情包")}" loading="lazy"><span class="sticker-fallback">表情</span></div>`
       : "";
+    // The caption is a caption, not a header: an uploaded photo carries no
+    // label at all (its file name is not a description of it), and a bubble
+    // whose only text would be the filename it arrived under shows none.
+    const imageCaption = String(image?.label || "").trim();
     const imageHtml = image?.url
-      ? `<div class="image-bubble"><img${imageClass} src="${CM.escapeHtml(image.url)}" alt="${CM.escapeHtml(image.label || "图片")}" loading="lazy"><div class="image-caption">${CM.escapeHtml(image.label || "图片")}</div></div>`
+      ? `<div class="image-bubble"><img${imageClass} src="${CM.escapeHtml(image.url)}" alt="${CM.escapeHtml(imageCaption || "图片")}" loading="lazy">${imageCaption ? `<div class="image-caption">${CM.escapeHtml(imageCaption)}</div>` : ""}</div>`
       : "";
     const voiceHtml = CM.voiceMessageHtml(message);
     return `${textHtml}${stickerHtml}${imageHtml}${voiceHtml}`;

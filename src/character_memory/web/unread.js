@@ -25,8 +25,9 @@
   function preview(profile) {
     const latest = summaries.get(profile.id)?.latest_message;
     if (!latest) return profile.tagline || profile.identity || "Persistent AI Person";
+    // An image with no label gets the bare tag: `[图片] 图片` says it twice.
     const mediaFallback = latest.image
-      ? `[图片] ${latest.image.label || "图片"}`
+      ? (latest.image.label ? `[图片] ${latest.image.label}` : "[图片]")
       : (latest.sticker ? `[表情包] ${latest.sticker.label || "表情包"}` : "");
     const body = latest.preview || latest.content || mediaFallback;
     if (!body) return profile.tagline || profile.identity || "Persistent AI Person";

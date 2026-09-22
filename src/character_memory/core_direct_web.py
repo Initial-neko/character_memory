@@ -15,9 +15,6 @@ from character_memory.config import (
 
 
 logger = logging.getLogger("character_memory.api.direct")
-_PROACTIVE_POLL_SECONDS = 30.0
-
-
 def _ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
@@ -46,7 +43,7 @@ def attach_core_direct_routes(app, access: CoreApiRouteAccess):
             "media_dir": str(resolve_media_dir(access.settings)),
             "sticker_dir": str(resolve_sticker_dir(access.settings)),
             "characters": len(access.character_profiles()),
-            "proactive_poll_seconds": _PROACTIVE_POLL_SECONDS,
+            "proactive_poll_seconds": access.proactive_poll_seconds,
         }
 
     @app.get("/v1/chat/history")

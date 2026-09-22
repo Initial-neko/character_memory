@@ -53,6 +53,8 @@ class FakeEnsembleModel:
     attempts = 1
 
     def structured_for_session(self, prompt, schema, session_id):
+        # Keep fixture descriptions above the production research-schema minimum;
+        # these tests are about the ensemble lifecycle, not validation failures.
         assert "PUBLIC SOURCE" in prompt
         assert session_id.startswith("ensemble-research:")
         return EnsembleResearch(

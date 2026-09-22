@@ -25,7 +25,9 @@ tts_voice: "zf_001"          # Provider-specific voice selected from the healthy
 tts_speed: 1.0               # Edge maps 0.5..2.0 to -50%..+100%
 tts_device: "cpu"            # Desired local device. GSV hot-reloads; Kokoro(:9002)/Sherpa(:8001) require only that owning runtime to restart.
 
-# Image search provider for avatar candidates. Keys live in .env.
+# Shared Search provider: image discovery for Avatar/Space plus web discovery for
+# World Observation. It is not exposed as an arbitrary Direct/Group browser tool.
+# Keys live in .env.
 search_provider: "searchapi"
 search_country: "jp"
 search_language: "zh-cn"

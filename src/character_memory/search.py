@@ -80,8 +80,10 @@ def _avatar_shape_ok(width: int | None, height: int | None) -> bool:
 class SearchApiProvider(SearchProvider):
     """SearchAPI.io Google Images adapter.
 
-    The provider intentionally implements image search only. General web search
-    remains a separate later capability even though SearchAPI.io supports it.
+    Image search stays provider-neutral here. Avatar-specific shape filtering
+    belongs to AvatarSearchService so Space can reuse the same provider for
+    landscapes, screenshots, news imagery and other non-avatar compositions.
+    General web search remains a separate later capability.
     """
 
     IMAGE_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
@@ -167,8 +169,6 @@ class SearchApiProvider(SearchProvider):
 
             width = _dimension(original.get("width"))
             height = _dimension(original.get("height"))
-            if not _avatar_shape_ok(width, height):
-                continue
 
             parsed_source = urlparse(source_page_url)
             source_domain = parsed_source.hostname or str(source.get("name") or "").strip()
@@ -260,8 +260,6 @@ class BraveSearchProvider(SearchProvider):
             source_domain = str(item.get("source") or meta_url.get("hostname") or meta_url.get("netloc") or "").strip()
             width = _dimension(properties.get("width"))
             height = _dimension(properties.get("height"))
-            if not _avatar_shape_ok(width, height):
-                continue
             results.append(
                 ImageSearchResult(
                     title=str(item.get("title") or source_domain or "头像候选").strip(),

@@ -430,6 +430,32 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         current = get_bundle()
         service = ProactiveService(current.store, current.chat)
         outcomes = service.dispatch_due(character_ids, now)
+
+        # Proactive intents bypass ReactionScheduler generation, but their
+        # derived CHARACTER_MESSAGE facts still need the same SSE publication
+        # and VOICE_MESSAGE materialization as an ordinary direct reaction.
+        feature_state = getattr(app.state, "character_memory", None)
+        scheduler = getattr(feature_state, "reaction_scheduler", None) if feature_state is not None else None
+        if scheduler is not None:
+            for outcome in outcomes:
+                source_event_id = outcome.get("source_event_id")
+                character_id = str(outcome.get("character_id") or "")
+                if source_event_id is None or not character_id:
+                    continue
+                source_event = current.store.get_event(int(source_event_id))
+                if source_event is None:
+                    continue
+                conversation_id = str(
+                    source_event.metadata.get("conversation_id")
+                    or f"{character_id}:proactive"
+                )
+                scheduler.publish_direct_responses(
+                    current.store,
+                    character_id,
+                    conversation_id,
+                    int(source_event_id),
+                )
+
         if outcomes:
             logger.info("api.proactive dispatched=%d", len(outcomes))
         return outcomes

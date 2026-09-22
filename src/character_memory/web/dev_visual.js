@@ -107,7 +107,7 @@
     $("useImageAsAvatar").hidden = true;
     $("imageGenPreview").hidden = true;
     $("imageGenPreview").removeAttribute("src");
-    $("imageGenLatency").textContent = "-";
+    $("imageGenLatency").textContent = "真实生成中...";
     $("imageGenResult").textContent = "真实生成中：AI Rewrite → Provider → MediaStorage ...";
     state.lastImage = null;
     try {
@@ -118,6 +118,7 @@
       });
       state.lastImage = data.image || null;
       renderPrompt(data.prompt);
+      // provider / model / duration stay outside the collapsed raw block.
       $("imageGenLatency").textContent = `${data.duration_ms ?? "-"} ms · ${data.provider || "-"} / ${data.model || "-"}`;
       $("imageGenResult").textContent = pretty(data);
       const previewUrl = data.image?.url || data.image?.data_url;
@@ -128,6 +129,7 @@
       }
       if (data.image?.media_id) $("useImageAsAvatar").hidden = false;
     } catch (error) {
+      $("imageGenLatency").textContent = `ERROR: ${error.message}`;
       $("imageGenResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;

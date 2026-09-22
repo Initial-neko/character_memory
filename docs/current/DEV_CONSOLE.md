@@ -77,6 +77,12 @@ export CHARACTER_CONFIG_PATH=config.yaml
 
 Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置管理职责复制到 Dev Console。
 
+### 原始 payload 的展示约定
+
+卡片在默认状态下只显示人读结论：badge、provider/device/latency、识别文本、模型回复。原始 JSON / 原始响应体一律放进折叠的 `<details class="debug-output">`，点开才出现——页面加载、卡片刷新和按钮点击都不会把 JSON 直接铺在页面上。执行类卡片（TTS / Vision / ImageGen / ASR / Media Smoke）在 `<details>` 之外留一行结论，失败时错误文本也写在这行，不藏在折叠块里。
+
+折叠样式定义在 `ui.css`（不是 `dev.css`）：Chat 页的「本轮详情 / Runtime」抽屉用同一套折叠块，而 `index.html` 不加载 `dev.css`。
+
 ### LLM
 
 通过服务端配置的 OpenAI-compatible Provider 发送开发 probe。
@@ -121,7 +127,7 @@ tts_provider: kokoro
   -> :8001 -> :9002 provider runtime
 ```
 
-卡片展示 WAV、provider/device、inference/audio/RTF/total timing。
+卡片展示 WAV、provider/device、total timing；inference/audio/RTF 等原始 timing 在折叠的原始响应块里。
 
 如果目的是横向试听 Sherpa/Kokoro/CosyVoice，请使用 `:9002/tts` 的 TTS Lab，而不是把 Dev Console 变成第二个 provider picker。
 

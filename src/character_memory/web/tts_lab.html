@@ -49,7 +49,11 @@
       </div>
       <div id="singleResult" class="tts-lab-single">
         <audio id="ttsLabAudio" controls></audio>
-        <pre id="ttsLabResult" class="result">等待试听...</pre>
+        <p id="ttsLabSummary" class="subtle">等待试听...</p>
+        <details class="debug-output">
+          <summary>原始响应（调试用）</summary>
+          <pre id="ttsLabResult" class="result">等待试听...</pre>
+        </details>
       </div>
     </section>
 
@@ -101,9 +105,16 @@
           </div>
         </div>
         <div class="voice-design-output">
-          <pre id="voiceDesignStatus" class="result">等待 VoiceDesign sidecar...</pre>
+          <details class="debug-output">
+            <summary>原始状态（调试用）</summary>
+            <pre id="voiceDesignStatus" class="result">等待 VoiceDesign sidecar...</pre>
+          </details>
           <audio id="voiceDesignAudio" controls></audio>
-          <pre id="voiceDesignResult" class="result">尚未生成。</pre>
+          <p id="voiceDesignResultSummary" class="subtle">尚未生成。</p>
+          <details class="debug-output">
+            <summary>原始响应（调试用）</summary>
+            <pre id="voiceDesignResult" class="result">尚未生成。</pre>
+          </details>
           <div class="voice-design-freeze">
             <p class="subtle">VoiceDesign 不可复现：固化保存的是上面这段试听的音频本身。修改测试文本、Instruct、语种或角色后需要重新生成。</p>
             <label for="voiceDesignCharacter">固化到角色</label>

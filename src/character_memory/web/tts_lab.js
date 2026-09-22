@@ -48,7 +48,14 @@
         reason: provider.reason || null,
         note: provider.note || null,
       });
-      card.append(header, body);
+      // The badge already answers "usable?"; the raw probe stays behind a click
+      // so the grid does not open onto a wall of per-provider JSON.
+      const debug = document.createElement("details");
+      debug.className = "debug-output";
+      const debugSummary = document.createElement("summary");
+      debugSummary.textContent = "原始响应（调试用）";
+      debug.append(debugSummary, body);
+      card.append(header, debug);
       root.appendChild(card);
     }
   }
@@ -145,6 +152,7 @@
     if (!provider?.ready) return;
     const button = $("generateTtsLab");
     button.disabled = true;
+    $("ttsLabSummary").textContent = "生成中...";
     $("ttsLabResult").textContent = "生成中...";
     try {
       const result = await requestAudio(
@@ -158,10 +166,18 @@
       const url = URL.createObjectURL(result.blob);
       $("ttsLabAudio").src = url;
       $("ttsLabAudio").dataset.objectUrl = url;
+      // Which provider/device produced the clip stays visible outside the
+      // collapsed raw block.
+      $("ttsLabSummary").textContent = [
+        result.meta.provider,
+        result.meta.device,
+        result.meta.inference_ms ? `${result.meta.inference_ms} ms` : null,
+      ].filter(Boolean).join(" · ");
       $("ttsLabResult").textContent = pretty(result.meta);
       await $("ttsLabAudio").play().catch(() => {});
       await loadProviders();
     } catch (error) {
+      $("ttsLabSummary").textContent = `ERROR: ${error.message}`;
       $("ttsLabResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = !selectedProvider()?.ready;
@@ -178,11 +194,21 @@
     voice.textContent = `voice: ${provider.default_voice || provider.voices?.[0] || "default"}`;
     const audio = document.createElement("audio");
     audio.controls = true;
+    const status = document.createElement("div");
+    status.className = "subtle";
+    status.textContent = "waiting...";
     const result = document.createElement("pre");
     result.className = "result";
     result.textContent = "waiting...";
-    card.append(title, voice, audio, result);
-    return {card, audio, result};
+    // Same rule as the single-provider card: outcome line visible, raw header
+    // dump behind a click.
+    const debug = document.createElement("details");
+    debug.className = "debug-output";
+    const debugSummary = document.createElement("summary");
+    debugSummary.textContent = "原始响应（调试用）";
+    debug.append(debugSummary, result);
+    card.append(title, voice, audio, status, debug);
+    return {card, audio, status, result};
   }
 
   async function compareReady() {
@@ -204,6 +230,7 @@
     }
     for (const provider of providers) {
       const view = views.get(provider.id);
+      view.status.textContent = "generating...";
       view.result.textContent = "generating...";
       try {
         const result = await requestAudio(
@@ -215,8 +242,13 @@
         const url = URL.createObjectURL(result.blob);
         view.audio.src = url;
         view.audio.dataset.objectUrl = url;
+        view.status.textContent = [
+          result.meta.device,
+          result.meta.inference_ms ? `${result.meta.inference_ms} ms` : null,
+        ].filter(Boolean).join(" · ") || "done";
         view.result.textContent = pretty(result.meta);
       } catch (error) {
+        view.status.textContent = `ERROR: ${error.message}`;
         view.result.textContent = `ERROR: ${error.message}`;
       }
     }
@@ -291,10 +323,12 @@
     const instruct = $("voiceDesignInstruct").value.trim();
     const text = $("voiceDesignText").value.trim();
     if (!instruct || !text) {
+      $("voiceDesignResultSummary").textContent = "ERROR: Instruct 和测试文本都不能为空。";
       $("voiceDesignResult").textContent = "ERROR: Instruct 和测试文本都不能为空。";
       return;
     }
     button.disabled = true;
+    $("voiceDesignResultSummary").textContent = "生成中...";
     $("voiceDesignResult").textContent = "生成中...";
     const started = performance.now();
     try {
@@ -316,18 +350,31 @@
       state.voiceDesignArtifact = decodedHeader(response.headers, "X-Voice-Design-Artifact") || null;
       state.voiceDesignSnapshot = voiceDesignInputs();
       state.voiceDesignFreezeResult = false;
+      const model = decodedHeader(response.headers, "x-voice-design-model");
+      const device = response.headers.get("x-voice-design-device");
+      const inferenceMs = Number(response.headers.get("x-voice-design-inference-ms") || 0);
+      const audioMs = Number(response.headers.get("x-voice-design-audio-ms") || 0);
+      const sampleRate = Number(response.headers.get("x-voice-design-sample-rate") || 0);
+      // Which model/device produced this take stays visible; the header dump
+      // stays behind the collapsed debug block.
+      $("voiceDesignResultSummary").textContent = [
+        device,
+        inferenceMs ? `${inferenceMs} ms` : null,
+        sampleRate ? `${sampleRate} Hz` : null,
+      ].filter(Boolean).join(" · ") || "已生成";
       $("voiceDesignResult").textContent = pretty({
         artifact_id: state.voiceDesignArtifact,
-        model: decodedHeader(response.headers, "x-voice-design-model"),
-        device: response.headers.get("x-voice-design-device"),
-        inference_ms: Number(response.headers.get("x-voice-design-inference-ms") || 0),
-        audio_ms: Number(response.headers.get("x-voice-design-audio-ms") || 0),
-        sample_rate: Number(response.headers.get("x-voice-design-sample-rate") || 0),
+        model,
+        device,
+        inference_ms: inferenceMs,
+        audio_ms: audioMs,
+        sample_rate: sampleRate,
         http_ms: Math.round(performance.now() - started),
       });
       await $("voiceDesignAudio").play().catch(() => {});
       await loadVoiceDesignStatus();
     } catch (error) {
+      $("voiceDesignResultSummary").textContent = "ERROR: " + error.message;
       $("voiceDesignResult").textContent = "ERROR: " + error.message;
     } finally {
       renderFreezeState();

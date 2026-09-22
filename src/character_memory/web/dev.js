@@ -43,6 +43,12 @@
       $("mediaStatus").textContent = pretty(data.media);
       $("modelStatus").textContent = pretty(data.dev);
     } catch (error) {
+      // The raw error text lives in the collapsed debug blocks now, so the
+      // badges are the only thing left saying the probe failed -- leave them
+      // at "unknown" and a dead runtime looks like a slow one.
+      setBadge($("characterBadge"), false);
+      setBadge($("mediaBadge"), false);
+      setBadge($("llmBadge"), false);
       $("characterStatus").textContent = String(error);
       $("mediaStatus").textContent = String(error);
       $("modelStatus").textContent = String(error);
@@ -52,7 +58,7 @@
   async function runLlm() {
     const button = $("runLlm");
     button.disabled = true;
-    $("llmResult").textContent = "请求中...";
+    $("llmReply").textContent = "请求中...";
     $("llmLatency").textContent = "-";
     try {
       const data = await jsonFetch("/v1/dev/llm", {
@@ -63,11 +69,15 @@
           system_prompt: $("llmSystem").value,
         }),
       });
-      $("llmResult").textContent = data.reply || "";
+      // Reply stays on screen; the raw response body sits behind the collapsed
+      // debug block so a JSON-mode prompt cannot spray the page with JSON.
+      $("llmReply").textContent = data.reply || "";
+      $("llmResult").textContent = pretty(data);
       $("llmLatency").textContent = `${data.total_ms} ms · ${data.model}`;
       refreshResources();
     } catch (error) {
-      $("llmResult").textContent = `ERROR: ${error.message}`;
+      $("llmReply").textContent = `ERROR: ${error.message}`;
+      $("llmResult").textContent = pretty({ ok: false, error: error.message });
     } finally {
       button.disabled = false;
     }
@@ -390,7 +400,7 @@
     const button = $("runTts");
     button.disabled = true;
     $("ttsResult").textContent = "生成中...";
-    $("ttsLatency").textContent = "-";
+    $("ttsLatency").textContent = "生成中...";
     try {
       const started = performance.now();
       const response = await fetch("/v1/dev/tts", {
@@ -409,12 +419,16 @@
       $("ttsAudio").src = state.ttsUrl;
       const inference = response.headers.get("x-media-inference-ms");
       const audioMs = response.headers.get("x-media-audio-ms");
+      const provider = response.headers.get("x-media-provider");
+      const device = response.headers.get("x-media-device");
       const total = response.headers.get("x-dev-total-ms") || (performance.now() - started).toFixed(1);
       const rtf = inference && audioMs ? (Number(inference) / Number(audioMs)).toFixed(3) : "-";
-      $("ttsLatency").textContent = `${total} ms total`;
+      // Provider / device / latency stay outside the collapsed block so the run
+      // still reports its outcome without opening the raw JSON.
+      $("ttsLatency").textContent = [provider, device, `${total} ms`].filter(Boolean).join(" · ");
       $("ttsResult").textContent = pretty({
-        provider: response.headers.get("x-media-provider"),
-        device: response.headers.get("x-media-device"),
+        provider,
+        device,
         inference_ms: inference,
         audio_ms: audioMs,
         sample_rate: response.headers.get("x-media-sample-rate"),
@@ -425,6 +439,7 @@
       refreshMetrics();
       refreshResources();
     } catch (error) {
+      $("ttsLatency").textContent = `ERROR: ${error.message}`;
       $("ttsResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;
@@ -535,6 +550,7 @@
     button.disabled = true;
     $("asrResult").textContent = "识别中...";
     $("asrLatency").textContent = "-";
+    $("asrText").textContent = "识别中...";
     try {
       const data = await jsonFetch("/v1/dev/asr", {
         method: "POST",
@@ -543,11 +559,14 @@
       });
       const rtf = data.inference_ms && data.audio_ms ? (Number(data.inference_ms) / Number(data.audio_ms)).toFixed(3) : "-";
       $("asrLatency").textContent = `${data.http_total_ms} ms total`;
+      // The transcript is the answer; the raw payload is the debug block.
+      $("asrText").textContent = data.text || "(无识别结果)";
       $("asrResult").textContent = pretty({ ...data, rtf });
       refreshStatus();
       refreshMetrics();
       refreshResources();
     } catch (error) {
+      $("asrText").textContent = `ERROR: ${error.message}`;
       $("asrResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = !state.asrBlob;
@@ -559,6 +578,7 @@
     button.disabled = true;
     $("mediaSmokeResult").textContent = "真实推理中：TTS → WAV → ASR ...";
     $("mediaSmokeLatency").textContent = "-";
+    $("mediaSmokeText").textContent = "真实推理中...";
     try {
       const data = await jsonFetch("/v1/dev/media-smoke", {
         method: "POST",
@@ -570,11 +590,14 @@
         }),
       });
       $("mediaSmokeLatency").textContent = `${data.total_ms} ms total`;
+      // Round-trip proof stays on screen: the transcript ASR heard back.
+      $("mediaSmokeText").textContent = `识别：${data.transcript || "(空)"}`;
       $("mediaSmokeResult").textContent = pretty(data);
       refreshStatus();
       refreshMetrics();
       refreshResources();
     } catch (error) {
+      $("mediaSmokeText").textContent = `ERROR: ${error.message}`;
       $("mediaSmokeResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;

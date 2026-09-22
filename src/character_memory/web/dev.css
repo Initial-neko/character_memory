@@ -112,14 +112,3 @@ td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
   font-size: 12px;
   letter-spacing: 0.04em;
 }
-.debug-output {
-  margin-top: 10px;
-}
-.debug-output > summary {
-  cursor: pointer;
-  color: var(--ui-muted);
-  font-size: 12px;
-}
-.debug-output[open] > summary {
-  margin-bottom: 6px;
-}

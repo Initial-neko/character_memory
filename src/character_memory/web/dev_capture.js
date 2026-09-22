@@ -67,7 +67,8 @@
     const frames = state.selected.length ? state.selected : selectFrames();
     if (!frames.length) return;
     button.disabled = true;
-    $("visionLatency").textContent = "-";
+    $("visionLatency").textContent = "推理中...";
+    $("visionReply").textContent = "Vision 推理中...";
     $("visionResult").textContent = "Vision 推理中...";
     try {
       const response = await fetch("/v1/dev/vision", {
@@ -83,9 +84,14 @@
       let data;
       try { data = text ? JSON.parse(text) : {}; } catch { data = {text}; }
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : pretty(data.detail || data));
+      // The model's answer stays on screen; the raw response body is the
+      // collapsed debug block, so a JSON-shaped reply cannot flood the card.
       $("visionLatency").textContent = `${data.total_ms} ms · ${data.model}`;
-      $("visionResult").textContent = data.reply || pretty(data);
+      $("visionReply").textContent = data.reply || "(响应里没有 reply 字段)";
+      $("visionResult").textContent = pretty(data);
     } catch (error) {
+      $("visionLatency").textContent = `ERROR: ${error.message}`;
+      $("visionReply").textContent = `ERROR: ${error.message}`;
       $("visionResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;

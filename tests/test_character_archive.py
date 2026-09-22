@@ -253,3 +253,38 @@ def test_every_hook_the_archive_module_reads_is_still_emitted_by_the_shell():
     assert read, "the module queries the DOM; the extraction above has gone stale"
     missing = sorted(hook for hook in read - rendered_here if hook not in shell)
     assert missing == [], f"no web source emits these any more: {missing}"
+
+
+def test_archive_keeps_voice_reference_and_refreshes_live_gsv_registry(tmp_path: Path, monkeypatch):
+    config = _config(tmp_path)
+    settings = load_settings(str(config))
+    momo_dir = Path(settings.persona_path).parent.parent / "momo"
+    (momo_dir / "voice.yaml").write_text("template: murasame\n", encoding="utf-8")
+    calls = []
+
+    class FakeReloader:
+        def __init__(self, *args, **kwargs):
+            calls.append(("init", kwargs.get("timeout_seconds")))
+
+        def reload(self):
+            calls.append(("reload", None))
+
+        def close(self):
+            calls.append(("close", None))
+
+    monkeypatch.setattr("character_memory.tts_lab.GsvVoiceReloader", FakeReloader)
+    app = create_api(str(config))
+
+    with TestClient(app) as client:
+        archived = client.post("/v1/characters/momo/archive")
+        assert archived.status_code == 200
+        assert archived.json()["voice_registry"] == {"ok": True, "reloaded": True}
+        assert (momo_dir / "voice.yaml").read_text(encoding="utf-8") == "template: murasame\n"
+
+        restored = client.post("/v1/characters/momo/restore")
+        assert restored.status_code == 200
+        assert restored.json()["voice_registry"] == {"ok": True, "reloaded": True}
+        assert (momo_dir / "voice.yaml").is_file()
+
+    assert [item[0] for item in calls].count("reload") == 2
+    assert ("init", 1.5) in calls

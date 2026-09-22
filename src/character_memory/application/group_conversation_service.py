@@ -321,8 +321,9 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 ) or "群聊最近的共同经历与当前状态"
             if source_event.metadata.get("media_id"):
                 recall_query = f"{recall_query} 群聊图片".strip()
-            if source_event.metadata.get("action") == ActionType.STICKER.value:
-                recall_query = f"{source_event.metadata.get('sticker_label') or '表情包'} {source_event.metadata.get('sticker_meaning') or ''}".strip()
+            if source_event.metadata.get("sticker_id"):
+                sticker_semantics = f"{source_event.metadata.get('sticker_label') or '表情包'} {source_event.metadata.get('sticker_meaning') or ''}".strip()
+                recall_query = f"{recall_query} {sticker_semantics}".strip()
 
             recent_events = self._recent_as_events(group.id)
             synthetic = Event(

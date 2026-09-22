@@ -814,6 +814,10 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
             "space_autonomy_enabled",
             "space_opportunity_interval_minutes",
             "space_max_posts_per_day",
+            "space_media_enabled",
+            "space_media_max_items",
+            "space_image_search_enabled",
+            "space_image_generation_enabled",
             "space_audience_size",
             "space_scheduler_poll_seconds",
         ]
@@ -825,6 +829,10 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
                     "space_autonomy_enabled": True,
                     "space_opportunity_interval_minutes": 60,
                     "space_max_posts_per_day": 12,
+                    "space_media_enabled": True,
+                    "space_media_max_items": 4,
+                    "space_image_search_enabled": False,
+                    "space_image_generation_enabled": True,
                     "space_audience_size": 2,
                     "space_scheduler_poll_seconds": 20,
                 }
@@ -837,12 +845,20 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
         "space_autonomy_enabled",
         "space_opportunity_interval_minutes",
         "space_max_posts_per_day",
+        "space_media_enabled",
+        "space_media_max_items",
+        "space_image_search_enabled",
+        "space_image_generation_enabled",
         "space_audience_size",
         "space_scheduler_poll_seconds",
     }
     settings = load_settings(str(config))
     assert settings.space_opportunity_interval_minutes == 60
     assert settings.space_max_posts_per_day == 12
+    assert settings.space_media_enabled is True
+    assert settings.space_media_max_items == 4
+    assert settings.space_image_search_enabled is False
+    assert settings.space_image_generation_enabled is True
     assert settings.space_audience_size == 2
     assert settings.space_scheduler_poll_seconds == 20
 

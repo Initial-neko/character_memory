@@ -90,11 +90,13 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 支持：
 
 - 选择一个未归档 Character；
-- 直接调整并持久化 `Autonomous Space / Opportunity Interval / Max Posts per Day / Audience / Scheduler Poll`；
+- 直接调整并持久化 `Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / Audience / Scheduler Poll`；
 - 快捷档 `10min / 30min / 1H / 6H / 24H`；
 - `立即手动触发一次`：立即跑一次完整 Space Opportunity，不改变正式 next time；
 - `让选中角色立即到期`：把 next opportunity 设为现在，用真实后台 Scheduler 验证；
 - 指定 Post ID 后 `再次模拟 Audience`；
+- 强制执行一条 `SEARCH_IMAGE` 或 `GENERATE_IMAGE` 测试动态，不移动正式 Scheduler；
+- 测试 1..9 张媒体上限、Search Query、SELFIE/SCENE Visual Intent；
 - 查看每个人的 last/next opportunity、last status，以及最近 opportunity run history。
 
 配置会写回 `config.yaml`，同时热应用到当前 Character Runtime。测试时可设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。

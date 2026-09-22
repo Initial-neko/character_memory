@@ -51,7 +51,8 @@ class Settings(BaseModel):
     voice_silence_ms: int = Field(default=DEFAULT_VOICE_SILENCE_MS, ge=200, le=3000)
 
     # Search is deliberately separate from the LLM runtime. Avatar discovery
-    # uses image search only; web_search/web_fetch remain reserved.
+    # and Space image expression share image search; web_search/web_fetch remain
+    # reserved for the World Observation phase.
     search_provider: str = "searchapi"
     search_api_key: str = ""
     search_country: str = "jp"
@@ -102,6 +103,12 @@ class Settings(BaseModel):
     # ceiling. It never forces a post -- a character that decides not to publish
     # simply does not consume the budget.
     space_max_posts_per_day: int = Field(default=0, ge=0, le=200)
+    # Optional visual expression on autonomous Space posts. The character still
+    # decides whether media is natural; these fields only gate/cap execution.
+    space_media_enabled: bool = True
+    space_media_max_items: int = Field(default=3, ge=0, le=9)
+    space_image_search_enabled: bool = True
+    space_image_generation_enabled: bool = True
     space_audience_size: int = Field(default=5, ge=0, le=10)
     space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 

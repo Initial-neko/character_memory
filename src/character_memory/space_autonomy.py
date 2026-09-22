@@ -5,7 +5,9 @@ import hashlib
 import logging
 import threading
 
-from character_memory.domain.models import ActionType, DailyLifePlan, Event, EventType
+from character_memory.domain.models import ActionType, Event, EventType, SpacePostPlan
+from character_memory.space_media import SpacePostMediaRepository
+from character_memory.space_media_executor import SpaceMediaExecutor
 from character_memory.space_store import SpaceRepository
 from character_memory.time_utils import epoch_us
 
@@ -18,7 +20,7 @@ MAX_AUTONOMOUS_AUDIENCE = 10
 class SpaceAutonomyService:
     """Autonomous Space behavior for the same persistent PersonRuntime.
 
-    Daily posting uses a small DailyLifePlan decision. Seeing/commenting events
+    Posting uses a small SpacePostPlan decision. Seeing/commenting events
     go through PersonRuntime so Mental State, Memory, Intent and trace behavior
     remain shared with direct/group chat. Space-only actions are projected back
     into the shared SpaceRepository instead of becoming private messages.
@@ -27,6 +29,8 @@ class SpaceAutonomyService:
     def __init__(self, access, repository: SpaceRepository):
         self.access = access
         self.repository = repository
+        self.media_repository = SpacePostMediaRepository(access.read_store)
+        self.media_executor = SpaceMediaExecutor(access)
 
     def _profiles(self) -> list[dict]:
         return list(self.access.character_profiles())
@@ -62,6 +66,13 @@ class SpaceAutonomyService:
             f"- {item.event_time.isoformat()} {item.event_type.value}: {item.content}"
             for item in recent[-16:]
         ) or "- 无"
+        media_enabled = bool(getattr(self.access.settings, "space_media_enabled", True))
+        media_max = max(0, min(9, int(getattr(self.access.settings, "space_media_max_items", 3))))
+        media_instruction = (
+            f"当前允许媒体，单条最多 {media_max} 个图片资源。"
+            if media_enabled and media_max > 0
+            else "当前媒体能力关闭，media_intents 必须返回 []。"
+        )
         return f"""# Persona
 {persona}
 
@@ -84,11 +95,16 @@ class SpaceAutonomyService:
 只根据这个人物已经真实存在的经历、记忆和状态判断。
 不要凭空创造没有发生过的新事件。
 
-本次只判断 Space 动态：
-- events 必须返回 []，不要在这里额外编造生活事件。
-- social_post 可以为空；没有自然想公开表达的内容就返回 null。
-- 如果发，写成这个人物自己会公开发出的自然短动态，不要写“根据我的记忆/状态”等系统口吻。
-- image_prompt 暂时返回 null；图片动态会在后续独立接入。
+本次只规划 Space 动态：
+- social_post 可以为空；没有自然想公开表达的文字就返回 null。
+- media_intents 可以为空；不要为了展示功能而强行配图。
+- 如果既没有自然想表达的文字，也没有自然想分享的图片，social_post=null 且 media_intents=[]。
+- 如果发文字，写成这个人物自己会公开发出的自然短动态，不要写“根据我的记忆/状态”等系统口吻。
+- SEARCH_IMAGE 用于现实中已经存在、适合从互联网搜索的图片；query 必须是简短公开搜索词，不能泄露私聊原句、用户隐私或长期记忆里的秘密。
+- GENERATE_IMAGE 用于角色自拍或需要创作出来的场景；purpose 只能是 SELFIE 或 SCENE，并给出简洁 visual_intent。
+- count 表示自然需要的图片数量，不是目标配额；总图片数不要超过系统上限。
+- 可以只有图片没有文字，也可以文字+图片。
+- {media_instruction}
 """
 
     def run_opportunity(
@@ -109,45 +125,78 @@ class SpaceAutonomyService:
         prompt = self._daily_context(character_id, now, runtime.persona)
         plan = bundle.model.structured_for_session(
             prompt,
-            DailyLifePlan,
+            SpacePostPlan,
             f"space-opportunity:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}",
         )
         content = str(plan.social_post or "").strip()
-        if not content:
+        media_result = self.media_executor.execute(
+            character_id,
+            list(plan.media_intents),
+            now=now,
+            runtime=runtime,
+        )
+        relations = list(media_result["relations"])
+        media_errors = list(media_result["errors"])
+        if not content and not relations:
             return {
                 "character_id": character_id,
                 "character_name": self._name(profile),
                 "posted": False,
                 "post": None,
                 "audience": [],
+                "media_errors": media_errors,
                 "source": source,
             }
 
-        source_event = self.access.store().append_event(
-            Event(
-                character_id=character_id,
-                event_type=EventType.SOCIAL_POST,
-                event_time=now,
-                content=content,
-                metadata={
-                    "channel": "SPACE",
-                    "source": source,
-                },
+        event_content = content or f"[图片动态 · {len(relations)} 张]"
+        try:
+            source_event = self.access.store().append_event(
+                Event(
+                    character_id=character_id,
+                    event_type=EventType.SOCIAL_POST,
+                    event_time=now,
+                    content=event_content,
+                    metadata={
+                        "channel": "SPACE",
+                        "source": source,
+                        "media_count": len(relations),
+                        "media_sources": [item["source_type"] for item in relations],
+                    },
+                )
             )
-        )
-        post = self.repository.create_post(
-            character_id,
-            content,
-            now,
-            source_event_id=source_event.id,
-        )
+            post = self.repository.create_post(
+                character_id,
+                content,
+                now,
+                media_id=relations[0]["media_id"] if relations else None,
+                source_event_id=source_event.id,
+            )
+        except Exception:
+            self.media_executor.discard(relations)
+            raise
+
+        if relations:
+            try:
+                self.media_repository.replace_for_post(post.id, relations, now)
+            except Exception:
+                # The legacy first-media pointer still keeps one image usable.
+                # Extra unattached assets are removed rather than leaked.
+                logger.exception("space.media attach_failed post=%s", post.id)
+                self.media_executor.discard(relations[1:])
+                relations = relations[:1]
+
         audience = self.process_audience(post.id, now=now) if cascade else []
         return {
             "character_id": character_id,
             "character_name": self._name(profile),
             "posted": True,
-            "post": post.model_dump(mode="json"),
+            "post": {
+                **post.model_dump(mode="json"),
+                "media_items": relations,
+                "media_count": len(relations),
+            },
             "audience": audience,
+            "media_errors": media_errors,
             "source": source,
         }
 
@@ -239,12 +288,16 @@ class SpaceAutonomyService:
             if runtime is None:
                 continue
             self.repository.record_view(post.id, character_id, now)
+            media_count = len(self.media_repository.list_for_post(post.id))
+            visible_summary = post.content or "[图片动态]"
+            if media_count:
+                visible_summary = f"{visible_summary}（附 {media_count} 张图片）"
             result = runtime.handle(
                 Event(
                     character_id=character_id,
                     event_type=EventType.SPACE_POST_SEEN,
                     event_time=now,
-                    content=f"{self._name(author)} 在空间发布了一条动态：{post.content}",
+                    content=f"{self._name(author)} 在空间发布了一条动态：{visible_summary}",
                     metadata={
                         "channel": "SPACE",
                         "post_id": post.id,
@@ -364,6 +417,10 @@ class SpaceAutonomyScheduler:
             "enabled": autonomy_enabled(self.access),
             "interval_minutes": self.interval_minutes(),
             "max_posts_per_day": self.max_posts_per_day(),
+            "media_enabled": bool(getattr(self.access.settings, "space_media_enabled", True)),
+            "media_max_items": max(0, min(9, int(getattr(self.access.settings, "space_media_max_items", 3)))),
+            "image_search_enabled": bool(getattr(self.access.settings, "space_image_search_enabled", True)),
+            "image_generation_enabled": bool(getattr(self.access.settings, "space_image_generation_enabled", True)),
             "poll_seconds": self.poll_seconds,
             "audience_size": min(
                 MAX_AUTONOMOUS_AUDIENCE,
@@ -379,6 +436,10 @@ class SpaceAutonomyScheduler:
         enabled: bool | None = None,
         interval_minutes: float | None = None,
         max_posts_per_day: int | None = None,
+        media_enabled: bool | None = None,
+        media_max_items: int | None = None,
+        image_search_enabled: bool | None = None,
+        image_generation_enabled: bool | None = None,
         audience_size: int | None = None,
         poll_seconds: float | None = None,
         rearm: bool = True,
@@ -395,6 +456,14 @@ class SpaceAutonomyScheduler:
             self.access.settings.space_max_posts_per_day = max(
                 0, min(200, int(max_posts_per_day))
             )
+        if media_enabled is not None:
+            self.access.settings.space_media_enabled = bool(media_enabled)
+        if media_max_items is not None:
+            self.access.settings.space_media_max_items = max(0, min(9, int(media_max_items)))
+        if image_search_enabled is not None:
+            self.access.settings.space_image_search_enabled = bool(image_search_enabled)
+        if image_generation_enabled is not None:
+            self.access.settings.space_image_generation_enabled = bool(image_generation_enabled)
         if audience_size is not None:
             self.access.settings.space_audience_size = max(
                 0, min(MAX_AUTONOMOUS_AUDIENCE, int(audience_size))
@@ -510,6 +579,7 @@ class SpaceAutonomyScheduler:
         self._wake.set()
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=1.0)
+        self.service.media_executor.close()
 
 def autonomy_enabled(access) -> bool:
     return bool(

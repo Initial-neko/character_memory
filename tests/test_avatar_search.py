@@ -56,13 +56,18 @@ def test_searchapi_image_search_parses_candidates_and_maps_safe_search():
     )
     results = provider.search_images("Mika avatar", limit=12)
 
-    assert len(results) == 1
+    # The provider is composition-neutral. Avatar-specific aspect filtering is
+    # applied later by AvatarSearchService so Space can reuse wide imagery.
+    assert len(results) == 2
     assert results[0].image_url == "https://imgs.example.org/full.jpg"
     assert results[0].thumbnail_url == "https://imgs.example.org/thumb.jpg"
     assert results[0].source_page_url == "https://example.org/source"
     assert results[0].source_domain == "example.org"
     assert results[0].width == 900
     assert results[0].height == 900
+    assert results[1].image_url == "https://imgs.example.org/banner.jpg"
+    assert results[1].width == 2000
+    assert results[1].height == 200
     assert seen["authorization"] == "Bearer secret"
     assert "engine=google_images" in seen["url"]
     assert "gl=jp" in seen["url"]
@@ -135,6 +140,42 @@ def test_brave_image_search_remains_available_as_fallback():
     client.close()
 
 
+class MixedShapeSearchProvider(SearchProvider):
+    def search_images(self, query: str, *, limit: int = 12) -> list[ImageSearchResult]:
+        return [
+            ImageSearchResult(
+                title="avatar",
+                image_url="https://cdn.example.org/avatar.png",
+                thumbnail_url="https://cdn.example.org/avatar-thumb.png",
+                source_page_url="https://example.org/avatar",
+                source_domain="example.org",
+                width=512,
+                height=512,
+            ),
+            ImageSearchResult(
+                title="wide banner",
+                image_url="https://cdn.example.org/banner.png",
+                thumbnail_url="https://cdn.example.org/banner-thumb.png",
+                source_page_url="https://example.org/banner",
+                source_domain="example.org",
+                width=2000,
+                height=200,
+            ),
+        ]
+
+
+def test_avatar_search_service_keeps_avatar_shape_filter_at_product_boundary(tmp_path):
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
+    store = AvatarStore(tmp_path / "avatars", client=client)
+    service = AvatarSearchService(MixedShapeSearchProvider(), store)
+
+    search = service.search("mika", "Mika avatar", limit=6)
+
+    assert len(search["candidates"]) == 1
+    assert search["candidates"][0]["title"] == "avatar"
+    service.close()
+
+
 class FakeSearchProvider(SearchProvider):
     def search_images(self, query: str, *, limit: int = 12) -> list[ImageSearchResult]:
         return [
@@ -159,7 +200,11 @@ def test_avatar_selection_requires_cached_candidate_and_persists_locally(tmp_pat
 
     def download(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == "https://cdn.example.org/avatar.png"
-        return httpx.Response(200, content=b"fake-png", headers={"content-type": "image/png"})
+        return httpx.Response(
+            200,
+            content=b"\x89PNG\r\n\x1a\nvalid-avatar",
+            headers={"content-type": "image/png"},
+        )
 
     client = httpx.Client(transport=httpx.MockTransport(download))
     store = AvatarStore(tmp_path / "avatars", client=client)
@@ -176,7 +221,7 @@ def test_avatar_selection_requires_cached_candidate_and_persists_locally(tmp_pat
     assert metadata.character_id == "mika"
     assert metadata.search_query == "Mika portrait"
     assert metadata.source_domain == "example.org"
-    assert (tmp_path / "avatars" / "mika" / "avatar.png").read_bytes() == b"fake-png"
+    assert (tmp_path / "avatars" / "mika" / "avatar.png").read_bytes() == b"\x89PNG\r\n\x1a\nvalid-avatar"
     assert store.load("mika") is not None
     assert store.asset_path("mika") is not None
     client.close()

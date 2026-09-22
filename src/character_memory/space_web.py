@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
+from character_memory.domain.models import SpaceMediaIntent, SpaceMediaIntentType
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
@@ -58,9 +59,22 @@ class SpaceDevConfigRequest(BaseModel):
     enabled: bool | None = None
     interval_minutes: float | None = Field(default=None, ge=10.0, le=10080.0)
     max_posts_per_day: int | None = Field(default=None, ge=0, le=200)
+    media_enabled: bool | None = None
+    media_max_items: int | None = Field(default=None, ge=0, le=9)
+    image_search_enabled: bool | None = None
+    image_generation_enabled: bool | None = None
     audience_size: int | None = Field(default=None, ge=0, le=10)
     poll_seconds: float | None = Field(default=None, ge=10.0, le=3600.0)
     rearm: bool = True
+
+
+class SpaceDevMediaRequest(BaseModel):
+    type: SpaceMediaIntentType
+    content: str = Field(default="", max_length=4000)
+    count: int = Field(default=1, ge=1, le=9)
+    query: str | None = Field(default=None, max_length=300)
+    purpose: str | None = Field(default="SCENE", max_length=16)
+    visual_intent: str | None = Field(default=None, max_length=800)
 
 
 def attach_space_routes(app):
@@ -89,9 +103,10 @@ def attach_space_routes(app):
             # Dev/Settings can hot-enable it without restarting Character Runtime.
             scheduler.start()
 
-        @app.on_event("shutdown")
-        def _stop_space_autonomy():
-            scheduler.stop()
+    @app.on_event("shutdown")
+    def _stop_space_autonomy():
+        scheduler.stop()
+        autonomy.media_executor.close()
 
     # Expose the feature runtime for tests/diagnostics without initializing LLM.
     access.space_repository = repository
@@ -136,7 +151,7 @@ def attach_space_routes(app):
         raw_source = str(asset.source or "").strip().upper()
         if "SEARCH" in raw_source:
             source_type = "SEARCH"
-        elif raw_source in {"GENERATED", "IMAGEGEN", "AI_GENERATED", "TTS", "VOICE_SYNTH"}:
+        elif "GENERATED" in raw_source or raw_source in {"IMAGEGEN", "AI_GENERATED", "TTS", "VOICE_SYNTH"}:
             source_type = "GENERATED"
         elif raw_source in {"WEB", "FETCHED", "WEB_FETCH"}:
             source_type = "WEB"
@@ -379,6 +394,10 @@ def attach_space_routes(app):
             enabled=req.enabled,
             interval_minutes=req.interval_minutes,
             max_posts_per_day=req.max_posts_per_day,
+            media_enabled=req.media_enabled,
+            media_max_items=req.media_max_items,
+            image_search_enabled=req.image_search_enabled,
+            image_generation_enabled=req.image_generation_enabled,
             audience_size=req.audience_size,
             poll_seconds=req.poll_seconds,
             rearm=req.rearm,
@@ -415,6 +434,50 @@ def attach_space_routes(app):
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/space/dev/media/{character_id}")
+    def space_dev_media(character_id: str, req: SpaceDevMediaRequest):
+        """Force one explicit media intent without changing scheduler state."""
+        require_known(character_id, active=True)
+        now = datetime.now().astimezone()
+        try:
+            intent = SpaceMediaIntent.model_validate(req.model_dump())
+            runtime = None
+            if intent.type == SpaceMediaIntentType.GENERATE_IMAGE:
+                bundle = access.require_bundle()
+                runtime = getattr(bundle, "runtimes", {}).get(character_id)
+                if runtime is None:
+                    raise KeyError(f"runtime not found for character: {character_id}")
+            result = autonomy.media_executor.execute(
+                character_id,
+                [intent],
+                now=now,
+                runtime=runtime,
+            )
+            relations = list(result["relations"])
+            if not relations:
+                raise RuntimeError(
+                    (result["errors"][-1]["error"] if result["errors"] else "media executor returned no image")
+                )
+            post = repository.create_post(
+                character_id,
+                req.content.strip(),
+                now,
+                media_id=relations[0]["media_id"],
+            )
+            media_repository.replace_for_post(post.id, relations, now)
+            return {
+                "ok": True,
+                "intent": intent.model_dump(mode="json"),
+                "errors": result["errors"],
+                "post": post_payload(repository, post),
+            }
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/v1/space/dev/audience/{post_id}")
     def space_dev_audience(post_id: int):

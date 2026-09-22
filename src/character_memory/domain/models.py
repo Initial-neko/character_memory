@@ -356,6 +356,84 @@ class DailyLifePlan(BaseModel):
     image_prompt: str | None = None
 
 
+class SpaceMediaIntentType(str, Enum):
+    SEARCH_IMAGE = "SEARCH_IMAGE"
+    GENERATE_IMAGE = "GENERATE_IMAGE"
+
+
+class SpaceMediaIntent(BaseModel):
+    type: SpaceMediaIntentType = Field(
+        validation_alias=AliasChoices("type", "kind")
+    )
+    count: int = Field(default=1, ge=1, le=9)
+    query: str | None = Field(default=None, max_length=300)
+    purpose: str | None = Field(default=None, max_length=16)
+    visual_intent: str | None = Field(default=None, max_length=800)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_media_intent(cls, value):
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        raw_type = normalized.get("type", normalized.get("kind"))
+        if isinstance(raw_type, str):
+            normalized["type"] = raw_type.strip().upper()
+        if isinstance(normalized.get("purpose"), str):
+            normalized["purpose"] = normalized["purpose"].strip().upper()
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_media_intent(self):
+        if self.type == SpaceMediaIntentType.SEARCH_IMAGE:
+            self.query = " ".join(str(self.query or "").split()).strip()[:300]
+            if not self.query:
+                raise ValueError("SEARCH_IMAGE requires query")
+            self.purpose = None
+            self.visual_intent = None
+            return self
+
+        purpose = str(self.purpose or "SCENE").strip().upper()
+        if purpose not in {"SELFIE", "SCENE"}:
+            raise ValueError("GENERATE_IMAGE purpose must be SELFIE or SCENE")
+        visual_intent = str(self.visual_intent or "").strip()
+        if not visual_intent:
+            raise ValueError("GENERATE_IMAGE requires visual_intent")
+        self.purpose = purpose
+        self.visual_intent = visual_intent[:800]
+        self.query = None
+        return self
+
+
+class SpacePostPlan(BaseModel):
+    social_post: str | None = None
+    media_intents: list[SpaceMediaIntent] = Field(default_factory=list, max_length=6)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_image_prompt(cls, value):
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        old_prompt = str(normalized.get("image_prompt") or "").strip()
+        if old_prompt and not normalized.get("media_intents"):
+            normalized["media_intents"] = [
+                {
+                    "type": "GENERATE_IMAGE",
+                    "purpose": "SCENE",
+                    "visual_intent": old_prompt,
+                    "count": 1,
+                }
+            ]
+        return normalized
+
+    @model_validator(mode="after")
+    def clean_social_post(self):
+        value = str(self.social_post or "").strip()
+        self.social_post = value or None
+        return self
+
+
 class DiaryResult(BaseModel):
     diary: str
     mental_state_update: str

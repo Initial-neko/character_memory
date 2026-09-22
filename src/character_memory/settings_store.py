@@ -221,6 +221,23 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "help": "每个角色每天最多发布几条自主动态。0 = 不限。它只是上限，不会强制发帖；角色判断不发时不消耗额度。",
             },
             {
+                "name": "space_media_enabled",
+                "label": "Space Media",
+                "type": "checkbox",
+                "help": "允许角色在自主动态里自然选择图片；关闭后仍可正常发布纯文字动态。",
+            },
+            {
+                "name": "space_media_max_items",
+                "label": "Max Media / Post",
+                "type": "number",
+                "min": 0,
+                "max": 9,
+                "step": 1,
+                "help": "单条自主动态最多执行多少张图片。0 = 禁用媒体；存储层硬上限仍为 9。",
+            },
+            {"name": "space_image_search_enabled", "label": "Web Image Search", "type": "checkbox"},
+            {"name": "space_image_generation_enabled", "label": "AI ImageGen", "type": "checkbox"},
+            {
                 "name": "space_audience_size",
                 "label": "Autonomous Audience",
                 "type": "number",

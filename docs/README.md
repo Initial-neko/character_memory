@@ -43,6 +43,7 @@ Source code and tests are the final implementation authority. `docs/current/` is
 ### Operations and validation
 
 - [Release and version policy](current/RELEASES.md)
+- [Release readiness audit](current/RELEASE_READINESS.md)
 - [Settings Center](current/SETTINGS_CENTER.md)
 - [Dev Console](current/DEV_CONSOLE.md)
 - [Mobile access](current/MOBILE_ACCESS.md)

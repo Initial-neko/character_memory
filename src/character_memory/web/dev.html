@@ -70,19 +70,34 @@
           <span class="pill">social life</span>
         </div>
 
-        <div class="visual-provider-row">
-          <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked /> Autonomous Space</label>
-          <label>Opportunity Interval (min)<input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="1440" /></label>
-          <label>Max Posts / Day<input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="0" /></label>
-          <label class="visual-check"><input id="spaceMediaEnabled" type="checkbox" checked /> Space Media</label>
-          <label>Max Media / Post<input id="spaceMediaMaxItems" type="number" min="0" max="9" step="1" value="3" /></label>
-          <label class="visual-check"><input id="spaceImageSearchEnabled" type="checkbox" checked /> Web Image Search</label>
-          <label class="visual-check"><input id="spaceImageGenerationEnabled" type="checkbox" checked /> AI ImageGen</label>
-          <label class="visual-check"><input id="spaceWorldObservationEnabled" type="checkbox" checked /> World Observation</label>
-          <label>World Pages<input id="spaceWorldMaxPages" type="number" min="1" max="4" step="1" value="2" /></label>
-          <label>World Text / Page<input id="spaceWorldMaxChars" type="number" min="500" max="16000" step="500" value="6000" /></label>
-          <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /></label>
-          <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
+        <div class="field-group">
+          <span class="field-group-label">调度</span>
+          <div class="visual-provider-row">
+            <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked /> Autonomous Space</label>
+            <label>Opportunity Interval (min)<input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="1440" /></label>
+            <label>Max Posts / Day<input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="0" /></label>
+            <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
+            <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /></label>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <span class="field-group-label">媒体</span>
+          <div class="visual-provider-row">
+            <label class="visual-check"><input id="spaceMediaEnabled" type="checkbox" checked /> Space Media</label>
+            <label>Max Media / Post<input id="spaceMediaMaxItems" type="number" min="0" max="9" step="1" value="3" /></label>
+            <label class="visual-check"><input id="spaceImageSearchEnabled" type="checkbox" checked /> Web Image Search</label>
+            <label class="visual-check"><input id="spaceImageGenerationEnabled" type="checkbox" checked /> AI ImageGen</label>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <span class="field-group-label">世界观察</span>
+          <div class="visual-provider-row">
+            <label class="visual-check"><input id="spaceWorldObservationEnabled" type="checkbox" checked /> World Observation</label>
+            <label>World Pages<input id="spaceWorldMaxPages" type="number" min="1" max="4" step="1" value="2" /></label>
+            <label>World Text / Page<input id="spaceWorldMaxChars" type="number" min="500" max="16000" step="500" value="6000" /></label>
+          </div>
         </div>
 
         <div class="actions">
@@ -139,8 +154,14 @@
         <p class="subtle">World Observation 会先搜索候选 URL，再由 Playwright 无头 Chromium 执行页面 JS 并抽取正文。URL 测试只验证浏览器抓取，不触发角色记忆或 Space 发帖。</p>
         <p class="subtle">“手动触发”不改变正式 next opportunity；“立即到期”则用于测试真实 Scheduler：把选中角色的 next opportunity 设为现在，后台线程会按 Poll 周期自动执行。</p>
         <p class="subtle" id="spaceStatusAge">尚未读取调度状态。</p>
-        <pre id="spaceStatus" class="result">等待读取 Space 调度状态...</pre>
-        <pre id="spaceResult" class="result">等待测试...</pre>
+        <details class="debug-output">
+          <summary>原始调度状态（调试用）</summary>
+          <pre id="spaceStatus" class="result">等待读取 Space 调度状态...</pre>
+        </details>
+        <details class="debug-output">
+          <summary>原始执行结果（调试用）</summary>
+          <pre id="spaceResult" class="result">等待测试...</pre>
+        </details>
       </article>
 
       <article class="card wide" id="groupAutonomyCard">
@@ -171,8 +192,14 @@
         </div>
         <p class="subtle">手动触发会忽略 User Quiet Guard，方便验收；正式 Scheduler 会遵守 Quiet Guard。自主消息仍写入原来的 conversation_events，群聊页面/SSE 无需第二套渲染。</p>
         <p class="subtle" id="groupAutonomyStatusAge">尚未读取调度状态。</p>
-        <pre id="groupAutonomyStatus" class="result">等待读取自主群聊调度状态...</pre>
-        <pre id="groupAutonomyResult" class="result">等待测试...</pre>
+        <details class="debug-output">
+          <summary>原始调度状态（调试用）</summary>
+          <pre id="groupAutonomyStatus" class="result">等待读取自主群聊调度状态...</pre>
+        </details>
+        <details class="debug-output">
+          <summary>原始执行结果（调试用）</summary>
+          <pre id="groupAutonomyResult" class="result">等待测试...</pre>
+        </details>
       </article>
 
       <article class="card">

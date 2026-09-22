@@ -31,6 +31,7 @@ from character_memory.storage.sqlite import SQLiteStore
 class SpaceModel(PersonModel):
     def __init__(self):
         self.opportunities = 0
+        self.prompts = []
 
     def react(self, context):
         return self._reaction(context)
@@ -64,6 +65,7 @@ class SpaceModel(PersonModel):
     def structured_for_session(self, prompt, schema, session_id):
         assert schema is SpacePostPlan
         self.opportunities += 1
+        self.prompts.append(prompt)
         return SpacePostPlan(
             social_post="今天想安静一点，晚点再做别的。",
             media_intents=[],
@@ -567,6 +569,26 @@ def test_interval_scheduler_runs_again_after_one_hour_and_manual_dev_does_not_co
     assert model.opportunities == 3
     assert len(repository.list_opportunity_runs(character_id="c00")) == 2
     store.close()
+
+def test_space_prompt_states_the_media_capability_without_policing_it(tmp_path):
+    """The prompt offers what a post may contain and stops there.
+
+    Telling the character not to reach for media "just to show the feature"
+    made it treat pictures and voice as things to avoid, so the capability is
+    stated plainly instead of being argued about.
+    """
+    access, store, model = _access(tmp_path, ids=("c00",))
+    service = SpaceAutonomyService(access, SpaceRepository(store))
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+
+    service.run_opportunity("c00", now=now, source="DEV")
+
+    prompt = model.prompts[0]
+    assert "文字、0-9 张图片、一条语音" in prompt
+    assert "强行配图" not in prompt
+    assert "不要为了展示功能" not in prompt
+    store.close()
+
 
 def test_daily_post_ceiling_skips_without_moving_the_next_opportunity(tmp_path):
     """A spent publishing budget pauses scheduling; it never reschedules it.

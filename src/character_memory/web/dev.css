@@ -97,3 +97,29 @@ td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
   font-size: 13px;
 }
 .boot-warning[hidden] { display: none; }
+
+/* The Space / Group autonomy cards carry a dozen controls each. Grouping them
+   under short labels keeps the card readable, and the raw scheduler payload
+   stays one click away instead of pushing the controls off the screen. */
+.field-group {
+  display: block;
+  margin-bottom: 10px;
+}
+.field-group-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ui-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.debug-output {
+  margin-top: 10px;
+}
+.debug-output > summary {
+  cursor: pointer;
+  color: var(--ui-muted);
+  font-size: 12px;
+}
+.debug-output[open] > summary {
+  margin-bottom: 6px;
+}

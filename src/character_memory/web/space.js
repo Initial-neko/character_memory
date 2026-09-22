@@ -46,6 +46,8 @@
   let opened = false;
   let filterCharacterId = null;
   let voicePlayer = {audio:null, button:null};
+  let postsById = new Map();
+  const expandedComments = new Set();
 
   function profileFor(id) {
     return CM.state.characters.find(item => item.id === id) || {id, name:id};
@@ -126,15 +128,26 @@
   }
 
   function commentsHtml(post) {
-    const comments = Array.isArray(post.comments) ? post.comments.slice(0, 3) : [];
-    if (!comments.length) return "";
+    const allComments = Array.isArray(post.comments) ? post.comments : [];
+    const expanded = expandedComments.has(String(post.id));
+    const comments = expanded ? allComments : allComments.slice(0, 3);
     const body = comments.map(comment => {
-      const name = comment.author?.name || comment.character_id;
-      return `<div class="space-comment"><strong>${CM.escapeHtml(name)}</strong><span>${CM.escapeHtml(comment.content)}</span></div>`;
+      const name = comment.author?.name || (comment.actor_type === "USER" ? "我" : comment.character_id);
+      const actorClass = comment.actor_type === "USER" ? " space-comment-user" : "";
+      return `<div class="space-comment${actorClass}"><strong>${CM.escapeHtml(name)}</strong><span>${CM.escapeHtml(comment.content)}</span></div>`;
     }).join("");
-    const remaining = Math.max(0, (post.comments || []).length - comments.length);
-    const more = remaining ? `<div class="space-comment-more">还有 ${remaining} 条评论 · 完整评论视图将在后续交互版打开</div>` : "";
-    return `<div class="space-comments">${body}${more}</div>`;
+    const toggle = allComments.length > 3
+      ? `<button class="space-comments-toggle" type="button" data-space-comments-toggle="${CM.escapeHtml(post.id)}">${expanded ? "收起评论" : `查看全部 ${allComments.length} 条评论`}</button>`
+      : "";
+    return `<div class="space-comments">
+      <div class="space-comments-list">${body || '<div class="space-comments-empty">还没有评论</div>'}</div>
+      ${toggle}
+      <form class="space-comment-form" data-space-comment-form="${CM.escapeHtml(post.id)}">
+        <textarea class="space-comment-input" name="content" rows="1" maxlength="1000" placeholder="评论这条动态…" aria-label="评论这条动态"></textarea>
+        <button class="space-comment-submit" type="submit">发送</button>
+        <div class="space-comment-error hidden" aria-live="polite"></div>
+      </form>
+    </div>`;
   }
 
   function postHtml(post) {
@@ -157,6 +170,14 @@
     `;
   }
 
+  function replacePost(post) {
+    if (!post) return;
+    postsById.set(String(post.id), post);
+    const target = Array.from(feed.querySelectorAll("[data-space-post]"))
+      .find(node => node.dataset.spacePost === String(post.id));
+    if (target) target.outerHTML = postHtml(post);
+  }
+
   function updateCharacterEntry() {
     characterEntry.classList.toggle("hidden", CM.isGroupConversation());
   }
@@ -176,6 +197,7 @@
     try {
       const data = await CM.api(`/v1/space/posts?${params.toString()}`);
       const posts = data.posts || [];
+      postsById = new Map(posts.map(post => [String(post.id), post]));
       if (filterCharacterId) {
         const profile = profileFor(filterCharacterId);
         title.textContent = `${profile.name || profile.id} 的空间`;
@@ -209,6 +231,15 @@
   }
 
   feed.addEventListener("click", event => {
+    const commentsToggle = event.target.closest("[data-space-comments-toggle]");
+    if (commentsToggle) {
+      const postId = String(commentsToggle.dataset.spaceCommentsToggle || "");
+      if (expandedComments.has(postId)) expandedComments.delete(postId);
+      else expandedComments.add(postId);
+      replacePost(postsById.get(postId));
+      return;
+    }
+
     const play = event.target.closest("[data-space-voice-play]");
     if (play) {
       if (voicePlayer.button === play && voicePlayer.audio) {
@@ -240,6 +271,42 @@
     const textButton = event.target.closest("[data-space-voice-text]");
     if (textButton) {
       textButton.parentElement?.querySelector("[data-space-voice-transcript]")?.classList.toggle("hidden");
+    }
+  });
+
+  feed.addEventListener("submit", async event => {
+    const form = event.target.closest("[data-space-comment-form]");
+    if (!form) return;
+    event.preventDefault();
+
+    const postId = String(form.dataset.spaceCommentForm || "");
+    const input = form.querySelector(".space-comment-input");
+    const submit = form.querySelector(".space-comment-submit");
+    const errorBox = form.querySelector(".space-comment-error");
+    const content = String(input?.value || "").trim();
+    if (!content) {
+      input?.focus();
+      return;
+    }
+
+    if (submit) submit.disabled = true;
+    errorBox?.classList.add("hidden");
+    try {
+      const data = await CM.api(`/v1/space/posts/${encodeURIComponent(postId)}/comments`, {
+        method:"POST",
+        body:JSON.stringify({content}),
+      });
+      expandedComments.add(postId);
+      replacePost(data.post);
+      const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
+        .find(node => node.dataset.spacePost === postId);
+      updated?.querySelector(".space-comment-input")?.focus();
+    } catch (error) {
+      if (submit) submit.disabled = false;
+      if (errorBox) {
+        errorBox.textContent = `评论发送失败：${error.message}`;
+        errorBox.classList.remove("hidden");
+      }
     }
   });
 

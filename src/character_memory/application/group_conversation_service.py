@@ -10,6 +10,7 @@ from uuid import uuid4
 from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.runtime.context import compile_context
+from character_memory.runtime.person_context import PersonContextBuilder
 from character_memory.voice_message_fields import voice_pending_fields
 
 
@@ -306,14 +307,22 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         with self._member_lock(character_id):
             now = source_event.event_time
             self.store.set_world_time(character_id, now)
-            state_before = self.store.get_mental_state(character_id, at=now)
             recall_query = str(source_event.metadata.get("display_text") or source_event.content or "").strip()
             if source_event.metadata.get("media_id"):
                 recall_query = f"{recall_query} 群聊图片".strip()
             if source_event.metadata.get("action") == ActionType.STICKER.value:
                 recall_query = f"{source_event.metadata.get('sticker_label') or '表情包'} {source_event.metadata.get('sticker_meaning') or ''}".strip()
-            memories = runtime.recall.recall(character_id, recall_query, now=now)
             recent = self._recent_as_events(group.id)
+            person_context = PersonContextBuilder(self.store, runtime.recall, runtime.persona).build(
+                character_id,
+                query=recall_query,
+                at=now,
+                recent_events=recent,
+                recent_limit=14,
+            )
+            state_before = person_context.mental_state
+            memories = person_context.memories
+            recent = person_context.recent_events
             sticker_query = "\n".join(item.content.strip() for item in recent[-4:] if (item.content or "").strip()) or recall_query
             sticker_retrieval = runtime.sticker_retriever.retrieve(runtime.sticker_catalog, sticker_query)
             prompt_stickers = sticker_retrieval.catalog if sticker_retrieval is not None else None

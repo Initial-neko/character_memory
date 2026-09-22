@@ -30,8 +30,11 @@
         <div id="configPath" class="mono subtle">loading...</div>
       </div>
       <div class="toolbar-actions">
-        <button id="reloadSettings" class="secondary" type="button">重新读取 / 刷新健康状态</button>
         <button id="saveSettings" class="primary" type="button">保存配置</button>
+        <details class="level-group" data-level="advanced">
+          <summary>高级操作（1 项）：重新读取配置 / 刷新服务健康状态</summary>
+          <button id="reloadSettings" class="secondary" type="button">重新读取 / 刷新健康状态</button>
+        </details>
       </div>
     </section>
 
@@ -48,11 +51,14 @@
       <div class="section-heading">
         <div>
           <h2>Secrets</h2>
-          <p>API Key / Token 只保存到 <code>.env</code>；系统环境变量优先级更高。页面不会读取或返回明文 Key。</p>
+          <p>API Key / Token 只保存到 <code>.env</code>；系统环境变量优先级更高。页面不会读取或返回明文 Key。当前 Provider 的 Key 在下面，其他 Provider 的 Key 收在「诊断设置」里。</p>
         </div>
-        <button id="migrateSecrets" class="secondary" type="button">迁移旧 config Key</button>
       </div>
       <div id="secretList" class="secret-list"></div>
+      <details class="level-group" data-level="diagnostic">
+        <summary>诊断操作（1 项）：迁移旧 config 里的明文 Key — 只在旧版本把 Key 写在 config.yaml 里时才需要</summary>
+        <button id="migrateSecrets" class="secondary" type="button">迁移旧 config Key</button>
+      </details>
     </section>
 
     <section class="card footer-card">

@@ -5,6 +5,48 @@
   const notice = document.getElementById("notice");
   const configPath = document.getElementById("configPath");
 
+  // Levels come from the server (`level` on every field and secret). `common`
+  // renders straight into the card; the other two become real <details> groups,
+  // closed by default, so the first screen is the short list. A value this page
+  // does not recognise is treated as diagnostic: an unknown level must never
+  // promote a control onto the first screen.
+  const LEVEL_ORDER = ["common", "advanced", "diagnostic"];
+  const LEVEL_META = {
+    advanced: {label: "高级设置", hint: "有合理默认，通常不用改"},
+    diagnostic: {label: "诊断设置", hint: "执行上限、路径与轮询等底层参数"},
+  };
+
+  function levelOf(item) {
+    return LEVEL_ORDER.includes(item?.level) ? item.level : "diagnostic";
+  }
+
+  function levelGroup(level, labels, hint) {
+    const meta = LEVEL_META[level] || {label: level, hint: ""};
+    const shown = labels.slice(0, 4).join(" · ");
+    const more = labels.length > 4 ? " …" : "";
+    const details = document.createElement("details");
+    details.className = "level-group";
+    details.dataset.level = level;
+    const summary = document.createElement("summary");
+    summary.textContent = `${meta.label}（${labels.length} 项）：${shown}${more} — ${hint || meta.hint}`;
+    details.appendChild(summary);
+    return details;
+  }
+
+  // Shared by the schema fields and the secret rows: both carry `level`, and
+  // both render common inline with the rest behind a closed group.
+  function bucketsByLevel(items) {
+    const buckets = {common: [], advanced: [], diagnostic: []};
+    for (const item of items) buckets[levelOf(item)].push(item);
+    return buckets;
+  }
+
+  function collapsedGroups(buckets, labels, hint) {
+    return LEVEL_ORDER
+      .filter(level => level !== "common" && buckets[level].length)
+      .map(level => ({level, details: levelGroup(level, labels(buckets[level]), hint?.[level])}));
+  }
+
   function showNotice(message, error = false) {
     notice.textContent = message;
     notice.classList.toggle("error", error);
@@ -66,40 +108,61 @@
       heading.querySelector("p").textContent = section.description || "";
       card.appendChild(heading);
 
-      const grid = document.createElement("div");
-      grid.className = "field-grid";
-      for (const field of section.fields || []) {
-        const wrap = document.createElement("div");
-        wrap.className = "field";
-        const label = document.createElement("label");
-        label.htmlFor = `setting-${field.name}`;
-        label.textContent = field.label || field.name;
-        const input = fieldInput(field, snapshot.values?.[field.name]);
-        wrap.appendChild(label);
-        if (field.type === "checkbox") {
-          const row = document.createElement("div");
-          row.className = "checkbox-row";
-          row.appendChild(input);
-          const copy = document.createElement("span");
-          copy.textContent = input.checked ? "启用" : "关闭";
-          input.addEventListener("change", () => { copy.textContent = input.checked ? "启用" : "关闭"; });
-          row.appendChild(copy);
-          wrap.appendChild(row);
-        } else {
-          wrap.appendChild(input);
-        }
-        if (field.help) {
-          const help = document.createElement("div");
-          help.className = "subtle field-help";
-          help.textContent = field.help;
-          wrap.appendChild(help);
-        }
-        grid.appendChild(wrap);
+      const buckets = bucketsByLevel(section.fields || []);
+      if (buckets.common.length) card.appendChild(fieldGrid(buckets.common, snapshot.values));
+      for (const {level, details} of collapsedGroups(buckets, fields => fields.map(field => field.label || field.name))) {
+        details.appendChild(fieldGrid(buckets[level], snapshot.values));
+        card.appendChild(details);
       }
-      card.appendChild(grid);
       sections.appendChild(card);
     }
     wireTtsControls(snapshot);
+  }
+
+  function fieldGrid(fields, values) {
+    const grid = document.createElement("div");
+    grid.className = "field-grid";
+    for (const field of fields) grid.appendChild(fieldElement(field, values?.[field.name]));
+    return grid;
+  }
+
+  function fieldElement(field, value) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const label = document.createElement("label");
+    label.htmlFor = `setting-${field.name}`;
+    label.textContent = field.label || field.name;
+    if (field.restart_required) {
+      // The save toast lists the changed fields once and is then gone. This
+      // marker is the durable half: it says, next to the field, that saving it
+      // is not the whole story.
+      const badge = document.createElement("span");
+      badge.className = "field-restart";
+      badge.textContent = "需重启";
+      badge.title = "保存后需重启对应 Runtime 才生效；保存提示里会列出本次实际改动的字段。";
+      label.appendChild(badge);
+    }
+    const input = fieldInput(field, value);
+    wrap.appendChild(label);
+    if (field.type === "checkbox") {
+      const row = document.createElement("div");
+      row.className = "checkbox-row";
+      row.appendChild(input);
+      const copy = document.createElement("span");
+      copy.textContent = input.checked ? "启用" : "关闭";
+      input.addEventListener("change", () => { copy.textContent = input.checked ? "启用" : "关闭"; });
+      row.appendChild(copy);
+      wrap.appendChild(row);
+    } else {
+      wrap.appendChild(input);
+    }
+    if (field.help) {
+      const help = document.createElement("div");
+      help.className = "subtle field-help";
+      help.textContent = field.help;
+      wrap.appendChild(help);
+    }
+    return wrap;
   }
 
   function ttsProviderStatus(providerId) {
@@ -144,7 +207,11 @@
       previewStatus.textContent = "使用当前 Provider / Voice 生成一句试听。";
 
       previewRow.append(previewButton, previewAudio, previewStatus);
-      voiceCard.appendChild(previewRow);
+      // Right under the common fields it belongs to, not below the card's
+      // collapsed groups: testing the current voice is a first-screen action.
+      const grid = voiceCard.querySelector(".field-grid");
+      if (grid) grid.insertAdjacentElement("afterend", previewRow);
+      else voiceCard.appendChild(previewRow);
     }
 
     function runtimeDevice(item) {
@@ -298,74 +365,92 @@
 
   function renderSecrets(snapshot) {
     secretList.innerHTML = "";
-    for (const secret of snapshot.secrets || []) {
-      const row = document.createElement("div");
-      row.className = "secret-row";
-
-      const meta = document.createElement("div");
-      meta.className = "secret-meta";
-      const status = secret.configured
-        ? `已配置 · ${secret.source || "unknown"}${secret.stored_in_env && secret.source === "system" ? "（.env 作为 fallback）" : ""}`
-        : "未配置";
-      meta.innerHTML = `<strong></strong><span></span>`;
-      meta.querySelector("strong").textContent = secret.label || secret.name;
-      meta.querySelector("span").textContent = `${secret.name} · ${status}`;
-
-      const inputWrap = document.createElement("div");
-      inputWrap.className = "secret-input";
-      const input = document.createElement("input");
-      input.type = "password";
-      input.autocomplete = "new-password";
-      input.placeholder = secret.configured ? "输入新值以替换；现有值不会显示" : "输入 Secret";
-      input.dataset.secret = secret.name;
-      inputWrap.appendChild(input);
-
-      const actions = document.createElement("div");
-      actions.className = "secret-actions";
-      const save = document.createElement("button");
-      save.type = "button";
-      save.className = "secondary";
-      save.textContent = "保存";
-      save.addEventListener("click", async () => {
-        const value = input.value.trim();
-        if (!value) return showNotice(`${secret.name} 不能为空`, true);
-        save.disabled = true;
-        try {
-          await jsonRequest(`/v1/settings/secrets/${encodeURIComponent(secret.name)}`, {
-            method: "PUT",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({value}),
-          });
-          input.value = "";
-          await loadSettings();
-          showNotice(`${secret.name} 已写入 .env。重启 stack 后其他进程生效。`);
-        } catch (error) {
-          showNotice(`保存 Secret 失败：${error.message}`, true);
-        } finally {
-          save.disabled = false;
-        }
-      });
-
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "danger";
-      remove.textContent = "删除 .env 值";
-      remove.disabled = !secret.stored_in_env;
-      remove.addEventListener("click", async () => {
-        if (!confirm(`从 .env 删除 ${secret.name}？系统环境变量不会被修改。`)) return;
-        remove.disabled = true;
-        try {
-          await jsonRequest(`/v1/settings/secrets/${encodeURIComponent(secret.name)}`, {method: "DELETE"});
-          await loadSettings();
-          showNotice(`${secret.name} 的 .env 值已删除。`);
-        } catch (error) {
-          showNotice(`删除 Secret 失败：${error.message}`, true);
-        }
-      });
-      actions.append(save, remove);
-      row.append(meta, inputWrap, actions);
-      secretList.appendChild(row);
+    const buckets = bucketsByLevel(snapshot.secrets || []);
+    for (const secret of buckets.common) secretList.appendChild(secretRow(secret));
+    // The server already decided which key belongs to which level: the two
+    // providers actually selected are advanced, the other providers' keys and
+    // the plain token drop to diagnostic -- still reachable, because a key has
+    // to exist before switching to the provider that needs it.
+    const hints = {
+      advanced: "当前 Search / ImageGen Provider 的 Key",
+      diagnostic: "其他 Provider 的 Key 与 Token，切换 Provider 前先填好",
+    };
+    for (const {level, details} of collapsedGroups(buckets, secrets => secrets.map(secret => secret.label || secret.name), hints)) {
+      const body = document.createElement("div");
+      body.className = "secret-list";
+      for (const secret of buckets[level]) body.appendChild(secretRow(secret));
+      details.appendChild(body);
+      secretList.appendChild(details);
     }
+  }
+
+  function secretRow(secret) {
+    const row = document.createElement("div");
+    row.className = "secret-row";
+
+    const meta = document.createElement("div");
+    meta.className = "secret-meta";
+    const status = secret.configured
+      ? `已配置 · ${secret.source || "unknown"}${secret.stored_in_env && secret.source === "system" ? "（.env 作为 fallback）" : ""}`
+      : "未配置";
+    meta.innerHTML = `<strong></strong><span></span>`;
+    meta.querySelector("strong").textContent = secret.label || secret.name;
+    meta.querySelector("span").textContent = `${secret.name} · ${status}`;
+
+    const inputWrap = document.createElement("div");
+    inputWrap.className = "secret-input";
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "new-password";
+    input.placeholder = secret.configured ? "输入新值以替换；现有值不会显示" : "输入 Secret";
+    input.dataset.secret = secret.name;
+    inputWrap.appendChild(input);
+
+    const actions = document.createElement("div");
+    actions.className = "secret-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "secondary";
+    save.textContent = "保存";
+    save.addEventListener("click", async () => {
+      const value = input.value.trim();
+      if (!value) return showNotice(`${secret.name} 不能为空`, true);
+      save.disabled = true;
+      try {
+        await jsonRequest(`/v1/settings/secrets/${encodeURIComponent(secret.name)}`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({value}),
+        });
+        input.value = "";
+        await loadSettings();
+        showNotice(`${secret.name} 已写入 .env。重启 stack 后其他进程生效。`);
+      } catch (error) {
+        showNotice(`保存 Secret 失败：${error.message}`, true);
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger";
+    remove.textContent = "删除 .env 值";
+    remove.disabled = !secret.stored_in_env;
+    remove.addEventListener("click", async () => {
+      if (!confirm(`从 .env 删除 ${secret.name}？系统环境变量不会被修改。`)) return;
+      remove.disabled = true;
+      try {
+        await jsonRequest(`/v1/settings/secrets/${encodeURIComponent(secret.name)}`, {method: "DELETE"});
+        await loadSettings();
+        showNotice(`${secret.name} 的 .env 值已删除。`);
+      } catch (error) {
+        showNotice(`删除 Secret 失败：${error.message}`, true);
+      }
+    });
+    actions.append(save, remove);
+    row.append(meta, inputWrap, actions);
+    return row;
   }
 
   function collectValues() {

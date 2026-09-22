@@ -36,6 +36,7 @@ from character_memory.web_assets import attach_static_assets
 
 logger = logging.getLogger("character_memory.api")
 _PROACTIVE_POLL_SECONDS = 30.0
+MAX_ACTIVE_CHARACTERS = 10
 _STICKER_VISION_MIME = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -178,10 +179,16 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
             profiles = character_profiles()
             target = next((item for item in profiles if item["id"] == character_id), None)
+            active_profiles = split_archived(profiles, False)
             if archived and target is not None and "archived_at" not in target:
-                active_profiles = split_archived(profiles, False)
                 if len(active_profiles) <= 1:
                     raise HTTPException(status_code=409, detail="至少保留一个未归档人物")
+            if not archived and target is not None and "archived_at" in target:
+                if len(active_profiles) >= MAX_ACTIVE_CHARACTERS:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"聊天列表最多保留 {MAX_ACTIVE_CHARACTERS} 位角色，请先归档一位再恢复。",
+                    )
 
             try:
                 stamp = set_character_archived(settings, character_id, archived)
@@ -419,6 +426,34 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         refresh_runtime_sticker_catalog(stickers)
         refresh_character_cache()
 
+    def create_character_from_draft(draft: PersonaDraft, requested_id: str = "") -> dict:
+        with character_write_lock:
+            active_profiles = split_archived(character_profiles(), False)
+            if len(active_profiles) >= MAX_ACTIVE_CHARACTERS:
+                raise ValueError(
+                    f"聊天列表最多保留 {MAX_ACTIVE_CHARACTERS} 位角色，请先归档一位再留下新角色。"
+                )
+            character_id = normalize_character_id(draft.name, requested_id)
+            path = save_persona(settings.persona_path, draft, character_id)
+            try:
+                profiles = discover_character_profiles(settings)
+                profile = next(profile for profile in profiles if profile["id"] == character_id)
+                register_runtime_character(profile)
+            except Exception:
+                try:
+                    path.unlink(missing_ok=True)
+                    path.parent.rmdir()
+                except OSError:
+                    logger.exception("api.character rollback_file failed character=%s", character_id)
+                raise
+            logger.info(
+                "api.character created character=%s path=%s runtime_loaded=%s",
+                character_id,
+                path,
+                app_bundle is not None,
+            )
+            return profile
+
     def dispatch_proactive_once() -> list[dict]:
         if not getattr(settings, "api_key", ""):
             return []
@@ -462,6 +497,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         global_sticker_catalog=global_sticker_catalog,
         refresh_runtime_sticker_catalog=refresh_runtime_sticker_catalog,
     )
+    # Encounter is a candidate layer, not a second character registry. It uses
+    # these callbacks only when the user explicitly keeps a candidate.
+    app.state.character_memory.create_character_from_draft = create_character_from_draft
+    app.state.character_memory.max_active_characters = MAX_ACTIVE_CHARACTERS
 
     def warm_runtime() -> None:
         try:
@@ -536,7 +575,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     @app.get("/v1/characters")
     def characters(archived: bool = False):
         listed = split_archived(character_profiles(), archived)
-        return {"characters": [public_profile(profile) for profile in listed]}
+        visible = listed if archived else listed[:MAX_ACTIVE_CHARACTERS]
+        return {
+            "characters": [public_profile(profile) for profile in visible],
+            "active_limit": MAX_ACTIVE_CHARACTERS,
+            "active_total": len(split_archived(character_profiles(), False)),
+            "overflow_count": 0 if archived else max(0, len(listed) - MAX_ACTIVE_CHARACTERS),
+        }
 
     @app.get("/v1/characters/summaries")
     def character_summaries(archived: bool = False):
@@ -684,30 +729,17 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     @app.post("/v1/characters")
     def create_character(req: CreateCharacterRequest):
-        with character_write_lock:
-            character_id = normalize_character_id(req.draft.name, req.character_id)
-            try:
-                path = save_persona(settings.persona_path, req.draft, character_id)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except FileExistsError as exc:
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-            try:
-                profiles = discover_character_profiles(settings)
-                profile = next(profile for profile in profiles if profile["id"] == character_id)
-                register_runtime_character(profile)
-            except Exception as exc:
-                try:
-                    path.unlink(missing_ok=True)
-                    path.parent.rmdir()
-                except OSError:
-                    logger.exception("api.character rollback_file failed character=%s", character_id)
-                logger.exception("api.character create failed character=%s error=%s", character_id, exc)
-                raise HTTPException(status_code=500, detail=f"人物创建失败：{exc}") from exc
-
-            logger.info("api.character created character=%s path=%s runtime_loaded=%s", character_id, path, app_bundle is not None)
-            return {"character": public_profile(profile), "description": req.draft.description}
+        try:
+            profile = create_character_from_draft(req.draft, req.character_id)
+        except ValueError as exc:
+            status = 409 if "最多保留" in str(exc) else 400
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("api.character create failed name=%s error=%s", req.draft.name, exc)
+            raise HTTPException(status_code=500, detail=f"人物创建失败：{exc}") from exc
+        return {"character": public_profile(profile), "description": req.draft.description}
 
     @app.get("/v1/chat/history")
     def history(character_id: str = "rin", limit: int = 160):

@@ -221,6 +221,23 @@ CI green **不等于**以下真实链路已经验证：
 
 当前 Direct / Group / Space / World planning 已共享 PersonContextBuilder 的基础读上下文；仍缺产品级长期 Eval，验证不同 Channel 的人物行为是否持续保持同一 Persona，而不只是结构上调用了同一 builder。
 
+### Autonomous Group Chat
+
+持续覆盖：
+
+- seed silence 会直接结束 Opportunity，不机械唤醒全群；
+- seed rotation 不是固定一个人物永远先说；
+- 每个成员一次 Opportunity 最多一个 visible action，总消息硬上限 1..4；
+- hidden GROUP_OPPORTUNITY 不进入 history/search/recent person context；
+- Autonomous V1 丢弃 GENERATE_IMAGE，不触发 user-watermark ImageGen 路径；
+- VOICE_MESSAGE 复用 pending -> ready/failed materializer；
+- newer User Event 能 supersede 尚未提交的自主 reaction/state/memory；
+- archived Character/Group 不参与；
+- scheduler state/run ledger 重启后保持；
+- User Quiet Guard 只限制正式 scheduled run，Dev manual trigger 可直接验收；
+- 浏览器中空群无需 User 先发消息，也能通过现有 Group SSE 看到自主 Character messages；
+- reload 后 durable history 与 SSE 结果一致，不出现伪 User/System bubble。
+
 ## 7. Visual Capture regression
 
 Visual Capture 必须单独测试，不与 ImageGen 混为一个 suite。

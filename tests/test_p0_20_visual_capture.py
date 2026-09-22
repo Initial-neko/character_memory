@@ -1,4 +1,7 @@
 import base64
+import json
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -144,6 +147,190 @@ def test_dev_console_injects_visual_capture_and_calls_real_vision_path():
     content = model.calls[0]["messages"][-1]["content"]
     assert content[0] == {"type": "text", "text": "画面里有什么？"}
     assert [item["type"] for item in content[1:]] == ["image_url", "image_url"]
+
+
+VISUAL_CAPTURE_HARNESS = r"""
+const fs = require("fs");
+const vm = require("vm");
+
+const source = fs.readFileSync(process.argv[2], "utf8");
+
+// Permission prompts the browser has not answered yet, in request order.
+const granted = [];
+// Every track the session handed back with stop(), in order.
+const stopped = [];
+// Intervals the session left running; the preview pipeline is one of them.
+const timers = new Map();
+let timerSeq = 0;
+
+function makeStream(label) {
+  const track = {
+    kind: "video",
+    label,
+    stop() { stopped.push(label); },
+    addEventListener() {},
+  };
+  return {getTracks: () => [track], getVideoTracks: () => [track]};
+}
+
+function makeElement() {
+  return {
+    style: {},
+    classList: {add() {}, remove() {}, toggle() {}},
+    textContent: "",
+    muted: false,
+    autoplay: false,
+    playsInline: false,
+    srcObject: null,
+    readyState: 0,
+    videoWidth: 0,
+    videoHeight: 0,
+    width: 0,
+    height: 0,
+    play() { return Promise.resolve(); },
+    pause() {},
+    addEventListener() {},
+    getContext: () => ({
+      drawImage() {},
+      getImageData: (x, y, width, height) => ({data: new Uint8ClampedArray(width * height * 4), width, height}),
+    }),
+    toDataURL: () => "data:image/jpeg;base64,AAAA",
+  };
+}
+
+const sandbox = {
+  document: {createElement: () => makeElement()},
+  navigator: {
+    mediaDevices: {
+      getUserMedia: () => new Promise((resolve, reject) => granted.push({kind: "CAMERA", resolve, reject})),
+      getDisplayMedia: () => new Promise((resolve, reject) => granted.push({kind: "DISPLAY", resolve, reject})),
+    },
+  },
+  performance: {now: () => Date.now()},
+  setInterval: () => { timerSeq += 1; timers.set(timerSeq, true); return timerSeq; },
+  clearInterval: id => { timers.delete(id); },
+  setTimeout: () => 0,
+  clearTimeout: () => {},
+  console: {debug() {}, log() {}, warn() {}, error() {}, info() {}},
+};
+sandbox.window = sandbox;
+
+vm.runInContext(source, vm.createContext(sandbox), {filename: "visual_capture.js"});
+const {createSession} = sandbox.VisualCapture;
+
+// One acquisition that reaches the permission prompt and is answered afterwards.
+async function acquire(session, kind, {hangup}) {
+  const pending = kind === "CAMERA" ? session.startCamera() : session.startDisplay();
+  if (hangup) session.stop({clearCandidates: true, reason: "视觉已关闭"});
+  const answer = granted[0];
+  answer.resolve(makeStream(kind));
+  await pending.catch(() => {});
+  return answer;
+}
+
+function observe(session, preview, status) {
+  return {
+    active: session.getState().active,
+    source: session.getState().source,
+    previewAttached: preview.srcObject !== null,
+    timers: timers.size,
+    status: status.textContent,
+  };
+}
+
+async function scenario(kind, {hangup}) {
+  granted.length = 0;
+  stopped.length = 0;
+  timers.clear();
+  const preview = makeElement();
+  const status = makeElement();
+  const session = createSession({preview, status});
+  await acquire(session, kind, {hangup});
+  return {stopped: stopped.slice(), ...observe(session, preview, status)};
+}
+
+async function supersededScenario() {
+  granted.length = 0;
+  stopped.length = 0;
+  timers.clear();
+  const preview = makeElement();
+  const status = makeElement();
+  const session = createSession({preview, status});
+  const camera = session.startCamera();      // prompt opened first
+  const screen = session.startDisplay();     // the user switched to the screen
+  const screenStream = makeStream("DISPLAY");
+  granted[1].resolve(screenStream);          // the screen is granted first
+  await screen.catch(() => {});
+  granted[0].resolve(makeStream("CAMERA"));  // the camera prompt is answered later
+  await camera.catch(() => {});
+  return {stopped: stopped.slice(), previewIsScreen: preview.srcObject === screenStream, ...observe(session, preview, status)};
+}
+
+async function main() {
+  process.stdout.write(JSON.stringify({
+    cameraAfterHangup: await scenario("CAMERA", {hangup: true}),
+    displayAfterHangup: await scenario("DISPLAY", {hangup: true}),
+    cameraWhileLive: await scenario("CAMERA", {hangup: false}),
+    displayWhileLive: await scenario("DISPLAY", {hangup: false}),
+    cameraSupersededByDisplay: await supersededScenario(),
+  }));
+}
+
+main().catch(error => {
+  process.stderr.write(String((error && error.stack) || error));
+  process.exit(1);
+});
+"""
+
+
+def test_late_permission_answer_cannot_start_a_capture_the_call_no_longer_wants(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to exercise visual_capture.js behaviourally")
+
+    harness = tmp_path / "visual_capture_harness.cjs"
+    harness.write_text(VISUAL_CAPTURE_HARNESS, encoding="utf-8")
+    script = Path("src/character_memory/web/visual_capture.js").resolve()
+    completed = subprocess.run(
+        [node, str(harness), str(script)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+
+    # Hangup with the permission prompt still open -- voice.js stopCall does exactly this:
+    # session.stop(), then voice.visualSession = null. The answer arrives afterwards, with
+    # no session left to stop it, so the acquisition itself has to hand the hardware back.
+    for source in ("camera", "display"):
+        after_hangup = payload[f"{source}AfterHangup"]
+        assert after_hangup["stopped"] == [source.upper()], (
+            f"{source}: the stream granted after hangup was left live"
+        )
+        assert after_hangup["active"] is False
+        assert after_hangup["source"] is None
+        assert after_hangup["previewAttached"] is False, "the preview was started for a dead session"
+        assert after_hangup["timers"] == 0, "the sampling timer survived the hangup"
+        assert after_hangup["status"] == "视觉已关闭"
+
+    # The same guard must leave the ordinary path untouched.
+    for source in ("camera", "display"):
+        while_live = payload[f"{source}WhileLive"]
+        assert while_live["stopped"] == []
+        assert while_live["active"] is True
+        assert while_live["source"] == source.upper()
+        assert while_live["previewAttached"] is True
+        assert while_live["timers"] == 1
+
+    # A newer capture owns the session: the camera answer that lands after the screen was
+    # granted must not tear the screen stream down and take its place.
+    superseded = payload["cameraSupersededByDisplay"]
+    assert superseded["stopped"] == ["CAMERA"]
+    assert superseded["source"] == "DISPLAY"
+    assert superseded["active"] is True
+    assert superseded["previewIsScreen"] is True
 
 
 def test_server_mounts_capture_routes_after_async_scheduler():

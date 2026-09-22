@@ -228,6 +228,10 @@ Browser stream 生命周期由用户明确控制：
 
 切换来源会先停止上一条 stream，再开始新的来源。
 
+权限弹窗可能在请求之后的任意时刻才被回答，所以**拿到 stream 不等于这次采集还该继续**。每一路 acquisition 都带一个申请序号，只有比当前 owner 更新的序号才允许接管会话；`stop()` 会自己领一个新序号，因此挂断瞬间所有还挂在弹窗上的申请全部作废。后到的 stream 一旦发现自己已经过期，就立刻 `stop()` 掉自己的 track（摄像头/屏幕指示灯熄灭），既不写入 preview 也不启动采样。
+
+结论是每一条从浏览器拿到的 stream 只有两种结局：被会话接管，或者当场释放。不存在“还活着但没人认识它”的第三种结局，因为那意味着指示灯一直亮着，而页面上已经没有任何控件能把它关掉。
+
 当前设计不做：
 
 - 后台持续录像；
@@ -257,6 +261,7 @@ Visual Capture 是可选输入能力：
 - frame bytes 不进入 MediaAsset/Event payload；
 - metadata summary 正确；
 - Browser CAMERA / DISPLAY start/stop；
+- 挂断后到达的权限许可不会留下活着的 track；
 - selected frames 不超过后端上限；
 - Voice invalid transcript 不发送 frames；
 - valid transcript + capture 仍进入同一个 PersonRuntime。

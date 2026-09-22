@@ -245,7 +245,7 @@ Voice integration：
 - invalid ASR transcript 同时不得上传当前 capture frames；
 - valid transcript 仍走同一个 PersonRuntime。
 
-## 7. Media / TTS regression
+## 8. Media / TTS regression
 
 CI contract：
 
@@ -268,7 +268,7 @@ uv run python scripts/benchmark_media.py --wav path/to/test.wav --iterations 20
 
 测量 cold/warm ASR/TTS、HTTP total、RAM/VRAM，而不是凭感觉决定 GPU。
 
-## 8. Settings regression
+## 9. Settings regression
 
 Settings Center 至少验证：
 
@@ -282,7 +282,7 @@ Settings Center 至少验证：
 - complete Settings validation 在写文件前发生；
 - 保存后明确 `restart_required`，不制造局部 hot-reload 假象。
 
-## 9. Sticker regression
+## 10. Sticker regression
 
 至少验证：
 
@@ -294,7 +294,7 @@ Settings Center 至少验证：
 - metadata 缺失时只有启用 AI tagger 才允许自动补标签；
 - legacy character asset route 仍兼容已有客户端。
 
-## 10. Smoke eval
+## 11. Smoke eval
 
 `evals/smoke.jsonl` 保留作为最小 provider/runtime 冒烟数据。
 

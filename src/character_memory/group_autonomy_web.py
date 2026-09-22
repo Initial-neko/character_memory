@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.application.group_autonomy import (
     GroupAutonomyScheduler,
     GroupAutonomyService,
@@ -37,13 +38,13 @@ def attach_group_autonomy_routes(app) -> None:
     scheduler_capable = bool(getattr(access.settings, "api_key", ""))
 
     if scheduler_capable:
-        @app.on_event("startup")
+        @on_app_event(app, "startup")
         def _start_group_autonomy():
             # Keep the thread alive while disabled so Settings/Dev can hot-enable
             # the feature without restarting Character Runtime.
             scheduler.start()
 
-    @app.on_event("shutdown")
+    @on_app_event(app, "shutdown")
     def _stop_group_autonomy():
         scheduler.stop()
 

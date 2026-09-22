@@ -11,6 +11,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import BaseModel, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.app import build_model
 from character_memory.config import Settings, load_settings
 from character_memory.resource_metrics import collect_resource_snapshot
@@ -224,7 +225,7 @@ def create_dev_app(
     app = FastAPI(title="Character Memory Dev Console", version="0.4")
     attach_static_assets(app, web_dir)
 
-    @app.on_event("shutdown")
+    @on_app_event(app, "shutdown")
     def shutdown():
         model = model_holder.get("model")
         if model is not None:

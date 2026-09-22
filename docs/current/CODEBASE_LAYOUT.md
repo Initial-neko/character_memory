@@ -39,6 +39,7 @@ src/character_memory/
 - `async_conversation.py` — ReactionScheduler、watermark、SSE hub。
 - `group_conversation_service.py` — group member ordering、shared-room reaction、member fault isolation、autonomous channel contract。
 - `action_materialization.py` — Direct/Group 共用：模型 action → 持久化事件（MESSAGE / EMOJI / VOICE_MESSAGE / STICKER / IMAGE 的唯一物料化门禁）。
+- `incoming_message.py` — Direct/Group 共用：text/sticker/image 用户输入 → canonical runtime content + common metadata。
 - `group_autonomy.py` — bounded autonomous Group opportunity + restart-safe scheduler。
 - `proactive_service.py` — persisted Intent execution。
 - `wake_service.py` — process-local character wake opportunity。
@@ -133,6 +134,7 @@ persona_builder.py          character draft/build flow
 resource_metrics.py         local resource sampling
 logging_utils.py            logging setup
 time_utils.py               datetime helpers
+web_lifecycle.py            centralized non-deprecated FastAPI/Starlette lifecycle registration
 ui.py                       read-only Streamlit inspector
 ```
 

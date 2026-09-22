@@ -6,6 +6,7 @@ import threading
 
 from pydantic import BaseModel, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.application.async_conversation import direct_channel
 from character_memory.application.wake_service import CharacterWakeService, WakeOutcome
 from character_memory.domain.models import EventType
@@ -140,7 +141,7 @@ def attach_wake_routes(app):
             "created_intent_ids": list(outcome.result.created_intent_ids),
         }
 
-    @app.on_event("startup")
+    @on_app_event(app, "startup")
     def _start_wake_loop():
         nonlocal thread
         if thread is None or not thread.is_alive():

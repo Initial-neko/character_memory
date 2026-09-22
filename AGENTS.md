@@ -47,6 +47,14 @@ When behavior changes:
 - use `docs/archive/` only for historical milestones that are still worth keeping;
 - do not create tool-specific documentation trees such as `docs/superpowers/`.
 
+## Releases
+
+- Keep `main` CI-green; do normal work on short-lived branches.
+- Stable baselines are immutable Git tags / GitHub Releases, not a moving `stable` branch.
+- Update `pyproject.toml`, `CHANGELOG.md`, and `docs/current/RELEASES.md` when cutting a release line.
+- Do not promote a release candidate to stable until the normal stack has had real local soak time in addition to CI.
+- Create a `release/X.Y` maintenance branch only when a shipped stable line needs a hotfix after `main` has moved on.
+
 ## Pull requests
 
 A PR should state:

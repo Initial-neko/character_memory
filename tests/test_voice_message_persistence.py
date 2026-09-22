@@ -250,12 +250,11 @@ def test_both_history_payloads_use_the_shared_projection():
     """Direct and Group payload builders must delegate resource/voice fields."""
     projection = (ROOT / "src/character_memory/message_projection.py").read_text(encoding="utf-8")
     assert "voice_fields(" in projection
-    for relative in (
-        "src/character_memory/history_web.py",
-        "src/character_memory/group_web.py",
-    ):
-        source = (ROOT / relative).read_text(encoding="utf-8")
-        assert "common_chat_message_fields(" in source, relative
+
+    direct = (ROOT / "src/character_memory/history_web.py").read_text(encoding="utf-8")
+    group = (ROOT / "src/character_memory/group_web.py").read_text(encoding="utf-8")
+    assert "project_direct_message(" in direct
+    assert "project_group_message(" in group
 
 
 def test_both_runtimes_delegate_pending_voice_state_to_the_shared_materializer():

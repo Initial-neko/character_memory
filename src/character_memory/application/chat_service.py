@@ -6,8 +6,9 @@ import logging
 import threading
 
 from character_memory.application.clock import Clock
+from character_memory.application.incoming_message import normalize_user_fact
 from character_memory.domain.models import Event, EventType
-from character_memory.voice_message_fields import voice_fields
+from character_memory.message_projection import project_direct_message
 
 
 logger = logging.getLogger("character_memory.application.chat")
@@ -22,51 +23,18 @@ def build_user_event(
     sticker: dict | None = None,
     image: dict | None = None,
 ) -> Event:
-    """Build one immutable user fact without running the character model."""
-    content = message.strip()
-    if not content and sticker is None and image is None:
-        raise ValueError("message, sticker or image must not be empty")
+    """Build one immutable Direct user fact without running the character model."""
 
-    metadata = {"conversation_id": conversation_id}
-    runtime_parts = [content] if content else []
-
-    if sticker is not None:
-        sticker_id = str(sticker.get("id") or "").strip()
-        sticker_label = str(sticker.get("label") or sticker_id).strip()
-        tags = [str(value).strip() for value in (sticker.get("tags") or []) if str(value).strip()]
-        description = str(sticker.get("description") or "").strip()
-        meaning = "、".join(tags) or description or sticker_label
-        runtime_parts.append(f"[用户发送表情包：{sticker_label}；含义：{meaning}]")
-        metadata.update(
-            {
-                "display_text": content,
-                "sticker_id": sticker_id,
-                "sticker_label": sticker_label,
-            }
-        )
-
-    if image is not None:
-        media_id = str(image.get("id") or "").strip()
-        original_name = str(image.get("original_name") or "图片").strip() or "图片"
-        mime_type = str(image.get("mime_type") or "").strip()
-        size_bytes = int(image.get("size_bytes") or 0)
-        runtime_parts.append(f"[用户发送真实图片：{original_name}。图片本体已随本轮多模态请求提供，请根据实际视觉内容理解。]")
-        metadata.update(
-            {
-                "display_text": content,
-                "media_id": media_id,
-                "media_name": original_name,
-                "media_mime_type": mime_type,
-                "media_size_bytes": size_bytes,
-            }
-        )
-
+    normalized = normalize_user_fact(message, sticker=sticker, image=image)
     return Event(
         character_id=character_id,
         event_type=EventType.USER_MESSAGE,
         event_time=at,
-        content="\n".join(runtime_parts).strip(),
-        metadata=metadata,
+        content=normalized.runtime_content,
+        metadata={
+            **normalized.metadata,
+            "conversation_id": conversation_id,
+        },
     )
 
 
@@ -265,36 +233,17 @@ class ChatService:
 
         messages = []
         for event in events:
-            if event.event_type == EventType.USER_MESSAGE:
-                role = "user"
-                source_event_id = event.id
-                content = event.metadata.get("display_text", event.content)
-            else:
-                role = "assistant"
-                source_event_id = event.metadata.get("source_event_id")
-                content = event.content
-
+            source_event_id = (
+                event.id
+                if event.event_type == EventType.USER_MESSAGE
+                else event.metadata.get("source_event_id")
+            )
             messages.append(
-                {
-                    "id": event.id,
-                    "role": role,
-                    "content": content,
-                    "event_time": event.event_time.isoformat(),
-                    "action": event.metadata.get("action"),
-                    "sticker_id": event.metadata.get("sticker_id"),
-                    "sticker_label": event.metadata.get("sticker_label"),
-                    "image_id": event.metadata.get("image_id"),
-                    "image_label": event.metadata.get("image_label"),
-                    "media_id": event.metadata.get("media_id"),
-                    "media_name": event.metadata.get("media_name"),
-                    # Deliberately distinct keys from "media_id"/"media_name"
-                    # above, which drive image rendering. None for every
-                    # non-voice message.
-                    **voice_fields(event.metadata),
-                    "source_event_type": event.metadata.get("source_event_type"),
-                    "source_event_id": source_event_id,
-                    "has_trace": source_event_id in trace_sources,
-                }
+                project_direct_message(
+                    event,
+                    has_trace=source_event_id in trace_sources,
+                    include_legacy_labels=True,
+                )
             )
 
         return {"character_id": character_id, "messages": messages}

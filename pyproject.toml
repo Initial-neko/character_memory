@@ -1,6 +1,6 @@
 [project]
 name = "character-memory"
-version = "0.4.1"
+version = "0.5.0rc1"
 description = "Experimental persistent AI person runtime with language memory, vector recall and simulated life."
 requires-python = ">=3.12,<3.13"
 dependencies = [

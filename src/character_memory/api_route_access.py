@@ -27,6 +27,7 @@ class CoreApiRouteAccess:
     character_profiles: Callable[[], list[dict[str, Any]]]
     public_profile: Callable[[dict[str, Any]], dict[str, Any]]
     set_archived: Callable[..., dict[str, Any]]
+    refresh_voice_registry: Callable[[], dict[str, Any]]
     character_summary: Callable[[dict[str, Any]], dict[str, Any]]
     ensure_character: Callable[[str], dict[str, Any]]
     create_character_from_draft: Callable[..., dict[str, Any]]

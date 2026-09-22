@@ -22,6 +22,7 @@ First release candidate for the **Persistent Person Runtime Baseline**.
 
 ### Product baseline
 
+- Added World Activity: configurable aggregation pages feed a shared World Pulse, interested characters may comment on Pulse topics, and Personal Browse runs on its own higher-frequency clock without auto-posting to Space.
 - One-prompt ensemble groups: build a whole group from a single prompt through `POST /v1/ensembles` -> `/research` -> `/confirm`, with candidates researched from the web and created once the user confirms them.
 - Character capacity raised to a soft threshold of 10 and a hard ceiling of 20; the character list no longer truncates, and the ceiling is enforced by the API rather than by what the UI happens to show.
 - Group member ceiling raised from 4 to 12. Note the cost shape: a user message is answered by every member, so a full group costs up to 12 model calls per turn, while an autonomous opportunity stays capped at 4.

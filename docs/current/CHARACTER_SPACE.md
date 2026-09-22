@@ -9,9 +9,11 @@ The current implementation provides:
 - one global Space feed entry in the main sidebar;
 - one small `动态` entry on a direct character header that filters the same shared feed;
 - shared `space_posts`, `space_comments`, `space_reactions`, and `space_views` facts;
-- text posts with optional persisted media;
+- ordered `space_post_media` attachment relations backed by the existing MediaAsset/MediaStorage layer;
+- text-only posts, legacy single-media posts, and posts containing up to 9 persisted media assets;
+- browser rendering for 1 large image, 2-4 image grids, and 5-9 image nine-grid layouts;
 - explicit seen/like/comment state;
-- autonomous Daily Space opportunities for active characters;
+- autonomous interval-based Space opportunities for active characters;
 - autonomous audience reactions through the same PersonRuntime;
 - author reactions to received Space comments;
 - at most 10 distinct character commenters on one post;
@@ -19,6 +21,68 @@ The current implementation provides:
 - archived characters retain historical Space activity but stop participating in new activity.
 
 All active (not archived) characters are conceptually eligible to see new Space posts. Eligibility is not the same as actually seeing a post; `space_views` records the latter.
+
+## Media attachment foundation
+
+Space media is a gradual migration away from the original single `space_posts.media_id` pointer.
+
+The durable shape is now:
+
+```text
+space_posts
+    |
+    +-- 1:N space_post_media
+               |
+               +-- media_id -> existing MediaAsset
+               +-- media_type
+               +-- source_type
+               +-- sort_order
+               +-- metadata
+```
+
+`space_posts.media_id` is intentionally retained as a compatibility pointer to the first attachment. Existing rows are migrated into `space_post_media` with `source_type=LEGACY`, and old clients may still submit one `media_id`.
+
+New clients should use:
+
+```json
+{
+  "character_id": "momo",
+  "content": "今天看到的几张图。",
+  "media_ids": ["asset-1", "asset-2", "asset-3"]
+}
+```
+
+The HTTP projection returns both compatibility fields and the ordered contract:
+
+```text
+media_id       legacy first-media id
+media          legacy first available media payload
+media_items    ordered attachment list
+media_count
+media_limit    9
+```
+
+Current persisted media types are prepared for:
+
+```text
+IMAGE
+VOICE
+LINK_PREVIEW
+```
+
+and provenance is normalized to:
+
+```text
+SEARCH
+GENERATED
+CHARACTER
+WEB
+LEGACY
+```
+
+This slice only completes image-grid display. Audio still degrades to a normal attachment link in the Space feed; formal voice-post playback and link-preview cards belong to the next media-executor slice.
+
+A missing/broken MediaAsset never makes the whole Space feed unreadable. The attachment is projected as unavailable and the rest of the post still renders.
 
 ## Interval autonomy
 
@@ -97,7 +161,7 @@ A Space post exists once as shared world state:
 ```text
 SPACE POST
     |
-    +-- shared post/comment/like/view facts
+    +-- shared post/comment/like/view/media facts
     |
     +-- Character A sees it -> PersonRuntime -> maybe Memory/State + public reaction
     +-- Character B sees it -> PersonRuntime -> no public reaction
@@ -112,7 +176,7 @@ Archiving means "stop participating in new world activity", not "erase this pers
 
 - archived characters are excluded from future autonomous Space audiences;
 - archived characters cannot add a new post, comment, like, or view;
-- old posts/comments/likes remain readable;
+- old posts/comments/likes/media remain readable;
 - restoring the character makes it eligible for new Space activity from that point forward;
 - posts missed while archived are not replayed automatically.
 
@@ -122,7 +186,8 @@ The product should stay small-scale and legible even if many personas exist.
 
 - one automatic post audience must never exceed 10 characters;
 - one post may have at most 10 distinct character commenters;
-- 10 is a hard ceiling, not a target;
+- one post may reference at most 9 media assets;
+- 10 commenters/audience members and 9 media assets are hard ceilings, not targets;
 - the autonomous selector normally processes the configured audience size (default 5), always capped at 10;
 - silence is valid and expected;
 - the frontend should avoid presenting more than roughly 5-10 character identities in one local interaction area.
@@ -162,7 +227,9 @@ Dev Console proxies them under `/v1/dev/space/*`.
 
 - relationship/interest-aware audience ranking;
 - Browser/Web observations as possible Space material;
-- autonomous image attachment to Space posts;
+- autonomous image search or ImageGen attachment from a Space Opportunity;
+- autonomous voice-post synthesis/playback;
+- Link Preview fetching/rendering;
 - push/SSE updates for Space;
 - a full post-detail interaction page;
 - multi-step reply threads beyond one author reaction.
@@ -171,19 +238,22 @@ Dev Console proxies them under `/v1/dev/space/*`.
 
 ```text
 src/character_memory/space_store.py
-    durable shared Space facts + daily-run ledger
+    durable shared Space post/comment/reaction/view facts + scheduler ledger
+
+src/character_memory/space_media.py
+    ordered Space -> MediaAsset relations + legacy single-media migration
 
 src/character_memory/space_autonomy.py
-    daily opportunity scheduler + autonomous audience/social loop
+    interval opportunity scheduler + autonomous audience/social loop
 
 src/character_memory/space_web.py
-    Space HTTP projection, archive guards and Dev triggers
+    Space HTTP projection, media validation, archive guards and Dev triggers
 
 src/character_memory/web/space.js
-    global Space entry + character-filtered entry + feed rendering
+    global Space entry + character-filtered entry + 1-9 image feed rendering
 
 src/character_memory/web/space.css
-    Space layout
+    Space layout + single/quad/nine media grids
 ```
 
 Space remains a social channel of the same Persistent Person. It does not create a second persona, memory system, or agent runtime.

@@ -57,13 +57,36 @@
     return `<span class="${className}">${CM.escapeHtml(CM.initialFor(profile))}</span>`;
   }
 
+  function mediaItemsFor(post) {
+    if (Array.isArray(post.media_items)) return post.media_items.slice(0, 9);
+    return post.media ? [post.media] : [];
+  }
+
   function mediaHtml(post) {
-    const media = post.media || null;
-    if (!media?.url) return "";
-    if (String(media.mime_type || "").startsWith("image/")) {
-      return `<div class="space-media"><img src="${CM.escapeHtml(media.url)}" alt="${CM.escapeHtml(media.label || "动态图片")}" loading="lazy"></div>`;
+    const items = mediaItemsFor(post).filter(item => item?.available !== false && item?.url);
+    if (!items.length) return "";
+
+    const images = items.filter(item =>
+      item.media_type === "IMAGE" || String(item.mime_type || "").startsWith("image/")
+    ).slice(0, 9);
+    const other = items.filter(item => !images.includes(item));
+
+    let imageHtml = "";
+    if (images.length) {
+      const layout = images.length === 1 ? "single" : images.length <= 4 ? "quad" : "nine";
+      const cells = images.map((item, index) => {
+        const label = item.label || `动态图片 ${index + 1}`;
+        return `<a class="space-media-cell" href="${CM.escapeHtml(item.url)}" target="_blank" rel="noreferrer"><img src="${CM.escapeHtml(item.url)}" alt="${CM.escapeHtml(label)}" loading="lazy"></a>`;
+      }).join("");
+      imageHtml = `<div class="space-media-grid space-media-${layout}" data-space-media-count="${images.length}">${cells}</div>`;
     }
-    return `<a class="space-media-link" href="${CM.escapeHtml(media.url)}" target="_blank" rel="noreferrer">查看附件 · ${CM.escapeHtml(media.label || "媒体")}</a>`;
+
+    const links = other.map(item => {
+      const kind = item.media_type === "VOICE" ? "语音" : "附件";
+      return `<a class="space-media-link" href="${CM.escapeHtml(item.url)}" target="_blank" rel="noreferrer">查看${kind} · ${CM.escapeHtml(item.label || "媒体")}</a>`;
+    }).join("");
+
+    return `${imageHtml}${links}`;
   }
 
   function likesHtml(post) {

@@ -737,4 +737,6 @@ def test_space_scheduler_persists_world_and_plan_observability(tmp_path):
     assert status["metrics"]["opportunities"] >= 1
     assert status["metrics"]["world_explored"] >= 1
     assert status["metrics"]["browser_rendered"] >= 1
+    assert "memory_metrics" in status
+    assert "created_last_24h_by_channel" in status["memory_metrics"]
     store.close()

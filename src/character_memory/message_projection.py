@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from character_memory.domain.models import EventType
 from character_memory.voice_message_fields import voice_fields
 
 
@@ -11,7 +12,7 @@ def common_chat_message_fields(
     sticker: dict | None = None,
     image: dict | None = None,
 ) -> dict[str, Any]:
-    """Canonical resource/voice projection shared by Direct and Group history."""
+    """Canonical resource/voice fields shared by every chat projection."""
 
     return {
         "action": metadata.get("action"),
@@ -22,4 +23,106 @@ def common_chat_message_fields(
         "media_id": metadata.get("media_id"),
         "image": image,
         **voice_fields(metadata),
+    }
+
+
+def project_direct_message(
+    event,
+    *,
+    sticker: dict | None = None,
+    image: dict | None = None,
+    has_trace: bool | None = None,
+    include_legacy_labels: bool = False,
+) -> dict[str, Any]:
+    """Project one durable Direct Event into the canonical browser/API message."""
+
+    is_user = event.event_type == EventType.USER_MESSAGE
+    role = "user" if is_user else "assistant"
+    source_event_id = event.id if is_user else event.metadata.get("source_event_id")
+    source_event_type = (
+        EventType.USER_MESSAGE.value
+        if is_user
+        else event.metadata.get("source_event_type")
+    )
+    content = event.metadata.get("display_text", event.content) if is_user else event.content
+    media_id = event.metadata.get("media_id")
+
+    preview = content
+    if sticker is not None and (
+        not str(content or "").strip() or event.metadata.get("action") == "STICKER"
+    ):
+        preview = f"[表情包] {sticker['label']}"
+    if image is not None and (
+        not str(content or "").strip()
+        or event.metadata.get("action") == "IMAGE"
+        or media_id
+    ):
+        prefix = str(content or "").strip()
+        media_preview = f"[图片] {image['label']}"
+        preview = f"{prefix} {media_preview}".strip() if prefix else media_preview
+
+    payload: dict[str, Any] = {
+        "id": event.id,
+        "role": role,
+        "content": content,
+        "preview": preview,
+        "event_time": event.event_time.isoformat(),
+        **common_chat_message_fields(
+            event.metadata,
+            sticker=sticker,
+            image=image,
+        ),
+        "source_event_type": source_event_type,
+        "source_event_id": source_event_id,
+        "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,
+    }
+    if has_trace is not None:
+        payload["has_trace"] = bool(has_trace)
+    if include_legacy_labels:
+        payload.update(
+            {
+                "sticker_label": event.metadata.get("sticker_label"),
+                "image_label": event.metadata.get("image_label"),
+                "media_name": event.metadata.get("media_name"),
+            }
+        )
+    return payload
+
+
+def project_group_message(
+    event,
+    *,
+    actor_name: str,
+    sticker: dict | None = None,
+    image: dict | None = None,
+    turn_summary: dict | None = None,
+) -> dict[str, Any]:
+    """Project one shared Group Event without changing Group-specific identity."""
+
+    role = "user" if event.actor_type == "USER" else "assistant"
+    content = (
+        event.metadata.get("display_text", event.content)
+        if role == "user"
+        else event.content
+    )
+    return {
+        "id": event.id,
+        "conversation_id": event.conversation_id,
+        "turn_id": event.turn_id,
+        "role": role,
+        "actor_type": event.actor_type,
+        "actor_id": event.actor_id,
+        "actor_name": actor_name,
+        "content": content,
+        "event_time": event.event_time.isoformat(),
+        **common_chat_message_fields(
+            event.metadata,
+            sticker=sticker,
+            image=image,
+        ),
+        "mentions": event.metadata.get("mentions", []) if role == "user" else [],
+        "source_conversation_event_id": event.metadata.get(
+            "source_conversation_event_id"
+        ),
+        "turn_summary": turn_summary if role == "user" else None,
     }

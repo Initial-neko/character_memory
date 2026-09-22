@@ -28,6 +28,8 @@ class CreateSpacePostRequest(BaseModel):
         candidates.extend(self.media_ids)
         for value in candidates:
             media_id = str(value or "").strip()
+            if len(media_id) > 120:
+                raise ValueError("Space media_id must be at most 120 characters")
             if media_id and media_id not in ordered:
                 ordered.append(media_id)
         if len(ordered) > MAX_SPACE_MEDIA_PER_POST:

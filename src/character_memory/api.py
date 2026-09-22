@@ -1,36 +1,41 @@
 from __future__ import annotations
 
-import base64
 from datetime import datetime
 import logging
 import os
 from pathlib import Path
-import shutil
 import threading
-import time
 
-from pydantic import BaseModel, Field, model_validator
-
-from character_memory.app import AppBundle, build_app, build_model
+from character_memory.app import AppBundle, build_app
+from character_memory.api_contracts import (
+    CharacterCapacityConfirmationRequired,
+    CharacterCapacityExceeded,
+    ChatImageRequest,
+    ChatRequest,
+    CreateCharacterRequest,
+    MAX_ACTIVE_CHARACTERS,
+    PersonaDraftRequest,
+    SOFT_ACTIVE_CHARACTERS,
+    SimulateRequest,
+)
+from character_memory.api_character_service import ApiCharacterService
+from character_memory.api_resource_service import ApiResourceService
+from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.application.proactive_service import ProactiveService
 from character_memory.config import (
-    discover_character_profiles,
     load_persona,
     load_settings,
     resolve_media_dir,
-    resolve_persona_path,
-    resolve_sticker_dir,
-    set_character_archived,
-    split_archived,
 )
 from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
+from character_memory.core_character_web import attach_core_character_routes
+from character_memory.core_direct_web import attach_core_direct_routes
+from character_memory.core_resource_web import attach_core_resource_routes
 from character_memory.logging_utils import configure_logging
 from character_memory.media import MediaStorage
-from character_memory.message_projection import project_direct_message
-from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
+from character_memory.persona_builder import PersonaDraft
 from character_memory.runtime_services import CharacterRuntimeAccess, build_runtime_services
-from character_memory.stickers import StickerTagSuggestion, import_sticker_bundle, load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.web_assets import attach_static_assets
 from character_memory.web_lifecycle import on_app_event
@@ -38,106 +43,9 @@ from character_memory.web_lifecycle import on_app_event
 
 logger = logging.getLogger("character_memory.api")
 _PROACTIVE_POLL_SECONDS = 30.0
-SOFT_ACTIVE_CHARACTERS = 10
-MAX_ACTIVE_CHARACTERS = 20
-_STICKER_VISION_MIME = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-}
-
-
-def _ms(started: float) -> float:
-    return round((time.perf_counter() - started) * 1000, 1)
-
-
-class ChatImageRequest(BaseModel):
-    filename: str = Field(default="image", min_length=1, max_length=180)
-    data_url: str = Field(min_length=16)
-
-
-class ChatRequest(BaseModel):
-    message: str = Field(default="", max_length=12000)
-    sticker_id: str | None = Field(default=None, max_length=64)
-    image: ChatImageRequest | None = None
-    character_id: str = "rin"
-    conversation_id: str = "default"
-    at: datetime | None = None
-
-    @model_validator(mode="after")
-    def require_content(self):
-        if not self.message.strip() and not (self.sticker_id or "").strip() and self.image is None:
-            raise ValueError("message, sticker_id or image is required")
-        if self.sticker_id and self.image is not None:
-            raise ValueError("send a sticker or image in one user turn, not both")
-        return self
-
-
-class SimulateRequest(BaseModel):
-    days: int = Field(default=1, ge=1, le=365)
-    character_id: str = "rin"
-
-
-class PersonaDraftRequest(BaseModel):
-    description: str = Field(min_length=3, max_length=4000)
-    name: str = Field(default="", max_length=48)
-    age: int | None = Field(default=None, ge=1, le=120)
-    tags: list[str] = Field(default_factory=list, max_length=8)
-
-
-class CreateCharacterRequest(BaseModel):
-    draft: PersonaDraft
-    character_id: str = Field(default="", max_length=32)
-    confirm_over_soft_limit: bool = False
-
-
-class CharacterCapacityConfirmationRequired(ValueError):
-    def __init__(self, active_count: int, add_count: int):
-        self.active_count = int(active_count)
-        self.add_count = int(add_count)
-        super().__init__(
-            f"当前已有 {active_count} 位角色；继续新增会超过 {SOFT_ACTIVE_CHARACTERS} 位提醒阈值。"
-        )
-
-    def detail(self) -> dict:
-        return {
-            "code": "ACTIVE_CHARACTER_SOFT_LIMIT",
-            "message": str(self),
-            "active_count": self.active_count,
-            "add_count": self.add_count,
-            "soft_limit": SOFT_ACTIVE_CHARACTERS,
-            "hard_limit": MAX_ACTIVE_CHARACTERS,
-            "result_count": self.active_count + self.add_count,
-            "confirmation_required": True,
-        }
-
-
-class CharacterCapacityExceeded(ValueError):
-    def __init__(self, active_count: int, add_count: int):
-        self.active_count = int(active_count)
-        self.add_count = int(add_count)
-        super().__init__(
-            f"角色已达到容量上限：当前 {active_count} 位，本次新增 {add_count} 位，最多 {MAX_ACTIVE_CHARACTERS} 位。"
-        )
-
-    def detail(self) -> dict:
-        return {
-            "code": "ACTIVE_CHARACTER_HARD_LIMIT",
-            "message": str(self),
-            "active_count": self.active_count,
-            "add_count": self.add_count,
-            "soft_limit": SOFT_ACTIVE_CHARACTERS,
-            "hard_limit": MAX_ACTIVE_CHARACTERS,
-            "result_count": self.active_count + self.add_count,
-            "confirmation_required": False,
-        }
-
 
 def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = None):
-    from fastapi import Body, FastAPI, HTTPException
-    from fastapi.responses import FileResponse
+    from fastapi import FastAPI, HTTPException
 
     configure_logging()
     own_bundle = bundle is None
@@ -156,6 +64,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     proactive_stop = threading.Event()
     proactive_thread: threading.Thread | None = None
     warmup_thread: threading.Thread | None = None
+
+    def current_bundle() -> AppBundle | None:
+        return app_bundle
 
     def get_bundle() -> AppBundle:
         nonlocal app_bundle, runtime_error, runtime_loading
@@ -190,213 +101,61 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Runtime 初始化失败：{exc}") from exc
 
-    def character_profiles() -> list[dict[str, str]]:
-        if app_bundle is not None and hasattr(app_bundle, "characters"):
-            return list(app_bundle.characters)
-        try:
-            return discover_character_profiles(settings)
-        except (AttributeError, OSError):
-            return [{"id": "rin", "name": "Rin", "identity": "", "tagline": "", "persona_path": getattr(settings, "persona_path", "personas/rin/persona.yaml")}]
-
-    def public_profile(profile: dict[str, str]) -> dict[str, str]:
-        return {key: value for key, value in profile.items() if key != "persona_path"}
-
-    def refresh_character_cache() -> None:
-        """Re-read the persona tree into the cached bundle list.
-
-        The listing filter reads ``archived_at`` off a profile, so a cache built
-        before the marker was written would keep serving the archived character
-        as active. The cache is never filtered itself -- ``ensure_character`` and
-        the group payloads resolve archived characters on purpose -- so only this
-        refresh matters.
-        """
-
-        if app_bundle is not None and hasattr(app_bundle, "characters"):
-            app_bundle.characters[:] = discover_character_profiles(settings)
-
-    def _set_archived(
-        character_id: str,
-        *,
-        archived: bool,
-        confirm_over_soft_limit: bool = False,
-    ) -> dict:
-        """Archive or restore one character. Idempotent, like the group routes."""
-
-        with character_write_lock:
-            try:
-                resolve_persona_path(settings, character_id)
-            except KeyError as exc:
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-            profiles = character_profiles()
-            target = next((item for item in profiles if item["id"] == character_id), None)
-            active_profiles = split_archived(profiles, False)
-            if archived and target is not None and "archived_at" not in target:
-                if len(active_profiles) <= 1:
-                    raise HTTPException(status_code=409, detail="至少保留一个未归档人物")
-            if not archived and target is not None and "archived_at" in target:
-                active_count = len(active_profiles)
-                if active_count >= MAX_ACTIVE_CHARACTERS:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=CharacterCapacityExceeded(active_count, 1).detail(),
-                    )
-                if active_count >= SOFT_ACTIVE_CHARACTERS and not confirm_over_soft_limit:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=CharacterCapacityConfirmationRequired(active_count, 1).detail(),
-                    )
-
-            try:
-                stamp = set_character_archived(settings, character_id, archived)
-            except OSError as exc:
-                logger.exception("api.character archive failed character=%s error=%s", character_id, exc)
-                raise HTTPException(status_code=500, detail=f"归档失败：{exc}") from exc
-
-            refresh_character_cache()
-            logger.info("api.character archived=%s character=%s", archived, character_id)
-
-            profile = next(
-                (item for item in character_profiles() if item["id"] == character_id), None
-            )
-            return {
-                "ok": True,
-                "archived": archived,
-                "archived_at": stamp,
-                "character": public_profile(profile) if profile else {"id": character_id},
-            }
-
-    def ensure_character(character_id: str) -> dict[str, str]:
-        for profile in character_profiles():
-            if profile["id"] == character_id:
-                return profile
-        known = ", ".join(profile["id"] for profile in character_profiles())
-        raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}. Known: {known}")
-
-    def global_sticker_catalog():
-        profiles = character_profiles()
-        return load_global_sticker_catalog(
-            resolve_sticker_dir(settings),
-            persona_paths=[profile["persona_path"] for profile in profiles],
-        )
-
-    def sticker_catalog_for(character_id: str):
-        ensure_character(character_id)
-        if app_bundle is not None and hasattr(app_bundle, "runtimes"):
-            runtime = app_bundle.runtimes.get(character_id)
-            if runtime is not None and getattr(runtime, "sticker_catalog", None) is not None:
-                return runtime.sticker_catalog
-        return global_sticker_catalog()
-
-    def refresh_runtime_sticker_catalog(catalog) -> None:
-        if app_bundle is None or not hasattr(app_bundle, "runtimes"):
+    def register_runtime_character(profile: dict[str, str]) -> None:
+        current = current_bundle()
+        if current is None:
             return
-        for runtime in app_bundle.runtimes.values():
-            runtime.sticker_catalog = catalog
+        if not hasattr(current, "runtimes") or not hasattr(current, "embeddings") or not hasattr(current, "model"):
+            raise RuntimeError("loaded runtime bundle does not support dynamic character registration")
 
-    def ai_sticker_tagger(scope: str = "global"):
-        model_holder: dict[str, object] = {}
+        from character_memory.memory.recall import VectorRecall
+        from character_memory.runtime.person_runtime import PersonRuntime
 
-        def tagger(filename: str, payload: bytes) -> StickerTagSuggestion:
-            suffix = Path(filename).suffix.lower()
-            mime_type = _STICKER_VISION_MIME.get(suffix)
-            if not mime_type:
-                raise ValueError(f"AI auto-tag does not support {suffix or 'this format'}; add metadata for this sticker")
-            if "model" not in model_holder:
-                current = require_bundle()
-                if not hasattr(current, "model"):
-                    raise RuntimeError("loaded runtime does not expose a vision model")
-                model_holder["model"] = current.model
-            model = model_holder["model"]
-            data_url = f"data:{mime_type};base64,{base64.b64encode(payload).decode('ascii')}"
-            prompt = (
-                "你正在给聊天软件里的表情包做长期可复用的语义标签。只观察图片本身，不猜人物真实身份、作品名或版权来源。"
-                "返回 JSON：label 是 2~12 个汉字左右的简短名称；tags 是 3~8 个适合聊天检索/选择的中文短标签，优先情绪、动作、语气和使用场景；"
-                "description 用一句中文说明这张表情在聊天里通常表达什么。不要输出文件名，不要输出 JSON 之外的文字。"
-            )
-            try:
-                result = model.structured_with_images_for_session(
-                    prompt,
-                    [data_url],
-                    StickerTagSuggestion,
-                    f"sticker-tag:{scope}:{filename}",
-                )
-            except Exception as exc:
-                logger.exception("api.sticker auto_tag failed scope=%s file=%s error=%s", scope, filename, exc)
-                raise RuntimeError(f"AI 自动标注失败：{filename}: {exc}") from exc
-            return result
+        character_id = profile["id"]
+        persona = load_persona(profile["persona_path"])
+        stickers = global_sticker_catalog()
+        images = load_image_catalog(profile["persona_path"])
+        recall = VectorRecall(current.store, current.embeddings, limit=getattr(settings, "recall_limit", 8))
+        runtime = PersonRuntime(current.store, recall, current.embeddings, current.model, persona, stickers, images)
+        current.runtimes[character_id] = runtime
+        if isinstance(getattr(current.chat, "runtime", None), dict):
+            current.chat.runtime[character_id] = runtime
+        refresh_runtime_sticker_catalog(stickers)
+        characters.refresh_cache()
 
-        return tagger
 
-    def image_catalog_for(character_id: str):
-        profile = ensure_character(character_id)
-        if app_bundle is not None and hasattr(app_bundle, "runtimes"):
-            runtime = app_bundle.runtimes.get(character_id)
-            if runtime is not None and getattr(runtime, "image_catalog", None) is not None:
-                return runtime.image_catalog
-        return load_image_catalog(profile["persona_path"])
+    characters = ApiCharacterService(
+        settings=settings,
+        current_bundle=current_bundle,
+        character_write_lock=character_write_lock,
+        register_runtime_character=register_runtime_character,
+    )
+    character_profiles = characters.profiles
+    public_profile = characters.public_profile
+    refresh_character_cache = characters.refresh_cache
+    _set_archived = characters.set_archived
+    ensure_character = characters.ensure
+    check_character_capacity = characters.check_capacity
+    create_character_from_draft = characters.create_from_draft
+    rollback_created_character = characters.rollback_created
 
-    def sticker_payload(character_id: str, sticker_id: str | None) -> dict | None:
-        if not sticker_id:
-            return None
-        catalog = sticker_catalog_for(character_id)
-        sticker = catalog.get(sticker_id)
-        if sticker is None or catalog.asset_path(sticker_id) is None:
-            return None
-        return {
-            **sticker.model_dump(mode="json"),
-            "url": f"/v1/stickers/{sticker.id}/asset",
-        }
-
-    def character_image_payload(character_id: str, image_id: str | None) -> dict | None:
-        if not image_id:
-            return None
-        catalog = image_catalog_for(character_id)
-        image = catalog.get(image_id)
-        if image is None or catalog.asset_path(image_id) is None:
-            return None
-        return {
-            **image.model_dump(mode="json"),
-            "source": "CHARACTER_LIBRARY",
-            "url": f"/v1/images/{character_id}/{image.id}/asset",
-        }
-
-    def uploaded_media_payload(media_id: str | None) -> dict | None:
-        if not media_id:
-            return None
-        asset = read_store.get_media_asset(media_id)
-        if asset is None or media_storage.asset_path(asset) is None:
-            return None
-        return {
-            "id": asset.id,
-            "label": asset.original_name,
-            "mime_type": asset.mime_type,
-            "size_bytes": asset.size_bytes,
-            "source": asset.source,
-            "url": f"/v1/media/{asset.id}",
-        }
-
-    def action_payload(character_id: str, action) -> dict:
-        item = action.model_dump(mode="json")
-        sticker = sticker_payload(character_id, item.get("sticker_id"))
-        if sticker is not None:
-            item["sticker"] = sticker
-        image = character_image_payload(character_id, item.get("image_id"))
-        if image is not None:
-            item["image"] = image
-        return item
-
-    def message_payload(event) -> dict:
-        sticker = sticker_payload(event.character_id, event.metadata.get("sticker_id"))
-        image = character_image_payload(
-            event.character_id,
-            event.metadata.get("image_id"),
-        )
-        media_id = event.metadata.get("media_id")
-        if media_id:
-            image = uploaded_media_payload(media_id)
-        return project_direct_message(event, sticker=sticker, image=image)
-
+    resources = ApiResourceService(
+        settings=settings,
+        read_store=read_store,
+        media_storage=media_storage,
+        current_bundle=current_bundle,
+        require_bundle=require_bundle,
+        character_profiles=character_profiles,
+        ensure_character=ensure_character,
+    )
+    global_sticker_catalog = resources.global_sticker_catalog
+    sticker_catalog_for = resources.sticker_catalog_for
+    refresh_runtime_sticker_catalog = resources.refresh_runtime_sticker_catalog
+    ai_sticker_tagger = resources.ai_sticker_tagger
+    image_catalog_for = resources.image_catalog_for
+    uploaded_media_payload = resources.uploaded_media_payload
+    action_payload = resources.action_payload
+    message_payload = resources.message_payload
 
     def history_payload(character_id: str, limit: int) -> dict:
         ensure_character(character_id)
@@ -424,104 +183,6 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "latest_message": latest_message,
             "latest_assistant_message_id": latest_assistant_id,
         }
-
-    def register_runtime_character(profile: dict[str, str]) -> None:
-        if app_bundle is None:
-            return
-        if not hasattr(app_bundle, "runtimes") or not hasattr(app_bundle, "embeddings") or not hasattr(app_bundle, "model"):
-            raise RuntimeError("loaded runtime bundle does not support dynamic character registration")
-
-        from character_memory.memory.recall import VectorRecall
-        from character_memory.runtime.person_runtime import PersonRuntime
-
-        character_id = profile["id"]
-        persona = load_persona(profile["persona_path"])
-        stickers = global_sticker_catalog()
-        images = load_image_catalog(profile["persona_path"])
-        recall = VectorRecall(app_bundle.store, app_bundle.embeddings, limit=getattr(settings, "recall_limit", 8))
-        runtime = PersonRuntime(app_bundle.store, recall, app_bundle.embeddings, app_bundle.model, persona, stickers, images)
-        app_bundle.runtimes[character_id] = runtime
-        if isinstance(getattr(app_bundle.chat, "runtime", None), dict):
-            app_bundle.chat.runtime[character_id] = runtime
-        refresh_runtime_sticker_catalog(stickers)
-        refresh_character_cache()
-
-    def check_character_capacity(
-        add_count: int = 1,
-        *,
-        confirm_over_soft_limit: bool = False,
-    ) -> dict:
-        count = max(0, int(add_count))
-        active_count = len(split_archived(character_profiles(), False))
-        result_count = active_count + count
-        if result_count > MAX_ACTIVE_CHARACTERS:
-            raise CharacterCapacityExceeded(active_count, count)
-        if count and result_count > SOFT_ACTIVE_CHARACTERS and not confirm_over_soft_limit:
-            raise CharacterCapacityConfirmationRequired(active_count, count)
-        return {
-            "active_count": active_count,
-            "add_count": count,
-            "result_count": result_count,
-            "soft_limit": SOFT_ACTIVE_CHARACTERS,
-            "hard_limit": MAX_ACTIVE_CHARACTERS,
-            "warning": result_count > SOFT_ACTIVE_CHARACTERS,
-        }
-
-    def create_character_from_draft(
-        draft: PersonaDraft,
-        requested_id: str = "",
-        *,
-        confirm_over_soft_limit: bool = False,
-        skip_capacity_check: bool = False,
-    ) -> dict:
-        with character_write_lock:
-            if not skip_capacity_check:
-                check_character_capacity(
-                    1,
-                    confirm_over_soft_limit=confirm_over_soft_limit,
-                )
-            character_id = normalize_character_id(draft.name, requested_id)
-            path = save_persona(settings.persona_path, draft, character_id)
-            try:
-                profiles = discover_character_profiles(settings)
-                profile = next(profile for profile in profiles if profile["id"] == character_id)
-                register_runtime_character(profile)
-            except Exception:
-                try:
-                    path.unlink(missing_ok=True)
-                    path.parent.rmdir()
-                except OSError:
-                    logger.exception("api.character rollback_file failed character=%s", character_id)
-                raise
-            logger.info(
-                "api.character created character=%s path=%s runtime_loaded=%s",
-                character_id,
-                path,
-                app_bundle is not None,
-            )
-            return profile
-
-    def rollback_created_character(character_id: str) -> None:
-        """Best-effort rollback for a character created inside a batch build."""
-        with character_write_lock:
-            profile = next(
-                (item for item in discover_character_profiles(settings) if item["id"] == character_id),
-                None,
-            )
-            if profile is None:
-                return
-            if app_bundle is not None:
-                if hasattr(app_bundle, "runtimes"):
-                    app_bundle.runtimes.pop(character_id, None)
-                runtime_map = getattr(getattr(app_bundle, "chat", None), "runtime", None)
-                if isinstance(runtime_map, dict):
-                    runtime_map.pop(character_id, None)
-            persona_path = Path(profile["persona_path"])
-            try:
-                shutil.rmtree(persona_path.parent)
-            except FileNotFoundError:
-                pass
-            refresh_character_cache()
 
     def dispatch_proactive_once() -> list[dict]:
         if not getattr(settings, "api_key", ""):
@@ -577,6 +238,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     app = FastAPI(title="character-memory", version="0.12.0")
     web_dir = Path(__file__).with_name("web")
     attach_static_assets(app, web_dir)
+
+    def runtime_status() -> dict:
+        return {
+            "runtime_loaded": app_bundle is not None,
+            "runtime_loading": runtime_loading,
+            "runtime_error": runtime_error,
+        }
 
     # One application runtime access point. Feature route modules (group chat,
     # future media tools) reuse this instead of creating their own model/store.
@@ -648,350 +316,32 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 app_bundle.close()
             read_store.close()
 
-    @app.get("/")
-    def web_index():
-        return FileResponse(web_dir / "index.html")
-
-    @app.get("/health")
-    def health():
-        return {
-            "ok": True,
-            "web": "ready",
-            "runtime_loaded": app_bundle is not None,
-            "runtime_loading": runtime_loading,
-            "runtime_error": runtime_error,
-            "model": settings.chat_model,
-            "vision_model": getattr(settings, "vision_model", ""),
-            "embedding_provider": settings.embedding_provider,
-            "db_path": settings.db_path,
-            "media_dir": str(resolve_media_dir(settings)),
-            "sticker_dir": str(resolve_sticker_dir(settings)),
-            "characters": len(character_profiles()),
-            "proactive_poll_seconds": _PROACTIVE_POLL_SECONDS,
-        }
-
-    @app.get("/v1/characters")
-    def characters(archived: bool = False):
-        listed = split_archived(character_profiles(), archived)
-        active_total = len(split_archived(character_profiles(), False))
-        return {
-            "characters": [public_profile(profile) for profile in listed],
-            "soft_limit": SOFT_ACTIVE_CHARACTERS,
-            "active_limit": MAX_ACTIVE_CHARACTERS,
-            "active_total": active_total,
-            "overflow_count": 0 if archived else max(0, active_total - SOFT_ACTIVE_CHARACTERS),
-        }
-
-    @app.get("/v1/characters/summaries")
-    def character_summaries(archived: bool = False):
-        listed = split_archived(character_profiles(), archived)
-        return {"characters": [character_summary(profile) for profile in listed]}
-
-    @app.post("/v1/characters/{character_id}/archive")
-    def archive_character(character_id: str):
-        return _set_archived(character_id, archived=True)
-
-    @app.post("/v1/characters/{character_id}/restore")
-    def restore_character(character_id: str, confirm_over_soft_limit: bool = False):
-        return _set_archived(
-            character_id,
-            archived=False,
-            confirm_over_soft_limit=confirm_over_soft_limit,
-        )
-
-    @app.get("/v1/stickers")
-    def stickers(character_id: str | None = None):
-        # character_id is accepted for backward compatibility but user-imported
-        # stickers are now global and identical across direct/group chats.
-        if character_id:
-            ensure_character(character_id)
-        catalog = global_sticker_catalog()
-        return {
-            "scope": "global",
-            "source": catalog.source,
-            "stickers": catalog.public_items(),
-        }
-
-    @app.post("/v1/stickers/import")
-    def import_stickers_web(
-        archive: bytes = Body(..., media_type="application/zip"),
-        character_id: str | None = None,
-        filename: str = "stickers.zip",
-        auto_tag: bool = True,
-    ):
-        # character_id is intentionally ignored for storage ownership. Old Web
-        # clients may still send it; imports now belong to the global user library.
-        if character_id:
-            ensure_character(character_id)
-        profiles = character_profiles()
-        compatibility_persona = profiles[0]["persona_path"] if profiles else settings.persona_path
-        pack_name = Path(filename).stem.strip()[:80] or "自定义表情包"
-        started = time.perf_counter()
-        try:
-            result = import_sticker_bundle(
-                compatibility_persona,
-                archive,
-                tagger=ai_sticker_tagger("global") if auto_tag else None,
-                default_pack_name=pack_name,
-                target_dir=resolve_sticker_dir(settings),
-            )
-            catalog = global_sticker_catalog()
-            refresh_runtime_sticker_catalog(catalog)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.exception("api.sticker import_failed scope=global file=%s error=%s", filename, exc)
-            raise HTTPException(status_code=502, detail=f"表情包导入失败：{exc}") from exc
-        logger.info(
-            "api.sticker imported scope=global file=%s count=%d ai_tagged=%d duration_ms=%.1f",
-            filename,
-            result["imported"],
-            result["ai_tagged"],
-            _ms(started),
-        )
-        return {
-            **result,
-            "scope": "global",
-            "source": catalog.source,
-            "stickers": catalog.public_items(),
-        }
-
-    @app.get("/v1/stickers/{sticker_id}/asset")
-    def global_sticker_asset(sticker_id: str):
-        catalog = global_sticker_catalog()
-        path = catalog.asset_path(sticker_id)
-        if path is None:
-            raise HTTPException(status_code=404, detail="sticker not found")
-        return FileResponse(path)
-
-    @app.get("/v1/stickers/{character_id}/{sticker_id}/asset")
-    def legacy_sticker_asset(character_id: str, sticker_id: str):
-        ensure_character(character_id)
-        catalog = global_sticker_catalog()
-        path = catalog.asset_path(sticker_id)
-        if path is None:
-            raise HTTPException(status_code=404, detail="sticker not found")
-        return FileResponse(path)
-
-    @app.get("/v1/images")
-    def images(character_id: str = "rin"):
-        catalog = image_catalog_for(character_id)
-        return {
-            "character_id": character_id,
-            "source": catalog.source,
-            "images": catalog.public_items(character_id),
-        }
-
-    @app.get("/v1/images/{character_id}/{image_id}/asset")
-    def character_image_asset(character_id: str, image_id: str):
-        catalog = image_catalog_for(character_id)
-        path = catalog.asset_path(image_id)
-        if path is None:
-            raise HTTPException(status_code=404, detail="image not found")
-        return FileResponse(path)
-
-    @app.get("/v1/media/{media_id}")
-    def uploaded_media_asset(media_id: str):
-        asset = read_store.get_media_asset(media_id)
-        if asset is None:
-            raise HTTPException(status_code=404, detail="media not found")
-        path = media_storage.asset_path(asset)
-        if path is None:
-            raise HTTPException(status_code=404, detail="media file not found")
-        if str(asset.mime_type).startswith(("audio/", "image/")):
-            return FileResponse(
-                path,
-                media_type=asset.mime_type,
-                headers={"Content-Disposition": f'inline; filename="{asset.storage_name}"'},
-            )
-        return FileResponse(path, media_type=asset.mime_type, filename=asset.original_name)
-
-    @app.post("/v1/characters/draft")
-    def generate_character_draft(req: PersonaDraftRequest):
-        started = time.perf_counter()
-        temporary_model = None
-        try:
-            if app_bundle is not None and hasattr(app_bundle, "model"):
-                model = app_bundle.model
-            else:
-                temporary_model = build_model(settings)
-                model = temporary_model
-            draft = PersonaBuilder(model).generate(req.description, name=req.name, age=req.age, tags=req.tags)
-            logger.info("api.persona_draft done name=%s duration_ms=%.1f", draft.name, _ms(started))
-            return {"draft": draft.model_dump(mode="json")}
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.exception("api.persona_draft failed duration_ms=%.1f error=%s", _ms(started), exc)
-            raise HTTPException(status_code=502, detail=f"人物草稿生成失败：{exc}") from exc
-        finally:
-            if temporary_model is not None:
-                temporary_model.close()
-
-    @app.post("/v1/characters")
-    def create_character(req: CreateCharacterRequest):
-        try:
-            profile = create_character_from_draft(
-                req.draft,
-                req.character_id,
-                confirm_over_soft_limit=req.confirm_over_soft_limit,
-            )
-        except CharacterCapacityConfirmationRequired as exc:
-            raise HTTPException(status_code=409, detail=exc.detail()) from exc
-        except CharacterCapacityExceeded as exc:
-            raise HTTPException(status_code=409, detail=exc.detail()) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except FileExistsError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.exception("api.character create failed name=%s error=%s", req.draft.name, exc)
-            raise HTTPException(status_code=500, detail=f"人物创建失败：{exc}") from exc
-        return {"character": public_profile(profile), "description": req.draft.description}
-
-    @app.get("/v1/chat/history")
-    def history(character_id: str = "rin", limit: int = 160):
-        return history_payload(character_id, max(1, min(limit, 500)))
-
-    @app.post("/v1/chat")
-    def chat(req: ChatRequest):
-        ensure_character(req.character_id)
-        selected_sticker = None
-        if req.sticker_id:
-            catalog = sticker_catalog_for(req.character_id)
-            sticker = catalog.get(req.sticker_id)
-            if sticker is None or catalog.asset_path(req.sticker_id) is None:
-                raise HTTPException(status_code=400, detail=f"Unknown sticker: {req.sticker_id}")
-            selected_sticker = sticker.model_dump(mode="json")
-
-        api_started = time.perf_counter()
-        was_unloaded = app_bundle is None
-        current = require_bundle()
-        init_ms = current.init_timings.get("total_ms", 0.0) if was_unloaded else 0.0
-
-        selected_image = None
-        vision_data_url = None
-        if req.image is not None:
-            upload_time = req.at or datetime.now().astimezone()
-            try:
-                asset, vision_data_url = media_storage.save_data_url(
-                    character_id=req.character_id,
-                    original_name=req.image.filename,
-                    data_url=req.image.data_url,
-                    created_at=upload_time,
-                )
-                current.store.add_media_asset(asset)
-                selected_image = asset.model_dump(mode="json")
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except Exception as exc:
-                logger.exception("api.media save_failed character=%s error=%s", req.character_id, exc)
-                raise HTTPException(status_code=500, detail=f"图片保存失败：{exc}") from exc
-
-        logger.info(
-            "api.chat start character=%s conversation=%s chars=%d sticker=%s image=%s runtime_loaded=%s",
-            req.character_id,
-            req.conversation_id,
-            len(req.message),
-            req.sticker_id or "-",
-            (selected_image or {}).get("id") or "-",
-            not was_unloaded,
-        )
-
-        service_started = time.perf_counter()
-        try:
-            out = current.chat.send(
-                req.message,
-                character_id=req.character_id,
-                conversation_id=req.conversation_id,
-                at=req.at,
-                sticker=selected_sticker,
-                image=selected_image,
-                vision_image_data_url=vision_data_url,
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception:
-            logger.exception("api.chat failed character=%s conversation=%s elapsed_ms=%.1f", req.character_id, req.conversation_id, _ms(api_started))
-            raise
-        service_ms = _ms(service_started)
-        api_total_ms = _ms(api_started)
-        timings = dict(out.timings)
-        timings["runtime_init_ms"] = round(init_ms, 1)
-        timings["chat_service_ms"] = service_ms
-        timings["api_total_ms"] = api_total_ms
-        logger.info("api.chat timings event_id=%s character=%s %s", out.event.id, req.character_id, " ".join(f"{key}={value:.1f}ms" for key, value in timings.items()))
-
-        return {
-            "event_id": out.event.id,
-            "event_time": out.event.event_time.isoformat(),
-            "character_id": req.character_id,
-            "input_image": uploaded_media_payload((selected_image or {}).get("id")),
-            "action": action_payload(req.character_id, out.reaction.action) if out.reaction.action is not None else None,
-            "actions": [action_payload(req.character_id, action) for action in out.reaction.actions],
-            "perception": out.reaction.perception,
-            "reaction": out.reaction.reaction,
-            "mental_state": out.reaction.mental_state_update,
-            "recalled_memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in out.recalled_memories],
-            "created_memory_ids": out.created_memory_ids,
-            "created_intent_ids": out.created_intent_ids,
-            "timings": timings,
-        }
-
-    @app.get("/v1/traces/{source_event_id}")
-    def trace(source_event_id: int):
-        value = read_store.get_runtime_trace(source_event_id)
-        if value is None:
-            raise HTTPException(status_code=404, detail="trace not found")
-        return value
-
-    @app.get("/v1/runtime/{character_id}")
-    def runtime_state(character_id: str):
-        profile = ensure_character(character_id)
-        memories = read_store.list_memories(character_id, include_inactive=True, limit=80, include_embedding=False)
-        intents = [dict(row) for row in read_store.list_intents(character_id, limit=80)]
-        stickers = sticker_catalog_for(character_id)
-        images = image_catalog_for(character_id)
-        if app_bundle is not None and hasattr(app_bundle, "runtimes") and character_id in app_bundle.runtimes:
-            persona = app_bundle.runtimes[character_id].persona
-        else:
-            persona_path = profile.get("persona_path") or resolve_persona_path(settings, character_id)
-            persona = load_persona(persona_path)
-        return {
-            "character_id": character_id,
-            "profile": public_profile(profile),
-            "now": datetime.now().astimezone().isoformat(),
-            "provider": {
-                "chat_model": settings.chat_model,
-                "vision_model": getattr(settings, "vision_model", ""),
-                "base_url": settings.base_url,
-                "embedding_provider": settings.embedding_provider,
-                "embedding_model": settings.embedding_model,
-                "db_path": settings.db_path,
-            },
-            "runtime_loaded": app_bundle is not None,
-            "runtime_error": runtime_error,
-            "runtime_init_timings": app_bundle.init_timings if app_bundle is not None else {},
-            "persona": persona,
-            "mental_state": read_store.get_mental_state(character_id),
-            "memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in reversed(memories)],
-            "intents": intents,
-            "stickers": stickers.public_items(),
-            "sticker_source": stickers.source,
-            "images": images.public_items(character_id),
-            "image_source": images.source,
-        }
-
-    @app.post("/v1/simulate")
-    def simulate(req: SimulateRequest):
-        current = require_bundle()
-        return {"days": current.days.simulate(req.character_id, req.days)}
-
-    @app.get("/v1/state/{character_id}")
-    def state(character_id: str):
-        ensure_character(character_id)
-        return {"world_time": read_store.get_world_time(character_id), "mental_state": read_store.get_mental_state(character_id), "recent_events": [e.model_dump(mode="json") for e in read_store.list_events(character_id, 30)], "memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in read_store.list_memories(character_id, limit=30, include_embedding=False)], "intents": [dict(r) for r in read_store.list_intents(character_id)]}
+    route_access = CoreApiRouteAccess(
+        settings=settings,
+        web_dir=web_dir,
+        read_store=read_store,
+        media_storage=media_storage,
+        current_bundle=current_bundle,
+        require_bundle=require_bundle,
+        runtime_status=runtime_status,
+        proactive_poll_seconds=_PROACTIVE_POLL_SECONDS,
+        character_profiles=character_profiles,
+        public_profile=public_profile,
+        set_archived=_set_archived,
+        character_summary=character_summary,
+        ensure_character=ensure_character,
+        create_character_from_draft=create_character_from_draft,
+        global_sticker_catalog=global_sticker_catalog,
+        sticker_catalog_for=sticker_catalog_for,
+        ai_sticker_tagger=ai_sticker_tagger,
+        refresh_runtime_sticker_catalog=refresh_runtime_sticker_catalog,
+        image_catalog_for=image_catalog_for,
+        uploaded_media_payload=uploaded_media_payload,
+        action_payload=action_payload,
+        history_payload=history_payload,
+    )
+    attach_core_character_routes(app, route_access)
+    attach_core_resource_routes(app, route_access)
+    attach_core_direct_routes(app, route_access)
 
     return app

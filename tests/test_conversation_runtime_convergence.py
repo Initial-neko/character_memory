@@ -126,13 +126,15 @@ def test_direct_and_group_builders_and_history_use_shared_boundaries():
     direct = (SRC / "application" / "chat_service.py").read_text(encoding="utf-8")
     group = (SRC / "application" / "group_conversation_service.py").read_text(encoding="utf-8")
     api = (SRC / "api.py").read_text(encoding="utf-8")
+    api_resources = (SRC / "api_resource_service.py").read_text(encoding="utf-8")
     history = (SRC / "history_web.py").read_text(encoding="utf-8")
     group_web = (SRC / "group_web.py").read_text(encoding="utf-8")
 
     assert "normalize_user_fact(" in direct
     assert "normalize_user_fact(" in group
     assert "project_direct_message(" in direct
-    assert "project_direct_message(" in api
+    assert "ApiResourceService(" in api
+    assert "project_direct_message(" in api_resources
     assert "project_direct_message(" in history
     assert "project_group_message(" in group_web
 

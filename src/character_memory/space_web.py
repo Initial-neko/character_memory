@@ -43,7 +43,9 @@ class CreateSpacePostRequest(BaseModel):
 
 
 class CreateSpaceCommentRequest(BaseModel):
-    character_id: str = Field(min_length=1, max_length=64)
+    # Omitted character_id means the human user is commenting from the browser.
+    # Character-authored comments keep using an explicit, validated character id.
+    character_id: str | None = Field(default=None, min_length=1, max_length=64)
     content: str = Field(min_length=1, max_length=1000)
     reply_to_comment_id: int | None = None
 
@@ -143,6 +145,18 @@ def attach_space_routes(app):
             "archived": "archived_at" in profile,
         }
 
+    def comment_author_payload(comment) -> dict:
+        if comment.actor_type == "USER":
+            return {
+                "id": "user",
+                "name": "我",
+                "identity": "",
+                "tagline": "",
+                "avatar_url": "",
+                "archived": False,
+            }
+        return profile_payload(comment.character_id)
+
     def relation_for_asset(asset) -> dict:
         mime_type = str(asset.mime_type or "").lower()
         if mime_type.startswith("image/"):
@@ -232,7 +246,7 @@ def attach_space_routes(app):
         first_media = next((item for item in media_items if item.get("available")), None)
         commenter_ids = []
         for comment in comments:
-            if comment.character_id not in commenter_ids:
+            if comment.actor_type == "CHARACTER" and comment.character_id not in commenter_ids:
                 commenter_ids.append(comment.character_id)
         return {
             "id": post.id,
@@ -254,7 +268,8 @@ def attach_space_routes(app):
                     "id": item.id,
                     "post_id": item.post_id,
                     "character_id": item.character_id,
-                    "author": profile_payload(item.character_id),
+                    "actor_type": item.actor_type,
+                    "author": comment_author_payload(item),
                     "content": item.content,
                     "created_at": item.created_at.isoformat(),
                     "reply_to_comment_id": item.reply_to_comment_id,
@@ -334,14 +349,18 @@ def attach_space_routes(app):
 
     @app.post("/v1/space/posts/{post_id}/comments")
     def create_space_comment(post_id: int, req: CreateSpaceCommentRequest):
-        require_known(req.character_id, active=True)
+        actor_type = "CHARACTER" if req.character_id else "USER"
+        commenter_id = req.character_id or "user"
+        if req.character_id:
+            require_known(req.character_id, active=True)
         repository = repo()
         try:
             comment = repository.add_comment(
                 post_id,
-                req.character_id,
+                commenter_id,
                 req.content,
                 datetime.now().astimezone(),
+                actor_type=actor_type,
                 reply_to_comment_id=req.reply_to_comment_id,
             )
         except KeyError as exc:
@@ -351,7 +370,7 @@ def attach_space_routes(app):
         return {
             "comment": {
                 **comment.model_dump(mode="json"),
-                "author": profile_payload(comment.character_id),
+                "author": comment_author_payload(comment),
             },
             "post": post_payload(repository, repository.get_post(post_id)),
         }

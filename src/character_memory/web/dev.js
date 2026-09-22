@@ -104,6 +104,9 @@
       if ($("spaceMediaMaxItems")) $("spaceMediaMaxItems").value = String(data.media_max_items ?? 3);
       if ($("spaceImageSearchEnabled")) $("spaceImageSearchEnabled").checked = Boolean(data.image_search_enabled ?? true);
       if ($("spaceImageGenerationEnabled")) $("spaceImageGenerationEnabled").checked = Boolean(data.image_generation_enabled ?? true);
+      if ($("spaceWorldObservationEnabled")) $("spaceWorldObservationEnabled").checked = Boolean(data.world_observation_enabled ?? true);
+      if ($("spaceWorldMaxPages")) $("spaceWorldMaxPages").value = String(data.world_max_pages ?? 2);
+      if ($("spaceWorldMaxChars")) $("spaceWorldMaxChars").value = String(data.world_max_chars_per_page ?? 6000);
       if ($("spaceAudienceSize")) $("spaceAudienceSize").value = String(data.audience_size ?? 5);
       if ($("spacePollSeconds")) $("spacePollSeconds").value = String(data.poll_seconds ?? 60);
     } catch (error) {
@@ -127,6 +130,9 @@
           media_max_items: Number($("spaceMediaMaxItems").value || 0),
           image_search_enabled: $("spaceImageSearchEnabled").checked,
           image_generation_enabled: $("spaceImageGenerationEnabled").checked,
+          world_observation_enabled: $("spaceWorldObservationEnabled").checked,
+          world_max_pages: Number($("spaceWorldMaxPages").value || 2),
+          world_max_chars_per_page: Number($("spaceWorldMaxChars").value || 6000),
           audience_size: Number($("spaceAudienceSize").value || 0),
           poll_seconds: Number($("spacePollSeconds").value || 60),
           rearm: true,
@@ -200,6 +206,49 @@
       });
       $("spaceResult").textContent = pretty(data);
       if (data.post?.id) $("spacePostId").value = String(data.post.id);
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runWorldSearch() {
+    const button = $("runWorldSearch");
+    button.disabled = true;
+    $("spaceResult").textContent = "正在搜索并用无头浏览器打开网页...";
+    try {
+      const data = await jsonFetch("/v1/dev/world/search", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          query: $("worldQuery").value,
+          max_pages: Number($("worldPages").value || 2),
+          max_chars_per_page: Number($("spaceWorldMaxChars").value || 6000),
+        }),
+      });
+      $("spaceResult").textContent = pretty(data);
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runWorldFetch() {
+    const button = $("runWorldFetch");
+    button.disabled = true;
+    $("spaceResult").textContent = "正在通过 Playwright Chromium 渲染 URL...";
+    try {
+      const data = await jsonFetch("/v1/dev/world/fetch", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          url: $("worldUrl").value,
+          max_chars: Number($("spaceWorldMaxChars").value || 6000),
+        }),
+      });
+      $("spaceResult").textContent = pretty(data);
     } catch (error) {
       $("spaceResult").textContent = `ERROR: ${error.message}`;
     } finally {
@@ -538,6 +587,8 @@
   });
   $("runSpaceAudience").addEventListener("click", runSpaceAudience);
   $("runSpaceMedia").addEventListener("click", runSpaceMedia);
+  $("runWorldSearch").addEventListener("click", runWorldSearch);
+  $("runWorldFetch").addEventListener("click", runWorldFetch);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);
   $("runTts").addEventListener("click", runTts);
   $("runAsr").addEventListener("click", runAsr);

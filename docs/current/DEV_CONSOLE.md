@@ -90,13 +90,15 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 支持：
 
 - 选择一个未归档 Character；
-- 直接调整并持久化 `Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / Audience / Scheduler Poll`；
+- 直接调整并持久化 Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / World Observation / World Pages / World Text / Audience / Scheduler Poll；
 - 快捷档 `10min / 30min / 1H / 6H / 24H`；
 - `立即手动触发一次`：立即跑一次完整 Space Opportunity，不改变正式 next time；
 - `让选中角色立即到期`：把 next opportunity 设为现在，用真实后台 Scheduler 验证；
 - 指定 Post ID 后 `再次模拟 Audience`；
 - 强制执行一条 `SEARCH_IMAGE` 或 `GENERATE_IMAGE` 测试动态，不移动正式 Scheduler；
 - 测试 1..9 张媒体上限、Search Query、SELFIE/SCENE Visual Intent；
+- 测试 World Observation：Search Provider 发现 URL 后，用 Playwright 无头 Chromium 真正打开并执行 JS，返回抽取后的 WorldObservation；
+- 无头浏览器打开 URL：只验证一个公开 URL 的渲染/正文抽取，不触发角色记忆或 Space 发帖；
 - 查看每个人的 last/next opportunity、last status，以及最近 opportunity run history。
 
 配置会写回 `config.yaml`，同时热应用到当前 Character Runtime。测试时可设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。
@@ -213,7 +215,25 @@ Dev Console 的 HTML 与 `/static/*` 都返回 `cache-control: no-cache` + ETag�
 - Space 状态区显示 `读取时间 HH:MM:SS`，一眼能看出这份数据是什么时候读的；
 - 页面从 bfcache 恢复（`pageshow` 且 `persisted`）时重新拉取 Space 状态与角色列表，避免恢复出 stack 重启前的旧配置。
 
-## 5. Image provider diagnostics
+## 5. World Browser diagnostics
+
+World Browser belongs to Character Runtime, not to Dev Console itself. Dev only proxies these formal diagnostics:
+
+    GET  /v1/dev/world/status
+    POST /v1/dev/world/search
+    POST /v1/dev/world/fetch
+
+The search path first asks the configured SearchAPI/Brave provider for candidate URLs, then opens up to N public pages with Playwright headless Chromium. The fetch path opens one public URL to diagnose JavaScript rendering and readable-text extraction.
+
+This is not a generic Postman surface: there are no custom headers, cookies or secrets, and local/private-network targets are rejected. Page text is untrusted external data; only the appraisal-safe summary may reach PersonRuntime Memory or final Space expression context.
+
+For a managed local Chromium installation:
+
+    uv run playwright install chromium
+
+CI browser-smoke opens a JavaScript delayed-render fixture with real Chromium and asserts that the extracted body is the rendered text rather than the initial HTML.
+
+## 6. Image provider diagnostics
 
 `GET /v1/visual/providers` 返回：
 
@@ -237,7 +257,7 @@ bash scripts/sync-all.sh
 bash scripts/setup-media-models.sh
 ```
 
-## 6. Boundary
+## 7. Boundary
 
 Dev Console 不是 generic Postman。
 
@@ -248,11 +268,12 @@ Dev Console 不是 generic Postman。
 - local media
 - formal TTS
 - visual generation
+- World Observation 的受限公开 URL 渲染/搜索诊断
 - resource/latency diagnostics
 
-不要加入任意 URL、任意 header、任意 secret 编辑器来绕过服务端边界。
+World Browser 的 URL 输入是这一条正式能力的诊断入口，不允许自定义 header/cookie/secret，也不能访问 localhost/私网。除此之外不要加入通用任意请求工具来绕过服务端边界。
 
-## 7. Testing expectation
+## 8. Testing expectation
 
 需要区分：
 

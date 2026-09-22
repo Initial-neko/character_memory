@@ -44,7 +44,7 @@
       return;
     }
     list.innerHTML = groups.map(group => {
-      const names = (group.members || []).map(item => item.name || item.id).join("、");
+      const names = (group.members || []).map(item => item.name || item.id).join("、") || (group.status === "BUILDING" ? "正在构建…" : "暂无成员");
       const active = CM.isGroupConversation() && group.id === activeId();
       const id = CM.escapeHtml(group.id);
       return `<div class="group-item-wrap" data-group-row="${id}"><button class="group-item ${active ? "active" : ""}" type="button" data-group="${id}"><span class="group-avatar">${CM.escapeHtml(initial(group))}</span><span class="group-copy"><span class="group-name">${CM.escapeHtml(group.name)}</span><span class="group-members">${CM.escapeHtml(names)}</span></span></button><button class="group-more-button" type="button" data-group-more="${id}" title="群聊操作" aria-label="群聊操作">···</button><div class="group-context-menu hidden" data-group-menu="${id}"><button type="button" data-group-archive="${id}">归档</button></div></div>`;
@@ -146,7 +146,9 @@
     CM.dom.chat.innerHTML = "";
     const group = current();
     if (!messages.length) {
-      CM.dom.chat.innerHTML = `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」还没有消息。<br>说第一句话，看看谁会接话。</div>`;
+      CM.dom.chat.innerHTML = group?.status === "BUILDING"
+        ? `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」正在构建成员。<br>确认人物后就可以直接开始聊天。</div>`
+        : `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」还没有消息。<br>说第一句话，看看谁会接话。</div>`;
       if (pending.has(activeId())) appendPending("群成员正在输入…");
       return;
     }
@@ -323,10 +325,11 @@
     if (!group) return false;
     const names = (group.members || []).map(item => item.name || item.id).join("、");
     const isPending = pending.has(group.id);
+    const building = group.status === "BUILDING";
     CM.dom.characterName.textContent = group.name;
-    CM.dom.characterIdentity.textContent = `${names}${isPending ? " · 有人正在输入" : ""}`;
+    CM.dom.characterIdentity.textContent = building ? "正在根据资料构建群成员…" : `${names}${isPending ? " · 有人正在输入" : ""}`;
     CM.dom.headerAvatar.textContent = initial(group);
-    CM.dom.input.placeholder = `发到「${group.name}」`;
+    CM.dom.input.placeholder = group.status === "BUILDING" ? "群聊构建完成后即可发送消息" : `发到「${group.name}」`;
     CM.dom.runtimeButton.disabled = true;
     CM.dom.runtimeButton.title = "群聊心理活动请查看每条用户消息下方的「本轮反应」";
     CM.features.intent?.setDisabled?.(true);
@@ -335,11 +338,13 @@
 
   function applyComposerState() {
     if (!CM.isGroupConversation()) return false;
-    CM.dom.sendButton.disabled = false;
-    CM.dom.input.disabled = false;
-    CM.features.stickers?.setDisabled?.(false);
-    CM.features.images?.setDisabled?.(false);
-    CM.dom.input.focus();
+    const group = current();
+    const building = group?.status === "BUILDING";
+    CM.dom.sendButton.disabled = Boolean(building);
+    CM.dom.input.disabled = Boolean(building);
+    CM.features.stickers?.setDisabled?.(Boolean(building));
+    CM.features.images?.setDisabled?.(Boolean(building));
+    if (!building) CM.dom.input.focus();
     return true;
   }
 

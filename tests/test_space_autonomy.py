@@ -712,3 +712,29 @@ def test_space_behavior_uses_configurable_interval_and_audience_size(tmp_path):
     assert status["audience_size"] == 2
     assert status["characters"][0]["next_opportunity_at"].startswith("2026-09-21T06:00")
     store.close()
+
+
+def test_space_scheduler_persists_world_and_plan_observability(tmp_path):
+    model = WorldSpaceModel()
+    access, store, _ = _access(tmp_path, ids=("c00",), model=model)
+    access.settings.space_world_observation_enabled = True
+    access.settings.space_opportunity_interval_minutes = 30
+    access.world_observer = FakeWorldObserver()
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    start = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+    scheduler.status(start)
+
+    outcomes = scheduler.run_once(datetime(2026, 9, 22, 8, 30, tzinfo=timezone.utc))
+    assert len(outcomes) == 1
+    run = repository.list_opportunity_runs(character_id="c00")[0]
+    assert run["status"] == "POSTED"
+    assert run["details"]["world"]["explored"] is True
+    assert run["details"]["world"]["observations"]
+    assert run["details"]["plan"]["has_text"] is True
+
+    status = scheduler.status(datetime(2026, 9, 22, 8, 31, tzinfo=timezone.utc))
+    assert status["metrics"]["opportunities"] >= 1
+    assert status["metrics"]["world_explored"] >= 1
+    assert status["metrics"]["browser_rendered"] >= 1
+    store.close()

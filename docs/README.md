@@ -42,6 +42,7 @@ Source code and tests are the final implementation authority. `docs/current/` is
 
 ### Operations and validation
 
+- [Release and version policy](current/RELEASES.md)
 - [Settings Center](current/SETTINGS_CENTER.md)
 - [Dev Console](current/DEV_CONSOLE.md)
 - [Mobile access](current/MOBILE_ACCESS.md)
@@ -70,7 +71,8 @@ Historical notes never override current code or `docs/current/`.
 - `MEMORY.md` — Memory admission/recall/provenance 以及尚未决定的 memory policy；
 - `MEDIA_RUNTIME.md` — ASR/TTS transport/runtime；
 - `SETTINGS_CENTER.md` — 配置与 Secret persistence/apply semantics；
-- `DEV_CONSOLE.md` — 诊断入口与 smoke workflow。
+- `DEV_CONSOLE.md` — 诊断入口与 smoke workflow；
+- `RELEASES.md` — branch/tag/version/release promotion policy。
 
 其它文档引用 owner 文档，不复制整套 topology、端口、Provider 列表或同一行为定义。README 只保留可运行摘要和链接。
 

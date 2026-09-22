@@ -369,3 +369,41 @@ def test_server_attaches_the_voice_routes():
     ).read_text(encoding="utf-8")
 
     assert "attach_voice_routes(app)" in server
+
+
+def test_snapshot_ignores_archived_characters_without_deleting_their_voice_reference(tmp_path):
+    voices = tmp_path / "voices"
+    _template(voices, "murasame")
+    haru = _personas(tmp_path / "personas", "haru", "murasame")
+    momo = _personas(tmp_path / "personas", "momo", "murasame")
+    characters = _characters(haru, momo)
+    next(item for item in characters if item["id"] == "momo")["archived_at"] = "2026-09-22T12:00:00+00:00"
+
+    snapshot = voice_snapshot(characters=characters, voices_root=voices)
+
+    assert set(snapshot["characters"]) == {"haru"}
+    entry = next(item for item in snapshot["templates"] if item["name"] == "murasame")
+    assert entry["used_by"] == ["haru"]
+    assert (momo / "voice.yaml").is_file(), "archiving is suspension, not voice configuration deletion"
+
+
+def test_archived_character_voice_route_is_read_only_until_restore(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    voices = tmp_path / "voices"
+    _template(voices, "murasame")
+    persona_dir = _personas(tmp_path / "personas", "haru", "murasame")
+    (persona_dir / "archived.yaml").write_text(
+        "archived_at: 2026-09-22T12:00:00+00:00\n",
+        encoding="utf-8",
+    )
+    client = TestClient(_attached_app(tmp_path, monkeypatch))
+
+    snapshot = client.get("/v1/voice-templates")
+    changed = client.post("/v1/characters/haru/voice", json={"template": None})
+
+    assert snapshot.status_code == 200
+    assert "haru" not in snapshot.json()["characters"]
+    assert changed.status_code == 409
+    assert "archived" in changed.text
+    assert (persona_dir / "voice.yaml").is_file()

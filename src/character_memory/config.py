@@ -123,6 +123,15 @@ class Settings(BaseModel):
     space_audience_size: int = Field(default=5, ge=0, le=10)
     space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 
+    # Autonomous Group Chat is intentionally sparse: an opportunity only asks
+    # whether one rotating seed member naturally starts a short room exchange.
+    # A new user message always has priority and can supersede the autonomous run.
+    group_autonomy_enabled: bool = True
+    group_autonomy_interval_minutes: float = Field(default=360.0, ge=10.0, le=10080.0)
+    group_autonomy_max_messages: int = Field(default=3, ge=1, le=4)
+    group_autonomy_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
+    group_autonomy_user_quiet_minutes: float = Field(default=30.0, ge=0.0, le=1440.0)
+
     # Legacy V2 fields remain loadable so existing config.yaml files do not need
     # a destructive migration. The interval scheduler no longer consumes them.
     space_daily_window_start_hour: int = Field(default=18, ge=0, le=23)

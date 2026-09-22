@@ -26,6 +26,8 @@ First release candidate for the **Persistent Person Runtime Baseline**.
 - Character capacity raised to a soft threshold of 10 and a hard ceiling of 20; the character list no longer truncates, and the ceiling is enforced by the API rather than by what the UI happens to show.
 - Group member ceiling raised from 4 to 12. Note the cost shape: a user message is answered by every member, so a full group costs up to 12 model calls per turn, while an autonomous opportunity stays capped at 4.
 - Character Space feed pages through older posts with the existing cursor instead of stopping at the first 10, and media open in an in-app lightbox.
+- Character Space now proactively prefetches older cursor pages before the reader reaches the bottom instead of making downward scrolling expose the loading boundary.
+- Avatar generation can return a 1~4 image candidate batch (4 by default) with bounded style presets, reusing the explicit Image prompt-polish path before ImageGen.
 - Persistent Persona, Memory, Mental State, Intent and Runtime Trace.
 - Direct and Group chat with async durable acceptance and SSE reconciliation.
 - Character Space with autonomous posts, audience reactions, search/world observation, image and voice media.

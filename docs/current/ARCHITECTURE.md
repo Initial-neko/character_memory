@@ -134,13 +134,15 @@ result = person_runtime.handle(event)
 核心信息流：
 
 ```text
-Event
+Event / Channel Opportunity
   ↓
-Relationship Time
+PersonContextBuilder
+  ├─ Persona
+  ├─ Mental State
+  ├─ Memory Recall
+  └─ Recent Events
   ↓
-Memory Recall
-  ↓
-Persona + Mental State + Available Resources
+Relationship Time + Available Resources
   ↓
 Person Model
   ↓
@@ -155,6 +157,8 @@ validation / resource sanitization / admission
   ↓
 transactional derived persistence
 ```
+
+Direct、Group、Space/World planning 现在共享同一个 `PersonContextBuilder` 读取人物状态；Channel 仍保留各自 Action/Prompt/persistence contract，不把所有行为强塞进一种 Reaction schema。
 
 当前 outward primitives：
 

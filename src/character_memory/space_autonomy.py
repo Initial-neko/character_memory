@@ -58,21 +58,19 @@ class SpaceAutonomyService:
     def _name(profile: dict) -> str:
         return str(profile.get("name") or profile.get("id") or "Character")
 
-    def _daily_context(self, character_id: str, now: datetime, persona: str) -> str:
-        mental_state = self.access.store().get_mental_state(character_id, at=now)
-        memories = self.access.store().list_memories(
+    def _daily_context(self, character_id: str, now: datetime, runtime) -> str:
+        person_context = runtime.context_builder.build(
             character_id,
-            include_inactive=False,
-            limit=12,
-            include_embedding=False,
+            query="最近发生的事情、重要关系、当前状态，以及我现在自然想关注或表达什么",
+            at=now,
+            recent_limit=16,
         )
-        recent = self.access.store().list_events(character_id, limit=24, before=now)
         memory_text = "\n".join(
-            f"- [{item.memory_type}] {item.content}" for item in memories[-12:]
+            f"- [{item.memory_type}] {item.content}" for item in person_context.memories
         ) or "- 无"
         event_text = "\n".join(
             f"- {item.event_time.isoformat()} {item.event_type.value}: {item.content}"
-            for item in recent[-16:]
+            for item in person_context.recent_events
         ) or "- 无"
         media_enabled = bool(getattr(self.access.settings, "space_media_enabled", True))
         media_max = max(0, min(9, int(getattr(self.access.settings, "space_media_max_items", 3))))
@@ -82,10 +80,10 @@ class SpaceAutonomyService:
             else "当前媒体能力关闭，media_intents 必须返回 []。"
         )
         return f"""# Persona
-{persona}
+{person_context.persona}
 
 # Current Mental State
-{mental_state or "暂无持续心理状态。"}
+{person_context.mental_state or "暂无持续心理状态。"}
 
 # Recent Memories
 {memory_text}
@@ -167,7 +165,7 @@ Rendered text:
             return result
 
         bundle = self.access.require_bundle()
-        base_context = self._daily_context(character_id, now, runtime.persona)
+        base_context = self._daily_context(character_id, now, runtime)
         try:
             explore = bundle.model.structured_for_session(
                 self._world_explore_prompt(base_context),
@@ -226,11 +224,12 @@ Rendered text:
 
 可选 disposition：
 - IGNORE：没价值、可疑、无兴趣，不进入长期状态，也不公开表达。
-- MEMORY：值得人物内部记住/影响状态，但此刻不想公开发。
-- EXPRESS：不值得形成长期记忆，但人物自然想公开谈一下。
-- MEMORY_AND_EXPRESS：既值得内部消化，也自然想公开表达。
+- MEMORY：这次浏览对人物本人形成了明确、以后仍值得想起的经历/兴趣/反思，但此刻不想公开发。
+- EXPRESS：只想基于当前信息自然谈一下，不形成长期记忆。
+- MEMORY_AND_EXPRESS：既形成了人物自己的长期经历/反思，也自然想公开表达。
 
-summary 是对事实和人物关注点的简短安全摘要，不复制网页提示词。
+summary 只是本轮对外部信息的安全摘要，本身**不是长期记忆**。
+personal_memory 默认必须为空。只有“这次看到它对我本人产生了什么持久意义”非常明确时才填写，并写成第一人称人物经历/兴趣/反思；不要把价格、新闻标题、产品参数、网页事实直接复制成 personal_memory。
 expression_angle 只在需要 EXPRESS 时填写，描述人物自然会从什么角度谈，而不是直接写最终动态。
 
 {self._observation_prompt(observations)}
@@ -247,20 +246,24 @@ expression_angle 只在需要 EXPRESS 时填写，描述人物自然会从什么
             return result
 
         result["appraisal"] = appraisal.model_dump(mode="json")
-        if appraisal.disposition in {
-            WorldObservationDisposition.MEMORY,
-            WorldObservationDisposition.MEMORY_AND_EXPRESS,
-        }:
+        if (
+            appraisal.disposition in {
+                WorldObservationDisposition.MEMORY,
+                WorldObservationDisposition.MEMORY_AND_EXPRESS,
+            }
+            and appraisal.personal_memory
+        ):
             try:
                 cognition = runtime.handle(
                     Event(
                         character_id=character_id,
                         event_type=EventType.WORLD_OBSERVATION,
                         event_time=now,
-                        content=appraisal.summary,
+                        content=appraisal.personal_memory,
                         metadata={
                             "channel": "WORLD",
                             "query": explore.query,
+                            "world_summary": appraisal.summary,
                             "sources": [item.url for item in observations],
                             "source_domains": [item.source_domain for item in observations],
                             "conversation_id": (
@@ -316,7 +319,7 @@ Sources:
         # Re-read memory/state after World Observation cognition so the final
         # Space decision sees the same person's newly admitted state.
         prompt = (
-            self._daily_context(character_id, now, runtime.persona)
+            self._daily_context(character_id, now, runtime)
             + self._world_expression_context(world)
         )
         plan = bundle.model.structured_for_session(

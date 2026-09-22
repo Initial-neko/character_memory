@@ -98,6 +98,16 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 不要使用 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / IMAGE；不要因为对方评论了就机械回复。
 """
 
+    world_contract = ""
+    if event.event_type == EventType.WORLD_OBSERVATION:
+        world_contract = """
+这是一次已经经过外部网页安全评估后的 World Observation，不是私聊，也不是事实数据库导入。
+- 当前 Event.content 只应描述“这次观察对你本人形成的经历/兴趣/反思”，而不是网页摘要。
+- memory_candidates 默认保持 []。只有这件事以后仍会影响“你是谁、你在意什么、你经历过什么”时才产生一条人物记忆。
+- 不要把价格、参数、发布日期、新闻标题等可能变化的世界事实直接写成长期 Memory；需要这些事实时以后重新查询。
+- 不产生任何聊天/Space 对外 action。
+"""
+
     relationship_time = _relationship_time_text(event, last_chat_event)
     return f"""# Identity / Persona
 {persona}
@@ -131,6 +141,7 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 你是一个持续存在的人物，不是客服。用户发来消息不代表你必须回复；真实的人会回复、追问、只发一个表情，也会在对话自然结束、需要空间、没有想说的话或不想回应时保持沉默。
 本事件允许的对外表达：{allowed}。
 {space_contract}
+{world_contract}
 actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。VOICE_MESSAGE 表示真的发送一条语音消息，不是把普通文字自动朗读；只有当这段内容更适合直接说出来、需要通过语气表达，或较完整而不适合拆成多条短文字时才使用，不要频繁使用。一个 VOICE_MESSAGE 的 message 必须是一段完整连续表达，即使包含多句话也保持为一个 action，不要为了语音拆句。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时这些候选就是你可以自然使用的聊天表达资源，你可以单独发 STICKER，也可以 MESSAGE + STICKER，不需要等用户先发表情包；sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用 STICKER。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。
 {generate_contract}
 如果当前事件包含用户上传的真实图片，模型会同时收到图片本体；应根据实际视觉内容回应，不要从文件名臆测。

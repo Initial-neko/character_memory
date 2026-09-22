@@ -36,7 +36,8 @@ Persistent Person 不能靠“看起来挺像”来迭代。Persona、Memory、R
 - 该想起的内容是否进入 Top-K；
 - 不相关 Memory 是否侵入 Context；
 - 是否发生 false recall；
-- future barrier 是否有效。
+- future barrier 是否有效；
+- pinned Memory 是否始终进入 bounded candidate union，但仍由 semantic context 决定是否最终 Top-K。
 
 ### Memory Admission Precision
 
@@ -210,12 +211,13 @@ CI green **不等于**以下真实链路已经验证：
 - 真实 Chromium smoke 必须证明 JavaScript-rendered text，而不是只读初始 HTML；
 - localhost/private/non-http(s) browser target 被拒绝；
 - raw webpage prompt-injection 文本只能作为 untrusted appraisal data，不进入最终 Space publishing context；
+- World summary 本身不能自动写 Memory；只有非空 personal_memory 才允许进入 PersonRuntime admission；
 - IGNORE / MEMORY / EXPRESS / MEMORY_AND_EXPRESS 语义保持分离；
 - WORLD_OBSERVATION outward chat action 被 channel policy 丢弃；
 - Search/browser/appraisal failure 不阻断正常 Space Opportunity；
 - route attach 顺序不能决定 Search/World/ImageGen service 是否存在。
 
-当前还缺一个产品级 Eval：Space planning 与 Direct/Group 是否长期保持同一 Persona cognition。这个问题与 Memory governance / World memory policy 仍待讨论，不用 source-string test 假装已经解决。
+当前 Direct / Group / Space / World planning 已共享 PersonContextBuilder 的基础读上下文；仍缺产品级长期 Eval，验证不同 Channel 的人物行为是否持续保持同一 Persona，而不只是结构上调用了同一 builder。
 
 ## 7. Visual Capture regression
 

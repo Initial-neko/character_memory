@@ -187,6 +187,14 @@ class SQLiteStore:
             """
         )
 
+    def _migrate_memory_governance_locked(self) -> None:
+        self._ensure_column_locked("memories", "pinned", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column_locked("memories", "superseded_by", "INTEGER")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_character_pinned "
+            "ON memories(character_id,active,pinned,event_time_epoch DESC,id DESC)"
+        )
+
     def _init_schema(self):
         with self._lock:
             self.conn.executescript(
@@ -267,6 +275,7 @@ class SQLiteStore:
             migrated = self._run_migration_locked("core/004-runtime-trace-extraction", self._migrate_legacy_action_traces_locked)
             self._run_migration_locked("core/005-indexes", self._create_core_indexes_locked)
             self._run_migration_locked("core/006-memory-candidate-indexes", self._create_memory_candidate_indexes_locked)
+            self._run_migration_locked("core/007-memory-governance", self._migrate_memory_governance_locked)
             compat_migrated = self._migrate_legacy_action_traces_incremental_locked()
             self.conn.commit()
             if intent_added:
@@ -414,6 +423,24 @@ class SQLiteStore:
     def _media_from_row(r) -> MediaAsset:
         return MediaAsset(id=r["id"], character_id=r["character_id"], source=r["source"], original_name=r["original_name"], mime_type=r["mime_type"], storage_name=r["storage_name"], created_at=parse_datetime(r["created_at"]), size_bytes=r["size_bytes"])
 
+    @classmethod
+    def _memory_from_row(cls, r, *, include_embedding: bool = True) -> Memory:
+        keys = set(r.keys())
+        return Memory(
+            id=r["id"],
+            character_id=r["character_id"],
+            content=r["content"],
+            memory_type=r["memory_type"],
+            event_time=parse_datetime(r["event_time"]),
+            importance=r["importance"],
+            source_event_id=r["source_event_id"],
+            active=bool(r["active"]),
+            pinned=bool(r["pinned"]) if "pinned" in keys else False,
+            superseded_by=r["superseded_by"] if "superseded_by" in keys else None,
+            metadata=json.loads(r["metadata_json"]),
+            embedding=cls._unpack(r["embedding"]) if include_embedding else None,
+        )
+
     def append_event(self, event: Event) -> Event:
         with self._lock:
             cur = self.conn.execute(
@@ -472,8 +499,8 @@ class SQLiteStore:
     def add_memory(self, memory: Memory) -> Memory:
         with self._lock:
             cur = self.conn.execute(
-                "INSERT INTO memories(character_id,content,memory_type,event_time,event_time_epoch,importance,source_event_id,active,metadata_json,embedding) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (memory.character_id, memory.content, memory.memory_type, memory.event_time.isoformat(), epoch_us(memory.event_time), memory.importance, memory.source_event_id, int(memory.active), json.dumps(memory.metadata, ensure_ascii=False), self._pack(memory.embedding)),
+                "INSERT INTO memories(character_id,content,memory_type,event_time,event_time_epoch,importance,source_event_id,active,pinned,superseded_by,metadata_json,embedding) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (memory.character_id, memory.content, memory.memory_type, memory.event_time.isoformat(), epoch_us(memory.event_time), memory.importance, memory.source_event_id, int(memory.active), int(memory.pinned), memory.superseded_by, json.dumps(memory.metadata, ensure_ascii=False), self._pack(memory.embedding)),
             )
             self._maybe_commit()
             return memory.model_copy(update={"id": cur.lastrowid})
@@ -495,7 +522,45 @@ class SQLiteStore:
             else:
                 sql += " ORDER BY event_time_epoch DESC,id DESC LIMIT ?"
                 rows = list(reversed(self.conn.execute(sql, [*args, limit]).fetchall()))
-            return [Memory(id=r["id"], character_id=r["character_id"], content=r["content"], memory_type=r["memory_type"], event_time=parse_datetime(r["event_time"]), importance=r["importance"], source_event_id=r["source_event_id"], active=bool(r["active"]), metadata=json.loads(r["metadata_json"]), embedding=self._unpack(r["embedding"]) if include_embedding else None) for r in rows]
+            return [self._memory_from_row(r, include_embedding=include_embedding) for r in rows]
+
+    def get_memory(self, memory_id: int) -> Memory | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM memories WHERE id=? AND event_time_epoch IS NOT NULL",
+                (int(memory_id),),
+            ).fetchone()
+            return self._memory_from_row(row) if row is not None else None
+
+    def set_memory_active(self, memory_id: int, active: bool) -> Memory | None:
+        with self._lock:
+            self.conn.execute(
+                "UPDATE memories SET active=?, pinned=CASE WHEN ?=0 THEN 0 ELSE pinned END WHERE id=?",
+                (int(bool(active)), int(bool(active)), int(memory_id)),
+            )
+            self._maybe_commit()
+        return self.get_memory(memory_id)
+
+    def set_memory_pinned(self, memory_id: int, pinned: bool) -> Memory | None:
+        with self._lock:
+            self.conn.execute(
+                "UPDATE memories SET pinned=?, active=CASE WHEN ?=1 THEN 1 ELSE active END WHERE id=?",
+                (int(bool(pinned)), int(bool(pinned)), int(memory_id)),
+            )
+            self._maybe_commit()
+        return self.get_memory(memory_id)
+
+    def supersede_memory(self, memory_id: int, replacement: Memory) -> tuple[Memory, Memory] | None:
+        with self.transaction():
+            old = self.get_memory(memory_id)
+            if old is None:
+                return None
+            saved = self.add_memory(replacement)
+            self.conn.execute(
+                "UPDATE memories SET active=0,pinned=0,superseded_by=? WHERE id=?",
+                (saved.id, int(memory_id)),
+            )
+        return self.get_memory(memory_id), saved
 
     def find_active_memory_by_content(self, character_id: str, content: str, *, at: datetime | None = None) -> Memory | None:
         normalized = str(content or "").strip()
@@ -514,18 +579,7 @@ class SQLiteStore:
             row = self.conn.execute(sql, args).fetchone()
             if row is None:
                 return None
-            return Memory(
-                id=row["id"],
-                character_id=row["character_id"],
-                content=row["content"],
-                memory_type=row["memory_type"],
-                event_time=parse_datetime(row["event_time"]),
-                importance=row["importance"],
-                source_event_id=row["source_event_id"],
-                active=bool(row["active"]),
-                metadata=json.loads(row["metadata_json"]),
-                embedding=self._unpack(row["embedding"]),
-            )
+            return self._memory_from_row(row)
 
     def list_memory_candidates(
         self,
@@ -562,27 +616,18 @@ class SQLiteStore:
                 "ORDER BY importance DESC,event_time_epoch DESC,id DESC LIMIT ?",
                 [*args, important_limit],
             ).fetchall()
+            pinned = self.conn.execute(
+                f"SELECT * FROM memories WHERE {where} AND pinned=1 "
+                "ORDER BY event_time_epoch DESC,id DESC",
+                args,
+            ).fetchall()
 
-            rows = {int(row["id"]): row for row in [*recent, *important]}
+            rows = {int(row["id"]): row for row in [*recent, *important, *pinned]}
             ordered = sorted(
                 rows.values(),
                 key=lambda row: (int(row["event_time_epoch"] or 0), int(row["id"])),
             )
-            return [
-                Memory(
-                    id=row["id"],
-                    character_id=row["character_id"],
-                    content=row["content"],
-                    memory_type=row["memory_type"],
-                    event_time=parse_datetime(row["event_time"]),
-                    importance=row["importance"],
-                    source_event_id=row["source_event_id"],
-                    active=bool(row["active"]),
-                    metadata=json.loads(row["metadata_json"]),
-                    embedding=self._unpack(row["embedding"]),
-                )
-                for row in ordered
-            ]
+            return [self._memory_from_row(row) for row in ordered]
 
     def list_events(self, character_id: str, limit: int = 50, event_type: str | None = None, before: datetime | None = None) -> list[Event]:
         with self._lock:

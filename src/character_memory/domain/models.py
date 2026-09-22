@@ -82,6 +82,8 @@ class Memory(BaseModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     source_event_id: int | None = None
     active: bool = True
+    pinned: bool = False
+    superseded_by: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     embedding: list[float] | None = None
 
@@ -390,11 +392,15 @@ class WorldObservationAppraisal(BaseModel):
     disposition: WorldObservationDisposition = WorldObservationDisposition.IGNORE
     summary: str = Field(default="", max_length=1600)
     expression_angle: str = Field(default="", max_length=800)
+    # Seeing a public fact is not enough to create long-term Person Memory.
+    # Only a first-person, personally meaningful experience/reflection belongs here.
+    personal_memory: str = Field(default="", max_length=800)
 
     @model_validator(mode="after")
     def normalize_appraisal(self):
         self.summary = " ".join(str(self.summary or "").split()).strip()[:1600]
         self.expression_angle = " ".join(str(self.expression_angle or "").split()).strip()[:800]
+        self.personal_memory = " ".join(str(self.personal_memory or "").split()).strip()[:800]
         if self.disposition != WorldObservationDisposition.IGNORE and not self.summary:
             raise ValueError("non-IGNORE world appraisal requires a summary")
         if self.disposition in {

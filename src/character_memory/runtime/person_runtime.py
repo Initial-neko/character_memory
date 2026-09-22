@@ -9,6 +9,7 @@ import numpy as np
 
 from character_memory.domain.models import ActionDecision, ActionType, EXPRESSIVE_ACTIONS, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.context import compile_context
+from character_memory.runtime.person_context import PersonContextBuilder
 from character_memory.runtime.sticker_retrieval import StickerRetriever
 from character_memory.visual_runtime import direct_visual_available, generate_direct_visual_action
 from character_memory.voice_message_fields import voice_pending_fields
@@ -50,6 +51,7 @@ class PersonRuntime:
         self.sticker_catalog = sticker_catalog
         self.image_catalog = image_catalog
         self.sticker_retriever = StickerRetriever(embeddings)
+        self.context_builder = PersonContextBuilder(store, recall, persona)
 
     def _last_chat_before(self, character_id: str, event_time, *, exclude_event_id: int | None = None):
         candidates = []
@@ -268,13 +270,20 @@ class PersonRuntime:
         )
 
         stage = time.perf_counter()
-        memories = self.recall.recall(event.character_id, event.content, now=event.event_time)
+        person_context = self.context_builder.build(
+            event.character_id,
+            query=event.content,
+            at=event.event_time,
+            exclude_event_id=event.id,
+            recent_limit=8,
+        )
+        memories = person_context.memories
+        state_before = person_context.mental_state
+        recent = person_context.recent_events
         timings["recall_ms"] = _ms(stage)
         logger.info("runtime.recall done count=%d ids=%s duration_ms=%.1f", len(memories), [memory.id for memory in memories], timings["recall_ms"])
 
         stage = time.perf_counter()
-        state_before = self.store.get_mental_state(event.character_id, at=event.event_time)
-        recent = [e for e in self.store.list_events(event.character_id, limit=10, before=event.event_time) if e.id != event.id][-8:]
         sticker_retrieval = self.sticker_retriever.retrieve(
             self.sticker_catalog,
             self._sticker_query(event, recent),

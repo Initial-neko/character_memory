@@ -4,6 +4,13 @@ This register records only debt that still exists on current `main`. A possible 
 
 ## Recently resolved
 
+### Minimal Memory governance and shared Person context
+
+Character Runtime now exposes a small Memory Inspector over explicit APIs: pin/unpin, forget/restore and provenance-preserving correction via `superseded_by`. Pinned memories remain in the bounded recall candidate union.
+
+Direct, Group and Space/World planning share `PersonContextBuilder` for Persona, Mental State, recalled Memory and recent events. World appraisal summaries remain working context; only an explicit first-person `personal_memory` can enter PersonRuntime admission.
+
+
 ### Route-order service locator coupling
 
 SearchProvider, AvatarStore/AvatarSearchService, ImageGenerationProviders and World Browser/Observer are now constructed once by `RuntimeServices` at Character Runtime composition time. Avatar/Visual/World routes consume those services instead of creating infrastructure and publishing it into `app.state` for later routes to discover.
@@ -64,19 +71,17 @@ The throwaway harness directory is ignored.
 
 ## High priority / semantic architecture
 
-### Space / World cognition path divergence
+### Channel-specific cognition still exists above shared Person context
 
-Direct/Group cognition runs through PersonRuntime Context/Recall/validation. Space post planning and World explore/appraisal currently reuse the same Persona/Memory/Mental State data but still compile part of their own context and call the model outside the main PersonRuntime cognition pipeline.
+Direct, Group and Space/World planning now share `PersonContextBuilder` for Persona, Mental State, Recall and recent-event reads. This removes the most immediate drift where Space hand-built a different view of the Person.
 
-That is not yet a second persisted Persona, but it is a real semantic drift risk: future Recall/relationship/context changes could affect chat and public Space behavior differently.
+The higher decision layer is still channel-specific: Direct/Group use reaction contracts, Space uses `SpacePostPlan`, and World uses explore/appraisal schemas. That is intentional for now. Only refactor further if real long-run evals show Persona/relationship drift; do not introduce a large universal action schema preemptively.
 
-Do **not** solve this by blindly routing every web observation into normal chat actions. The next design needs a shared cognition/context layer plus explicit channel policy. This work is intentionally deferred until Memory governance and World-memory semantics are discussed.
+### Advanced Memory governance remains deferred
 
-### Memory governance / intervention
+The minimal control plane now supports inspect / pin / forget / restore / correct with provenance-preserving supersession. World summary no longer becomes Memory by default; only explicit first-person `personal_memory` may enter normal admission.
 
-Automatic Memory Candidate + admission exists, but there is no complete user/developer control plane for inspecting why a Memory was admitted, correcting/removing/pinning it, or preventing selected source classes from becoming long-term memory.
-
-World Observation makes this more important because external information has provenance, freshness and trust semantics that ordinary relationship memories may not have. Raw web text is already blocked from direct Memory writes; the policy for appraisal summaries remains an open product decision.
+Still deferred: bulk policies by source/type, confidence/freshness models, automatic stale-world-fact invalidation, knowledge graph semantics, and per-character “never remember this class of information” rules. Add those only when real long-run data demonstrates the need.
 
 ## High priority / environment reproducibility
 

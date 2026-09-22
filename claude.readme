@@ -13,66 +13,55 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 ## Current baseline
 
 - Repository: `Initial-neko/character_memory`
-- Base: `main@ff57f30c9c3c849cd18933a5ce909ca6a2d30058`
-- Active branch: none
-- Pull request: **#74 — Clarify architecture docs and compose shared runtime services**
-- Phase: post-feature architecture cleanup after Space / World Observation
-- Status: **MERGED**
-
-## Validation
-
-- PR #74 merged to `main` as `ff57f30c9c3c849cd18933a5ce909ca6a2d30058`.
-- Final PR CI run #390 passed `test`, `windows-smoke`, and `browser-smoke` on head `b685fce5c0804fe97a96d98b7da7287491df7348`.
+- Base: `main@66231ef45fccb5bc685ae6b0969237cd836ebd2a`
+- Active branch: `feature/memory-governance-context`
+- Pull request: **#75 — Add minimal Memory governance and shared Person context**
+- Status: **CI / acceptance pending**
 
 ## Current slice
 
-### Batch 1 — documentation convergence
+### Minimal Memory governance
 
-The maintained docs now:
-- use **Durable Facts -> Derived Cognition** instead of implying every fact belongs in one `events` table;
-- reflect that Character Space already provides early Society foundation behavior;
-- document Space / World / Headless Browser in the current architecture;
-- define document ownership to reduce repeated/stale facts;
-- fix stale Avatar Search, Playwright and Voice Message status;
-- explicitly record Memory governance and World-memory policy as open decisions.
+- Memory persists `pinned` and `superseded_by`.
+- Existing Runtime drawer is now a lightweight Memory Inspector.
+- User/developer can pin/unpin, forget/restore and correct.
+- Forget only disables derived Memory; durable source facts stay intact.
+- Correction creates a new Memory and supersedes the old row instead of overwriting history.
+- Pinned Memory remains in the bounded recall candidate union.
 
-### Batch 2 — explicit RuntimeServices composition
+### Conservative World memory
 
-`RuntimeServices` is now the composition root for:
-- typed `CharacterRuntimeAccess` core boundary;
-- shared `SearchProvider`;
-- `AvatarStore` + `AvatarSearchService`;
-- ImageGenerationProviders;
-- `HeadlessBrowserWebFetcher`;
-- `WorldObservationService`.
+- World appraisal `summary` is working context only.
+- `summary` never automatically becomes long-term Memory.
+- Only explicit non-empty `personal_memory` may create a WORLD_OBSERVATION cognition event and enter normal PersonRuntime admission.
+- Dynamic world facts such as prices/news/parameters are expected to be queried again when needed.
 
-Feature routes consume these services. Avatar/Visual/World routes no longer create shared provider infrastructure for later routes to discover through attach order. World is deliberately attached before Avatar as a regression guard.
+### Shared Person context
 
-Provider/resource shutdown is owned by the composition root after feature workers stop.
-
-## Deliberately NOT changed
-
-Do not treat these as acceptance defects for #74 unless the refactor accidentally worsens them:
-
-- Space/World post planning is not yet fully unified with PersonRuntime Context/Recall.
-- No manual Memory control plane was added.
-- The project has not decided when World Observation should become long-term Memory.
-- Wake / Proactive / Space / Reaction background loops are not consolidated in this PR.
-
-Those are the next architecture/product discussion, especially Memory governance + World-memory semantics.
+- `PersonContextBuilder` owns the shared read view: Persona + Mental State + Recall + Recent Events.
+- Direct, Group and Space/World planning use that read layer.
+- Channel-specific action schemas and persistence remain separate.
 
 ## Acceptance focus
 
-1. Character Runtime starts without requiring Avatar route to initialize Search.
-2. World routes work when attached before Avatar routes.
-3. Avatar search, Space image search and World discovery reference the same composed SearchProvider.
-4. Visual and Space ImageGen use the same composed provider map.
-5. Route shutdown no longer closes shared providers prematurely; composition-root shutdown closes them once.
-6. Existing Direct/Group/Space/World behavior remains unchanged.
-7. Documentation no longer claims Web search is future-only or Voice Message is still only on a feature branch.
-8. Documentation states Playwright runtime is in `all`, while Chromium binary installation remains separate.
-9. Memory/World policy remains explicitly undecided rather than silently expanded.
-10. Main, Windows and browser CI are green.
+1. Existing databases migrate with `core/007-memory-governance`; fresh databases also work.
+2. Pin/unpin, forget/restore and correction preserve intended semantics and provenance.
+3. A corrected Memory leaves the old row inactive with `superseded_by`, while the new row is active.
+4. Pinned Memory stays eligible for recall without bypassing normal vector ranking.
+5. Memory Inspector routes enforce character ownership.
+6. World `summary` without `personal_memory` writes no Memory and no WORLD_OBSERVATION Event.
+7. World with explicit `personal_memory` still uses PersonRuntime admission and cannot leak chat actions.
+8. Direct / Group / Space use the shared PersonContextBuilder without changing their channel contracts.
+9. Existing chat, Space, visual, voice and browser behavior does not regress.
+10. Main test, Windows smoke and browser smoke are green.
+
+## Deliberately deferred
+
+- bulk Memory source/type policies;
+- confidence/freshness/world-fact cache;
+- knowledge graph;
+- universal PersonRuntime action schema;
+- background worker lifecycle consolidation.
 
 ## Claude acceptance findings
 

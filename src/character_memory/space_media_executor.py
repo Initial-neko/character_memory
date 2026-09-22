@@ -342,3 +342,4 @@ class SpaceMediaExecutor:
     def close(self) -> None:
         if self._remote_fetcher is not None:
             self._remote_fetcher.close()
+            self._remote_fetcher = None

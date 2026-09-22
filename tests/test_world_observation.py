@@ -112,7 +112,7 @@ def test_headless_world_browser_rejects_loopback_before_playwright_launch(monkey
     )
     fetcher = HeadlessBrowserWebFetcher(channel="chromium")
 
-    with pytest.raises(ValueError, match="non-public"):
+    with pytest.raises(ValueError, match="local host|non-public"):
         fetcher.fetch("http://localhost/private")
 
 

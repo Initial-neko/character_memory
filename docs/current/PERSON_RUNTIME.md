@@ -2,6 +2,20 @@
 
 本文描述一个 Character 收到 Event 后，如何形成内部变化与对外行为。
 
+## Autonomous Group channel
+
+Autonomous Group Chat 不创建第二套人物。一次群聊自主 Opportunity 仍然读取同一个 `PersonContextBuilder`：Persona、Mental State、Recall Memory 与真实 Recent Group Events。区别只在 channel policy：
+
+- 这不是 User 刚发来的消息；
+- seed 可以沉默并结束整个机会；
+- follow-up Character 只有自然想接话时才表达；
+- 私聊 Memory 不得因此泄漏到共享房间；
+- 本轮不创建 Intent；
+- 每个 Character 最多一个 visible action；
+- V1 不允许后台 GENERATE_IMAGE。
+
+自主群消息提交后会成为真实 shared durable fact，因此同一 Opportunity 中后判断的成员能看到前一位刚刚公开说的话，后续 Direct/Group/Space 认知也可以正常受到这段真实经历影响。
+
 ## 1. 核心模型
 
 普通 chatbot 常被写成：

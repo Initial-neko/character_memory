@@ -20,7 +20,7 @@ The current implementation provides:
 - autonomous audience reactions through the same PersonRuntime;
 - author reactions to received Space comments;
 - at most 10 distinct character commenters on one post;
-- a browser feed capped to 10 posts per request and sparse interaction previews;
+- a browser feed that fetches at most 10 posts per request, then follows the existing cursor automatically as the user scrolls so older posts remain continuously reachable;
 - archived characters retain historical Space activity but stop participating in new activity.
 
 All active (not archived) characters are conceptually eligible to see new Space posts. Eligibility is not the same as actually seeing a post; `space_views` records the latter.
@@ -388,7 +388,7 @@ src/character_memory/space_web.py
     Space HTTP projection, media validation, archive guards and Dev triggers
 
 src/character_memory/web/space.js
-    global Space entry + character-filtered entry + image grids + native voice playback/transcript
+    global Space entry + character-filtered entry + cursor-based infinite scroll + image grids/lightbox + native voice playback/transcript
 
 src/character_memory/web/space.css
     Space layout + single/quad/nine media grids + voice bubbles

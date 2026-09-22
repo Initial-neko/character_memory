@@ -33,6 +33,7 @@
     <div class="space-feed-wrap">
       <div class="space-feed-meta"></div>
       <div class="space-feed" aria-live="polite"></div>
+      <button class="space-feed-more hidden" type="button" aria-live="polite">继续向下滚动加载更多</button>
     </div>
   `;
   chatShell?.appendChild(shell);
@@ -56,6 +57,7 @@
 
   const feed = shell.querySelector(".space-feed");
   const meta = shell.querySelector(".space-feed-meta");
+  const more = shell.querySelector(".space-feed-more");
   const title = shell.querySelector(".space-title");
   const subtitle = shell.querySelector(".space-subtitle");
   const closeButton = shell.querySelector(".space-close-button");
@@ -66,6 +68,12 @@
   let lightboxItems = [];
   let lightboxIndex = 0;
   let postsById = new Map();
+  let feedHasMore = false;
+  let feedNextBeforeId = null;
+  let feedTotal = 0;
+  let feedActiveCharacterCount = 0;
+  let feedLoading = false;
+  let feedEpoch = 0;
   const expandedComments = new Set();
 
   function profileFor(id) {
@@ -246,15 +254,63 @@
     if (!value) filterCharacterId = null;
   }
 
-  async function loadFeed() {
-    feed.innerHTML = '<div class="space-loading">正在读取空间…</div>';
-    CM.features.encounter?.refresh?.().catch?.(console.warn);
+  function updateFeedMeta() {
+    const loaded = postsById.size;
+    meta.textContent = loaded
+      ? `已加载 ${loaded}${feedTotal ? ` / ${feedTotal}` : ""} 条 · ${feedActiveCharacterCount} 个活跃角色可看到新动态`
+      : `${feedActiveCharacterCount} 个活跃角色可看到新动态`;
+  }
+
+  function updateFeedMore() {
+    if (!more) return;
+    if (!opened || !postsById.size) {
+      more.classList.add("hidden");
+      return;
+    }
+    more.classList.remove("hidden");
+    more.disabled = feedLoading || !feedHasMore;
+    more.textContent = feedLoading
+      ? "正在加载更多动态…"
+      : feedHasMore
+        ? "继续向下滚动加载更多"
+        : "已经看到全部动态";
+  }
+
+  async function loadFeed({append = false} = {}) {
+    if (append && (feedLoading || !feedHasMore || !feedNextBeforeId)) return;
+
+    const epoch = append ? feedEpoch : ++feedEpoch;
+    if (!append) {
+      postsById = new Map();
+      feedHasMore = false;
+      feedNextBeforeId = null;
+      feedTotal = 0;
+      feedActiveCharacterCount = 0;
+      feed.innerHTML = '<div class="space-loading">正在读取空间…</div>';
+      more?.classList.add("hidden");
+      CM.features.encounter?.refresh?.().catch?.(console.warn);
+    }
+
+    feedLoading = true;
+    if (append) updateFeedMore();
+
     const params = new URLSearchParams({limit:"10"});
     if (filterCharacterId) params.set("character_id", filterCharacterId);
+    if (append && feedNextBeforeId) params.set("before_id", String(feedNextBeforeId));
+
+    let failed = false;
     try {
       const data = await CM.api(`/v1/space/posts?${params.toString()}`);
-      const posts = data.posts || [];
-      postsById = new Map(posts.map(post => [String(post.id), post]));
+      if (epoch !== feedEpoch) return;
+
+      const posts = Array.isArray(data.posts) ? data.posts : [];
+      const freshPosts = posts.filter(post => !postsById.has(String(post.id)));
+      posts.forEach(post => postsById.set(String(post.id), post));
+      feedHasMore = Boolean(data.has_more);
+      feedNextBeforeId = data.next_before_id ?? null;
+      feedTotal = Number(data.total || postsById.size);
+      feedActiveCharacterCount = Number(data.active_character_count || 0);
+
       if (filterCharacterId) {
         const profile = profileFor(filterCharacterId);
         title.textContent = `${profile.name || profile.id} 的空间`;
@@ -263,14 +319,30 @@
         title.textContent = "空间";
         subtitle.textContent = "角色们公开留下的近况";
       }
-      meta.textContent = posts.length
-        ? `最近 ${posts.length} 条 · ${data.active_character_count || 0} 个活跃角色可看到新动态`
-        : `${data.active_character_count || 0} 个活跃角色可看到新动态`;
-      feed.innerHTML = posts.length
-        ? posts.map(postHtml).join("")
-        : '<div class="space-empty"><strong>这里还没有动态</strong><span>角色真正想公开表达时，内容会出现在这里。</span></div>';
+
+      if (append) {
+        if (freshPosts.length) feed.insertAdjacentHTML("beforeend", freshPosts.map(postHtml).join(""));
+      } else {
+        feed.innerHTML = posts.length
+          ? posts.map(postHtml).join("")
+          : '<div class="space-empty"><strong>这里还没有动态</strong><span>角色真正想公开表达时，内容会出现在这里。</span></div>';
+      }
+      updateFeedMeta();
     } catch (error) {
-      feed.innerHTML = `<div class="error">空间读取失败：${CM.escapeHtml(error.message)}</div>`;
+      if (epoch !== feedEpoch) return;
+      failed = true;
+      if (append && more) {
+        more.disabled = false;
+        more.textContent = `加载更多失败：${error.message} · 点此重试`;
+        more.classList.remove("hidden");
+      } else {
+        feed.innerHTML = `<div class="error">空间读取失败：${CM.escapeHtml(error.message)}</div>`;
+      }
+    } finally {
+      if (epoch === feedEpoch) {
+        feedLoading = false;
+        if (!failed) updateFeedMore();
+      }
     }
   }
 
@@ -386,6 +458,20 @@
     else if (event.key === "ArrowLeft") moveLightbox(-1);
     else if (event.key === "ArrowRight") moveLightbox(1);
   });
+
+  more?.addEventListener("click", () => {
+    if (feedHasMore && !feedLoading) loadFeed({append:true}).catch(console.warn);
+  });
+
+  if (more && "IntersectionObserver" in window) {
+    const feedObserver = new IntersectionObserver(entries => {
+      if (!opened || feedLoading || !feedHasMore) return;
+      if (entries.some(entry => entry.isIntersecting)) {
+        loadFeed({append:true}).catch(console.warn);
+      }
+    }, {rootMargin:"480px 0px"});
+    feedObserver.observe(more);
+  }
 
   nav.addEventListener("click", () => open(null).catch(console.error));
   characterEntry.addEventListener("click", () => {

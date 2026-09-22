@@ -57,6 +57,19 @@ def _save_test_media(app, character_id: str, index: int, *, source: str = "USER_
     return asset
 
 
+def _save_test_audio(app, character_id: str, index: int, *, source: str = "SPACE_VOICE"):
+    access = app.state.character_memory
+    asset = access.media_storage.save_bytes(
+        character_id=character_id,
+        original_name=f"space-{index}.wav",
+        payload=b"RIFF" + (b"\x00" * 4) + b"WAVEfmt " + (b"\x00" * 24),
+        created_at=datetime(2026, 9, 22, 8, index, tzinfo=timezone.utc),
+        source=source,
+    )
+    access.read_store.add_media_asset(asset)
+    return asset
+
+
 def test_space_repository_keeps_shared_social_facts_and_caps_distinct_commenters(tmp_path: Path):
     store = SQLiteStore(tmp_path / "space-store.db")
     repo = SpaceRepository(store)
@@ -284,6 +297,27 @@ def test_space_api_supports_ordered_multi_image_posts_and_legacy_single_media(tm
         assert missing.status_code == 400
 
 
+def test_space_api_projects_audio_assets_as_voice_media(tmp_path: Path):
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        audio = _save_test_audio(app, "c00", 1)
+        created = client.post(
+            "/v1/space/posts",
+            json={"character_id":"c00", "content":"听一下。", "media_ids":[audio.id]},
+        )
+        assert created.status_code == 200
+        post = created.json()["post"]
+        assert post["media_count"] == 1
+        item = post["media_items"][0]
+        assert item["media_type"] == "VOICE"
+        assert item["mime_type"] == "audio/wav"
+        assert item["available"] is True
+        assert item["url"] == f"/v1/media/{audio.id}"
+
+
 def test_space_feed_is_capped_to_ten_items_and_can_filter_one_character(tmp_path: Path):
     config = _config(tmp_path, count=2)
     app = create_api(str(config))
@@ -328,6 +362,10 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "data-space-media-count",
         'images.length === 1 ? "single"',
         'images.length <= 4 ? "quad" : "nine"',
+        "space-voice-bubble",
+        "data-space-voice-play",
+        "data-space-voice-text",
+        "new Audio(",
     ]:
         assert token in script
     for token in [
@@ -339,6 +377,8 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         ".space-media-single",
         ".space-media-quad",
         ".space-media-nine",
+        ".space-voice-bubble",
+        ".space-voice-transcript",
     ]:
         assert token in css
     assert 'addEventListener("submit"' not in script

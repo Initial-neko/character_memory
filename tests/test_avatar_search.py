@@ -74,9 +74,53 @@ def test_searchapi_image_search_parses_candidates_and_maps_safe_search():
     assert "hl=zh-cn" in seen["url"]
     assert "safe=active" in seen["url"]
     assert "secret" not in seen["url"]
-    with pytest.raises(NotImplementedError):
-        provider.search_web("anything")
     client.close()
+
+
+def test_searchapi_web_search_parses_public_results():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["authorization"] = request.headers.get("authorization")
+        return httpx.Response(
+            200,
+            json={
+                "organic_results": [
+                    {
+                        "title": "Rendered web result",
+                        "link": "https://news.example.org/story",
+                        "snippet": "A short public search snippet.",
+                        "date": "Sep 22, 2026",
+                    }
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = SearchApiProvider(
+        "secret",
+        country="sg",
+        language="en",
+        safe_search="strict",
+        client=client,
+    )
+    try:
+        results = provider.search_web("agent memory research", limit=3)
+    finally:
+        client.close()
+
+    assert len(results) == 1
+    assert results[0].title == "Rendered web result"
+    assert results[0].url == "https://news.example.org/story"
+    assert results[0].snippet == "A short public search snippet."
+    assert results[0].source_domain == "news.example.org"
+    assert results[0].published_at == "Sep 22, 2026"
+    assert seen["authorization"] == "Bearer secret"
+    assert "engine=google" in seen["url"]
+    assert "gl=sg" in seen["url"]
+    assert "hl=en" in seen["url"]
+    assert "safe=active" in seen["url"]
 
 
 def test_searchapi_accepts_legacy_all_country_and_zh_language():
@@ -138,6 +182,49 @@ def test_brave_image_search_remains_available_as_fallback():
     assert "safesearch=strict" in seen["url"]
     assert "search_lang=zh" in seen["url"]
     client.close()
+
+
+def test_brave_web_search_parses_public_results():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["token"] = request.headers.get("x-subscription-token")
+        return httpx.Response(
+            200,
+            json={
+                "web": {
+                    "results": [
+                        {
+                            "title": "Brave result",
+                            "url": "https://example.net/article",
+                            "description": "Public result description.",
+                            "age": "2 hours ago",
+                        }
+                    ]
+                }
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = BraveSearchProvider(
+        "secret",
+        country="SG",
+        language="en",
+        safe_search="strict",
+        client=client,
+    )
+    try:
+        results = provider.search_web("character agents", limit=2)
+    finally:
+        client.close()
+
+    assert len(results) == 1
+    assert results[0].title == "Brave result"
+    assert results[0].source_domain == "example.net"
+    assert results[0].published_at == "2 hours ago"
+    assert seen["token"] == "secret"
+    assert "/res/v1/web/search" in seen["url"]
 
 
 class MixedShapeSearchProvider(SearchProvider):

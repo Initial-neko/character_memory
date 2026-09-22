@@ -17,6 +17,7 @@ class EventType(str, Enum):
     SOCIAL_POST = "SOCIAL_POST"
     SPACE_POST_SEEN = "SPACE_POST_SEEN"
     SPACE_COMMENT_RECEIVED = "SPACE_COMMENT_RECEIVED"
+    WORLD_OBSERVATION = "WORLD_OBSERVATION"
     PROACTIVE_INTENT = "PROACTIVE_INTENT"
     ACTION = "ACTION"
 
@@ -354,6 +355,54 @@ class DailyLifePlan(BaseModel):
     events: list[LifeEventCandidate] = Field(default_factory=list, max_length=3)
     social_post: str | None = None
     image_prompt: str | None = None
+
+
+class WorldExplorePlan(BaseModel):
+    explore: bool = False
+    query: str | None = Field(default=None, max_length=240)
+
+    @model_validator(mode="after")
+    def normalize_query(self):
+        query = " ".join(str(self.query or "").split()).strip()[:240]
+        if self.explore and not query:
+            raise ValueError("explore=true requires a public search query")
+        self.query = query if self.explore else None
+        return self
+
+
+class WorldObservation(BaseModel):
+    title: str = Field(default="", max_length=500)
+    url: str = Field(min_length=8, max_length=2000)
+    source_domain: str = Field(default="", max_length=255)
+    snippet: str = Field(default="", max_length=1600)
+    content: str = Field(default="", max_length=16000)
+    published_at: str | None = Field(default=None, max_length=120)
+
+
+class WorldObservationDisposition(str, Enum):
+    IGNORE = "IGNORE"
+    MEMORY = "MEMORY"
+    EXPRESS = "EXPRESS"
+    MEMORY_AND_EXPRESS = "MEMORY_AND_EXPRESS"
+
+
+class WorldObservationAppraisal(BaseModel):
+    disposition: WorldObservationDisposition = WorldObservationDisposition.IGNORE
+    summary: str = Field(default="", max_length=1600)
+    expression_angle: str = Field(default="", max_length=800)
+
+    @model_validator(mode="after")
+    def normalize_appraisal(self):
+        self.summary = " ".join(str(self.summary or "").split()).strip()[:1600]
+        self.expression_angle = " ".join(str(self.expression_angle or "").split()).strip()[:800]
+        if self.disposition != WorldObservationDisposition.IGNORE and not self.summary:
+            raise ValueError("non-IGNORE world appraisal requires a summary")
+        if self.disposition in {
+            WorldObservationDisposition.EXPRESS,
+            WorldObservationDisposition.MEMORY_AND_EXPRESS,
+        } and not self.expression_angle:
+            self.expression_angle = self.summary[:800]
+        return self
 
 
 class SpaceMediaIntentType(str, Enum):

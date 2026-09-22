@@ -78,6 +78,9 @@
           <label>Max Media / Post<input id="spaceMediaMaxItems" type="number" min="0" max="9" step="1" value="3" /></label>
           <label class="visual-check"><input id="spaceImageSearchEnabled" type="checkbox" checked /> Web Image Search</label>
           <label class="visual-check"><input id="spaceImageGenerationEnabled" type="checkbox" checked /> AI ImageGen</label>
+          <label class="visual-check"><input id="spaceWorldObservationEnabled" type="checkbox" checked /> World Observation</label>
+          <label>World Pages<input id="spaceWorldMaxPages" type="number" min="1" max="4" step="1" value="2" /></label>
+          <label>World Text / Page<input id="spaceWorldMaxChars" type="number" min="500" max="16000" step="500" value="6000" /></label>
           <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /></label>
           <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
         </div>
@@ -123,6 +126,15 @@
           <button class="secondary" id="runSpaceMedia" type="button">测试媒体动态</button>
         </div>
         <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图。</p>
+
+        <div class="visual-provider-row">
+          <label>World Query<input id="worldQuery" type="text" value="AI agent memory systems latest research" /></label>
+          <label>Pages<input id="worldPages" type="number" min="1" max="4" step="1" value="2" /></label>
+          <button class="secondary" id="runWorldSearch" type="button">测试 World Observation</button>
+          <label>Browser URL<input id="worldUrl" type="url" value="https://example.com" /></label>
+          <button class="secondary" id="runWorldFetch" type="button">无头浏览器打开 URL</button>
+        </div>
+        <p class="subtle">World Observation 会先搜索候选 URL，再由 Playwright 无头 Chromium 执行页面 JS 并抽取正文。URL 测试只验证浏览器抓取，不触发角色记忆或 Space 发帖。</p>
         <p class="subtle">“手动触发”不改变正式 next opportunity；“立即到期”则用于测试真实 Scheduler：把选中角色的 next opportunity 设为现在，后台线程会按 Poll 周期自动执行。</p>
         <p class="subtle" id="spaceStatusAge">尚未读取调度状态。</p>
         <pre id="spaceStatus" class="result">等待读取 Space 调度状态...</pre>

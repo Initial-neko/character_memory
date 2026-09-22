@@ -30,13 +30,18 @@ search_provider: "searchapi"
 search_country: "jp"
 search_language: "zh-cn"
 search_safe_search: "strict"
+
+# World Observation uses a real headless browser after search discovery.
+# "auto" tries Playwright Chromium first, then installed desktop Chrome.
+web_browser_channel: "auto"             # auto | chromium | chrome
+web_browser_timeout_seconds: 20
+web_browser_render_wait_ms: 700          # allow JS-rendered article content to appear
 # Brave remains available as an optional fallback:
 # search_provider: "brave"
 # search_country: "ALL"
 # search_language: "zh"
-# Reserved future capabilities; not implemented as character runtime tools yet.
-# web_search_enabled: false
-# web_fetch_enabled: false
+# General Web Search discovery is now used only by World Observation.
+# The character never receives a generic arbitrary browser tool in private chat.
 
 # Character autonomous ImageGen and the guided chat image tool share this provider config.
 # Dev Console provides the provider-oriented diagnostics surface.
@@ -78,6 +83,9 @@ space_media_enabled: true                 # character may naturally choose image
 space_media_max_items: 3                  # execution cap per post; hard max 9
 space_image_search_enabled: true          # use configured image-search provider
 space_image_generation_enabled: true      # use configured ImageGen provider
+space_world_observation_enabled: true     # character may choose to explore public web
+space_world_max_pages: 2                  # headless-rendered pages per opportunity; hard max 4
+space_world_max_chars_per_page: 6000      # extracted readable text cap for each page
 space_audience_size: 5                    # 0 disables automatic distribution; hard max 10
 space_scheduler_poll_seconds: 60          # check latency only; does not change interval
 

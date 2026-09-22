@@ -796,6 +796,26 @@ def test_a_working_provider_with_an_unusable_default_template_says_so(tmp_path: 
     assert "item.default_template_problem" in settings_js
 
 
+def test_world_browser_settings_are_exposed_in_visual_settings(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text('chat_model: "deepseek-flash"\n', encoding="utf-8")
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=_SettingsRuntimeClient(),
+    )
+
+    with TestClient(app) as client:
+        snapshot = client.get("/v1/settings").json()
+
+    section = next(item for item in snapshot["schema"] if item["id"] == "visual")
+    names = [field["name"] for field in section["fields"]]
+    assert "web_browser_channel" in names
+    assert "web_browser_timeout_seconds" in names
+    assert "web_browser_render_wait_ms" in names
+
+
 def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Path, monkeypatch):
     _clear_secret_env(monkeypatch)
     config = tmp_path / "config.yaml"
@@ -818,6 +838,9 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
             "space_media_max_items",
             "space_image_search_enabled",
             "space_image_generation_enabled",
+            "space_world_observation_enabled",
+            "space_world_max_pages",
+            "space_world_max_chars_per_page",
             "space_audience_size",
             "space_scheduler_poll_seconds",
         ]
@@ -833,6 +856,9 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
                     "space_media_max_items": 4,
                     "space_image_search_enabled": False,
                     "space_image_generation_enabled": True,
+                    "space_world_observation_enabled": True,
+                    "space_world_max_pages": 3,
+                    "space_world_max_chars_per_page": 7500,
                     "space_audience_size": 2,
                     "space_scheduler_poll_seconds": 20,
                 }
@@ -849,6 +875,9 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
         "space_media_max_items",
         "space_image_search_enabled",
         "space_image_generation_enabled",
+        "space_world_observation_enabled",
+        "space_world_max_pages",
+        "space_world_max_chars_per_page",
         "space_audience_size",
         "space_scheduler_poll_seconds",
     }
@@ -859,6 +888,9 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
     assert settings.space_media_max_items == 4
     assert settings.space_image_search_enabled is False
     assert settings.space_image_generation_enabled is True
+    assert settings.space_world_observation_enabled is True
+    assert settings.space_world_max_pages == 3
+    assert settings.space_world_max_chars_per_page == 7500
     assert settings.space_audience_size == 2
     assert settings.space_scheduler_poll_seconds == 20
 

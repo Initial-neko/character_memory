@@ -13,6 +13,7 @@ from character_memory.visual_capture_web import attach_visual_capture_routes
 from character_memory.visual_web import attach_visual_routes
 from character_memory.voice_web import attach_voice_routes
 from character_memory.wake_web import attach_wake_routes
+from character_memory.world_web import attach_world_routes
 
 
 config_path = os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml")
@@ -24,6 +25,7 @@ attach_visual_routes(app)
 attach_group_routes(app, config_path)
 attach_group_member_routes(app)
 attach_search_routes(app)
+attach_world_routes(app)
 attach_space_routes(app)
 attach_async_routes(app)
 install_group_autonomous_visual(app)

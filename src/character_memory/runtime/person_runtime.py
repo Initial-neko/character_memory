@@ -217,6 +217,10 @@ class PersonRuntime:
             allowed = {ActionType.SPACE_LIKE, ActionType.SPACE_COMMENT}
         elif event.event_type == EventType.SPACE_COMMENT_RECEIVED:
             allowed = {ActionType.SPACE_COMMENT}
+        elif event.event_type == EventType.WORLD_OBSERVATION:
+            # External observations may update cognition/memory through the same
+            # PersonRuntime, but they are never themselves a chat channel.
+            allowed = set()
         else:
             return reaction, []
 

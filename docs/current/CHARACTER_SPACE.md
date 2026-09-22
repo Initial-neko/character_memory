@@ -13,6 +13,7 @@ The current implementation provides:
 - text-only posts, legacy single-media posts, and posts containing up to 9 persisted media assets;
 - browser rendering for 1 large image, 2-4 image grids, and 5-9 image nine-grid layouts;
 - autonomous image search and AI-generated Space images through the same media attachment contract;
+- optional public-web World Observation through Playwright headless Chromium before the final Space decision;
 - explicit seen/like/comment state;
 - autonomous interval-based Space opportunities for active characters;
 - autonomous audience reactions through the same PersonRuntime;
@@ -126,6 +127,57 @@ Media execution is fail-soft per intent. Search or ImageGen outages are returned
 
 The execution cap is `space_media_max_items` (default 3, hard range 0..9). The durable post-media schema still has the hard maximum of 9.
 
+## World Observation through headless Chromium
+
+World Observation is an optional cognition phase inside a Space Opportunity. It does not give private chat a generic browser tool, and it does not turn search results directly into posts.
+
+    Space Opportunity
+      -> WorldExplorePlan
+           explore=false -> continue normally
+           explore=true
+              -> SearchProvider.search_web(query)
+              -> candidate public URLs
+              -> Playwright headless Chromium
+                   execute page JavaScript
+                   wait briefly for rendered content
+                   extract readable article/main/body text
+              -> WorldObservation[]
+              -> WorldObservationAppraisal
+                   IGNORE | MEMORY | EXPRESS | MEMORY_AND_EXPRESS
+              -> optional PersonRuntime cognition
+              -> final SpacePostPlan
+
+Search and browsing are separate trust boundaries. SearchAPI/Brave discover candidate URLs; HeadlessBrowserWebFetcher actually opens those pages. The browser only accepts public http(s) targets, rejects local/private/link-local/reserved destinations, re-checks redirect destinations and browser subrequests, blocks service workers, and skips image/media/font resources because this phase only needs rendered text.
+
+Playwright page objects are not shared across scheduler/FastAPI threads. One observation batch owns its Playwright/browser/context lifecycle, which is slower than keeping a global browser alive but avoids cross-thread Playwright state corruption and is acceptable at Space's low opportunity frequency.
+
+External page content is always untrusted data. Raw rendered text is only supplied to the appraisal prompt with an explicit untrusted-data boundary. It is never copied directly into long-term Memory or the final Space publishing prompt.
+
+The four dispositions mean:
+
+- IGNORE: no memory admission and no public expression context;
+- MEMORY: only the appraisal safe summary is sent through the same PersonRuntime as a WORLD_OBSERVATION event;
+- EXPRESS: no forced memory; only safe summary/expression angle/source links are offered to the final SpacePostPlan;
+- MEMORY_AND_EXPRESS: both paths are allowed.
+
+A WORLD_OBSERVATION event may update Mental State, Memory or Intent through the normal PersonRuntime admission path, but its outward action channel is empty. Even if a model tries to return MESSAGE / VOICE_MESSAGE / IMAGE / STICKER, those actions are dropped and can never become a private-chat message.
+
+Search failure, browser launch failure, one broken page, or appraisal failure are all fail-soft. The character still proceeds to the normal Space decision. Searching therefore means neither believe this nor remember this nor publish this.
+
+Configuration:
+
+    web_browser_channel              auto | chromium | chrome
+    web_browser_timeout_seconds
+    web_browser_render_wait_ms
+
+    space_world_observation_enabled
+    space_world_max_pages            1..4
+    space_world_max_chars_per_page   500..16000
+
+web_browser_channel=auto first tries Playwright-managed Chromium and falls back to the installed Chrome channel. To install managed Chromium locally:
+
+    uv run playwright install chromium
+
 ## Interval autonomy
 
 When Character Runtime has an API key, Space autonomy is enabled by default.
@@ -165,6 +217,9 @@ space_media_enabled
 space_media_max_items
 space_image_search_enabled
 space_image_generation_enabled
+space_world_observation_enabled
+space_world_max_pages
+space_world_max_chars_per_page
 space_audience_size
 space_scheduler_poll_seconds
 ```
@@ -266,6 +321,10 @@ POST /v1/space/dev/due/{character_id}
 POST /v1/space/dev/opportunity/{character_id}
 POST /v1/space/dev/media/{character_id}
 POST /v1/space/dev/audience/{post_id}
+
+GET  /v1/world/status
+POST /v1/world/dev/search
+POST /v1/world/dev/fetch
 ```
 
 Dev Console proxies them under `/v1/dev/space/*`.
@@ -273,7 +332,6 @@ Dev Console proxies them under `/v1/dev/space/*`.
 ## Not implemented yet
 
 - relationship/interest-aware audience ranking;
-- Browser/Web observations as possible Space material;
 - autonomous voice-post synthesis/playback;
 - Link Preview fetching/rendering;
 - push/SSE updates for Space;
@@ -294,6 +352,15 @@ src/character_memory/space_media_executor.py
 
 src/character_memory/remote_media.py
     reusable SSRF-safe public image downloader
+
+src/character_memory/browser_web.py
+    Playwright headless Chromium public-page renderer + readable-text extraction
+
+src/character_memory/world_observation.py
+    web-search discovery -> rendered WorldObservation conversion
+
+src/character_memory/world_web.py
+    World Browser status/search/fetch diagnostics
 
 src/character_memory/space_autonomy.py
     interval opportunity scheduler + autonomous audience/social loop

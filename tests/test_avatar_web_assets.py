@@ -33,7 +33,7 @@ def test_avatar_ui_uses_llm_hint_and_search_session_ids_without_arbitrary_image_
     assert "AI 搜索词" in avatars
 
 
-def test_example_config_declares_searchapi_and_avatar_storage_without_enabling_future_web_tools():
+def test_example_config_declares_searchapi_avatar_storage_and_bounded_world_browser():
     config = (ROOT / "config.example.yaml").read_text(encoding="utf-8")
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
@@ -46,5 +46,7 @@ def test_example_config_declares_searchapi_and_avatar_storage_without_enabling_f
     assert 'search_safe_search: "strict"' in config
     assert 'avatar_dir: ""' in config
     assert '# search_provider: "brave"' in config
-    assert "# web_search_enabled: false" in config
-    assert "# web_fetch_enabled: false" in config
+    assert 'web_browser_channel: "auto"' in config
+    assert "web_browser_timeout_seconds: 20" in config
+    assert "space_world_observation_enabled: true" in config
+    assert "space_world_max_pages: 2" in config

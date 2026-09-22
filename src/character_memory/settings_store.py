@@ -172,6 +172,19 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 ],
             },
             {
+                "name": "web_browser_channel",
+                "label": "World Browser",
+                "type": "select",
+                "options": [
+                    {"value": "auto", "label": "Auto (Playwright Chromium → Chrome)"},
+                    {"value": "chromium", "label": "Playwright Chromium"},
+                    {"value": "chrome", "label": "Installed Chrome"},
+                ],
+                "help": "World Observation 真正打开网页时使用的无头浏览器。",
+            },
+            {"name": "web_browser_timeout_seconds", "label": "World Browser Timeout (s)", "type": "number", "min": 3, "max": 90, "step": 1},
+            {"name": "web_browser_render_wait_ms", "label": "JS Render Wait (ms)", "type": "number", "min": 0, "max": 5000, "step": 100},
+            {
                 "name": "image_generation_provider",
                 "label": "ImageGen Provider",
                 "type": "select",
@@ -237,6 +250,28 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
             },
             {"name": "space_image_search_enabled", "label": "Web Image Search", "type": "checkbox"},
             {"name": "space_image_generation_enabled", "label": "AI ImageGen", "type": "checkbox"},
+            {
+                "name": "space_world_observation_enabled",
+                "label": "World Observation",
+                "type": "checkbox",
+                "help": "允许角色在 Space Opportunity 中先决定是否探索公开互联网；搜索到内容不等于一定记忆或发动态。",
+            },
+            {
+                "name": "space_world_max_pages",
+                "label": "World Pages / Opportunity",
+                "type": "number",
+                "min": 1,
+                "max": 4,
+                "step": 1,
+            },
+            {
+                "name": "space_world_max_chars_per_page",
+                "label": "World Text / Page",
+                "type": "number",
+                "min": 500,
+                "max": 16000,
+                "step": 500,
+            },
             {
                 "name": "space_audience_size",
                 "label": "Autonomous Audience",

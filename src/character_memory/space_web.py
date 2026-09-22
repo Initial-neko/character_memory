@@ -63,6 +63,9 @@ class SpaceDevConfigRequest(BaseModel):
     media_max_items: int | None = Field(default=None, ge=0, le=9)
     image_search_enabled: bool | None = None
     image_generation_enabled: bool | None = None
+    world_observation_enabled: bool | None = None
+    world_max_pages: int | None = Field(default=None, ge=1, le=4)
+    world_max_chars_per_page: int | None = Field(default=None, ge=500, le=16000)
     audience_size: int | None = Field(default=None, ge=0, le=10)
     poll_seconds: float | None = Field(default=None, ge=10.0, le=3600.0)
     rearm: bool = True
@@ -398,6 +401,9 @@ def attach_space_routes(app):
             media_max_items=req.media_max_items,
             image_search_enabled=req.image_search_enabled,
             image_generation_enabled=req.image_generation_enabled,
+            world_observation_enabled=req.world_observation_enabled,
+            world_max_pages=req.world_max_pages,
+            world_max_chars_per_page=req.world_max_chars_per_page,
             audience_size=req.audience_size,
             poll_seconds=req.poll_seconds,
             rearm=req.rearm,

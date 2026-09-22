@@ -10,6 +10,7 @@ EXPECTED_CORE_MIGRATIONS = [
     "core/004-runtime-trace-extraction",
     "core/005-indexes",
     "core/006-memory-candidate-indexes",
+    "core/007-memory-governance",
 ]
 
 

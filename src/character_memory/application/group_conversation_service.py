@@ -8,6 +8,7 @@ from typing import Callable
 from uuid import uuid4
 
 from character_memory.application.action_materialization import materialize_expressive_action
+from character_memory.application.incoming_message import normalize_user_fact
 from character_memory.domain.models import ActionType, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.runtime.reaction_engine import evaluate_reaction
@@ -92,48 +93,21 @@ def build_group_user_event(
     sticker: dict | None = None,
     mentions: list[str] | None = None,
 ) -> GroupEvent:
-    content = message.strip()
-    if image is not None and sticker is not None:
-        raise ValueError("send a sticker or image in one group user turn, not both")
-    if not content and image is None and sticker is None:
-        raise ValueError("group message, sticker or image must not be empty")
+    """Build one immutable Group user fact using the shared input contract."""
 
-    turn_id = f"turn-{uuid4().hex[:12]}"
-    metadata = {"display_text": content, "mentions": list(mentions or [])}
-    runtime_content = content
-    if image is not None:
-        metadata.update(
-            {
-                "media_id": image.get("id"),
-                "media_name": image.get("original_name") or "图片",
-                "media_mime_type": image.get("mime_type") or "",
-                "media_size_bytes": int(image.get("size_bytes") or 0),
-            }
-        )
-        runtime_content = f"{content}\n[用户发送了一张真实图片]".strip()
-    elif sticker is not None:
-        label = str(sticker.get("label") or sticker.get("id") or "表情包")
-        tags = sticker.get("tags") if isinstance(sticker.get("tags"), list) else []
-        meaning = "、".join(str(value) for value in tags if str(value).strip()) or str(sticker.get("description") or "")
-        metadata.update(
-            {
-                "action": ActionType.STICKER.value,
-                "sticker_id": sticker.get("id"),
-                "sticker_label": label,
-                "sticker_meaning": meaning,
-            }
-        )
-        runtime_content = f"[用户发送表情包：{label}{f'；含义：{meaning}' if meaning else ''}]"
-
+    normalized = normalize_user_fact(message, sticker=sticker, image=image)
     return GroupEvent(
         conversation_id=conversation_id,
-        turn_id=turn_id,
+        turn_id=f"turn-{uuid4().hex[:12]}",
         actor_type="USER",
         actor_id="user",
         event_type="USER_MESSAGE",
         event_time=at,
-        content=runtime_content,
-        metadata=metadata,
+        content=normalized.runtime_content,
+        metadata={
+            **normalized.metadata,
+            "mentions": list(mentions or []),
+        },
     )
 
 

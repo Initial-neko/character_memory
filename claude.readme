@@ -1,209 +1,73 @@
 # Claude Acceptance Bridge
 
-This file is a deliberately lightweight coordination surface requested by the project owner.
+Lightweight AI-to-AI handoff for the current slice only. Product/architecture truth belongs in source + `docs/current/`; implementation history belongs in PRs and Git history.
 
-It is **not** the architecture source of truth and must not replace `docs/current/`, tests, issues, or pull-request history. Its purpose is only to let the implementation agent and the later Claude acceptance pass exchange concise, durable status without losing context between sessions.
+## Rules
 
-## Working rules
+1. Keep this file short and current. Do not accumulate old PR transcripts.
+2. Every acceptance finding uses a stable id: `CLAUDE-YYYYMMDD-NNN`.
+3. Finding state: `OPEN` -> `FIXED_NEEDS_RETEST` -> `PASS` (or `WONT_FIX` with rationale).
+4. Findings must name the tested branch/commit and concrete reproduction/evidence.
+5. Never put secrets, private user data, model weights or generated media binaries here.
 
-1. Keep entries factual and tied to a branch, commit, PR, test, screenshot, or reproducible behavior.
-2. Claude should append acceptance findings instead of rewriting implementation history.
-3. Every finding gets a stable id such as `CLAUDE-20260922-001`.
-4. Use one of these states: `OPEN`, `FIXED_NEEDS_RETEST`, `PASS`, `WONT_FIX`.
-5. A developer response should reference the same finding id and include the fixing commit/PR when available.
-6. Product/architecture decisions still belong in `docs/current/`. Long debugging transcripts do not belong here.
-7. Never put API keys, local absolute secret paths, model weights, private user data, or generated media binaries in this file.
-
-## Current development baseline
+## Current baseline
 
 - Repository: `Initial-neko/character_memory`
-- Base branch: `main`
-- Base commit: 8930dafb661477f2e04f2daa2cf2209f531c1859 (PR #73 merged)
-- Active development branch: none
-- Phase: **Autonomous Social Layer Phase 1**
-- Current slice: **World Observation through Headless Browser — merged to main**
+- Base: `main@91383b824b47ab5a52a6d9a7b3663f581f352c09`
+- Active branch: `refactor/docs-and-runtime-services`
+- Pull request: **#74 — Clarify architecture docs and compose shared runtime services**
+- Phase: post-feature architecture cleanup after Space / World Observation
+- Status: **CI / acceptance pending**
 
-### Current phase state
+## Current slice
 
-- #70 Space multimedia attachment foundation: merged.
-- #71 autonomous Space image search + ImageGen: merged.
-- #72 Claude acceptance follow-up for legacy media type backfill: merged.
-- #73 headless-browser World Observation: merged.
-- `main` now contains the complete text + image + world-observation path for this phase.
+### Batch 1 — documentation convergence
 
-### Next development candidates
+The maintained docs now:
+- use **Durable Facts -> Derived Cognition** instead of implying every fact belongs in one `events` table;
+- reflect that Character Space already provides early Society foundation behavior;
+- document Space / World / Headless Browser in the current architecture;
+- define document ownership to reduce repeated/stale facts;
+- fix stale Avatar Search, Playwright and Voice Message status;
+- explicitly record Memory governance and World-memory policy as open decisions.
 
-- formal Space voice-post synthesis/playback;
-- link-preview media cards;
-- autonomous group-chat bursts;
-- image/vision appraisal by Space audience characters.
+### Batch 2 — explicit RuntimeServices composition
 
-Do not treat any item above as automatically approved scope for a new PR; the active development session should choose one slice and rewrite this section before implementation.
-## Implementation progress
+`RuntimeServices` is now the composition root for:
+- shared `SearchProvider`;
+- `AvatarStore` + `AvatarSearchService`;
+- ImageGenerationProviders;
+- `HeadlessBrowserWebFetcher`;
+- `WorldObservationService`.
 
-### 2026-09-22 — implementation slice ready for acceptance
+Feature routes consume these services. Avatar/Visual/World routes no longer create shared provider infrastructure for later routes to discover through attach order. World is deliberately attached before Avatar as a regression guard.
 
-Status: `READY_FOR_ACCEPTANCE`
+Provider/resource shutdown is owned by the composition root after feature workers stop.
 
-Development started from `main@a22be1332e521ce27ba6e7654c60cede7d971597`.
+## Deliberately NOT changed
 
-Pull request: **#70 — Add Character Space multimedia attachment foundation**
+Do not treat these as acceptance defects for #74 unless the refactor accidentally worsens them:
 
-Current implementation head before this coordination update: `78d43a7892506630b7b193102b798709635f6b43`.
+- Space/World post planning is not yet fully unified with PersonRuntime Context/Recall.
+- No manual Memory control plane was added.
+- The project has not decided when World Observation should become long-term Memory.
+- Wake / Proactive / Space / Reaction background loops are not consolidated in this PR.
 
-Design choice: use a dedicated Space attachment-relation module backed by the same SQLite store and existing `MediaAsset` ids. This keeps media bytes in the existing MediaStorage layer and avoids coupling binary persistence to the social-feed repository.
+Those are the next architecture/product discussion, especially Memory governance + World-memory semantics.
 
-Compatibility rule: `space_posts.media_id` remains as a legacy first-media pointer for now; new reads use ordered `space_post_media`.
+## Acceptance focus
 
-Implemented in this slice:
-
-- `space_post_media` schema + `space/004-post-media` migration marker;
-- migration of legacy single-media Space rows to ordered attachment relations;
-- `media_ids` request contract with a hard limit of 9 and duplicate normalization;
-- legacy single `media_id` request/response compatibility;
-- ordered `media_items` response with media type, source/provenance, availability and sort order;
-- 1 / 2-4 / 5-9 image layouts in the browser;
-- fail-soft rendering for unavailable assets;
-- regression coverage in `tests/test_character_space.py`;
-- maintained contract update in `docs/current/CHARACTER_SPACE.md`.
-
-Validation state:
-
-- First CI attempt reached **687 passed, 8 skipped, 1 failed** in the main test job. The only failure was a frontend source-contract assertion that looked for the literal class name `space-media-single`, while the implementation intentionally composes it as `space-media-${layout}` at runtime.
-- The product code did not fail. Commit `78d43a7892506630b7b193102b798709635f6b43` fixes that over-specific test to assert the actual 1 / 2-4 / 5-9 layout branch.
-- `windows-smoke` passed on that CI attempt.
-- Follow-up CI run **#360** on commit `7436b8395ed128170319955c6c7b30dc25279121` passed all three jobs: `test`, `windows-smoke`, and `browser-smoke`.
-- Main test result: **688 passed, 8 skipped**.
-- This status entry itself is documentation-only; Claude should still use the latest PR #70 head shown by GitHub when recording a finding.
-- Autonomous Web Observation / image search / ImageGen / voice-post execution remain intentionally deferred.
-
-### 2026-09-22 — Autonomous Space Images implementation
-
-Status: `READY_FOR_ACCEPTANCE`
-
-Pull request: **#71 — Let autonomous Space posts search and generate images**
-
-Implementation head before this coordination update: `d053f59d3a48b8326f86b1342e6504016f0ac2f1`.
-
-PR #70 was merged to `main` as `4ce2d1acce7d3c52881e1412fbf655c61f26c4ea`. Development then continued on `feature/space-autonomous-images`.
-
-Implemented so far:
-
-- provider-neutral image search, with avatar aspect filtering moved to `AvatarSearchService`;
-- reusable `RemoteMediaFetcher` with public-http(s), DNS/private-network, redirect, MIME and size guards;
-- `SpacePostPlan` + `SpaceMediaIntent` structured contracts;
-- `SpaceMediaExecutor` for SEARCH_IMAGE and GENERATE_IMAGE;
-- fail-soft media errors and text fallback;
-- image-only post support;
-- Settings/Dev runtime gates and max-media cap;
-- Dev forced media-post endpoint/UI independent from formal scheduler;
-- tests for wide-image search, media persistence, ImageGen reuse and provider failure fallback.
-
-Validation state:
-
-- CI run **#365** passed all three jobs: `test`, `windows-smoke`, and `browser-smoke`.
-- Main test result: **694 passed, 8 skipped**.
-- Earlier CI attempts caught only contract-test drift caused by the intentional Search/Settings architecture changes; those tests were updated without weakening the runtime behavior or remote-media safety checks.
-- CI does not prove live SearchAPI/Agnes/ModelScope credentials or network availability. Use the Dev media smoke controls for local-provider acceptance.
-
-Acceptance focus for this slice:
-
-1. Autonomous text-only posts still work.
-2. A model-planned SEARCH_IMAGE post can persist one or multiple internet images.
-3. A model-planned GENERATE_IMAGE post reuses the configured existing ImageGen provider.
-4. Wide/landscape search results are no longer discarded by avatar rules.
-5. Search/ImageGen failure does not fail a valid text Space post.
-6. Image-only Opportunity becomes NO_POST only when every media intent fails.
-7. `space_media_max_items` caps execution and never exceeds the durable hard limit of 9.
-8. Dev media smoke does not move `next_opportunity_at`.
-9. Archive and Audience <=10 behavior remain unchanged.
-10. No Space media action leaks into private chat.
-
-### 2026-09-22 — World Observation through Headless Browser
-
-Status: MERGED
-
-Pull request: **#73 — Let Character Space observe the web through headless Chromium**
-
-Implementation head before this coordination update: 2f69834f317a0e503e4b9106ce075b4843bab521.
-
-Development starts from main@7d7283664543a94dc2e3ce77804c6d389930eea2, after #71 and the Claude acceptance fix #72 were merged.
-
-Implemented in this slice:
-
-- SearchAPI and Brave now expose provider-neutral web-search discovery in addition to image search;
-- HeadlessBrowserWebFetcher renders public pages through Playwright Chromium, executes JavaScript and extracts readable article/main/body text;
-- localhost/private/link-local/reserved targets are rejected, redirects/subrequests stay behind the same public-network boundary, service workers are blocked, and media/font/image resources are skipped;
-- WorldObservationService separates URL discovery from rendered-page observation and keeps per-page failures fail-soft;
-- Space Opportunity now has a separate WorldExplorePlan before final publishing;
-- rendered webpage text is marked untrusted and is visible only to WorldObservationAppraisal;
-- appraisal supports IGNORE / MEMORY / EXPRESS / MEMORY_AND_EXPRESS;
-- only appraisal-safe summaries can reach PersonRuntime Memory or the final SpacePostPlan; raw webpage prompt-injection text never flows into the final publishing prompt;
-- WORLD_OBSERVATION goes through the same PersonRuntime for Memory/Mental State/Intent but has an empty outward channel, so it cannot create private chat messages;
-- Settings Center exposes browser transport controls and Space exploration caps;
-- Dev Console can test one headless URL or search -> render WorldObservation without moving scheduler state;
-- browser-smoke now includes a real JavaScript delayed-render page to prove Chromium executes JS before text extraction.
-
-Explicitly deferred:
-
-- Link Preview media cards;
-- autonomous Space voice posts;
-- generic browsing tools in direct/private chat;
-- autonomous group-chat bursts;
-- image/vision appraisal by Space audience.
-
-Validation state:
-
-- CI run **#373** passed all three jobs: test, windows-smoke and browser-smoke.
-- Main test result: **704 passed, 9 skipped**.
-- Browser smoke result: **9 passed**, including the new delayed-JavaScript World Browser fixture.
-- The first CI attempt intentionally exposed two categories of drift: legacy tests still asserting that web search did not exist, and pytest-playwright running the sync browser smoke inside its own asyncio loop. The fixes preserve the product boundary: general web tools remain outside PersonRuntime, and the real browser smoke invokes the sync fetcher from the same worker-thread boundary used by scheduler/FastAPI sync paths.
-- CI proves Playwright Chromium installs, executes JavaScript and yields rendered text. It does not prove the user's live SearchAPI/Brave credentials or arbitrary third-party site compatibility; Dev World Search/Fetch is the local-provider/live-network acceptance surface.
-
-Acceptance focus:
-
-1. Real Chromium reads JavaScript-rendered text rather than only initial HTML.
-2. Formal browser rejects localhost/private targets and non-http(s) URLs.
-3. Search Provider only discovers URLs; browsing is a separate trust boundary.
-4. Raw page prompt-injection text may reach appraisal as data but never final Space publishing context.
-5. IGNORE / MEMORY / EXPRESS / MEMORY_AND_EXPRESS remain distinct.
-6. WORLD_OBSERVATION memory uses the same PersonRuntime and normal memory admission.
-7. WORLD_OBSERVATION can never leak MESSAGE/VOICE/IMAGE/STICKER actions into private chat.
-8. Search/browser/appraisal failure does not fail the normal Space opportunity.
-9. Settings/Dev controls expose World enablement, page cap and text cap.
-10. Main tests, Windows smoke and real browser smoke must all be green before READY_FOR_ACCEPTANCE.
-
-## Acceptance bridge audit
-
-- PR #70 was merged by the implementation-side ChatGPT workflow.
-- PR #71 was merged after its green CI/acceptance handoff; the GitHub connector does not expose a reliable `merged_by` actor in the retrieved snapshot, so this file does not guess the exact merger identity.
-- PR #72 is the concrete Claude acceptance follow-up: it fixes the legacy Space media type backfill after #71 and its commit records Claude Code co-authorship.
-- PR #73 was merged by the implementation-side ChatGPT workflow as main@8930dafb661477f2e04f2daa2cf2209f531c1859 after CI #374 was fully green.
-- Gap found: the acceptance process produced a real fix PR (#72), but did not append a stable `CLAUDE-*` finding below. Future Claude acceptance passes should record the finding first, then reference the fix PR/commit and mark it PASS after retest.
+1. Character Runtime starts without requiring Avatar route to initialize Search.
+2. World routes work when attached before Avatar routes.
+3. Avatar search, Space image search and World discovery reference the same composed SearchProvider.
+4. Visual and Space ImageGen use the same composed provider map.
+5. Route shutdown no longer closes shared providers prematurely; composition-root shutdown closes them once.
+6. Existing Direct/Group/Space/World behavior remains unchanged.
+7. Documentation no longer claims Web search is future-only or Voice Message is still only on a feature branch.
+8. Documentation states Playwright runtime is in `all`, while Chromium binary installation remains separate.
+9. Memory/World policy remains explicitly undecided rather than silently expanded.
+10. Main, Windows and browser CI are green.
 
 ## Claude acceptance findings
 
-Claude: append findings below this line.
-
-<!--
-Example:
-
-### CLAUDE-20260922-001 — OPEN
-
-Severity: P1
-Area: Space API
-Branch/commit tested: feature/space-multimedia-foundation @ <sha>
-
-Expected:
-A post with 10 images is rejected with HTTP 422/400.
-
-Actual:
-The API accepted all 10.
-
-Evidence / reproduction:
-1. ...
-2. ...
-
-Developer response:
-Pending.
--->
+Append findings below this line.

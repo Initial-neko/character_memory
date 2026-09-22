@@ -46,12 +46,15 @@ def normalize_user_fact(
         meaning = "、".join(tags) or description or label
         metadata.update(
             {
-                "action": "STICKER",
                 "sticker_id": sticker_id,
                 "sticker_label": label,
                 "sticker_meaning": meaning,
             }
         )
+        # A pure sticker is a resource action. When the user also supplied a
+        # caption, keep the text visible and treat the sticker as an attachment.
+        if not content:
+            metadata["action"] = "STICKER"
         runtime_parts.append(
             f"[用户发送表情包：{label}{f'；含义：{meaning}' if meaning else ''}]"
         )

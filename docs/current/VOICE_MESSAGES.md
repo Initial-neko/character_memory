@@ -60,6 +60,8 @@ Voice message
 
 They may use the same configured TTS provider, but a durable Voice Message does not depend on live-call UI state.
 
+Chat dictation (`web/dictation.js`) and a voice call exclude each other: only one microphone capture is open at a time. Dictation refuses to start while a call is live, and both starting a call and switching conversation retire a dictation start that is still waiting on the permission prompt — the late "Allow" is never adopted, its tracks are stopped on the spot and the button returns to idle. A recording that is already live is dropped on the same two events without being sent to ASR, because its transcript would otherwise land in the conversation the user has already left. The permission prompt may be answered at any point after the request, so *holding a stream* and *still wanting this capture* are two separate things, and the answer is judged against what was wanted when the request was made.
+
 ## Boundaries
 
 - One `VOICE_MESSAGE` is one complete TTS request; no sentence/chunk splitting in V1.

@@ -44,6 +44,8 @@ A failed TTS provider never removes the message text. The failure reason carried
 
 Direct events live in `events`; Group events live in `conversation_events`. Both use the same `VOICE_MESSAGE` action contract and formal TTS path.
 
+Direct `TIME_TICK` wakes and due `PROACTIVE_INTENT` turns may also choose `VOICE_MESSAGE`. They persist the same pending character event and reuse the same direct publication/materialization hook, so background speech is synthesized instead of remaining a text-only or permanently-pending voice action. Autonomous Group Chat already follows the Group materializer path.
+
 The scheduler/materializer updates the **original event id** instead of appending a second message. Browser Direct and Group history/SSE projections preserve the voice fields and merge by id.
 
 ## Relationship to voice calls

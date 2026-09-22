@@ -409,7 +409,18 @@ Sources:
                 self.media_executor.discard(relations[1:])
                 relations = relations[:1]
 
-        audience = self.process_audience(post.id, now=now) if cascade else []
+        audience: list[dict] = []
+        audience_error = ""
+        if cascade:
+            try:
+                audience = self.process_audience(post.id, now=now)
+            except Exception as exc:
+                # The post is already published. Who noticed it is a follow-up,
+                # so a failure here must not be reported as a run that posted
+                # nothing -- the same reason the media attach above is caught
+                # instead of raised.
+                audience_error = str(exc)
+                logger.exception("space.audience failed post=%s", post.id)
         return {
             "character_id": character_id,
             "character_name": self._name(profile),
@@ -420,6 +431,7 @@ Sources:
                 "media_count": len(relations),
             },
             "audience": audience,
+            "audience_error": audience_error,
             "media_errors": media_errors,
             "world": world,
             "source": source,
@@ -781,6 +793,10 @@ class SpaceAutonomyScheduler:
                     datetime.now().astimezone(),
                     status=status,
                     post_id=post_id,
+                    # A published post whose audience step broke is still a
+                    # published post; keep the reason in the ledger instead of
+                    # downgrading the run to FAILED and losing the post id.
+                    error=str(result.get("audience_error") or ""),
                 )
                 outcomes.append({**result, "run_id": run_id})
             except Exception as exc:

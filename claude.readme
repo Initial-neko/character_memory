@@ -18,31 +18,31 @@ It is **not** the architecture source of truth and must not replace `docs/curren
 
 - Repository: `Initial-neko/character_memory`
 - Base branch: `main`
-- Base commit: `a22be1332e521ce27ba6e7654c60cede7d971597`
-- Active development branch: `feature/space-multimedia-foundation`
+- Base commit: `4ce2d1acce7d3c52881e1412fbf655c61f26c4ea` (PR #70 merged)
+- Active development branch: `feature/space-autonomous-images`
 - Phase: **Autonomous Social Layer Phase 1**
-- Current slice: **Space multimedia foundation**
+- Current slice: **Autonomous Space Images**
 
 ### Scope of this slice
 
-- add ordered `space_post_media` persistence;
-- keep legacy `space_posts.media_id` readable during gradual migration;
-- allow one Space post to reference up to 9 media assets;
-- expose ordered media through the Space API;
-- render 1 image as a large image, 2-4 as a grid, and 5-9 as a nine-grid style layout;
-- preserve text-only posts and current Space autonomy behavior;
-- add regression tests for storage, API compatibility, the 9-item ceiling, and frontend contract.
+- replace the Space-only legacy image prompt with structured `SpacePostPlan.media_intents`;
+- support autonomous `SEARCH_IMAGE` and `GENERATE_IMAGE` intents;
+- keep media optional and character-driven rather than quota-driven;
+- make image-search providers composition-neutral while preserving avatar-specific filtering;
+- add a reusable SSRF-safe `RemoteMediaFetcher`;
+- persist searched/generated output as ordinary `MediaAsset` rows and attach through `space_post_media`;
+- fail soft per media intent so provider/network failure does not block a valid text post;
+- allow image-only Space posts when at least one image succeeds;
+- expose Space Media / max items / search / ImageGen controls in Settings and Dev;
+- add an explicit Dev smoke endpoint for search/generated image posts without changing scheduler state.
 
 ### Explicitly deferred from this slice
 
-- autonomous Web Observation;
-- image search execution;
-- autonomous AI ImageGen execution from Space opportunities;
-- autonomous voice posts;
-- link-preview fetching;
-- autonomous group-chat bursts.
-
-Those features should reuse this attachment foundation rather than create parallel post/message media models.
+- general Web Search / Web Fetch and World Observation;
+- link-preview cards;
+- autonomous Space voice posts;
+- autonomous group-chat bursts;
+- semantic/vision appraisal of images by audience characters.
 
 ## Implementation progress
 
@@ -81,6 +81,37 @@ Validation state:
 - Main test result: **688 passed, 8 skipped**.
 - This status entry itself is documentation-only; Claude should still use the latest PR #70 head shown by GitHub when recording a finding.
 - Autonomous Web Observation / image search / ImageGen / voice-post execution remain intentionally deferred.
+
+### 2026-09-22 — Autonomous Space Images implementation
+
+Status: `IN_PROGRESS`
+
+PR #70 was merged to `main` as `4ce2d1acce7d3c52881e1412fbf655c61f26c4ea`. Development then continued on `feature/space-autonomous-images`.
+
+Implemented so far:
+
+- provider-neutral image search, with avatar aspect filtering moved to `AvatarSearchService`;
+- reusable `RemoteMediaFetcher` with public-http(s), DNS/private-network, redirect, MIME and size guards;
+- `SpacePostPlan` + `SpaceMediaIntent` structured contracts;
+- `SpaceMediaExecutor` for SEARCH_IMAGE and GENERATE_IMAGE;
+- fail-soft media errors and text fallback;
+- image-only post support;
+- Settings/Dev runtime gates and max-media cap;
+- Dev forced media-post endpoint/UI independent from formal scheduler;
+- tests for wide-image search, media persistence, ImageGen reuse and provider failure fallback.
+
+Acceptance focus for this slice:
+
+1. Autonomous text-only posts still work.
+2. A model-planned SEARCH_IMAGE post can persist one or multiple internet images.
+3. A model-planned GENERATE_IMAGE post reuses the configured existing ImageGen provider.
+4. Wide/landscape search results are no longer discarded by avatar rules.
+5. Search/ImageGen failure does not fail a valid text Space post.
+6. Image-only Opportunity becomes NO_POST only when every media intent fails.
+7. `space_media_max_items` caps execution and never exceeds the durable hard limit of 9.
+8. Dev media smoke does not move `next_opportunity_at`.
+9. Archive and Audience <=10 behavior remain unchanged.
+10. No Space media action leaks into private chat.
 
 ## Claude acceptance findings
 

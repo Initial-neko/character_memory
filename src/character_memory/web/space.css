@@ -49,8 +49,6 @@
 .space-voice-bubble.broken { opacity:.55; }
 .space-voice-glyph { display:inline-block; font-weight:750; letter-spacing:-2px; transform:rotate(180deg); }
 .space-voice-duration { font-size:12px; font-weight:650; white-space:nowrap; }
-.space-voice-text-button { min-height:0; border:0; padding:2px 5px; background:transparent; color:var(--ui-muted); font-size:10px; cursor:pointer; }
-.space-voice-text-button:hover { color:var(--ui-text); }
 .space-voice-transcript { max-width:420px; padding:7px 9px; border-radius:var(--ui-r-sm); background:var(--ui-surface-sunken); color:var(--ui-muted); font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
 @keyframes space-voice-pulse { from { opacity:.35; transform:rotate(180deg) scale(.92); } to { opacity:1; transform:rotate(180deg) scale(1.04); } }
 

@@ -4,6 +4,11 @@ This register records only debt that still exists on current `main`. A possible 
 
 ## Recently resolved
 
+### Bounded Autonomous Group Chat
+
+Existing groups can now receive restart-safe sparse opportunities without fabricating a User message. A hidden GROUP_OPPORTUNITY fact provides provenance, a rotating seed may stay silent, follow-up members each judge once, visible messages are hard-capped, and newer User facts supersede stale autonomous work. The feature reuses normal conversation_events, Person context, Group SSE and VoiceMessage materialization.
+
+
 ### Minimal Memory governance and shared Person context
 
 Character Runtime now exposes a small Memory Inspector over explicit APIs: pin/unpin, forget/restore and provenance-preserving correction via `superseded_by`. Pinned memories remain in the bounded recall candidate union.
@@ -102,7 +107,7 @@ A developer-generated, verified local lockfile can therefore be added later with
 
 ### Background worker ownership
 
-Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent polling, Character Wake, Space Autonomy and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
+Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent polling, Character Wake, Space Autonomy, Group Autonomy and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
 
 Before adding many more autonomous schedulers, introduce one typed background-service/lifespan owner with start/stop/health semantics. This does not require Redis/Celery or a distributed queue.
 

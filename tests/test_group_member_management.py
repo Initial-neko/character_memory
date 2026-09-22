@@ -86,3 +86,37 @@ def test_core_launchers_start_only_character_runtime():
         assert "character_memory.dev_server" not in text
         assert "character_memory.settings_server" not in text
         assert "character_memory.tts_lab" not in text
+
+
+def test_group_can_hold_more_than_four_characters_for_ensemble_chat(tmp_path: Path):
+    root = tmp_path / "personas"
+    for index in range(8):
+        directory = root / f"c{index}"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "persona.yaml").write_text(
+            f"id: c{index}\nname: C{index}\n",
+            encoding="utf-8",
+        )
+    config = tmp_path / "large-group.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                'api_key: ""',
+                'embedding_provider: "deterministic"',
+                f'db_path: "{(tmp_path / "large-group.db").as_posix()}"',
+                f'persona_path: "{(root / "c0" / "persona.yaml").as_posix()}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    app = create_api(str(config))
+    attach_group_routes(app, str(config))
+
+    with TestClient(app) as client:
+        ids = [item["id"] for item in client.get("/v1/characters").json()["characters"]]
+        response = client.post("/v1/groups", json={"name": "群像", "member_ids": ids})
+        assert response.status_code == 200
+        assert len(response.json()["group"]["member_ids"]) == 8
+        assert response.json()["group"]["status"] == "ACTIVE"
+
+

@@ -178,3 +178,36 @@ def test_generated_media_can_be_copied_to_avatar_with_provenance(tmp_path):
     assert metadata.title == "better selfie"
     assert avatars.asset_path("mika").read_bytes() == _PNG
     avatars.close()
+
+
+def test_avatar_candidate_batch_reuses_image_prompt_polish_contract():
+    from character_memory.visual_web import AvatarGenerateRequest
+
+    request = AvatarGenerateRequest(
+        provider="agnes",
+        hint="更温暖一点",
+        style="anime_clean",
+        count=4,
+    )
+    assert request.style == "ANIME_CLEAN"
+    assert request.count == 4
+
+    source = (
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        / "src"
+        / "character_memory"
+        / "visual_web.py"
+    ).read_text(encoding="utf-8")
+    assert "rewrite_req = ImageRewriteRequest(" in source
+    assert "compile_instruction(" in source
+    assert '"candidates": candidates' in source
+    assert "GENERATED_AVATAR_CANDIDATE" in source
+    assert "_AVATAR_STYLE_GUIDANCE" in source
+
+
+def test_avatar_candidate_batch_rejects_unknown_style():
+    from pydantic import ValidationError
+    from character_memory.visual_web import AvatarGenerateRequest
+
+    with pytest.raises(ValidationError, match="avatar style must be one of"):
+        AvatarGenerateRequest(style="oil-painting-by-random-name")

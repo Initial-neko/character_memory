@@ -24,6 +24,7 @@ class VectorRecall:
         vectors = []
         recencies = []
         importances = []
+        pinned = []
         candidate_loader = getattr(self.store, "list_memory_candidates", None)
         if callable(candidate_loader):
             source_memories = candidate_loader(character_id, at=n)
@@ -42,6 +43,7 @@ class VectorRecall:
             days = max(0.0, (n - t).total_seconds() / 86400)
             recencies.append(1 / (1 + days / 30))
             importances.append(memory.importance)
+            pinned.append(1.0 if getattr(memory, "pinned", False) else 0.0)
 
         if not memories:
             return []
@@ -54,6 +56,7 @@ class VectorRecall:
             0.70 * semantic
             + 0.20 * np.asarray(recencies, dtype=np.float32)
             + 0.10 * np.asarray(importances, dtype=np.float32)
+            + 0.12 * np.asarray(pinned, dtype=np.float32)
         )
         count = min(limit or self.limit, len(memories))
         order = np.argsort(-scores, kind="stable")[:count]

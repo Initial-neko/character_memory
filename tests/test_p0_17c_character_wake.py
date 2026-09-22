@@ -9,7 +9,8 @@ import subprocess
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
 from character_memory.application.wake_service import CharacterWakeService
-from character_memory.domain.models import EventType, PersonReaction
+from character_memory.domain.models import Event, EventType, PersonReaction
+from character_memory.runtime.context import compile_context
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -52,6 +53,24 @@ def test_chat_service_dispatch_wake_is_time_tick_and_never_forces_a_message(tmp_
         assert "不是要求你必须回复" in event.content
     finally:
         store.close()
+
+
+def test_time_tick_wake_contract_offers_voice_message():
+    now = datetime(2026, 9, 22, 10, 0, tzinfo=timezone.utc)
+    context = compile_context(
+        "persona",
+        "",
+        [],
+        Event(
+            character_id="rin",
+            event_type=EventType.TIME_TICK,
+            event_time=now,
+            content="时间自然过去了一段。",
+            metadata={"conversation_id":"wake-test"},
+        ),
+    )
+
+    assert "VOICE_MESSAGE" in context
 
 
 def test_periodic_wake_is_due_at_60_minutes_and_manual_bypasses_interval(tmp_path):
@@ -140,6 +159,8 @@ def test_wake_frontend_contract_and_javascript_syntax():
     assert "result.silent" in script
     assert "button.hidden = group" in script
     assert '/static/wake.js' in index
+    wake_backend = (ROOT / "src" / "character_memory" / "wake_web.py").read_text(encoding="utf-8")
+    assert "scheduler.publish_direct_responses(" in wake_backend
 
     node = shutil.which("node")
     if node:

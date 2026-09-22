@@ -13,61 +13,55 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 ## Current baseline
 
 - Repository: `Initial-neko/character_memory`
-- Base: `main@caf24d34ec90a501b46bdcf6d5323544d5a09d42`
-- Active branch: none
-- Pull request: **#75 — Add minimal Memory governance and shared Person context**
-- Status: **MERGED**
-
-## Validation
-
-- PR #75 merged to `main` as `caf24d34ec90a501b46bdcf6d5323544d5a09d42`.
-- Final PR CI run #397 passed `test`, `windows-smoke`, and `browser-smoke` on head `d703e6feab325580f1cc26ac11c137c646bc6539`.
-- CI caught and the PR fixed two implementation regressions before merge: missing SQLite bindings for pinned candidates and one stale Space context call.
+- Base: current `main`
+- Active branch: `feature/space-voice`
+- Current slice: **Space Voice**
+- Status: **CI / acceptance pending**
 
 ## Current slice
 
-### Minimal Memory governance
+### Autonomous Space Voice
 
-- Memory persists `pinned` and `superseded_by`.
-- Existing Runtime drawer is now a lightweight Memory Inspector.
-- User/developer can pin/unpin, forget/restore and correct.
-- Forget only disables derived Memory; durable source facts stay intact.
-- Correction creates a new Memory and supersedes the old row instead of overwriting history.
-- Pinned Memory remains in the bounded recall candidate union.
+- `SpaceMediaIntentType.VOICE` is a first-class Space media intent.
+- One VOICE intent contains one complete `voice_text`; duplicate VOICE intents in one post plan are collapsed to the first.
+- SpaceMediaExecutor sends one formal `:8001/v1/tts` request using the character id as the voice owner.
+- Resulting WAV/MP3 is persisted through existing MediaStorage / MediaAsset and attached through `space_post_media(type=VOICE, source=GENERATED)`.
+- Transcript + duration metadata stay on the durable Space media relation.
+- TTS failure is fail-soft: valid text still publishes; voice-only failure becomes NO_POST rather than an empty post.
 
-### Conservative World memory
+### Social semantics
 
-- World appraisal `summary` is working context only.
-- `summary` never automatically becomes long-term Memory.
-- Only explicit non-empty `personal_memory` may create a WORLD_OBSERVATION cognition event and enter normal PersonRuntime admission.
-- Dynamic world facts such as prices/news/parameters are expected to be queried again when needed.
+- Voice-only post persists a local SOCIAL_POST event containing the spoken transcript.
+- Caption + voice preserves both in the local social fact.
+- Autonomous Audience receives the safe voice transcript in the visible Space observation, so another Person can react to what was actually said.
+- Manual existing audio assets already accepted by Space API now project as VOICE media.
 
-### Shared Person context
+### Browser / Dev
 
-- `PersonContextBuilder` owns the shared read view: Persona + Mental State + Recall + Recent Events.
-- Direct, Group and Space/World planning use that read layer.
-- Channel-specific action schemas and persistence remain separate.
+- Space feed renders native voice bubbles with play/pause and optional transcript expansion.
+- It does not degrade autonomous voice to a generic attachment link.
+- Dev Console Media Test includes VOICE and sends Voice Text through the same formal TTS route.
 
 ## Acceptance focus
 
-1. Existing databases migrate with `core/007-memory-governance`; fresh databases also work.
-2. Pin/unpin, forget/restore and correction preserve intended semantics and provenance.
-3. A corrected Memory leaves the old row inactive with `superseded_by`, while the new row is active.
-4. Pinned Memory stays eligible for recall without bypassing normal vector ranking.
-5. Memory Inspector routes enforce character ownership.
-6. World `summary` without `personal_memory` writes no Memory and no WORLD_OBSERVATION Event.
-7. World with explicit `personal_memory` still uses PersonRuntime admission and cannot leak chat actions.
-8. Direct / Group / Space use the shared PersonContextBuilder without changing their channel contracts.
-9. Existing chat, Space, visual, voice and browser behavior does not regress.
-10. Main test, Windows smoke and browser smoke are green.
+1. VOICE schema requires non-empty voice_text, forces count=1, and does not leak image-only fields.
+2. Exactly one formal TTS request is made for one Space VOICE intent.
+3. WAV/MP3 asset and VOICE relation are persisted with transcript/duration provenance.
+4. TTS failures are fail-soft and do not leak media files/DB rows.
+5. Voice-only autonomous post creates a real Space post and local SOCIAL_POST transcript fact.
+6. Audience observation contains the spoken transcript.
+7. Space API projects audio assets as VOICE.
+8. Browser Space voice uses native bubble playback and optional transcript.
+9. Dev Console can force a VOICE media test.
+10. Main pytest, Windows smoke and browser smoke are green.
 
 ## Deliberately deferred
 
-- bulk Memory source/type policies;
-- confidence/freshness/world-fact cache;
-- knowledge graph;
-- universal PersonRuntime action schema;
-- background worker lifecycle consolidation.
+- Space SSE/push refresh;
+- link preview cards;
+- full post-detail interaction page;
+- multi-step social reply threads;
+- autonomous Group Chat (next feature after this merge).
 
 ## Claude acceptance findings
 

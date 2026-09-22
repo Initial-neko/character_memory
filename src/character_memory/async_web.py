@@ -251,6 +251,8 @@ def attach_async_routes(app):
         group = repository.get_group(conversation_id)
         if group is None:
             raise HTTPException(status_code=404, detail="group not found")
+        if len(group.member_ids) < 2:
+            raise HTTPException(status_code=409, detail="群聊还在构建中，请先完成成员确认。")
         try:
             mentions = resolve_group_mentions(group.member_ids, req.message, profiles_by_id(), req.mentions)
         except ValueError as exc:

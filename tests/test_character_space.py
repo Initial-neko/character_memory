@@ -442,6 +442,10 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "media_items",
         "slice(0, 9)",
         "data-space-media-count",
+        "data-space-image-open",
+        "space-lightbox",
+        "data-space-lightbox-prev",
+        "data-space-lightbox-next",
         'images.length === 1 ? "single"',
         'images.length <= 4 ? "quad" : "nine"',
         "space-voice-bubble",
@@ -463,6 +467,9 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         ".space-media-single",
         ".space-media-quad",
         ".space-media-nine",
+        ".space-lightbox",
+        ".space-lightbox-image",
+        ".space-lightbox-nav",
         ".space-voice-bubble",
         ".space-voice-transcript",
         ".space-comments-toggle",
@@ -476,3 +483,18 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
     if node:
         checked = subprocess.run([node, "--check", str(script_path)], capture_output=True, text=True)
         assert checked.returncode == 0, checked.stderr
+
+
+def test_uploaded_image_media_is_inline_for_space_lightbox(tmp_path: Path):
+    config = _config(tmp_path, count=1)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        asset = _save_test_media(app, "c00", 99, source="GENERATED")
+        response = client.get(f"/v1/media/{asset.id}")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/")
+        assert response.headers.get("content-disposition", "").startswith("inline;")
+
+

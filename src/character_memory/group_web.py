@@ -115,6 +115,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "created_at": group.created_at.isoformat(),
             "updated_at": group.updated_at.isoformat(),
             "archived_at": group.archived_at.isoformat() if group.archived_at else None,
+            "status": "ACTIVE" if len(group.member_ids) >= 2 else "BUILDING",
         }
 
     def resource_snapshot(group=None) -> dict:
@@ -321,6 +322,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         preliminary = repo().get_group(conversation_id)
         if preliminary is None:
             raise HTTPException(status_code=404, detail="group not found")
+        if len(preliminary.member_ids) < 2:
+            raise HTTPException(status_code=409, detail="群聊还在构建中，请先完成成员确认。")
         try:
             bundle = access.get_bundle()
             refresh_member_resources(bundle, preliminary.member_ids)

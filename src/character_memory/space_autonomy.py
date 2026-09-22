@@ -103,16 +103,14 @@ class SpaceAutonomyService:
 不要凭空创造没有发生过的新事件。
 
 本次只规划 Space 动态：
-- social_post 可以为空；没有自然想公开表达的文字就返回 null。
-- media_intents 可以为空；不要为了展示功能而强行配图或发语音。
-- 如果既没有自然想表达的文字，也没有自然想分享的图片/语音，social_post=null 且 media_intents=[]。
+- 一条动态可以是：文字、0-9 张图片、一条语音，或它们的任意组合。
+- social_post 和 media_intents 都可以为空。
 - 如果发文字，写成这个人物自己会公开发出的自然短动态，不要写“根据我的记忆/状态”等系统口吻。
 - SEARCH_IMAGE 用于现实中已经存在、适合从互联网搜索的图片；query 必须是简短公开搜索词，不能泄露私聊原句、用户隐私或长期记忆里的秘密。
 - GENERATE_IMAGE 用于角色自拍或需要创作出来的场景；purpose 只能是 SELFIE 或 SCENE，并给出简洁 visual_intent。
 - VOICE 表示这条动态更适合直接说出来；voice_text 必须是角色真正会公开说出的完整连续表达，而不是 TTS 指令、幕后说明或文字动态的机械朗读。单条动态最多一条 VOICE。
 - social_post 与 VOICE 可以二选一，也可以是简短文字说明 + 一条语音；不要把同一句话原样重复两遍。
-- count 只表示图片自然需要的数量，不是目标配额；VOICE 的 count 固定为 1；总媒体数不要超过系统上限。
-- 可以只有图片、只有语音，也可以文字+媒体。
+- count 是图片数量，总图片数不要超过系统上限；VOICE 的 count 固定为 1。
 - {media_instruction}
 """
 

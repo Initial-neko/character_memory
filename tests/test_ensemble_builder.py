@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from character_memory.ensemble_builder import (
     EnsembleBuilderService,
     EnsembleMemberResearch,
@@ -273,6 +276,42 @@ def test_prepare_failure_leaves_no_real_group_or_build_record(tmp_path):
     with store._lock:
         count = store.conn.execute("SELECT COUNT(*) AS total FROM ensemble_builds").fetchone()["total"]
     assert count == 0
+    store.close()
+
+
+def test_prepare_route_maps_research_value_error_to_502_and_cleans_build(tmp_path):
+    store = SQLiteStore(str(tmp_path / "ensemble-web.db"))
+    access = SimpleNamespace(
+        read_store=store,
+        store=lambda: store,
+        character_profiles=lambda: [],
+        soft_active_characters=10,
+        max_active_characters=20,
+    )
+    app = FastAPI()
+    app.state.character_memory = access
+    attach_ensemble_routes(app)
+
+    def fail_research(*args, **kwargs):
+        raise ValueError("media host could not be resolved: example.invalid")
+
+    access.ensemble_service.research = fail_research
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/ensembles/prepare",
+            json={"prompt": "复刻一个公开作品群聊"},
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "资料整理失败：media host could not be resolved: example.invalid"
+    )
+    with store._lock:
+        total = store.conn.execute(
+            "SELECT COUNT(*) AS total FROM ensemble_builds"
+        ).fetchone()["total"]
+    assert total == 0
     store.close()
 
 

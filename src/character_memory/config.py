@@ -59,6 +59,12 @@ class Settings(BaseModel):
     search_language: str = "zh-cn"
     search_safe_search: str = "strict"
 
+    # Public-page observation uses Playwright headless Chromium. "auto" first
+    # tries Playwright's managed Chromium and then the installed Chrome channel.
+    web_browser_channel: str = Field(default="auto", pattern=r"^(auto|chromium|chrome)$")
+    web_browser_timeout_seconds: float = Field(default=20.0, ge=3.0, le=90.0)
+    web_browser_render_wait_ms: int = Field(default=700, ge=0, le=5000)
+
     # P0.19 direct-character visual capability. Both providers share one
     # provider-neutral request/result contract. Agnes supports reference images;
     # msimg 0.0.4 is currently text-to-image only in this integration.
@@ -109,6 +115,11 @@ class Settings(BaseModel):
     space_media_max_items: int = Field(default=3, ge=0, le=9)
     space_image_search_enabled: bool = True
     space_image_generation_enabled: bool = True
+    # External-world exploration is a separate optional cognition phase. Search
+    # only discovers candidate URLs; page content is rendered by headless Chromium.
+    space_world_observation_enabled: bool = True
+    space_world_max_pages: int = Field(default=2, ge=1, le=4)
+    space_world_max_chars_per_page: int = Field(default=6000, ge=500, le=16000)
     space_audience_size: int = Field(default=5, ge=0, le=10)
     space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 

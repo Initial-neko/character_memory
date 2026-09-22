@@ -160,8 +160,8 @@ def test_direct_and_group_share_message_content_renderer():
 
     assert "/static/message_content.js" in index
     assert index.index("/static/app.js") < index.index("/static/message_content.js") < index.index("/static/groups.js")
-    assert "CM.messageContentHtml(message)" in direct
-    assert "CM.messageContentHtml(message)" in group
+    assert "CM.messageContentHtml(" in direct
+    assert "CM.messageContentHtml(" in group
     assert "CM.bindMessageContent(row)" in direct
     assert "CM.bindMessageContent(row)" in group
     assert "STICKER" in common

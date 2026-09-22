@@ -102,6 +102,12 @@ class Settings(BaseModel):
     # ceiling. It never forces a post -- a character that decides not to publish
     # simply does not consume the budget.
     space_max_posts_per_day: int = Field(default=0, ge=0, le=200)
+    # Optional visual expression on autonomous Space posts. The character still
+    # decides whether media is natural; these fields only gate/cap execution.
+    space_media_enabled: bool = True
+    space_media_max_items: int = Field(default=3, ge=0, le=9)
+    space_image_search_enabled: bool = True
+    space_image_generation_enabled: bool = True
     space_audience_size: int = Field(default=5, ge=0, le=10)
     space_scheduler_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 

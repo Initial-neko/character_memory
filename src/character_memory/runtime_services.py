@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Any
-
 from character_memory.avatars import AvatarSearchService, AvatarStore
 from character_memory.browser_web import HeadlessBrowserWebFetcher
 from character_memory.config import resolve_avatar_dir

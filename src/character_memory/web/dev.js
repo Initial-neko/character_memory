@@ -100,6 +100,10 @@
       if ($("spaceEnabled")) $("spaceEnabled").checked = Boolean(data.enabled);
       if ($("spaceIntervalMinutes")) $("spaceIntervalMinutes").value = String(data.interval_minutes ?? 1440);
       if ($("spaceMaxPostsPerDay")) $("spaceMaxPostsPerDay").value = String(data.max_posts_per_day ?? 0);
+      if ($("spaceMediaEnabled")) $("spaceMediaEnabled").checked = Boolean(data.media_enabled ?? true);
+      if ($("spaceMediaMaxItems")) $("spaceMediaMaxItems").value = String(data.media_max_items ?? 3);
+      if ($("spaceImageSearchEnabled")) $("spaceImageSearchEnabled").checked = Boolean(data.image_search_enabled ?? true);
+      if ($("spaceImageGenerationEnabled")) $("spaceImageGenerationEnabled").checked = Boolean(data.image_generation_enabled ?? true);
       if ($("spaceAudienceSize")) $("spaceAudienceSize").value = String(data.audience_size ?? 5);
       if ($("spacePollSeconds")) $("spacePollSeconds").value = String(data.poll_seconds ?? 60);
     } catch (error) {
@@ -119,6 +123,10 @@
           enabled: $("spaceEnabled").checked,
           interval_minutes: Number($("spaceIntervalMinutes").value || 1440),
           max_posts_per_day: Number($("spaceMaxPostsPerDay").value || 0),
+          media_enabled: $("spaceMediaEnabled").checked,
+          media_max_items: Number($("spaceMediaMaxItems").value || 0),
+          image_search_enabled: $("spaceImageSearchEnabled").checked,
+          image_generation_enabled: $("spaceImageGenerationEnabled").checked,
           audience_size: Number($("spaceAudienceSize").value || 0),
           poll_seconds: Number($("spacePollSeconds").value || 60),
           rearm: true,
@@ -164,6 +172,34 @@
       const postId = data.post?.id;
       if (postId) $("spacePostId").value = String(postId);
       refreshSpaceStatus();
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runSpaceMedia() {
+    const button = $("runSpaceMedia");
+    const characterId = $("spaceCharacter").value;
+    const type = $("spaceMediaType").value;
+    button.disabled = true;
+    $("spaceResult").textContent = `正在测试 ${type} Space 动态...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/space/media/${encodeURIComponent(characterId)}`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          type,
+          count: Number($("spaceMediaCount").value || 1),
+          query: $("spaceMediaQuery").value,
+          purpose: $("spaceMediaPurpose").value,
+          visual_intent: $("spaceMediaVisualIntent").value,
+          content: $("spaceMediaPostText").value,
+        }),
+      });
+      $("spaceResult").textContent = pretty(data);
+      if (data.post?.id) $("spacePostId").value = String(data.post.id);
     } catch (error) {
       $("spaceResult").textContent = `ERROR: ${error.message}`;
     } finally {
@@ -501,6 +537,7 @@
     });
   });
   $("runSpaceAudience").addEventListener("click", runSpaceAudience);
+  $("runSpaceMedia").addEventListener("click", runSpaceMedia);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);
   $("runTts").addEventListener("click", runTts);
   $("runAsr").addEventListener("click", runAsr);

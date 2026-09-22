@@ -523,16 +523,9 @@ Content:
                 created_character_ids=created_ids,
             )
         except Exception:
-            if callable(rollback):
-                for character_id in reversed(created_ids):
-                    try:
-                        rollback(character_id)
-                    except Exception:
-                        logger.exception(
-                            "ensemble.rollback failed group=%s character=%s",
-                            group_id,
-                            character_id,
-                        )
+            # Remove the group reference first, then roll back any characters
+            # that were created for this build. This avoids leaving a group that
+            # points at characters already removed by a partial rollback.
             try:
                 if created_group_id is not None:
                     self.groups.delete_empty_group(created_group_id)
@@ -544,6 +537,16 @@ Content:
                     group_id,
                     created_group_id or group_id,
                 )
+            if callable(rollback):
+                for character_id in reversed(created_ids):
+                    try:
+                        rollback(character_id)
+                    except Exception:
+                        logger.exception(
+                            "ensemble.rollback failed group=%s character=%s",
+                            group_id,
+                            character_id,
+                        )
             raise
 
         logger.info(

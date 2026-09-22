@@ -384,7 +384,7 @@ class GroupAutonomyScheduler:
                 self.repository.finish_autonomy_run(
                     run_id,
                     group.id,
-                    datetime.now().astimezone(),
+                    now,
                     status=status,
                     turn_id=result.get("turn_id"),
                     message_count=int(result.get("message_count") or 0),
@@ -394,7 +394,7 @@ class GroupAutonomyScheduler:
                 self.repository.finish_autonomy_run(
                     run_id,
                     group.id,
-                    datetime.now().astimezone(),
+                    now,
                     status="FAILED",
                     error=str(exc),
                 )

@@ -323,6 +323,37 @@ class ReactionScheduler:
             ).fetchall()
         return [store._event_from_row(row) for row in rows]
 
+    def publish_direct_responses(
+        self,
+        store,
+        character_id: str,
+        conversation_id: str,
+        source_event_id: int,
+    ) -> list[dict]:
+        """Publish one direct reaction and materialize any voice messages.
+
+        User-message reactions, proactive intents and TIME_TICK wakes all persist
+        the same CHARACTER_MESSAGE facts. Keeping transport/materialization here
+        prevents background producers from publishing text while leaving a
+        VOICE_MESSAGE permanently pending.
+        """
+        channel = direct_channel(character_id, conversation_id)
+        published: list[dict] = []
+        for response_event in self._direct_response_events(store, character_id, source_event_id):
+            raw_event = {
+                "id": response_event.id,
+                "character_id": response_event.character_id,
+                "event_type": response_event.event_type.value,
+                "event_time": response_event.event_time.isoformat(),
+                "content": response_event.content,
+                "metadata": response_event.metadata,
+            }
+            self.hub.publish(channel, "character_event", raw_event)
+            if self.voice_materializer is not None and response_event.metadata.get("action") == "VOICE_MESSAGE":
+                self.voice_materializer.materialize_direct(response_event, conversation_id=conversation_id)
+            published.append(raw_event)
+        return published
+
     def _finish_cycle(self, state: _PendingState, watermark: int) -> bool:
         with state.condition:
             state.processed_id = max(state.processed_id, watermark)
@@ -369,18 +400,12 @@ class ReactionScheduler:
                         persist_event=False,
                         commit_guard=lambda: self._latest_direct_user_id(bundle.store, character_id, conversation_id) == watermark,
                     )
-                for response_event in self._direct_response_events(bundle.store, character_id, watermark):
-                    raw_event = {
-                        "id": response_event.id,
-                        "character_id": response_event.character_id,
-                        "event_type": response_event.event_type.value,
-                        "event_time": response_event.event_time.isoformat(),
-                        "content": response_event.content,
-                        "metadata": response_event.metadata,
-                    }
-                    self.hub.publish(channel, "character_event", raw_event)
-                    if self.voice_materializer is not None and response_event.metadata.get("action") == "VOICE_MESSAGE":
-                        self.voice_materializer.materialize_direct(response_event, conversation_id=conversation_id)
+                self.publish_direct_responses(
+                    bundle.store,
+                    character_id,
+                    conversation_id,
+                    watermark,
+                )
                 self.hub.publish(
                     channel,
                     "reaction_complete",

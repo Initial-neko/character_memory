@@ -17,7 +17,13 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 - Active branch: `refactor/docs-and-runtime-services`
 - Pull request: **#74 — Clarify architecture docs and compose shared runtime services**
 - Phase: post-feature architecture cleanup after Space / World Observation
-- Status: **CI / acceptance pending**
+- Status: **READY_FOR_ACCEPTANCE**
+
+## Validation
+
+- PR #74 implementation including typed CharacterRuntimeAccess passed CI run #386 on commit b70a69aeaf5b54d2398acb400f9bc31b71be087c.
+- Later commits are documentation/typing cleanup; the latest PR HEAD should still be used for final acceptance.
+- Main test, Windows smoke and browser smoke are required before merge.
 
 ## Current slice
 
@@ -34,6 +40,7 @@ The maintained docs now:
 ### Batch 2 — explicit RuntimeServices composition
 
 `RuntimeServices` is now the composition root for:
+- typed `CharacterRuntimeAccess` core boundary;
 - shared `SearchProvider`;
 - `AvatarStore` + `AvatarSearchService`;
 - ImageGenerationProviders;

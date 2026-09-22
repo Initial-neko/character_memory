@@ -13,10 +13,16 @@ Lightweight AI-to-AI handoff for the current slice only. Product/architecture tr
 ## Current baseline
 
 - Repository: `Initial-neko/character_memory`
-- Base: current `main`
-- Active branch: `feature/space-voice`
+- Base: `main@c58a6254fffcbb216bfda8ff45f49b36a25c4dae`
+- Active branch: none
 - Current slice: **Space Voice**
-- Status: **CI / acceptance pending**
+- Status: **MERGED**
+
+## Validation
+
+- PR #76 merged to `main` as `c58a6254fffcbb216bfda8ff45f49b36a25c4dae`.
+- Final PR CI run #400 passed `test`, `windows-smoke`, and `browser-smoke` on head `3271fa1c0838daf0671dd7d9d3349229eb5e4005`.
+- Space Voice is now part of main; Autonomous Group Chat is the next planned feature.
 
 ## Current slice
 

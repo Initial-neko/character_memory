@@ -85,6 +85,68 @@ def test_space_repository_keeps_shared_social_facts_and_caps_distinct_commenters
     store.close()
 
 
+def _legacy_asset(store: SQLiteStore, media_id: str, mime_type: str) -> None:
+    from character_memory.media import MediaAsset
+
+    store.add_media_asset(
+        MediaAsset(
+            id=media_id,
+            character_id="c00",
+            source="USER_UPLOAD",
+            original_name="legacy",
+            mime_type=mime_type,
+            storage_name=f"{media_id}.bin",
+            created_at=datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc),
+            size_bytes=8,
+        )
+    )
+
+
+def test_legacy_space_media_backfill_reads_the_kind_from_the_asset_mime(tmp_path: Path):
+    """A legacy attachment is not assumed to be an image.
+
+    The backfill is an INSERT OR IGNORE against UNIQUE(post_id, media_id), so a
+    wrong kind is written once and skipped forever -- the repair pass is what
+    makes a previously mislabelled voice attachment recoverable.
+    """
+    store = SQLiteStore(tmp_path / "legacy-kind.db")
+    posts = SpaceRepository(store)
+    now = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+
+    _legacy_asset(store, "legacy-voice", "audio/wav")
+    _legacy_asset(store, "legacy-photo", "image/png")
+    _legacy_asset(store, "legacy-unknown", "application/octet-stream")
+    voice = posts.create_post("c00", "旧的语音动态", now, media_id="legacy-voice")
+    photo = posts.create_post("c00", "旧的图片动态", now, media_id="legacy-photo")
+    unknown = posts.create_post("c00", "旧的其他附件", now, media_id="legacy-unknown")
+    dangling = posts.create_post("c00", "资产已丢失", now, media_id="missing-asset")
+
+    media = SpacePostMediaRepository(store)
+    kinds = {
+        item.media_id: (item.media_type, item.source_type)
+        for item in media.list_for_post(voice.id)
+        + media.list_for_post(photo.id)
+        + media.list_for_post(unknown.id)
+        + media.list_for_post(dangling.id)
+    }
+    assert kinds["legacy-voice"] == ("VOICE", "LEGACY")
+    assert kinds["legacy-photo"] == ("IMAGE", "LEGACY")
+    assert kinds["legacy-unknown"] == ("IMAGE", "LEGACY")
+    assert kinds["missing-asset"] == ("IMAGE", "LEGACY")
+
+    # A row written by the earlier hardcoded-IMAGE build is corrected on the
+    # next construction rather than staying wrong for the life of the database.
+    with store._lock:
+        store.conn.execute(
+            "UPDATE space_post_media SET media_type='IMAGE' WHERE media_id='legacy-voice'"
+        )
+        store._maybe_commit()
+    repaired = SpacePostMediaRepository(store)
+    assert repaired.list_for_post(voice.id)[0].media_type == "VOICE"
+    assert repaired.list_for_post(photo.id)[0].media_type == "IMAGE"
+    store.close()
+
+
 def test_space_media_relation_migrates_legacy_media_and_caps_ordered_items(tmp_path: Path):
     store = SQLiteStore(tmp_path / "space-media.db")
     posts = SpaceRepository(store)

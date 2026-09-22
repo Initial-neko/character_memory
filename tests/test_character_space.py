@@ -526,7 +526,7 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         'images.length <= 4 ? "quad" : "nine"',
         "space-voice-bubble",
         "data-space-voice-play",
-        "data-space-voice-text",
+        "data-space-voice-transcript",
         "new Audio(",
         "data-space-comments-toggle",
         "data-space-thread-toggle",
@@ -541,6 +541,9 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         'addEventListener("submit"',
     ]:
         assert token in script
+    assert "data-space-voice-text" not in script
+    assert "space-voice-transcript hidden" not in script
+
     for token in [
         "space-shell",
         "space-post",

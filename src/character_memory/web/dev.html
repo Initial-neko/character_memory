@@ -143,6 +143,37 @@
         <pre id="spaceResult" class="result">等待测试...</pre>
       </article>
 
+      <article class="card wide" id="groupAutonomyCard">
+        <div class="card-title-row">
+          <div><h2>Autonomous Group Chat</h2><p class="subtle">让已有群聊偶尔自己聊起来。一次机会只允许一条很短的角色链；seed 沉默则什么都不发生，新用户消息始终优先。</p></div>
+          <span class="pill">shared room</span>
+        </div>
+        <div class="visual-provider-row">
+          <label class="visual-check"><input id="groupAutonomyEnabled" type="checkbox" checked /> Autonomous Group</label>
+          <label>Opportunity Interval (min)<input id="groupAutonomyInterval" type="number" min="10" max="10080" step="10" value="360" /></label>
+          <label>Max Messages<input id="groupAutonomyMaxMessages" type="number" min="1" max="4" step="1" value="3" /></label>
+          <label>User Quiet Guard (min)<input id="groupAutonomyQuietMinutes" type="number" min="0" max="1440" step="5" value="30" /></label>
+          <label>Scheduler Poll (s)<input id="groupAutonomyPollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
+          <label>Group<select id="groupAutonomyGroup"><option value="">暂无群聊</option></select></label>
+        </div>
+        <div class="actions">
+          <button class="secondary group-autonomy-preset" data-minutes="10" type="button">10min</button>
+          <button class="secondary group-autonomy-preset" data-minutes="30" type="button">30min</button>
+          <button class="secondary group-autonomy-preset" data-minutes="60" type="button">1H</button>
+          <button class="secondary group-autonomy-preset" data-minutes="360" type="button">6H / 默认</button>
+          <button class="primary" id="applyGroupAutonomyConfig" type="button">应用测试配置</button>
+        </div>
+        <div class="actions">
+          <button class="primary" id="runGroupAutonomyOpportunity" type="button">立即手动触发一次</button>
+          <button class="secondary" id="forceGroupAutonomyDue" type="button">让选中群立即到期</button>
+          <button class="secondary" id="refreshGroupAutonomyStatus" type="button">刷新调度状态</button>
+        </div>
+        <p class="subtle">手动触发会忽略 User Quiet Guard，方便验收；正式 Scheduler 会遵守 Quiet Guard。自主消息仍写入原来的 conversation_events，群聊页面/SSE 无需第二套渲染。</p>
+        <p class="subtle" id="groupAutonomyStatusAge">尚未读取调度状态。</p>
+        <pre id="groupAutonomyStatus" class="result">等待读取自主群聊调度状态...</pre>
+        <pre id="groupAutonomyResult" class="result">等待测试...</pre>
+      </article>
+
       <article class="card">
         <div class="card-title-row"><h2>TTS</h2><span class="pill">media</span></div>
         <label for="ttsText">Text</label>

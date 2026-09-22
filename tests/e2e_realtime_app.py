@@ -13,6 +13,7 @@ from character_memory.avatar_web import attach_avatar_routes
 from character_memory.config import Settings, discover_character_profiles, load_persona, resolve_sticker_dir
 from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, PersonReaction
 from character_memory.group_web import attach_group_routes
+from character_memory.group_autonomy_web import attach_group_autonomy_routes
 from character_memory.history_web import attach_history_routes
 from character_memory.images import load_image_catalog
 from character_memory.llm.client import PersonModel
@@ -136,6 +137,7 @@ attach_history_routes(app)
 attach_group_routes(app, str(ROOT / "config.example.yaml"))
 attach_search_routes(app)
 attach_async_routes(app)
+attach_group_autonomy_routes(app)
 attach_wake_routes(app)
 
 

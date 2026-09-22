@@ -37,7 +37,8 @@ src/character_memory/
 
 - `chat_service.py` — direct application service / per-character lock。
 - `async_conversation.py` — ReactionScheduler、watermark、SSE hub。
-- `group_conversation_service.py` — group member ordering、shared-room reaction、member fault isolation。
+- `group_conversation_service.py` — group member ordering、shared-room reaction、member fault isolation、autonomous channel contract。
+- `group_autonomy.py` — bounded autonomous Group opportunity + restart-safe scheduler。
 - `proactive_service.py` — persisted Intent execution。
 - `wake_service.py` — process-local character wake opportunity。
 - `clock.py` — RealClock / FixedClock。
@@ -75,6 +76,7 @@ api.py                  core FastAPI app + direct/common APIs
 server.py               application assembly / attach routes
 async_web.py            async message accept + SSE routes
 group_web.py            group HTTP surface
+group_autonomy_web.py   autonomous Group status/config/manual opportunity HTTP surface
 history_web.py          history APIs
 memory_web.py           minimal Memory Inspector / pin / forget / correct APIs
 search_web.py           durable message search APIs
@@ -110,7 +112,7 @@ world_observation.py         search discovery -> rendered WorldObservation
 remote_media.py              SSRF-safe public image downloader
 space_store.py               Character Space shared posts/comments/reactions/views + schedule ledger
 space_media.py               ordered Space <-> MediaAsset relation
-space_media_executor.py      Space SEARCH_IMAGE / GENERATE_IMAGE execution
+space_media_executor.py      Space SEARCH_IMAGE / GENERATE_IMAGE / VOICE execution
 space_autonomy.py            Space opportunity + World appraisal + Audience loop
 media.py                    media asset storage/contracts
 media_runtime.py            local ASR/Sherpa TTS providers/runtime
@@ -256,6 +258,7 @@ time_format.js          shared MM-DD HH:mm:ss timestamp formatter
 | LLM 回复/structured output | `domain/models.py` → `llm/client.py` → `runtime/person_runtime.py` |
 | Direct async/SSE | `application/async_conversation.py` → `async_web.py` → `web/app.js` |
 | Group chat | `group_store.py` → `application/group_conversation_service.py` → `group_web.py` → `web/groups.js` |
+| Autonomous Group Chat | `group_store.py` → `application/group_autonomy.py` → `group_autonomy_web.py` → existing Group SSE/UI |
 | Character Space | `space_store.py` → `space_autonomy.py` → `space_media_executor.py` / `world_observation.py` → `space_web.py` → `web/space.js` |
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
 | Memory/Recall/Governance | `runtime/person_context.py` → `memory/recall.py` → `storage/sqlite.py` → `memory_web.py` → `web/app.js` |

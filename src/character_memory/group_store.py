@@ -95,6 +95,44 @@ class GroupRepository:
             "ON conversations(type,archived_at_epoch,updated_at_epoch DESC,id DESC)"
         )
 
+    def _migrate_autonomy_scheduler(self) -> None:
+        self.store.conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS group_autonomy_state(
+                conversation_id TEXT PRIMARY KEY,
+                last_opportunity_at TEXT,
+                last_opportunity_at_epoch INTEGER,
+                next_opportunity_at TEXT NOT NULL,
+                next_opportunity_at_epoch INTEGER NOT NULL,
+                last_status TEXT,
+                last_turn_id TEXT,
+                updated_at TEXT NOT NULL,
+                updated_at_epoch INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS group_autonomy_runs(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                scheduled_for TEXT NOT NULL,
+                scheduled_for_epoch INTEGER NOT NULL,
+                started_at TEXT NOT NULL,
+                started_at_epoch INTEGER NOT NULL,
+                completed_at TEXT,
+                completed_at_epoch INTEGER,
+                status TEXT NOT NULL,
+                turn_id TEXT,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT 'SCHEDULED',
+                error TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_group_autonomy_state_due
+                ON group_autonomy_state(next_opportunity_at_epoch,conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_group_autonomy_runs_recent
+                ON group_autonomy_runs(conversation_id,started_at_epoch DESC,id DESC);
+            """
+        )
+
     def _init_schema(self) -> None:
         with self.store._lock:
             self.store._ensure_migration_table_locked()
@@ -153,6 +191,7 @@ class GroupRepository:
         self.store.apply_schema_migration("group/001-epoch-time-keys", self._migrate_epoch_keys)
         self.store.apply_schema_migration("group/002-indexes", self._create_indexes)
         self.store.apply_schema_migration("group/003-conversation-archive", self._migrate_archive_state)
+        self.store.apply_schema_migration("group/004-autonomy-scheduler", self._migrate_autonomy_scheduler)
 
     @staticmethod
     def _event_from_row(row) -> GroupEvent:
@@ -299,10 +338,11 @@ class GroupRepository:
                     json.dumps(event.metadata, ensure_ascii=False),
                 ),
             )
-            self.store.conn.execute(
-                "UPDATE conversations SET updated_at=?,updated_at_epoch=? WHERE id=?",
-                (event.event_time.isoformat(), stamp, event.conversation_id),
-            )
+            if not bool((event.metadata or {}).get("hidden")):
+                self.store.conn.execute(
+                    "UPDATE conversations SET updated_at=?,updated_at_epoch=? WHERE id=?",
+                    (event.event_time.isoformat(), stamp, event.conversation_id),
+                )
             self.store._maybe_commit()
         return event.model_copy(update={"id": cur.lastrowid})
 
@@ -328,7 +368,7 @@ class GroupRepository:
     def list_event_page(self, conversation_id: str, *, limit: int = 50, before_id: int | None = None) -> GroupHistoryPage:
         page_size = max(1, min(int(limit), 100))
         with self.store._lock:
-            sql = "SELECT * FROM conversation_events WHERE conversation_id=? AND event_time_epoch IS NOT NULL"
+            sql = "SELECT * FROM conversation_events WHERE conversation_id=? AND event_time_epoch IS NOT NULL AND actor_type IN ('USER','CHARACTER')"
             args: list = [conversation_id]
             if before_id is not None:
                 cursor = self.store.conn.execute(
@@ -356,6 +396,192 @@ class GroupRepository:
                 (conversation_id, turn_id),
             ).fetchall()
         return [self._event_from_row(row) for row in rows]
+
+    def get_autonomy_state(self, conversation_id: str) -> dict[str, Any] | None:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM group_autonomy_state WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def ensure_autonomy_state(
+        self,
+        conversation_id: str,
+        now: datetime,
+        interval_minutes: float,
+    ) -> dict[str, Any]:
+        interval_seconds = max(600.0, float(interval_minutes) * 60.0)
+        next_at = datetime.fromtimestamp(now.timestamp() + interval_seconds, tz=now.tzinfo)
+        with self.store._lock:
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO group_autonomy_state("
+                "conversation_id,next_opportunity_at,next_opportunity_at_epoch,updated_at,updated_at_epoch"
+                ") VALUES(?,?,?,?,?)",
+                (
+                    conversation_id,
+                    next_at.isoformat(),
+                    epoch_us(next_at),
+                    now.isoformat(),
+                    epoch_us(now),
+                ),
+            )
+            self.store._maybe_commit()
+            row = self.store.conn.execute(
+                "SELECT * FROM group_autonomy_state WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchone()
+        return dict(row)
+
+    def set_next_autonomy_opportunity(
+        self,
+        conversation_id: str,
+        next_at: datetime,
+        now: datetime,
+    ) -> dict[str, Any]:
+        with self.store._lock:
+            self.store.conn.execute(
+                "INSERT INTO group_autonomy_state("
+                "conversation_id,next_opportunity_at,next_opportunity_at_epoch,updated_at,updated_at_epoch"
+                ") VALUES(?,?,?,?,?) "
+                "ON CONFLICT(conversation_id) DO UPDATE SET "
+                "next_opportunity_at=excluded.next_opportunity_at,"
+                "next_opportunity_at_epoch=excluded.next_opportunity_at_epoch,"
+                "updated_at=excluded.updated_at,updated_at_epoch=excluded.updated_at_epoch",
+                (
+                    conversation_id,
+                    next_at.isoformat(),
+                    epoch_us(next_at),
+                    now.isoformat(),
+                    epoch_us(now),
+                ),
+            )
+            self.store._maybe_commit()
+            row = self.store.conn.execute(
+                "SELECT * FROM group_autonomy_state WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchone()
+        return dict(row)
+
+    def claim_due_autonomy_opportunity(
+        self,
+        conversation_id: str,
+        now: datetime,
+        interval_minutes: float,
+        *,
+        source: str = "SCHEDULED",
+    ) -> int | None:
+        interval_seconds = max(600.0, float(interval_minutes) * 60.0)
+        next_at = datetime.fromtimestamp(now.timestamp() + interval_seconds, tz=now.tzinfo)
+        now_epoch = epoch_us(now)
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM group_autonomy_state WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchone()
+            if row is None or int(row["next_opportunity_at_epoch"]) > now_epoch:
+                return None
+            cur = self.store.conn.execute(
+                "INSERT INTO group_autonomy_runs("
+                "conversation_id,scheduled_for,scheduled_for_epoch,started_at,started_at_epoch,status,source,error"
+                ") VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    conversation_id,
+                    str(row["next_opportunity_at"]),
+                    int(row["next_opportunity_at_epoch"]),
+                    now.isoformat(),
+                    now_epoch,
+                    "RUNNING",
+                    str(source or "SCHEDULED"),
+                    "",
+                ),
+            )
+            self.store.conn.execute(
+                "UPDATE group_autonomy_state SET "
+                "next_opportunity_at=?,next_opportunity_at_epoch=?,updated_at=?,updated_at_epoch=? "
+                "WHERE conversation_id=?",
+                (
+                    next_at.isoformat(),
+                    epoch_us(next_at),
+                    now.isoformat(),
+                    now_epoch,
+                    conversation_id,
+                ),
+            )
+            self.store._maybe_commit()
+            return int(cur.lastrowid)
+
+    def finish_autonomy_run(
+        self,
+        run_id: int,
+        conversation_id: str,
+        now: datetime,
+        *,
+        status: str,
+        turn_id: str | None = None,
+        message_count: int = 0,
+        error: str = "",
+    ) -> None:
+        normalized = str(status or "").strip().upper()
+        if normalized not in {"CHATTED", "NO_CHAT", "SKIPPED", "FAILED", "SUPERSEDED"}:
+            raise ValueError("invalid Group autonomy run status")
+        now_epoch = epoch_us(now)
+        with self.store._lock:
+            self.store.conn.execute(
+                "UPDATE group_autonomy_runs SET completed_at=?,completed_at_epoch=?,status=?,turn_id=?,message_count=?,error=? "
+                "WHERE id=? AND conversation_id=?",
+                (
+                    now.isoformat(),
+                    now_epoch,
+                    normalized,
+                    turn_id,
+                    max(0, int(message_count)),
+                    str(error or "")[:2000],
+                    int(run_id),
+                    conversation_id,
+                ),
+            )
+            self.store.conn.execute(
+                "UPDATE group_autonomy_state SET "
+                "last_opportunity_at=?,last_opportunity_at_epoch=?,last_status=?,last_turn_id=?,"
+                "updated_at=?,updated_at_epoch=? WHERE conversation_id=?",
+                (
+                    now.isoformat(),
+                    now_epoch,
+                    normalized,
+                    turn_id,
+                    now.isoformat(),
+                    now_epoch,
+                    conversation_id,
+                ),
+            )
+            self.store._maybe_commit()
+
+    def list_autonomy_runs(
+        self,
+        *,
+        conversation_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM group_autonomy_runs"
+        args: list[Any] = []
+        if conversation_id:
+            sql += " WHERE conversation_id=?"
+            args.append(conversation_id)
+        sql += " ORDER BY started_at_epoch DESC,id DESC LIMIT ?"
+        args.append(max(1, min(int(limit), 500)))
+        with self.store._lock:
+            rows = self.store.conn.execute(sql, args).fetchall()
+        return [dict(row) for row in rows]
+
+    def latest_user_event(self, conversation_id: str) -> GroupEvent | None:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM conversation_events WHERE conversation_id=? AND actor_type='USER' "
+                "AND event_time_epoch IS NOT NULL ORDER BY event_time_epoch DESC,id DESC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        return self._event_from_row(row) if row is not None else None
 
     def count_user_turns(self, conversation_id: str) -> int:
         with self.store._lock:

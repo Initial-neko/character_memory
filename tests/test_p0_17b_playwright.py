@@ -163,3 +163,64 @@ def test_group_mentions_use_authoritative_group_state(page, realtime_server):
 
     expect(page.locator(".message-row.user .bubble", has_text=marker)).to_be_visible()
     expect(page.locator(".message-row.assistant.group-assistant")).to_have_count(2)
+
+
+def test_autonomous_group_messages_stream_without_a_user_turn(page, realtime_server):
+    _open(page, realtime_server)
+    marker = f"autonomous-{uuid4().hex[:8]}"
+    data = page.evaluate(
+        """async marker => {
+          const characters = (await (await fetch('/v1/characters')).json()).characters;
+          const members = characters.slice(0, 2);
+          const response = await fetch('/v1/groups', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({name:`Auto ${marker}`, member_ids:members.map(item => item.id)})
+          });
+          return {group:(await response.json()).group};
+        }""",
+        marker,
+    )
+
+    entered = page.evaluate(
+        """async groupId => {
+          await CM.features.groups.loadGroups();
+          await CM.features.groups.enter(groupId);
+          return CM.features.groups.current()?.id;
+        }""",
+        data["group"]["id"],
+    )
+    assert entered == data["group"]["id"]
+    expect(page.locator(".message-row.user")).to_have_count(0)
+    expect(page.locator(".message-row.assistant.group-assistant")).to_have_count(0)
+
+    result = page.evaluate(
+        """async groupId => {
+          const response = await fetch('/v1/group-autonomy/opportunity/' + encodeURIComponent(groupId), {
+            method:'POST'
+          });
+          return {status:response.status, payload:await response.json()};
+        }""",
+        data["group"]["id"],
+    )
+    assert result["status"] == 200
+    assert result["payload"]["status"] == "CHATTED"
+    assert result["payload"]["message_count"] == 2
+
+    expect(page.locator(".message-row.user")).to_have_count(0)
+    expect(page.locator(".message-row.assistant.group-assistant")).to_have_count(2)
+    expect(page.locator(".message-row.assistant.group-assistant", has_text="E2E wake reply")).to_have_count(2)
+
+    # Reload from durable history: hidden GROUP_OPPORTUNITY provenance must not
+    # become a visible pseudo-user/system bubble.
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_function("() => Boolean(CM.features.groups)")
+    page.evaluate(
+        """async groupId => {
+          await CM.features.groups.loadGroups();
+          await CM.features.groups.enter(groupId);
+        }""",
+        data["group"]["id"],
+    )
+    expect(page.locator(".message-row.user")).to_have_count(0)
+    expect(page.locator(".message-row.assistant.group-assistant")).to_have_count(2)

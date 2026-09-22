@@ -92,6 +92,15 @@ class DevSpaceConfigRequest(BaseModel):
     rearm: bool = True
 
 
+class DevGroupAutonomyConfigRequest(BaseModel):
+    enabled: bool
+    interval_minutes: float = Field(ge=10.0, le=10080.0)
+    max_messages: int = Field(ge=1, le=4)
+    user_quiet_minutes: float = Field(ge=0.0, le=1440.0)
+    poll_seconds: float = Field(ge=10.0, le=3600.0)
+    rearm: bool = True
+
+
 class DevSpaceMediaRequest(BaseModel):
     type: str = Field(pattern=r"^(SEARCH_IMAGE|GENERATE_IMAGE|VOICE)$")
     content: str = Field(default="", max_length=4000)
@@ -275,6 +284,59 @@ def create_dev_app(
     @app.get("/v1/dev/characters")
     def dev_characters():
         return request_character("GET", "/v1/characters", operation="characters", timeout=10.0)
+
+    @app.get("/v1/dev/groups")
+    def dev_groups():
+        return request_character("GET", "/v1/groups", operation="groups", timeout=10.0)
+
+    @app.get("/v1/dev/group-autonomy/status")
+    def dev_group_autonomy_status():
+        return request_character(
+            "GET",
+            "/v1/group-autonomy/status",
+            operation="group-autonomy-status",
+            timeout=10.0,
+        )
+
+    @app.post("/v1/dev/group-autonomy/config")
+    def dev_group_autonomy_config(req: DevGroupAutonomyConfigRequest):
+        persisted = SettingsStore(config_path).save_values(
+            {
+                "group_autonomy_enabled": req.enabled,
+                "group_autonomy_interval_minutes": req.interval_minutes,
+                "group_autonomy_max_messages": req.max_messages,
+                "group_autonomy_user_quiet_minutes": req.user_quiet_minutes,
+                "group_autonomy_poll_seconds": req.poll_seconds,
+            }
+        )
+        runtime = request_character(
+            "POST",
+            "/v1/group-autonomy/config",
+            operation="group-autonomy-config",
+            json=req.model_dump(),
+            timeout=10.0,
+        )
+        return {"persisted": persisted, "runtime": runtime}
+
+    @app.post("/v1/dev/group-autonomy/due/{conversation_id}")
+    def dev_group_autonomy_due(conversation_id: str):
+        safe_id = quote(conversation_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/group-autonomy/due/{safe_id}",
+            operation="group-autonomy-due",
+            timeout=10.0,
+        )
+
+    @app.post("/v1/dev/group-autonomy/opportunity/{conversation_id}")
+    def dev_group_autonomy_opportunity(conversation_id: str):
+        safe_id = quote(conversation_id, safe="")
+        return request_character(
+            "POST",
+            f"/v1/group-autonomy/opportunity/{safe_id}",
+            operation="group-autonomy-opportunity",
+            timeout=300.0,
+        )
 
     @app.get("/v1/dev/space/status")
     def dev_space_status():

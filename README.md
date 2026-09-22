@@ -21,17 +21,17 @@
 - 本地 BGE Embedding + Vector Recall；同一进程内所有人物共享 Embedding / LLM Provider。
 - `PersonReaction.actions[0..3]`：`MESSAGE / EMOJI / STICKER / IMAGE`，以及内部工具意图 `GENERATE_IMAGE`。
 - `actions=[]` 是合法沉默；辅助 Memory/Intent 字段允许安全容错，主 outward action contract 仍严格。
-- Direct Chat + Group Chat；群聊共享事实只保存一次，成员按因果顺序逐个判断。
+- Direct Chat + Group Chat；群聊共享事实只保存一次，成员按因果顺序逐个判断。已有群聊还可以获得稀疏的自主交流机会：轮转 seed 可沉默，短链消息有硬上限，新 User fact 可 supersede 过时自主结果。
 - 异步消息接受：用户消息先持久化并立即返回 202，人物反应通过 SSE 渐进推送。
 - Message Search、Group Mentions、Unread、Intent Preview、Group Archive/Restore。
-- Character Space：共享帖子/评论/点赞/已查看/媒体事实；未归档角色默认每 24H 获得一次可沉默的自主发帖机会（测试时可调成 1H/30min/10min），可自然选择文字、互联网搜图、AI 生图，并可在发帖前通过 Search + Headless Chromium 做受限 World Observation；Audience 最多 10 个候选角色，经同一人物状态决定忽略/点赞/评论，作者可自主回复。
+- Character Space：共享帖子/评论/点赞/已查看/媒体事实；未归档角色默认每 24H 获得一次可沉默的自主发帖机会（测试时可调成 1H/30min/10min），可自然选择文字、互联网搜图、AI 生图或一条语音动态，并可在发帖前通过 Search + Headless Chromium 做受限 World Observation；Audience 最多 10 个候选角色，经同一人物状态决定忽略/点赞/评论，作者可自主回复。
 - 用户图片输入 + Vision；浏览器 Camera / Display Capture 会选择关键帧作为本轮 transient Vision context，不把帧二进制长期写进聊天事实。
 - ImageGen：Direct 与 Group 中 Character 都可以自主选择 `SELFIE / SCENE`；同时保留用户显式“AI 生成图片”草稿工具。
 - Avatar Search / Avatar Generate / 从聊天图片设头像。
 - Media Runtime：SenseVoice ASR；正式 Browser TTS 固定走 `:8001/v1/tts`，按配置路由 Kokoro / Sherpa / Edge / GSV-TTS-Lite。
 - TTS Workbench + Provider Runtime：`:9002` 承载正式 Provider adapter、试听/benchmark，以及可选 VoiceDesign 工具；Sherpa 试听使用独立 provider-specific Media route，不经过正式 TTS selector。
 - GSV-TTS-Lite：独立 `:9014` sidecar；音色统一保存为 `voices/<name>.yaml` 模板，`personas/<character>/voice.yaml` 只引用模板；VoiceDesign freeze 会把试听结果固化成可复用模板。
-- Settings Center：`config.yaml` 管正式运行选择，`.env` 管 Secret 与 GSV runtime 资产；测试阶段可直接调整 Character Space 自主开关、Opportunity Interval（默认24H，可测1H等）、Audience 数量（0~10）和 scheduler poll。Provider/Voice/Speed 与 GSV runtime 配置支持热生效；Space 行为配置当前重启 Character Runtime 生效。
+- Settings Center：`config.yaml` 管正式运行选择，`.env` 管 Secret 与 GSV runtime 资产；测试阶段可直接调整 Character Space 自主开关、Opportunity Interval（默认24H，可测1H等）、Audience 数量（0~10）和 scheduler poll。Provider/Voice/Speed 与 GSV runtime 配置支持热生效；Space/Autonomous Group 行为配置可在 Dev Console 热应用；Settings Center 持久化配置后按其 runtime-apply/restart contract 生效。
 - Dev Console：统一测试 LLM、ASR/TTS、ImageGen、资源与运行状态。
 - Voice Message V1 已形成 Direct/Group 完整链路：`VOICE_MESSAGE` 先持久化 pending 文本事件，再走正式 TTS 合成 WAV/MP3、更新同一事件为 ready/failed，并由浏览器语音气泡播放或展示失败原因。
 - pytest、Browser Smoke、JSONL Eval regression。

@@ -83,7 +83,7 @@ td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
 
 
 /* Space interval presets are behavior hooks as well as compact controls. */
-.space-preset { min-width: 64px; }
+.space-preset, .group-autonomy-preset { min-width: 64px; }
 
 
 /* Shown when dev.js never marked the body, i.e. the page lost its script. The

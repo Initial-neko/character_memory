@@ -91,6 +91,15 @@ space_world_max_chars_per_page: 6000      # extracted readable text cap for each
 space_audience_size: 5                    # 0 disables automatic distribution; hard max 10
 space_scheduler_poll_seconds: 60          # check latency only; does not change interval
 
+# Autonomous Group Chat. One due opportunity chooses one rotating seed member;
+# if that member naturally speaks, at most a few other members may respond once.
+# New user messages always take priority. No infinite character-to-character loop.
+group_autonomy_enabled: true
+group_autonomy_interval_minutes: 360       # 6H production baseline; 10/30/60 useful for soak tests
+group_autonomy_max_messages: 3             # hard range 1..4 visible character messages per opportunity
+group_autonomy_user_quiet_minutes: 30      # skip/rearm when the user spoke too recently; 0 disables this guard
+group_autonomy_poll_seconds: 60            # check latency only; does not change interval
+
 
 # GSV-TTS-Lite runtime assets are intentionally NOT stored in config.yaml.
 # Configure them in Settings Center; they persist to project-local .env:

@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.settings_store import GSV_RUNTIME_FIELDS, SettingsStore
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_IDS, provider_spec
 from character_memory.web_assets import attach_static_assets
@@ -317,7 +318,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
 
         return normalized
 
-    @app.on_event("shutdown")
+    @on_app_event(app, "shutdown")
     def shutdown():
         if owns_client:
             client.close()

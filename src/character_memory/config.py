@@ -50,9 +50,9 @@ class Settings(BaseModel):
     # 450 ms was the old hardcoded value and cut people off mid-sentence.
     voice_silence_ms: int = Field(default=DEFAULT_VOICE_SILENCE_MS, ge=200, le=3000)
 
-    # Search is deliberately separate from the LLM runtime. Avatar discovery
-    # and Space image expression share image search; web_search/web_fetch remain
-    # reserved for the World Observation phase.
+    # Search is deliberately separate from the LLM runtime. Avatar discovery,
+    # Space image expression and World Observation share one provider contract.
+    # Private/direct chat still does not receive a generic arbitrary web tool.
     search_provider: str = "searchapi"
     search_api_key: str = ""
     search_country: str = "jp"

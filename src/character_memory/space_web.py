@@ -460,6 +460,18 @@ def attach_space_routes(app):
         payload["scheduler_capable"] = scheduler_capable
         return payload
 
+    @app.get("/v1/space/dev/opportunity/run/{run_id}")
+    def space_dev_opportunity_run(run_id: int):
+        """Full details of one opportunity run, raw model output included.
+
+        The scheduling status reports ledger summaries so polling it stays
+        cheap; this is where a specific decision is read in full.
+        """
+        run = repository.get_opportunity_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="space opportunity run not found")
+        return run
+
     @app.post("/v1/space/dev/config")
     def space_dev_config(req: SpaceDevConfigRequest):
         return scheduler.apply_runtime_config(

@@ -6,6 +6,8 @@ import json
 import logging
 import threading
 
+from pydantic import BaseModel
+
 from character_memory.domain.models import (
     ActionType,
     Event,
@@ -25,6 +27,102 @@ logger = logging.getLogger("character_memory.space_autonomy")
 
 MAX_AUTONOMOUS_AUDIENCE = 10
 MAX_AUTOMATIC_REPLY_ROUNDS = 4
+
+# The opportunity ledger keeps the raw structured output of each autonomous
+# model call so a prompt experiment can read why a plan came back empty
+# instead of re-deriving it from the parsed fields. The cap only exists so one
+# run cannot grow a single details_json row without limit: observed Space
+# outputs are a few hundred characters, so 2000 covers a full plan or appraisal
+# with room to spare while bounding the three calls at ~6 KB on one row.
+MAX_RAW_MODEL_OUTPUT_CHARS = 2000
+
+
+def _truncate_raw_output(
+    text: str, limit: int = MAX_RAW_MODEL_OUTPUT_CHARS
+) -> tuple[str, bool]:
+    value = str(text or "")
+    if len(value) <= limit:
+        return value, False
+    kept = value[:limit] + f"\n…[truncated: kept {limit} of {len(value)} chars]"
+    return kept, True
+
+
+def _structured_call(model, prompt: str, schema: type[BaseModel], session_id: str):
+    """Run a structured call and keep the provider trace when there is one.
+
+    Returns ``(value, trace)``. Models that cannot surface raw provider text
+    still work: the trace is then ``None`` and the value is used as before.
+    """
+    caller = getattr(model, "structured_call_for_session", None)
+    if callable(caller):
+        result = caller(prompt, schema, session_id)
+        return result.value, result.trace
+    return model.structured_for_session(prompt, schema, session_id), None
+
+
+def _model_call_record(stage: str, schema: type[BaseModel], *, trace=None, error="") -> dict:
+    """One ledger entry describing what the model emitted for one call.
+
+    The record is additive and read-only: nothing here feeds back into the
+    pipeline decision. ``repaired`` is the honest signal that the first output
+    failed validation and the generic repair prompt produced this one, which is
+    how an invalid media intent can come back as an empty list.
+    """
+    raw = str(getattr(trace, "response_text", "") or "") or str(
+        getattr(error, "response_text", "") or ""
+    )
+    raw_kept, raw_truncated = _truncate_raw_output(raw)
+    attempt = int(getattr(trace, "attempt", 0) or 0)
+    record = {
+        "stage": stage,
+        "schema": schema.__name__,
+        "model": str(getattr(trace, "model", "") or ""),
+        "attempt": attempt,
+        "repaired": attempt > 1,
+        "raw_response": raw_kept,
+        "raw_response_chars": len(raw),
+        "raw_response_truncated": raw_truncated,
+        "error": " ".join(str(error or "").split())[:800],
+    }
+    rejected = str(getattr(trace, "rejected_response_text", "") or "")
+    if rejected:
+        rejected_kept, rejected_truncated = _truncate_raw_output(rejected)
+        record["rejected_raw_response"] = rejected_kept
+        record["rejected_raw_response_truncated"] = rejected_truncated
+        record["validation_error"] = " ".join(
+            str(getattr(trace, "validation_error", "") or "").split()
+        )[:800]
+    return record
+
+
+def _summarize_model_calls(details: dict) -> dict:
+    """Status-sized view of the ledger: never carries the raw model text.
+
+    The scheduling status polls up to 100 runs and the Dev Console dumps the
+    whole payload into one text pane, so each run reports only the verdict of
+    each call and the raw text stays behind the single-run endpoint
+    (``GET /v1/space/dev/opportunity/run/{run_id}``). ``attempt`` and ``chars``
+    are always present -- ``chars`` is what tells a reader the full text is
+    stored for that call -- while ``repaired``, ``truncated`` and ``failed``
+    appear only when they are true, so a clean run stays small and a scan of
+    recent runs surfaces the runs that need reading.
+    """
+    summary = {}
+    for stage, record in (details.get("model_calls") or {}).items():
+        if not isinstance(record, dict):
+            continue
+        entry = {
+            "attempt": int(record.get("attempt") or 0),
+            "chars": int(record.get("raw_response_chars") or 0),
+        }
+        if record.get("repaired"):
+            entry["repaired"] = True
+        if record.get("raw_response_truncated"):
+            entry["truncated"] = True
+        if str(record.get("error") or "").strip():
+            entry["failed"] = True
+        summary[stage] = entry
+    return {**details, "model_calls": summary}
 
 
 class SpaceAutonomyService:
@@ -148,7 +246,9 @@ Rendered text:
             )
         return "\n".join(blocks)
 
-    def _explore_world(self, character_id: str, now: datetime, runtime, *, source: str) -> dict:
+    def _explore_world(
+        self, character_id: str, now: datetime, runtime, *, source: str, model_calls: dict
+    ) -> dict:
         result = {
             "enabled": self._world_enabled(),
             "explored": False,
@@ -168,16 +268,26 @@ Rendered text:
 
         bundle = self.access.require_bundle()
         base_context = self._daily_context(character_id, now, runtime)
+        explore_session = (
+            f"space-world-explore:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}"
+        )
         try:
-            explore = bundle.model.structured_for_session(
+            explore, explore_trace = _structured_call(
+                bundle.model,
                 self._world_explore_prompt(base_context),
                 WorldExplorePlan,
-                f"space-world-explore:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}",
+                explore_session,
             )
         except Exception as exc:
             logger.warning("space.world explore_plan_failed character=%s error=%s", character_id, exc)
             result["errors"].append({"stage": "plan", "error": str(exc)[:800]})
+            model_calls["world_explore"] = _model_call_record(
+                "world_explore", WorldExplorePlan, error=exc
+            )
             return result
+        model_calls["world_explore"] = _model_call_record(
+            "world_explore", WorldExplorePlan, trace=explore_trace
+        )
 
         if not explore.explore or not explore.query:
             return result
@@ -236,16 +346,26 @@ expression_angle 只在需要 EXPRESS 时填写，描述人物自然会从什么
 
 {self._observation_prompt(observations)}
 """
+        appraise_session = (
+            f"space-world-appraise:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}"
+        )
         try:
-            appraisal = bundle.model.structured_for_session(
+            appraisal, appraisal_trace = _structured_call(
+                bundle.model,
                 appraisal_prompt,
                 WorldObservationAppraisal,
-                f"space-world-appraise:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}",
+                appraise_session,
             )
         except Exception as exc:
             logger.warning("space.world appraisal_failed character=%s error=%s", character_id, exc)
             result["errors"].append({"stage": "appraisal", "error": str(exc)[:800]})
+            model_calls["world_appraisal"] = _model_call_record(
+                "world_appraisal", WorldObservationAppraisal, error=exc
+            )
             return result
+        model_calls["world_appraisal"] = _model_call_record(
+            "world_appraisal", WorldObservationAppraisal, trace=appraisal_trace
+        )
 
         result["appraisal"] = appraisal.model_dump(mode="json")
         if (
@@ -309,6 +429,7 @@ Sources:
         now: datetime | None = None,
         cascade: bool = True,
         source: str = "DAILY",
+        model_calls: dict | None = None,
     ) -> dict:
         now = now or datetime.now().astimezone()
         profile = self._require_active(character_id)
@@ -316,18 +437,31 @@ Sources:
         runtime = bundle.runtimes.get(character_id)
         if runtime is None:
             raise KeyError(f"runtime not found for character: {character_id}")
+        # Passed in by the scheduler so a run that raises still leaves the calls
+        # it already made in the ledger.
+        ledger = model_calls if model_calls is not None else {}
 
-        world = self._explore_world(character_id, now, runtime, source=source)
+        world = self._explore_world(
+            character_id, now, runtime, source=source, model_calls=ledger
+        )
         # Re-read memory/state after World Observation cognition so the final
         # Space decision sees the same person's newly admitted state.
         prompt = (
             self._daily_context(character_id, now, runtime)
             + self._world_expression_context(world)
         )
-        plan = bundle.model.structured_for_session(
-            prompt,
-            SpacePostPlan,
-            f"space-opportunity:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}",
+        plan_session = (
+            f"space-opportunity:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}"
+        )
+        try:
+            plan, plan_trace = _structured_call(
+                bundle.model, prompt, SpacePostPlan, plan_session
+            )
+        except Exception as exc:
+            ledger["space_plan"] = _model_call_record("space_plan", SpacePostPlan, error=exc)
+            raise
+        ledger["space_plan"] = _model_call_record(
+            "space_plan", SpacePostPlan, trace=plan_trace
         )
         plan_payload = {
             "has_text": bool(str(plan.social_post or "").strip()),
@@ -352,6 +486,7 @@ Sources:
                 "media_errors": media_errors,
                 "world": world,
                 "plan": plan_payload,
+                "model_calls": ledger,
                 "source": source,
             }
 
@@ -440,6 +575,7 @@ Sources:
             "media_errors": media_errors,
             "world": world,
             "plan": plan_payload,
+            "model_calls": ledger,
             "source": source,
         }
 
@@ -796,7 +932,10 @@ class SpaceAutonomyScheduler:
                     "due": epoch_us(now) >= int(state["next_opportunity_at_epoch"]),
                 }
             )
-        recent_runs = self.repository.list_opportunity_runs(limit=100)
+        recent_runs = [
+            {**run, "details": _summarize_model_calls(run.get("details") or {})}
+            for run in self.repository.list_opportunity_runs(limit=100)
+        ]
         metrics = {
             "opportunities": len(recent_runs),
             "posted": 0,
@@ -854,6 +993,10 @@ class SpaceAutonomyScheduler:
             ),
             "characters": items,
             "recent_runs": recent_runs,
+            # recent_runs carries a summary of each decision, not its raw model
+            # output; the full details are one request away.
+            "recent_run_details": "summary",
+            "run_detail_path": "/v1/space/dev/opportunity/run/{run_id}",
             "metrics": metrics,
             "memory_metrics": self.memory_metrics(now),
         }
@@ -953,12 +1096,14 @@ class SpaceAutonomyScheduler:
             )
             if run_id is None:
                 continue
+            model_calls: dict[str, dict] = {}
             try:
                 result = self.service.run_opportunity(
                     character_id,
                     now=now,
                     cascade=True,
                     source="SCHEDULED",
+                    model_calls=model_calls,
                 )
                 status = "POSTED" if result["posted"] else "NO_POST"
                 post_id = (result.get("post") or {}).get("id")
@@ -977,6 +1122,7 @@ class SpaceAutonomyScheduler:
                         "plan": result.get("plan") or {},
                         "media_errors": result.get("media_errors") or [],
                         "audience_error": result.get("audience_error") or "",
+                        "model_calls": model_calls,
                     },
                 )
                 outcomes.append({**result, "run_id": run_id})
@@ -987,6 +1133,9 @@ class SpaceAutonomyScheduler:
                     datetime.now().astimezone(),
                     status="FAILED",
                     error=str(exc),
+                    # A failed run is exactly where the raw output matters, so
+                    # keep whatever calls were made before the exception.
+                    details={"model_calls": model_calls} if model_calls else None,
                 )
                 logger.exception(
                     "space.opportunity failed character=%s run_id=%s error=%s",

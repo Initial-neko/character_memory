@@ -348,6 +348,15 @@ def create_dev_app(
             timeout=10.0,
         )
 
+    @app.get("/v1/dev/space/opportunity/run/{run_id}")
+    def dev_space_opportunity_run(run_id: int):
+        return request_character(
+            "GET",
+            f"/v1/space/dev/opportunity/run/{int(run_id)}",
+            operation="space-run-detail",
+            timeout=10.0,
+        )
+
 
     @app.post("/v1/dev/space/config")
     def dev_space_config(req: DevSpaceConfigRequest):

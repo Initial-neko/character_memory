@@ -125,3 +125,41 @@ def test_opencode_headers_use_stable_conversation_session():
         assert "Authorization" in discovery_headers
     finally:
         model.close()
+
+
+def test_structured_call_trace_keeps_the_rejected_output_of_a_repair():
+    """A repaired call must be distinguishable from a clean one.
+
+    The generic repair prompt resolves an invalid field by asking for empty
+    values, so the caller cannot tell a deliberate empty list from one that was
+    dropped during repair unless the trace keeps the first output.
+    """
+    model = OpenAICompatibleModel("key", attempts=2)
+    replies = iter([
+        json.dumps({"actions": [{"type": "MESSAGE"}]}, ensure_ascii=False),
+        json.dumps({"actions": []}, ensure_ascii=False),
+    ])
+    model._request = lambda messages, **kwargs: next(replies)
+    try:
+        result = model.structured_call_for_session("context", PersonReaction, "s1")
+    finally:
+        model.close()
+
+    assert result.value.actions == []
+    assert result.trace.attempt == 2
+    assert '"MESSAGE"' in result.trace.rejected_response_text
+    assert result.trace.validation_error
+    assert result.trace.response_text == json.dumps({"actions": []}, ensure_ascii=False)
+
+
+def test_structured_call_trace_has_no_rejected_output_when_the_first_attempt_validates():
+    model = OpenAICompatibleModel("key", attempts=2)
+    model._request = lambda messages, **kwargs: json.dumps({"actions": []})
+    try:
+        result = model.structured_call_for_session("context", PersonReaction, "s1")
+    finally:
+        model.close()
+
+    assert result.trace.attempt == 1
+    assert result.trace.rejected_response_text == ""
+    assert result.trace.validation_error == ""

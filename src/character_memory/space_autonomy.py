@@ -319,7 +319,7 @@ Sources:
         # Re-read memory/state after World Observation cognition so the final
         # Space decision sees the same person's newly admitted state.
         prompt = (
-            self._daily_context(character_id, now, runtime.persona)
+            self._daily_context(character_id, now, runtime)
             + self._world_expression_context(world)
         )
         plan = bundle.model.structured_for_session(

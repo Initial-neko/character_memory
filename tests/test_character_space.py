@@ -8,6 +8,7 @@ import yaml
 
 from character_memory.api import create_api
 from character_memory.config import load_settings, set_character_archived
+from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
 from character_memory.space_web import attach_space_routes
 from character_memory.storage.sqlite import SQLiteStore
@@ -42,6 +43,19 @@ def _config(tmp_path: Path, count: int = 12) -> Path:
     return config
 
 
+def _save_test_media(app, character_id: str, index: int, *, source: str = "USER_UPLOAD"):
+    access = app.state.character_memory
+    asset = access.media_storage.save_bytes(
+        character_id=character_id,
+        original_name=f"space-{index}.png",
+        payload=b"\x89PNG\r\n\x1a\n" + f"space-{index}".encode("utf-8"),
+        created_at=datetime(2026, 9, 22, 8, index, tzinfo=timezone.utc),
+        source=source,
+    )
+    access.read_store.add_media_asset(asset)
+    return asset
+
+
 def test_space_repository_keeps_shared_social_facts_and_caps_distinct_commenters(tmp_path: Path):
     store = SQLiteStore(tmp_path / "space-store.db")
     repo = SpaceRepository(store)
@@ -67,6 +81,50 @@ def test_space_repository_keeps_shared_social_facts_and_caps_distinct_commenters
     assert [item.character_id for item in repo.list_reactions(post.id)] == ["c01"]
     assert len(repo.list_comments(post.id)) == MAX_COMMENTERS_PER_POST + 1
     assert "space/001-core" in store.list_schema_migrations()
+    store.close()
+
+
+def test_space_media_relation_migrates_legacy_media_and_caps_ordered_items(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "space-media.db")
+    posts = SpaceRepository(store)
+    now = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+    post = posts.create_post("c00", "旧单图动态", now, media_id="legacy-image")
+
+    media = SpacePostMediaRepository(store)
+    migrated = media.list_for_post(post.id)
+    assert [(item.media_id, item.media_type, item.source_type, item.sort_order) for item in migrated] == [
+        ("legacy-image", "IMAGE", "LEGACY", 0)
+    ]
+    assert "space/004-post-media" in store.list_schema_migrations()
+
+    items = [
+        {
+            "media_id": f"asset-{index}",
+            "media_type": "IMAGE",
+            "source_type": "CHARACTER",
+            "metadata": {"index": index},
+        }
+        for index in range(MAX_SPACE_MEDIA_PER_POST)
+    ]
+    replaced = media.replace_for_post(post.id, items, now + timedelta(minutes=1))
+    assert [item.media_id for item in replaced] == [f"asset-{index}" for index in range(9)]
+    assert [item.sort_order for item in replaced] == list(range(9))
+    assert replaced[4].metadata == {"index": 4}
+
+    try:
+        media.replace_for_post(
+            post.id,
+            items + [{
+                "media_id": "asset-9",
+                "media_type": "IMAGE",
+                "source_type": "CHARACTER",
+            }],
+            now,
+        )
+        assert False, "the tenth media item must be rejected"
+    except ValueError as exc:
+        assert "at most 9" in str(exc)
+
     store.close()
 
 
@@ -111,6 +169,58 @@ def test_space_api_archive_rules_preserve_history_but_stop_new_participation(tmp
         assert client.get("/health").json()["runtime_loaded"] is False
 
 
+def test_space_api_supports_ordered_multi_image_posts_and_legacy_single_media(tmp_path: Path):
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        assets = [_save_test_media(app, "c00", index, source="GENERATED") for index in range(3)]
+        media_ids = [asset.id for asset in assets]
+
+        created = client.post(
+            "/v1/space/posts",
+            json={"character_id":"c00", "content":"三张图一起发。", "media_ids":media_ids},
+        )
+        assert created.status_code == 200
+        post = created.json()["post"]
+        assert post["media_id"] == media_ids[0]
+        assert post["media_count"] == 3
+        assert post["media_limit"] == 9
+        assert [item["media_id"] for item in post["media_items"]] == media_ids
+        assert [item["sort_order"] for item in post["media_items"]] == [0, 1, 2]
+        assert {item["media_type"] for item in post["media_items"]} == {"IMAGE"}
+        assert {item["source_type"] for item in post["media_items"]} == {"GENERATED"}
+        assert all(item["available"] for item in post["media_items"])
+        assert post["media"]["media_id"] == media_ids[0]
+
+        legacy_asset = _save_test_media(app, "c00", 8)
+        legacy = client.post(
+            "/v1/space/posts",
+            json={"character_id":"c00", "media_id":legacy_asset.id},
+        )
+        assert legacy.status_code == 200
+        legacy_post = legacy.json()["post"]
+        assert legacy_post["media_id"] == legacy_asset.id
+        assert [item["media_id"] for item in legacy_post["media_items"]] == [legacy_asset.id]
+
+        too_many = client.post(
+            "/v1/space/posts",
+            json={
+                "character_id":"c00",
+                "content":"不应接受十张图",
+                "media_ids":[f"missing-{index}" for index in range(10)],
+            },
+        )
+        assert too_many.status_code == 422
+
+        missing = client.post(
+            "/v1/space/posts",
+            json={"character_id":"c00", "content":"坏资源", "media_ids":["missing-one"]},
+        )
+        assert missing.status_code == 400
+
+
 def test_space_feed_is_capped_to_ten_items_and_can_filter_one_character(tmp_path: Path):
     config = _config(tmp_path, count=2)
     app = create_api(str(config))
@@ -125,6 +235,7 @@ def test_space_feed_is_capped_to_ten_items_and_can_filter_one_character(tmp_path
         feed = client.get("/v1/space/posts?limit=50").json()
         assert len(feed["posts"]) == 10
         assert feed["max_feed_items"] == 10
+        assert feed["max_media_per_post"] == 9
         assert feed["total"] == 13
         assert feed["has_more"] is True
 
@@ -147,11 +258,26 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "space-nav-button",
         "characterSpaceButton",
         "/v1/space/posts",
-        "limit:\"10\"",
-        "CM.registerFeature(\"space\"",
+        'limit:"10"',
+        'CM.registerFeature("space"',
+        "media_items",
+        "slice(0, 9)",
+        "data-space-media-count",
+        "space-media-single",
+        "space-media-quad",
+        "space-media-nine",
     ]:
         assert token in script
-    for token in ["space-shell", "space-post", "space-comments", "space-character-entry"]:
+    for token in [
+        "space-shell",
+        "space-post",
+        "space-comments",
+        "space-character-entry",
+        ".space-media-grid",
+        ".space-media-single",
+        ".space-media-quad",
+        ".space-media-nine",
+    ]:
         assert token in css
     assert 'addEventListener("submit"' not in script
 

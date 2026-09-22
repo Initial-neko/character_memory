@@ -16,6 +16,7 @@ from urllib.parse import quote
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from character_memory.web_lifecycle import on_app_event
 from character_memory.voices import (
     TEMPLATE_FILE_SUFFIX,
     VoiceProfile,
@@ -746,7 +747,7 @@ def create_gsv_tts_app(runtime: GsvTtsRuntime | None = None):
     app = FastAPI(title="Character Memory GSV-TTS-Lite Experiment", version="0.1")
     app.state.gsv_tts = engine
 
-    @app.on_event("startup")
+    @on_app_event(app, "startup")
     def startup():
         if engine.preload:
             try:

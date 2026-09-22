@@ -26,11 +26,11 @@ from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
 from character_memory.logging_utils import configure_logging
 from character_memory.media import MediaStorage
+from character_memory.message_projection import project_direct_message
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
 from character_memory.runtime_services import CharacterRuntimeAccess, build_runtime_services
 from character_memory.stickers import StickerTagSuggestion, import_sticker_bundle, load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
-from character_memory.voice_message_fields import voice_fields
 from character_memory.web_assets import attach_static_assets
 
 
@@ -330,53 +330,16 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         return item
 
     def message_payload(event) -> dict:
-        if event.event_type == EventType.USER_MESSAGE:
-            role = "user"
-            source_event_id = event.id
-            source_event_type = EventType.USER_MESSAGE.value
-            content = event.metadata.get("display_text", event.content)
-        else:
-            role = "assistant"
-            source_event_id = event.metadata.get("source_event_id")
-            source_event_type = event.metadata.get("source_event_type")
-            content = event.content
-
-        sticker_id = event.metadata.get("sticker_id")
-        sticker = sticker_payload(event.character_id, sticker_id)
-        character_image_id = event.metadata.get("image_id")
-        image = character_image_payload(event.character_id, character_image_id)
+        sticker = sticker_payload(event.character_id, event.metadata.get("sticker_id"))
+        image = character_image_payload(
+            event.character_id,
+            event.metadata.get("image_id"),
+        )
         media_id = event.metadata.get("media_id")
         if media_id:
             image = uploaded_media_payload(media_id)
+        return project_direct_message(event, sticker=sticker, image=image)
 
-        preview = content
-        if sticker is not None and (not str(content or "").strip() or event.metadata.get("action") == "STICKER"):
-            preview = f"[表情包] {sticker['label']}"
-        if image is not None and (not str(content or "").strip() or event.metadata.get("action") == "IMAGE" or media_id):
-            prefix = str(content or "").strip()
-            media_preview = f"[图片] {image['label']}"
-            preview = f"{prefix} {media_preview}".strip() if prefix else media_preview
-
-        return {
-            "id": event.id,
-            "role": role,
-            "content": content,
-            "preview": preview,
-            "event_time": event.event_time.isoformat(),
-            "action": event.metadata.get("action"),
-            "action_index": event.metadata.get("action_index"),
-            "sticker_id": sticker_id,
-            "sticker": sticker,
-            "image_id": character_image_id,
-            "media_id": media_id,
-            "image": image,
-            # Deliberately a distinct key from "media_id" above, which drives
-            # image rendering. None for every non-voice message.
-            **voice_fields(event.metadata),
-            "source_event_type": source_event_type,
-            "source_event_id": source_event_id,
-            "proactive": source_event_type == EventType.PROACTIVE_INTENT.value,
-        }
 
     def history_payload(character_id: str, limit: int) -> dict:
         ensure_character(character_id)

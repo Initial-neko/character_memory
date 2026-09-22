@@ -35,9 +35,11 @@ src/character_memory/
 
 ### `application/`
 
-- `chat_service.py` — direct application service / per-character lock。
+- `chat_service.py` — Direct application service / per-character lock / Direct Event adapter。
+- `incoming_message.py` — Direct/Group shared user-input normalization；统一 text/sticker/image runtime semantics 与 common metadata。
+- `action_materialization.py` — shared outward Action → canonical visible message content/metadata。
 - `async_conversation.py` — ReactionScheduler、watermark、SSE hub。
-- `group_conversation_service.py` — group member ordering、shared-room reaction、member fault isolation、autonomous channel contract。
+- `group_conversation_service.py` — Group member ordering、shared-room reaction、member fault isolation、channel policy / Group Event adapter。
 - `group_autonomy.py` — bounded autonomous Group opportunity + restart-safe scheduler。
 - `proactive_service.py` — persisted Intent execution。
 - `wake_service.py` — process-local character wake opportunity。
@@ -51,9 +53,10 @@ src/character_memory/
 
 ### `runtime/`
 
-- `person_runtime.py` — Event → Recall → LLM → derived persistence。
+- `person_runtime.py` — Direct Event orchestration、Direct policy 与 derived-state commit。
+- `reaction_engine.py` — Direct/Group shared Recall → Context → Model → resource sanitize evaluation pipeline。
 - `person_context.py` — Direct/Group/Space/World shared read-only Persona + Mental State + Recall + Recent Events snapshot。
-- `context.py` — channel-aware compiled character prompt。
+- `context.py` — base/channel-aware compiled character prompt。
 - `sticker_retrieval.py` — Sticker 候选检索。
 
 ### `memory/`
@@ -130,6 +133,8 @@ persona_builder.py          character draft/build flow
 resource_metrics.py         local resource sampling
 logging_utils.py            logging setup
 time_utils.py               datetime helpers
+message_projection.py        Direct/Group canonical API/history message projection
+web_lifecycle.py             non-deprecated FastAPI/Starlette lifecycle callback registration
 ui.py                       read-only Streamlit inspector
 ```
 
@@ -206,8 +211,9 @@ src/character_memory/web/
 主要 ownership：
 
 ```text
-app.js                  conversation/composer core
-groups.js               group UX
+app.js                  conversation/composer core + Direct-only message chrome
+message_content.js       Direct/Group shared text/sticker/image/voice message content renderer
+groups.js               group UX + Group-only speaker/turn chrome
 realtime_reconcile.js   realtime reconciliation
 persona.js              character UI
 mentions.js             @ mention

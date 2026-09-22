@@ -171,8 +171,12 @@ def test_autonomous_group_hard_caps_visible_messages_and_drops_generate_image(tm
     model = AutonomousGroupModel(
         {
             "c00": [
+                ActionDecision(
+                    type=ActionType.GENERATE_IMAGE,
+                    image_purpose="SCENE",
+                    visual_intent="不应该在后台自主群聊触发生图",
+                ),
                 ActionDecision(type=ActionType.MESSAGE, message="第一句"),
-                ActionDecision(type=ActionType.MESSAGE, message="第二句不该保留"),
             ],
             "c01": [ActionDecision(type=ActionType.MESSAGE, message="接一句")],
             "c02": [ActionDecision(type=ActionType.MESSAGE, message="第三个人不该提交")],
@@ -187,8 +191,11 @@ def test_autonomous_group_hard_caps_visible_messages_and_drops_generate_image(tm
         group.id, now=now
     )
 
+    # Seed's GENERATE_IMAGE is filtered before persistence. Because autonomous
+    # mode keeps at most the first *allowed* action, its following MESSAGE stays.
     assert outcome["message_count"] == 2
     assert [item.content for item in outcome["events"]] == ["第一句", "接一句"]
+    assert all(item.metadata["action"] != "GENERATE_IMAGE" for item in outcome["events"])
     assert len(model.calls) == 2
     store.close()
 
@@ -326,3 +333,44 @@ def test_archived_character_is_not_autonomous_group_participant(tmp_path):
     assert "c01" not in outcome["active_member_ids"]
     assert "c01" not in model.calls
     store.close()
+
+
+def test_group_autonomy_schema_migration_and_dev_console_contract(tmp_path):
+    from pathlib import Path
+
+    store = SQLiteStore(tmp_path / "group-autonomy-migration.db")
+    try:
+        assert "group/004-autonomy-scheduler" in store.list_schema_migrations()
+        repo = GroupRepository(store)
+        now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+        group = repo.create_group("迁移验证", ["c00", "c01"], now)
+        state = repo.ensure_autonomy_state(group.id, now, 60)
+        assert state["conversation_id"] == group.id
+    finally:
+        store.close()
+
+    root = Path(__file__).resolve().parents[1]
+    web = root / "src" / "character_memory" / "web"
+    html = (web / "dev.html").read_text(encoding="utf-8")
+    script = (web / "dev.js").read_text(encoding="utf-8")
+    server = (root / "src" / "character_memory" / "dev_server.py").read_text(encoding="utf-8")
+    for token in [
+        'id="groupAutonomyEnabled"',
+        'id="groupAutonomyInterval"',
+        'id="groupAutonomyMaxMessages"',
+        'id="groupAutonomyQuietMinutes"',
+        'id="groupAutonomyPollSeconds"',
+        'id="groupAutonomyGroup"',
+        'id="runGroupAutonomyOpportunity"',
+        'id="forceGroupAutonomyDue"',
+        'id="refreshGroupAutonomyStatus"',
+    ]:
+        assert token in html
+    for token in [
+        "/v1/dev/group-autonomy/status",
+        "/v1/dev/group-autonomy/config",
+        "/v1/dev/group-autonomy/opportunity/",
+        "/v1/dev/group-autonomy/due/",
+    ]:
+        assert token in script
+        assert token in server

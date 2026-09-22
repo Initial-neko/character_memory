@@ -47,6 +47,12 @@ uv run pytest -q
 
 If your change affects browser behavior, also run the relevant browser smoke checks. If it affects a real local model or CUDA sidecar, document the live validation separately from CI.
 
+## Branches and releases
+
+Use short-lived feature/fix/refactor/chore branches and merge them into a CI-green `main`. Do not maintain a permanent `develop` or moving `stable` branch.
+
+Release baselines use immutable tags and GitHub Releases. See `docs/current/RELEASES.md` for the 0.x version rules, RC promotion flow, and when a temporary `release/X.Y` maintenance branch is appropriate.
+
 ## Documentation rules
 
 The maintained documentation layout is:

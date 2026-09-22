@@ -112,7 +112,7 @@ world_observation.py         search discovery -> rendered WorldObservation
 remote_media.py              SSRF-safe public image downloader
 space_store.py               Character Space shared posts/comments/reactions/views + schedule ledger
 space_media.py               ordered Space <-> MediaAsset relation
-space_media_executor.py      Space SEARCH_IMAGE / GENERATE_IMAGE execution
+space_media_executor.py      Space SEARCH_IMAGE / GENERATE_IMAGE / VOICE execution
 space_autonomy.py            Space opportunity + World appraisal + Audience loop
 media.py                    media asset storage/contracts
 media_runtime.py            local ASR/Sherpa TTS providers/runtime

@@ -205,7 +205,9 @@ CI green **不等于**以下真实链路已经验证：
 
 - Opportunity 可以合法 NO_POST，短 interval 不变成发帖 KPI；
 - Space media hard limit 9、Audience hard limit 10；
-- SEARCH_IMAGE / GENERATE_IMAGE provider failure 对有效文本 fail-soft；
+- SEARCH_IMAGE / GENERATE_IMAGE / VOICE provider failure 对有效文本 fail-soft；
+- Space VOICE 一条 intent 只做一次 formal TTS 请求，生成 WAV/MP3 MediaAsset，并保留 transcript/duration metadata；
+- Space audience 看到语音动态时获得安全 transcript 语义，而不是只看到“有附件”；
 - SearchProvider 的 avatar shape policy 不污染 Space image search；
 - World Search discovery 与 Headless Browser rendering 是两个边界；
 - 真实 Chromium smoke 必须证明 JavaScript-rendered text，而不是只读初始 HTML；

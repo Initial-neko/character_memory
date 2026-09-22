@@ -414,6 +414,7 @@ class WorldObservationAppraisal(BaseModel):
 class SpaceMediaIntentType(str, Enum):
     SEARCH_IMAGE = "SEARCH_IMAGE"
     GENERATE_IMAGE = "GENERATE_IMAGE"
+    VOICE = "VOICE"
 
 
 class SpaceMediaIntent(BaseModel):
@@ -424,6 +425,7 @@ class SpaceMediaIntent(BaseModel):
     query: str | None = Field(default=None, max_length=300)
     purpose: str | None = Field(default=None, max_length=16)
     visual_intent: str | None = Field(default=None, max_length=800)
+    voice_text: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="before")
     @classmethod
@@ -446,6 +448,18 @@ class SpaceMediaIntent(BaseModel):
                 raise ValueError("SEARCH_IMAGE requires query")
             self.purpose = None
             self.visual_intent = None
+            self.voice_text = None
+            return self
+
+        if self.type == SpaceMediaIntentType.VOICE:
+            voice_text = str(self.voice_text or "").strip()
+            if not voice_text:
+                raise ValueError("VOICE requires voice_text")
+            self.count = 1
+            self.voice_text = voice_text[:4000]
+            self.query = None
+            self.purpose = None
+            self.visual_intent = None
             return self
 
         purpose = str(self.purpose or "SCENE").strip().upper()
@@ -457,6 +471,7 @@ class SpaceMediaIntent(BaseModel):
         self.purpose = purpose
         self.visual_intent = visual_intent[:800]
         self.query = None
+        self.voice_text = None
         return self
 
 
@@ -486,6 +501,18 @@ class SpacePostPlan(BaseModel):
     def clean_social_post(self):
         value = str(self.social_post or "").strip()
         self.social_post = value or None
+        # One spoken post is one coherent utterance. If a model duplicates the
+        # same media primitive, keep the first instead of synthesizing several
+        # independent voice bubbles for one social post.
+        voice_seen = False
+        normalized = []
+        for intent in self.media_intents:
+            if intent.type == SpaceMediaIntentType.VOICE:
+                if voice_seen:
+                    continue
+                voice_seen = True
+            normalized.append(intent)
+        self.media_intents = normalized
         return self
 
 

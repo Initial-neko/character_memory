@@ -111,6 +111,7 @@
             <select id="spaceMediaType">
               <option value="SEARCH_IMAGE">SEARCH_IMAGE · 互联网图片</option>
               <option value="GENERATE_IMAGE">GENERATE_IMAGE · AI 生图</option>
+              <option value="VOICE">VOICE · 语音动态</option>
             </select>
           </label>
           <label>Count<input id="spaceMediaCount" type="number" min="1" max="9" step="1" value="1" /></label>
@@ -122,10 +123,11 @@
           </label>
           <label>Search Query<input id="spaceMediaQuery" type="text" value="Tokyo night street photography" /></label>
           <label>Visual Intent<input id="spaceMediaVisualIntent" type="text" value="夜晚街道的自然生活氛围" /></label>
+          <label>Voice Text<input id="spaceMediaVoiceText" type="text" value="今天不想打字，就直接说一句。" /></label>
           <label>Post Text<input id="spaceMediaPostText" type="text" value="随手分享一下。" /></label>
           <button class="secondary" id="runSpaceMedia" type="button">测试媒体动态</button>
         </div>
-        <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图。</p>
+        <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE / VOICE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图；Voice Text 会走正式 :8001/v1/tts。</p>
 
         <div class="visual-provider-row">
           <label>World Query<input id="worldQuery" type="text" value="AI agent memory systems latest research" /></label>

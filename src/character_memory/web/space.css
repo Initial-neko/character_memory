@@ -39,6 +39,18 @@
 .space-media-nine .space-media-cell { aspect-ratio:1 / 1; }
 .space-media-link { display:block; width:max-content; max-width:100%; margin-top:8px; color:var(--ui-text); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
+.space-voice { margin-top:10px; display:grid; justify-items:start; gap:4px; }
+.space-voice-bubble { width:var(--space-voice-width,140px); min-width:108px; max-width:280px; height:42px; border:0; border-radius:15px; padding:0 13px; background:var(--ui-surface-sunken); color:var(--ui-text); display:flex; align-items:center; justify-content:space-between; gap:12px; cursor:pointer; }
+.space-voice-bubble:hover { filter:brightness(.985); }
+.space-voice-bubble.playing .space-voice-glyph { animation:space-voice-pulse .8s ease-in-out infinite alternate; }
+.space-voice-bubble.broken { opacity:.55; }
+.space-voice-glyph { display:inline-block; font-weight:750; letter-spacing:-2px; transform:rotate(180deg); }
+.space-voice-duration { font-size:12px; font-weight:650; white-space:nowrap; }
+.space-voice-text-button { min-height:0; border:0; padding:2px 5px; background:transparent; color:var(--ui-muted); font-size:10px; cursor:pointer; }
+.space-voice-text-button:hover { color:var(--ui-text); }
+.space-voice-transcript { max-width:420px; padding:7px 9px; border-radius:var(--ui-r-sm); background:var(--ui-surface-sunken); color:var(--ui-muted); font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+@keyframes space-voice-pulse { from { opacity:.35; transform:rotate(180deg) scale(.92); } to { opacity:1; transform:rotate(180deg) scale(1.04); } }
+
 .space-likes { margin-top:12px; padding:7px 9px; border-radius:var(--ui-r-sm); background:var(--ui-surface-sunken); color:var(--ui-muted); font-size:11px; display:flex; align-items:center; gap:6px; }
 .space-heart { color:var(--ui-text); font-size:15px; line-height:1; }
 .space-comments { margin-top:6px; padding:8px 10px; border-radius:var(--ui-r-sm); background:var(--ui-surface-sunken); display:grid; gap:6px; }

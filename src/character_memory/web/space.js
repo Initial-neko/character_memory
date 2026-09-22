@@ -45,6 +45,7 @@
 
   let opened = false;
   let filterCharacterId = null;
+  let voicePlayer = {audio:null, button:null};
 
   function profileFor(id) {
     return CM.state.characters.find(item => item.id === id) || {id, name:id};
@@ -62,6 +63,21 @@
     return post.media ? [post.media] : [];
   }
 
+  function voiceHtml(item, index) {
+    const metadata = item.metadata || {};
+    const durationMs = Number(metadata.duration_ms || 0);
+    const seconds = durationMs > 0 ? Math.max(1, Math.round(durationMs / 1000)) : 0;
+    const transcript = String(metadata.transcript || "").trim();
+    const width = Math.min(280, 108 + Math.min(seconds || 4, 34) * 5);
+    return `<div class="space-voice" data-space-voice="${CM.escapeHtml(item.media_id || index)}">
+      <button class="space-voice-bubble" type="button" data-space-voice-play data-audio-url="${CM.escapeHtml(item.url)}" style="--space-voice-width:${width}px" aria-label="播放空间语音">
+        <span class="space-voice-glyph" aria-hidden="true">)))</span>
+        <span class="space-voice-duration">${seconds ? `${seconds}"` : "语音"}</span>
+      </button>
+      ${transcript ? `<button class="space-voice-text-button" type="button" data-space-voice-text>文本</button><div class="space-voice-transcript hidden" data-space-voice-transcript>${CM.escapeHtml(transcript)}</div>` : ""}
+    </div>`;
+  }
+
   function mediaHtml(post) {
     const items = mediaItemsFor(post).filter(item => item?.available !== false && item?.url);
     if (!items.length) return "";
@@ -69,7 +85,10 @@
     const images = items.filter(item =>
       item.media_type === "IMAGE" || String(item.mime_type || "").startsWith("image/")
     ).slice(0, 9);
-    const other = items.filter(item => !images.includes(item));
+    const voices = items.filter(item =>
+      item.media_type === "VOICE" || String(item.mime_type || "").startsWith("audio/")
+    ).slice(0, 1);
+    const other = items.filter(item => !images.includes(item) && !voices.includes(item));
 
     let imageHtml = "";
     if (images.length) {
@@ -81,12 +100,21 @@
       imageHtml = `<div class="space-media-grid space-media-${layout}" data-space-media-count="${images.length}">${cells}</div>`;
     }
 
-    const links = other.map(item => {
-      const kind = item.media_type === "VOICE" ? "语音" : "附件";
-      return `<a class="space-media-link" href="${CM.escapeHtml(item.url)}" target="_blank" rel="noreferrer">查看${kind} · ${CM.escapeHtml(item.label || "媒体")}</a>`;
-    }).join("");
+    const voiceMediaHtml = voices.map(voiceHtml).join("");
+    const links = other.map(item =>
+      `<a class="space-media-link" href="${CM.escapeHtml(item.url)}" target="_blank" rel="noreferrer">查看附件 · ${CM.escapeHtml(item.label || "媒体")}</a>`
+    ).join("");
 
-    return `${imageHtml}${links}`;
+    return `${imageHtml}${voiceMediaHtml}${links}`;
+  }
+
+  function stopVoice() {
+    if (voicePlayer.audio) {
+      voicePlayer.audio.pause();
+      voicePlayer.audio.currentTime = 0;
+    }
+    voicePlayer.button?.classList.remove("playing");
+    voicePlayer = {audio:null, button:null};
   }
 
   function likesHtml(post) {
@@ -175,9 +203,45 @@
   }
 
   function close() {
+    stopVoice();
     setOpen(false);
     window.scrollTo({top:0, behavior:"auto"});
   }
+
+  feed.addEventListener("click", event => {
+    const play = event.target.closest("[data-space-voice-play]");
+    if (play) {
+      if (voicePlayer.button === play && voicePlayer.audio) {
+        if (voicePlayer.audio.paused) {
+          voicePlayer.audio.play().catch(console.warn);
+          play.classList.add("playing");
+        } else {
+          voicePlayer.audio.pause();
+          play.classList.remove("playing");
+        }
+        return;
+      }
+      stopVoice();
+      const audio = new Audio(play.dataset.audioUrl);
+      voicePlayer = {audio, button:play};
+      play.classList.add("playing");
+      audio.addEventListener("ended", stopVoice, {once:true});
+      audio.addEventListener("error", () => {
+        play.classList.remove("playing");
+        play.classList.add("broken");
+        voicePlayer = {audio:null, button:null};
+      }, {once:true});
+      audio.play().catch(error => {
+        play.classList.remove("playing");
+        console.warn("space voice playback failed", error);
+      });
+      return;
+    }
+    const textButton = event.target.closest("[data-space-voice-text]");
+    if (textButton) {
+      textButton.parentElement?.querySelector("[data-space-voice-transcript]")?.classList.toggle("hidden");
+    }
+  });
 
   nav.addEventListener("click", () => open(null).catch(console.error));
   characterEntry.addEventListener("click", () => {

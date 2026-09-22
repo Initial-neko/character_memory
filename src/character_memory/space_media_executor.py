@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime
+import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from character_memory.domain.models import EventType, SpaceMediaIntent, SpaceMediaIntentType
 from character_memory.remote_media import RemoteMediaFetcher
@@ -20,12 +24,12 @@ logger = logging.getLogger("character_memory.space_media_executor")
 
 
 class SpaceMediaExecutor:
-    """Execute optional Space image intents into durable MediaAssets.
+    """Execute optional Space media intents into durable MediaAssets.
 
     The planner decides whether media is natural for the post. This class does
-    not make social decisions; it only executes SEARCH_IMAGE / GENERATE_IMAGE
-    requests and returns ordered Space attachment relations. Every intent is
-    fail-soft so text publication is never coupled to an external media provider.
+    not make social decisions; it executes SEARCH_IMAGE / GENERATE_IMAGE / VOICE
+    and returns ordered Space attachment relations. Every intent is fail-soft so
+    text publication is never coupled to an external media or TTS provider.
     """
 
     def __init__(
@@ -35,12 +39,19 @@ class SpaceMediaExecutor:
         search_provider=None,
         remote_fetcher: RemoteMediaFetcher | None = None,
         image_providers: dict[str, Any] | None = None,
+        tts_client=None,
+        media_base: str | None = None,
     ):
         self.access = access
         self.settings = access.settings
         self._search_provider = search_provider
         self._image_providers = image_providers
         self._remote_fetcher = remote_fetcher
+        self._tts_client = tts_client
+        self._owns_tts_client = False
+        self._media_base = str(
+            media_base or os.getenv("CHARACTER_MEDIA_BASE", "http://127.0.0.1:8001")
+        ).rstrip("/")
 
     def max_items(self) -> int:
         return max(0, min(9, int(getattr(self.settings, "space_media_max_items", 3))))
@@ -168,6 +179,86 @@ class SpaceMediaExecutor:
             detail = errors[-1] if errors else "search returned no downloadable images"
             raise RuntimeError(detail)
         return relations
+
+    def _voice_client(self):
+        if self._tts_client is None:
+            self._tts_client = httpx.Client(timeout=180.0)
+            self._owns_tts_client = True
+        return self._tts_client
+
+    @staticmethod
+    def _response_detail(response) -> str:
+        try:
+            value = response.json().get("detail")
+        except Exception:
+            value = None
+        if value is None:
+            value = response.text
+        for _ in range(4):
+            if not isinstance(value, str):
+                break
+            try:
+                parsed = json.loads(value)
+            except (TypeError, ValueError):
+                break
+            if not isinstance(parsed, dict) or "detail" not in parsed:
+                break
+            value = parsed["detail"]
+        return str(value or "").strip() or "no response body"
+
+    @staticmethod
+    def _voice_duration_ms(response) -> int | None:
+        raw = response.headers.get("x-media-audio-ms")
+        try:
+            value = int(float(raw))
+            return value if value >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    def _synthesize_voice(
+        self,
+        character_id: str,
+        intent: SpaceMediaIntent,
+        *,
+        now: datetime,
+    ) -> list[dict[str, Any]]:
+        text = str(intent.voice_text or "").strip()
+        if not text:
+            raise ValueError("Space VOICE requires voice_text")
+        response = self._voice_client().post(
+            f"{self._media_base}/v1/tts",
+            json={"text": text, "voice": character_id},
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Space voice synthesis failed with HTTP {response.status_code}: "
+                f"{self._response_detail(response)}"
+            )
+        asset = self.access.media_storage.save_bytes(
+            character_id=character_id,
+            original_name="space-voice",
+            payload=response.content,
+            created_at=now,
+            source="SPACE_VOICE",
+        )
+        try:
+            self.access.store().add_media_asset(asset)
+        except Exception:
+            self.access.media_storage.delete(asset)
+            raise
+        return [
+            {
+                "media_id": asset.id,
+                "media_type": "VOICE",
+                "source_type": "GENERATED",
+                "metadata": {
+                    "transcript": text,
+                    "duration_ms": self._voice_duration_ms(response),
+                    "provider": str(getattr(self.settings, "tts_provider", "") or ""),
+                    "voice": character_id,
+                },
+            }
+        ]
 
     @staticmethod
     def _recent_dialogue(runtime, character_id: str, before: datetime) -> list[str]:
@@ -313,6 +404,12 @@ class SpaceMediaExecutor:
                         remaining=remaining,
                         runtime=runtime,
                     )
+                elif intent.type == SpaceMediaIntentType.VOICE:
+                    created = self._synthesize_voice(
+                        character_id,
+                        intent,
+                        now=now,
+                    )
                 else:
                     continue
                 relations.extend(created[:remaining])
@@ -344,3 +441,7 @@ class SpaceMediaExecutor:
         if self._remote_fetcher is not None:
             self._remote_fetcher.close()
             self._remote_fetcher = None
+        if self._owns_tts_client and self._tts_client is not None:
+            self._tts_client.close()
+            self._tts_client = None
+            self._owns_tts_client = False

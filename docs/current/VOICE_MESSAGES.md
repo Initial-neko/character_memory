@@ -64,7 +64,7 @@ They may use the same configured TTS provider, but a durable Voice Message does 
 - Ordinary `MESSAGE` remains text-only and is not automatically materialized.
 - Audio is MediaAsset data, not Memory.
 - Translation has a browser UI slot but no required V1 backend translation service.
-- Space Voice Post is a different social-channel feature and is **not** implemented yet.
+- Space Voice Post is implemented as a separate social-channel media intent: one complete `VOICE` intent synthesizes through the same formal `:8001/v1/tts` route and persists as a Space MediaAsset. It does not reuse chat `VOICE_MESSAGE` event semantics.
 - Raw microphone audio remains a transport/input concern and is not persisted as character memory by default.
 
 ## Main modules
@@ -87,7 +87,11 @@ application/async_conversation.py
 
 web/app.js
 web/groups.js
-    voice bubble projection/playback
+    Direct/Group voice bubble projection/playback
+
+space_media_executor.py
+web/space.js
+    autonomous Space VOICE synthesis + durable media relation + native playback
 ```
 
 Regression coverage lives in `test_voice_message_*.py`, including persistence, materialization, Direct/Group transition and browser contract tests.

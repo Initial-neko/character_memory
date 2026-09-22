@@ -93,12 +93,13 @@ class DevSpaceConfigRequest(BaseModel):
 
 
 class DevSpaceMediaRequest(BaseModel):
-    type: str = Field(pattern=r"^(SEARCH_IMAGE|GENERATE_IMAGE)$")
+    type: str = Field(pattern=r"^(SEARCH_IMAGE|GENERATE_IMAGE|VOICE)$")
     content: str = Field(default="", max_length=4000)
     count: int = Field(default=1, ge=1, le=9)
     query: str = Field(default="", max_length=300)
     purpose: str = Field(default="SCENE", pattern=r"^(SELFIE|SCENE)$")
     visual_intent: str = Field(default="", max_length=800)
+    voice_text: str = Field(default="", max_length=4000)
 
 
 class DevWorldFetchRequest(BaseModel):

@@ -12,7 +12,7 @@ The current implementation provides:
 - ordered `space_post_media` attachment relations backed by the existing MediaAsset/MediaStorage layer;
 - text-only posts, legacy single-media posts, and posts containing up to 9 persisted media assets;
 - browser rendering for 1 large image, 2-4 image grids, and 5-9 image nine-grid layouts;
-- autonomous image search and AI-generated Space images through the same media attachment contract;
+- autonomous image search, AI-generated Space images, and one autonomous Space voice attachment through the same media contract;
 - optional public-web World Observation through Playwright headless Chromium before the final Space decision;
 - explicit seen/like/comment state;
 - autonomous interval-based Space opportunities for active characters;
@@ -90,11 +90,11 @@ WEB
 LEGACY
 ```
 
-Image-grid display and autonomous image execution are now both implemented. Audio still degrades to a normal attachment link in the Space feed; formal voice-post playback and link-preview cards remain later work.
+Image-grid display, autonomous image execution, formal Space voice synthesis, and native Space voice playback are implemented. Link-preview cards remain later work.
 
 A missing/broken MediaAsset never makes the whole Space feed unreadable. The attachment is projected as unavailable and the rest of the post still renders.
 
-## Autonomous image expression
+## Autonomous media expression
 
 One Space Opportunity now produces a structured `SpacePostPlan` instead of treating images as a single legacy `image_prompt`:
 
@@ -109,9 +109,12 @@ SpacePostPlan
       purpose: SELFIE | SCENE
       visual_intent
       count
+    VOICE
+      voice_text
+      count: 1
 ```
 
-The character may choose text only, image only, text + images, or silence. Media is never a quota. `SpaceMediaExecutor` executes the optional intents after the character has decided they are natural:
+The character may choose text only, image only, voice only, text + media, or silence. A Space post may contain at most one VOICE intent; its `voice_text` is the complete public spoken expression and is stored as attachment metadata for transcript/provenance. Media is never a quota. `SpaceMediaExecutor` executes the optional intents after the character has decided they are natural:
 
 ```text
 SEARCH_IMAGE
@@ -125,11 +128,17 @@ GENERATE_IMAGE
   -> configured ImageGenerationProvider
   -> MediaStorage / MediaAsset
   -> space_post_media(source=GENERATED)
+
+VOICE
+  -> formal Media Runtime /v1/tts
+  -> configured character voice/provider
+  -> MediaStorage / MediaAsset (WAV or MP3)
+  -> space_post_media(type=VOICE, source=GENERATED, transcript + duration metadata)
 ```
 
 Image-search providers are composition-neutral. Avatar-specific aspect-ratio filtering stays inside `AvatarSearchService`, so Space may search landscapes, screenshots or other wide/tall imagery without changing avatar behavior.
 
-Media execution is fail-soft per intent. Search or ImageGen outages are returned as `media_errors`; a valid text post still publishes. If the post was image-only and every media intent fails, the Opportunity resolves to `NO_POST` instead of creating an empty post.
+Media execution is fail-soft per intent. Search, ImageGen, or TTS outages are returned as `media_errors`; a valid text post still publishes. If the post was image-only and every media intent fails, the Opportunity resolves to `NO_POST` instead of creating an empty post.
 
 The execution cap is `space_media_max_items` (default 3, hard range 0..9). The durable post-media schema still has the hard maximum of 9.
 
@@ -338,7 +347,6 @@ Dev Console proxies them under `/v1/dev/space/*`.
 ## Not implemented yet
 
 - relationship/interest-aware audience ranking;
-- autonomous voice-post synthesis/playback;
 - Link Preview fetching/rendering;
 - push/SSE updates for Space;
 - a full post-detail interaction page;
@@ -354,7 +362,7 @@ src/character_memory/space_media.py
     ordered Space -> MediaAsset relations + legacy single-media migration
 
 src/character_memory/space_media_executor.py
-    fail-soft SEARCH_IMAGE / GENERATE_IMAGE execution into durable MediaAssets
+    fail-soft SEARCH_IMAGE / GENERATE_IMAGE / VOICE execution into durable MediaAssets
 
 src/character_memory/remote_media.py
     reusable SSRF-safe public image downloader
@@ -375,10 +383,10 @@ src/character_memory/space_web.py
     Space HTTP projection, media validation, archive guards and Dev triggers
 
 src/character_memory/web/space.js
-    global Space entry + character-filtered entry + 1-9 image feed rendering
+    global Space entry + character-filtered entry + image grids + native voice playback/transcript
 
 src/character_memory/web/space.css
-    Space layout + single/quad/nine media grids
+    Space layout + single/quad/nine media grids + voice bubbles
 ```
 
 Space remains a social channel of the same Persistent Person. It does not create a second persisted persona or memory database.

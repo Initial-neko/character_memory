@@ -579,6 +579,7 @@ class SpaceAutonomyScheduler:
         self._wake.set()
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=1.0)
+        self.service.media_executor.close()
 
 def autonomy_enabled(access) -> bool:
     return bool(

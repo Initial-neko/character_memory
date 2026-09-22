@@ -45,10 +45,20 @@ class PersonaDraftRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=8)
 
 
+class CharacterCreationMetadataRequest(BaseModel):
+    source: str = Field(default="PERSONA_BUILDER", min_length=1, max_length=64)
+    prompt: str = Field(default="", max_length=12000)
+    name_hint: str = Field(default="", max_length=120)
+    age_hint: int | None = Field(default=None, ge=1, le=120)
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    group_id: str | None = Field(default=None, max_length=120)
+
+
 class CreateCharacterRequest(BaseModel):
     draft: PersonaDraft
     character_id: str = Field(default="", max_length=32)
     confirm_over_soft_limit: bool = False
+    creation: CharacterCreationMetadataRequest | None = None
 
 
 class CharacterCapacityConfirmationRequired(ValueError):

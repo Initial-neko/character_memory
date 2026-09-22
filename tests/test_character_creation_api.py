@@ -96,10 +96,35 @@ def test_created_character_is_immediately_chat_ready(tmp_path):
     )
 
     client = TestClient(create_api(bundle=bundle))
-    created = client.post("/v1/characters", json={"draft": valid_draft()})
+    created = client.post(
+        "/v1/characters",
+        json={
+            "draft": valid_draft(),
+            "creation": {
+                "source": "PERSONA_BUILDER",
+                "prompt": "想认识一个脑洞很大的声音设计师",
+                "name_hint": "Nova",
+                "age_hint": 24,
+                "tags": [],
+            },
+        },
+    )
     assert created.status_code == 200
-    assert created.json()["character"]["id"] == "nova"
+    body = created.json()
+    assert body["character"]["id"] == "nova"
+    assert body["character"]["initialization"]["avatar"]["status"] == "ready"
+    assert body["character"]["initialization"]["voice"]["status"] in {"selected", "unavailable"}
     assert (persona_root / "nova" / "persona.yaml").exists()
+    assert (persona_root / "nova" / "creation.json").exists()
+    assert any((tmp_path / "avatars" / "nova").glob("avatar.*"))
+
+    inspected = client.get("/v1/characters/nova/persona")
+    assert inspected.status_code == 200
+    inspected_body = inspected.json()
+    assert inspected_body["read_only"] is True
+    assert inspected_body["persona"]["name"] == "Nova"
+    assert inspected_body["creation"]["source"] == "PERSONA_BUILDER"
+    assert inspected_body["creation"]["prompt"] == "想认识一个脑洞很大的声音设计师"
 
     ids = {item["id"] for item in client.get("/v1/characters").json()["characters"]}
     assert "nova" in ids

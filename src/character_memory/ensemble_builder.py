@@ -446,6 +446,14 @@ Content:
                     "",
                     confirm_over_soft_limit=True,
                     skip_capacity_check=True,
+                    creation={
+                        "source": "ENSEMBLE_BUILDER",
+                        "prompt": str(build.get("prompt") or ""),
+                        "name_hint": str(item.get("canonical_name") or draft.name),
+                        "age_hint": draft.age,
+                        "tags": ["群像复刻"],
+                        "group_id": group_id,
+                    },
                 )
                 character_id = str(profile["id"])
                 created_ids.append(character_id)

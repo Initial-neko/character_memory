@@ -13,6 +13,7 @@ from character_memory.api_contracts import (
 )
 from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.app import build_model
+from character_memory.character_onboarding import persona_inspector_payload
 from character_memory.config import split_archived
 from character_memory.persona_builder import PersonaBuilder
 
@@ -43,6 +44,14 @@ def attach_core_character_routes(app, access: CoreApiRouteAccess):
     def character_summaries(archived: bool = False):
         listed = split_archived(access.character_profiles(), archived)
         return {"characters": [access.character_summary(profile) for profile in listed]}
+
+    @app.get("/v1/characters/{character_id}/persona")
+    def character_persona(character_id: str):
+        profile = access.ensure_character(character_id)
+        try:
+            return persona_inspector_payload(profile)
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/v1/characters/{character_id}/archive")
     def archive_character(character_id: str):
@@ -99,6 +108,7 @@ def attach_core_character_routes(app, access: CoreApiRouteAccess):
                 req.draft,
                 req.character_id,
                 confirm_over_soft_limit=req.confirm_over_soft_limit,
+                creation=req.creation.model_dump(mode="json") if req.creation is not None else None,
             )
         except CharacterCapacityConfirmationRequired as exc:
             raise HTTPException(status_code=409, detail=exc.detail()) from exc

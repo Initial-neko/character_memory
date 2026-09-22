@@ -12,6 +12,7 @@ from character_memory.api_contracts import (
     MAX_ACTIVE_CHARACTERS,
     SOFT_ACTIVE_CHARACTERS,
 )
+from character_memory.character_onboarding import CharacterOnboardingService
 from character_memory.config import (
     discover_character_profiles,
     resolve_persona_path,
@@ -43,11 +44,17 @@ class ApiCharacterService:
         current_bundle: Callable[[], Any | None],
         character_write_lock: threading.RLock,
         register_runtime_character: Callable[[dict[str, Any]], None],
+        services: Any | None = None,
     ):
         self.settings = settings
         self.current_bundle = current_bundle
         self.character_write_lock = character_write_lock
         self.register_runtime_character = register_runtime_character
+        self.onboarding = (
+            CharacterOnboardingService(settings=settings, services=services)
+            if services is not None
+            else None
+        )
 
     def profiles(self) -> list[dict[str, Any]]:
         current = self.current_bundle()
@@ -231,6 +238,7 @@ class ApiCharacterService:
         *,
         confirm_over_soft_limit: bool = False,
         skip_capacity_check: bool = False,
+        creation: dict[str, Any] | None = None,
     ) -> dict:
         with self.character_write_lock:
             if not skip_capacity_check:
@@ -255,6 +263,17 @@ class ApiCharacterService:
                     if profile["id"] == character_id
                 )
                 self.register_runtime_character(profile)
+                initialization = (
+                    self.onboarding.initialize(
+                        profile,
+                        draft,
+                        creation=creation,
+                    )
+                    if self.onboarding is not None
+                    else None
+                )
+                if initialization is not None:
+                    profile = {**profile, "initialization": initialization}
             except Exception:
                 try:
                     path.unlink(missing_ok=True)

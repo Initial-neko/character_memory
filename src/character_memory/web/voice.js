@@ -491,8 +491,7 @@
         } else {
           voice.currentSpeakerId = null;
           renderCallIdentity();
-          setCapturePhase("listening");
-          setPhase("listening", "正在听…");
+          resumeInputState();
         }
       }
     });
@@ -501,9 +500,10 @@
       if (!voice.active) return;
       let message = "角色响应失败";
       try { message = JSON.parse(event.data || "{}").message || message; } catch (_) {}
-      setCapturePhase("listening");
+      if (voice.micActive) setCapturePhase("listening");
+      else setCapturePhase("idle");
       setPhase("error", message);
-      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      setTimeout(() => voice.active && resumeInputState(), 1200);
     });
   }
 
@@ -559,9 +559,10 @@
       const sent = await sendTranscript(text, turn.visualFrames || []);
       appendCallLog("user", text, sent.message?.id ?? sent.event_id ?? null);
     } catch (error) {
-      setCapturePhase("listening");
+      if (voice.micActive) setCapturePhase("listening");
+      else setCapturePhase("idle");
       setPhase("error", `语音失败：${error.message}`);
-      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      setTimeout(() => voice.active && resumeInputState(), 1200);
     }
   }
 
@@ -591,7 +592,7 @@
   }
 
   async function finishSpeech() {
-    if (!voice.active || !voice.chunks.length) return;
+    if (!voice.active || !voice.micActive || !voice.chunks.length) return;
     const speechEndedAt = performance.now();
     const visualFrames = voice.visualSession?.selectFrames?.({
       fromMs:Math.max(0, voice.speechStartedAt - 1000),
@@ -623,9 +624,13 @@
 
       const validation = validateAsrTranscript(result.text);
       if (!validation.valid) {
-        setCapturePhase("listening");
+        if (voice.micActive) setCapturePhase("listening");
+        else setCapturePhase("idle");
         if (dom.transcript && !voice.playing) dom.transcript.textContent = "没有识别到有效内容";
-        if (!voice.playing) setPhase("listening", "正在听…");
+        if (!voice.playing) {
+          if (voice.micActive) setPhase("listening", "正在听…");
+          else resumeInputState();
+        }
         console.debug("[voice] ignored invalid ASR transcript", validation.reason, validation.text);
         return;
       }
@@ -633,16 +638,18 @@
       const turn = {text:validation.text, visualFrames, asrMs};
       if (voice.playing || voice.queue.length) {
         voice.pendingTurns.push(turn);
-        setCapturePhase("listening");
+        if (voice.micActive) setCapturePhase("listening");
+        else setCapturePhase("idle");
         if (dom.transcript) dom.transcript.textContent = `你：${validation.text} · 已听到，等待对方说完…`;
         return;
       }
       await dispatchRecognizedTurn(turn);
     } catch (error) {
-      setCapturePhase("listening");
+      if (voice.micActive) setCapturePhase("listening");
+      else setCapturePhase("idle");
       if (!voice.playing) {
         setPhase("error", `语音失败：${error.message}`);
-        setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+        setTimeout(() => voice.active && resumeInputState(), 1200);
       } else {
         console.warn("[voice] ASR failed during playback", error);
       }
@@ -707,7 +714,8 @@
         const item = voice.queue.shift();
         voice.currentSpeakerId = item.characterId;
         renderCallIdentity();
-        setCapturePhase("listening");
+        if (voice.micActive) setCapturePhase("listening");
+        else setCapturePhase("idle");
         setPhase("speaking", `${speakerName(item.characterId)} 正在说…`);
         const url = await scheduleSynthesis(item);
         prefetchNext();
@@ -726,7 +734,8 @@
       if (voice.active) {
         voice.currentSpeakerId = null;
         renderCallIdentity();
-        setCapturePhase("listening");
+        if (voice.micActive) setCapturePhase("listening");
+        else setCapturePhase("idle");
         setPhase("error", `TTS 失败：${error.message}`);
       }
     } finally {
@@ -737,7 +746,7 @@
     voice.currentSpeakerId = null;
     renderCallIdentity();
     if (failed) {
-      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      setTimeout(() => voice.active && resumeInputState(), 1200);
       return;
     }
     voice.lastMetrics.total = voice.turnStartedAt ? performance.now() - voice.turnStartedAt + Number(voice.lastMetrics.asr || 0) : null;
@@ -745,8 +754,7 @@
     if (voice.pendingTurns.length) {
       await flushPendingTurns();
     } else {
-      setCapturePhase("listening");
-      setPhase("listening", "正在听…");
+      resumeInputState();
     }
   }
 

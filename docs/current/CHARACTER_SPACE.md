@@ -24,6 +24,12 @@ The current implementation provides:
 
 All active (not archived) characters are conceptually eligible to see new Space posts. Eligibility is not the same as actually seeing a post; `space_views` records the latter.
 
+### World memory boundary
+
+World Observation 的网页 `summary` 默认只属于当前机会的 Working Context，不自动进入长期 Memory。Appraisal 只有在明确给出第一人称 `personal_memory`（人物持续兴趣/经历/反思）时，才会创建 WORLD_OBSERVATION Event 并进入现有 PersonRuntime admission；价格、新闻标题、参数等动态世界事实默认以后重新查询。
+
+Space planning、World explore planning 与 Direct/Group 现在共用 `PersonContextBuilder` 读取 Persona / Mental State / Recall / recent events，但各 Channel 继续拥有自己的行为 contract。
+
 ## Media attachment foundation
 
 Space media is a gradual migration away from the original single `space_posts.media_id` pointer.

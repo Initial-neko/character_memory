@@ -194,6 +194,34 @@ conversation_runtime_traces
 
 Group 也支持 soft archive/restore。Archive 隐藏 conversation，但不删除 `conversation_events`、Trace、Memory 或 Media。
 
+
+### Space
+
+Character Space 使用另一组 shared durable facts：
+
+```text
+space_posts
+space_comments
+space_reactions
+space_views
+space_post_media
+space_opportunity_state
+space_opportunity_runs
+```
+
+因此当前更准确的原则是 **Durable Facts > Derived Cognition**，而不是“所有事实都必须写进单一 `events` 表”。
+
+```text
+Direct fact        -> events
+Group shared fact  -> conversation_events
+Space shared fact  -> space_*
+Media fact         -> media_assets
+                     ↓
+Derived cognition  -> Memory / Mental State / Intent / Trace
+```
+
+不同事实表可以有不同共享语义，但 Memory/State 仍属于同一个 Persistent Person，且不能反向篡改原始事实。
+
 ## 6. SQLite
 
 核心表包括：

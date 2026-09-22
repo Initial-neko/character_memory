@@ -148,6 +148,7 @@ Memory Candidate 是 outward reaction 的辅助派生信息。
 score = 0.70 * semantic
       + 0.20 * recency
       + 0.10 * importance
+      + 0.12 * pinned
 ```
 
 硬规则：
@@ -203,32 +204,48 @@ one shared conversation event
 
 某一个 group member 本轮 structured output 失败，也不应该让其他成员失去形成 reaction/memory 的机会。
 
-## 9. Memory governance is not solved yet
+## 9. Minimal Memory governance
 
-当前系统有自动 Memory Candidate + deterministic admission，但**还没有完整的人为干预手段**。用户/开发者目前缺少一套明确的产品 contract 来：
+V1 已提供最小的人为干预闭环，入口在 Character Runtime 抽屉的 **Memory Inspector**：
 
-- 查看某个人物为什么记住了某条 Memory；
-- 手动删除、纠正、降权或固定一条 Memory；
-- 标记“这只是临时上下文，不应该长期记住”；
-- 控制某类来源（Direct / Group / Space / World）是否允许进入长期 Memory；
-- 在错误 Memory 已经影响 Mental State / Intent 后进行可追溯修复。
+- 查看 active / inactive Memory、importance、来源和原始 Direct Event 摘要；
+- **固定 / 取消固定**：`pinned` Memory 永远进入 bounded recall candidate union，并获得小幅 ranking bonus；
+- **忘记 / 恢复**：只切换派生 Memory 的 `active`，不删除原始 durable fact；
+- **纠正**：创建一条新 Memory，旧 Memory 变为 inactive，并通过 `superseded_by` 指向新版本；不 UPDATE 原文本覆盖历史。
 
-这不是简单增加一个 CRUD 页面就能解决的问题。Memory 是 derived cognition，干预必须保留 provenance，并明确“修改 Memory”与“修改原始 durable fact”的区别。
+因此：
 
-### World Observation memory policy is an open decision
+```text
+Durable Fact
+   ↓
+Memory v1  ──纠正──> Memory v2
+   │                  ↑
+   └ inactive + superseded_by
+```
 
-当前 World Observation 的安全边界是：raw webpage text 不直接进入 Memory；只有 Appraisal 产生的 safe summary 才有机会通过同一 PersonRuntime admission。
+Memory governance API 位于 `memory_web.py`。当前不做复杂的角色记忆分类器、批量规则、知识图谱或来源级策略管理。
 
-但以下产品问题尚未定案：
+### World Observation memory policy
 
-- 人物看到互联网信息，什么情况下应当形成长期 Memory？
-- “知道一个世界事实”与“这件事对我重要”是否应该使用同一种 Memory？
-- 来源 URL、可信度、时效性/过期语义应如何保存？
-- 新闻/网页更新后，旧 World Memory 如何修正或失效？
-- 用户是否能禁止某个 Character 记住互联网观察？
-- World Memory 是否需要独立类型/metadata，还是继续使用语言级 EPISODIC/SELF 等类型？
+当前正式规则是：
 
-在这些问题讨论清楚前，不把 World 观察自动扩大成“搜到就记住”，也不在本轮架构整理中新增复杂 Knowledge Graph 或事实数据库。
+> **看到网页 ≠ 长期记住网页。**
+
+World appraisal 的 `summary` 只服务本轮理解/表达，本身永远不是长期 Memory。只有 appraisal 明确产生非空 `personal_memory`，并且内容描述的是“这次观察对人物本人形成的持续兴趣、经历或反思”，才允许送入同一个 PersonRuntime Memory admission。
+
+例如：
+
+```text
+网页事实：某模型今天价格是多少
+-> 不进入长期 Memory，需要时重新查询
+
+人物经历：我发现自己会持续关注这种长期记忆设计
+-> 可以成为 Person Memory
+```
+
+raw webpage text 仍然是 untrusted data，不直接进入 Memory 或最终 Space prompt。
+
+来源 URL / query 继续保存在 WORLD_OBSERVATION Event metadata 作为 provenance。更复杂的 freshness / confidence / 世界知识缓存暂不实现。
 
 ## 10. 尚未决定
 

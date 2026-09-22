@@ -166,6 +166,52 @@ C continues
 
 如果这一轮所有成员都失败，才提升为 group-level reaction error，避免把系统性故障伪装成“大家都沉默”。
 
+### Autonomous Group Chat
+
+已有群聊现在可以在没有新 User message 的情况下获得稀疏的自主交流机会。它仍然复用同一组 `conversation_events`、Person context、Memory/Mental State 与 Group SSE，不存在“群聊专属人格”。
+
+正式调度由 `GroupAutonomyScheduler` 驱动，状态写入：
+
+```text
+group_autonomy_state
+group_autonomy_runs
+```
+
+默认 baseline：
+
+```text
+interval          360 min
+max messages      3
+user quiet guard  30 min
+poll              60 s
+```
+
+一次 Opportunity 的行为边界：
+
+```text
+hidden GROUP_OPPORTUNITY fact
+  ↓
+rotating seed member decides
+  ├─ silence -> whole opportunity ends
+  └─ speaks
+       ↓
+remaining members each judge at most once
+       ↓
+hard cap 1..4 visible character messages
+```
+
+- seed 沉默时不会为了 KPI 唤醒其他成员；
+- 每个成员本轮最多一个可见动作；
+- V1 允许 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / 已有 IMAGE；
+- V1 主动群聊明确不允许 GENERATE_IMAGE，避免复用“最新 User watermark”生图 stale contract 时产生语义冲突；
+- 新 User Event 可以在模型生成期间持久化，commit guard 会把过时的自主结果标为 `SUPERSEDED`；
+- 归档 Character 不参与新的自主交流；归档 Group 不参与调度；
+- `GROUP_OPPORTUNITY` 是 hidden provenance，不进入正常历史、搜索或人物 Recent Events；
+- 自主 Character message 仍通过现有 `group_character_event` SSE 推送；
+- VOICE_MESSAGE 继续交给现有 VoiceMessageMaterializer，更新同一 conversation event。
+
+Dev Console 可以手动触发 Opportunity、强制 due、调 interval/max messages/quiet guard/poll。手动触发为方便验收不强制 quiet guard；正式 Scheduler 会遵守。
+
 ### Group autonomous ImageGen
 
 Group 中每个 Character 都可以在自己的用户消息 reaction 中独立决定是否输出：
@@ -319,7 +365,7 @@ ASCII Latin/digit >= 2  -> accept
 Search 只查真实 durable chat facts：
 
 - Direct：`events` 中 USER/CHARACTER message；
-- Group：活跃 `conversations` 的 `conversation_events`。
+- Group：活跃 `conversations` 中 USER / CHARACTER 的 `conversation_events`；hidden SYSTEM Opportunity 不进入搜索。
 
 归档 Group 默认不进入普通 message search；恢复后自动重新进入搜索范围。底层 Event 没有删除。
 

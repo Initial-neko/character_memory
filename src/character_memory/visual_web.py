@@ -13,7 +13,6 @@ from character_memory.visual_generation import (
     ImageGenerationRequest,
     VisualPromptPlanner,
     VisualPurpose,
-    build_image_providers,
     visual_aspect_ratio,
 )
 from character_memory.visual_runtime import configure_direct_visual_runtime
@@ -83,13 +82,10 @@ def attach_visual_routes(app) -> None:
     access = getattr(app.state, "character_memory", None)
     if access is None:
         raise RuntimeError("create_api() must expose app.state.character_memory before visual routes are attached")
-    avatar_store = getattr(access, "avatar_store", None)
-    if avatar_store is None:
-        raise RuntimeError("attach_avatar_routes() must run before attach_visual_routes()")
-
+    services = access.services
+    avatar_store = services.avatar_store
     settings = access.settings
-    providers = build_image_providers(settings)
-    access.image_generation_providers = providers
+    providers = services.image_generation_providers
     configure_direct_visual_runtime(access)
 
     def profile(character_id: str) -> dict[str, str]:
@@ -501,11 +497,3 @@ def attach_visual_routes(app) -> None:
             "avatar_url": avatar_url(character_id),
             "avatar": metadata.model_dump(mode="json"),
         }
-
-    @app.on_event("shutdown")
-    def _close_visual_providers():
-        for provider in providers.values():
-            try:
-                provider.close()
-            except Exception:
-                logger.exception("visual provider close_failed provider=%s", getattr(provider, "name", "unknown"))

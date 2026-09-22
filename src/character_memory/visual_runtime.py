@@ -33,7 +33,11 @@ class DirectVisualRuntime:
 
     def _provider(self):
         name = str(getattr(self.settings, "image_generation_provider", "agnes") or "agnes").strip().lower()
-        providers = getattr(self.access, "image_generation_providers", {}) or {}
+        services = getattr(self.access, "services", None)
+        providers = getattr(services, "image_generation_providers", {}) if services is not None else {}
+        # Legacy test adapters may still inject the provider map directly.
+        if not providers:
+            providers = getattr(self.access, "image_generation_providers", {}) or {}
         provider = providers.get(name)
         if provider is None or not provider.available():
             return name, None
@@ -44,7 +48,12 @@ class DirectVisualRuntime:
         return provider is not None
 
     def _avatar_reference(self, character_id: str) -> str | None:
-        avatar_store = getattr(self.access, "avatar_store", None)
+        services = getattr(self.access, "services", None)
+        avatar_store = getattr(services, "avatar_store", None) if services is not None else None
+        # Keep standalone/runtime tests compatible while production ownership is
+        # explicit in RuntimeServices.
+        if avatar_store is None:
+            avatar_store = getattr(self.access, "avatar_store", None)
         if avatar_store is None:
             return None
         path = avatar_store.asset_path(character_id)

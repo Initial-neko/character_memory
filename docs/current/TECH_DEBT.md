@@ -4,6 +4,13 @@ This register records only debt that still exists on current `main`. A possible 
 
 ## Recently resolved
 
+### Route-order service locator coupling
+
+SearchProvider, AvatarStore/AvatarSearchService, ImageGenerationProviders and World Browser/Observer are now constructed once by `RuntimeServices` at Character Runtime composition time. Avatar/Visual/World routes consume those services instead of creating infrastructure and publishing it into `app.state` for later routes to discover.
+
+Production behavior no longer depends on `attach_avatar_routes()` running before World/Visual/Space. Typed `CharacterRuntimeAccess` replaces the former core `SimpleNamespace`. Compatibility properties such as `avatar_store` / `image_generation_providers` delegate to `RuntimeServices`; feature modules may still attach process-local handles such as schedulers/hubs until lifecycle consolidation happens.
+
+
 ### TTS provider/config drift
 
 Formal realtime Provider metadata now lives in `character_memory.tts_registry`. Config validation, Settings and Media routing consume the same Provider ids/default metadata instead of maintaining independent hard-coded lists.
@@ -55,6 +62,22 @@ Settings no longer swallows every GSV unload exception. Runtime application fail
 
 The throwaway harness directory is ignored.
 
+## High priority / semantic architecture
+
+### Space / World cognition path divergence
+
+Direct/Group cognition runs through PersonRuntime Context/Recall/validation. Space post planning and World explore/appraisal currently reuse the same Persona/Memory/Mental State data but still compile part of their own context and call the model outside the main PersonRuntime cognition pipeline.
+
+That is not yet a second persisted Persona, but it is a real semantic drift risk: future Recall/relationship/context changes could affect chat and public Space behavior differently.
+
+Do **not** solve this by blindly routing every web observation into normal chat actions. The next design needs a shared cognition/context layer plus explicit channel policy. This work is intentionally deferred until Memory governance and World-memory semantics are discussed.
+
+### Memory governance / intervention
+
+Automatic Memory Candidate + admission exists, but there is no complete user/developer control plane for inspecting why a Memory was admitted, correcting/removing/pinning it, or preventing selected source classes from becoming long-term memory.
+
+World Observation makes this more important because external information has provenance, freshness and trust semantics that ordinary relationship memories may not have. Raw web text is already blocked from direct Memory writes; the policy for appraisal summaries remains an open product decision.
+
 ## High priority / environment reproducibility
 
 ### Dependency lock
@@ -69,6 +92,14 @@ no uv.lock       -> uv sync --extra all
 ```
 
 A developer-generated, verified local lockfile can therefore be added later without changing the setup contract. Once it is intentionally committed, CI should also be tightened to require the lock rather than merely support it.
+
+## Medium priority / runtime lifecycle
+
+### Background worker ownership
+
+Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent polling, Character Wake, Space Autonomy and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
+
+Before adding many more autonomous schedulers, introduce one typed background-service/lifespan owner with start/stop/health semantics. This does not require Redis/Celery or a distributed queue.
 
 ## Medium priority / observe before refactoring
 

@@ -375,4 +375,13 @@ src/character_memory/web/space.css
     Space layout + single/quad/nine media grids
 ```
 
-Space remains a social channel of the same Persistent Person. It does not create a second persona, memory system, or agent runtime.
+Space remains a social channel of the same Persistent Person. It does not create a second persisted persona or memory database.
+
+One architecture caveat is deliberately explicit: Audience observation and admitted WORLD_OBSERVATION cognition go through PersonRuntime, while initial Space post planning / World explore-appraisal currently still compile some context inside `SpaceAutonomyService` and call the same model directly. They reuse Persona, Mental State and Memory data, but they are not yet the exact same Context/Recall pipeline as Direct/Group.
+
+That unification is deferred until we decide two product contracts together:
+
+1. what information a Person should be allowed to retain as long-term Memory;
+2. when World Observation is ephemeral knowledge versus personally meaningful Memory, including provenance/freshness and user intervention.
+
+Until then, raw webpage text must stay outside long-term Memory and final publishing context, and no refactor should turn “search result” into “remembered fact” automatically.

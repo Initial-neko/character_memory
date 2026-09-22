@@ -75,15 +75,16 @@ server.py               application assembly / attach routes
 async_web.py            async message accept + SSE routes
 group_web.py            group HTTP surface
 history_web.py          history APIs
-search_web.py           message search APIs
+search_web.py           durable message search APIs
+world_web.py            World Observation diagnostic HTTP surface
 space_web.py            Character Space HTTP surface
-avatar_web.py           avatar/search HTTP surface
+avatar_web.py           avatar HTTP/search adapter
 visual_web.py           ImageGen/visual tool HTTP surface
 visual_capture_web.py   Camera/Screen transient Vision routes
 wake_web.py             wake/debug HTTP surface
 ```
 
-`server.py` 是查看 Character Runtime 当前装配顺序的最快入口。
+`server.py` 是查看 Character Runtime route 装配的最快入口；真正的 Search/Avatar/ImageGen/World infrastructure 在 `runtime_services.py` / `create_api()` 中先完成 composition。Feature route 之间不应依赖“谁先 attach”来获得 provider。
 
 后续如果 route 数量继续明显增长，可以在大版本单独迁移到 `web_routes/` 或 `transport/http/`；当前不要制造全仓 import churn。
 
@@ -97,11 +98,18 @@ avatar_intent.py            AI avatar-search planning
 images.py                   character image catalog
 stickers.py                 built-in/global/legacy sticker catalog + import
 sticker_import_cli.py       global sticker import CLI + deprecated --character compatibility
-search.py                   external avatar image search providers
+search.py                   shared image/web search provider contracts
 visual_generation.py        ImageGen providers + prompt compiler
 visual_runtime.py           direct autonomous generated-image execution
 group_autonomous_visual.py  group autonomous ImageGen glue/adapter
-space_store.py               Character Space shared posts/comments/reactions/views
+runtime_services.py          Search/Avatar/ImageGen/World composition root
+browser_web.py               public headless Chromium renderer
+world_observation.py         search discovery -> rendered WorldObservation
+remote_media.py              SSRF-safe public image downloader
+space_store.py               Character Space shared posts/comments/reactions/views + schedule ledger
+space_media.py               ordered Space <-> MediaAsset relation
+space_media_executor.py      Space SEARCH_IMAGE / GENERATE_IMAGE execution
+space_autonomy.py            Space opportunity + World appraisal + Audience loop
 media.py                    media asset storage/contracts
 media_runtime.py            local ASR/Sherpa TTS providers/runtime
 media_bootstrap.py          Windows/native media bootstrap
@@ -246,7 +254,7 @@ time_format.js          shared MM-DD HH:mm:ss timestamp formatter
 | LLM 回复/structured output | `domain/models.py` → `llm/client.py` → `runtime/person_runtime.py` |
 | Direct async/SSE | `application/async_conversation.py` → `async_web.py` → `web/app.js` |
 | Group chat | `group_store.py` → `application/group_conversation_service.py` → `group_web.py` → `web/groups.js` |
-| Character Space | `space_store.py` → `space_web.py` → `web/space.js` / `web/space.css` |
+| Character Space | `space_store.py` → `space_autonomy.py` → `space_media_executor.py` / `world_observation.py` → `space_web.py` → `web/space.js` |
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
 | Memory/Recall | `memory/embedding.py` → `memory/recall.py` → `storage/sqlite.py` |
 | Formal TTS registry/routing | `tts_registry.py` → `settings_server.py` / `media_server.py` → `tts_lab.py` |
@@ -255,7 +263,8 @@ time_format.js          shared MM-DD HH:mm:ss timestamp formatter
 | 用户图片/Vision | `media.py` → `api.py/async_web.py` → `web/images.js` |
 | Camera/Screen Vision | `visual_capture_web.py` → `web/visual_capture.js` / `web/voice.js` |
 | ImageGen | `visual_generation.py` → `visual_runtime.py` → `visual_web.py` → `web/ai_images.js` |
-| Avatar | `avatars.py` / `avatar_intent.py` → `avatar_web.py` → `web/avatars.js` |
+| Shared Search / World | `runtime_services.py` → `search.py` → `browser_web.py` / `world_observation.py` → `world_web.py` |
+| Avatar | `runtime_services.py` → `avatars.py` / `avatar_intent.py` → `avatar_web.py` → `web/avatars.js` |
 | Voice/ASR | `media_bootstrap.py` → `media_runtime.py` → `media_server.py` → `web/voice.js` |
 | Formal TTS | `config.py` → `media_server.py` → `tts_lab.py` → `web/voice.js` |
 | Settings | `envfile.py` → `settings_store.py` → `settings_server.py` → `web/settings.*` |

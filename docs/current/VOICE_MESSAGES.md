@@ -1,14 +1,27 @@
 # Voice Messages
 
-Status: **V1 end-to-end implementation is under review on the voice-message feature branch.**
+Status: **V1 is implemented on current `main` for Direct and Group chat.**
 
-This document describes the current `main` contract after the voice-message persistence work. It is intentionally narrower than voice calls: a voice message is a durable chat event with text plus a synthesized audio asset, not a live call transport.
+Voice Message is a durable chat expression, not a live call transport. The text remains the canonical message body; synthesized audio is an attached MediaAsset that can fail without deleting the message.
 
-## Current contract
+## Current flow
 
-`ActionType.VOICE_MESSAGE` exists as a text-carrying visible action. Its message text remains the durable chat content; audio state is stored in event metadata.
+```text
+PersonReaction VOICE_MESSAGE
+  -> persist CHARACTER_MESSAGE with text + voice_status=pending
+  -> publish pending event
+  -> VoiceMessageMaterializer
+  -> POST Media Runtime :8001/v1/tts with the complete message text
+  -> save WAV/MP3 through MediaStorage
+  -> update the same event id
+       ready  -> voice_media_id + optional duration
+       failed -> voice_error, text remains readable
+  -> republish the same Direct/Group event id over SSE
+  -> browser merges the update in place
+  -> compact voice bubble playback / text expansion
+```
 
-Canonical metadata fields are defined once in `character_memory.voice_message_fields`:
+Canonical metadata is defined in `character_memory.voice_message_fields`:
 
 ```text
 voice_status
@@ -17,70 +30,64 @@ voice_duration_ms
 voice_error
 ```
 
-State progression:
+The state transition is:
 
 ```text
 pending
-  ├─> ready   -> media id + optional duration
-  └─> failed  -> error, no media id
+  ├─ ready
+  └─ failed
 ```
 
-Media storage accepts:
+A failed TTS provider never removes the message text. The failure reason carried by the provider chain is preserved in `voice_error` and surfaced by the browser bubble.
 
-- `audio/wav`
-- `audio/mpeg` (MP3)
+## Direct and Group
 
-and stores audio alongside other local media assets.
+Direct events live in `events`; Group events live in `conversation_events`. Both use the same `VOICE_MESSAGE` action contract and formal TTS path.
 
-History/payload builders preserve the voice metadata so a persisted event can be loaded again without losing its voice state.
-
-## State transitions
-
-The current state-transition service can update a persisted direct-chat event and republish the same event id over SSE. Reusing the original id is important because the eventual browser client should update the existing bubble in place instead of creating a second message.
-
-The service validates event provenance before writing so an id collision with the separate group-event table cannot modify an unrelated direct-chat row.
-
-## V1 product flow
-
-The V1 feature branch completes the durable voice-message path:
-
-```text
-VOICE_MESSAGE action
-  -> persist pending event first
-  -> one POST /v1/tts with the complete message text
-  -> save WAV/MP3 through MediaStorage
-  -> update the same event id to ready/failed
-  -> direct/group SSE updates the existing bubble
-  -> history reload reuses the persisted audio asset
-```
-
-The browser renders a compact IM-style voice bubble rather than native `<audio controls>`. The bubble shows a speaker glyph and duration, grows within a bounded width according to duration, supports play/pause, and exposes the original text on demand. Translation has a UI slot but is not a V1 backend dependency.
-
-Only `VOICE_MESSAGE` enters this materialization path. Ordinary `MESSAGE` remains text and does not gain a durable audio asset.
+The scheduler/materializer updates the **original event id** instead of appending a second message. Browser Direct and Group history/SSE projections preserve the voice fields and merge by id.
 
 ## Relationship to voice calls
 
-Voice calls and voice messages share TTS providers but have different lifecycle semantics.
-
 ```text
 Voice call
-  live microphone -> ASR -> normal Person reaction -> playback queue
+  microphone -> ASR -> normal Person reaction -> ephemeral playback pipeline
 
 Voice message
-  durable chat event -> synthesize once -> persist audio asset -> replay later
+  Person reaction -> durable text event -> synthesize once -> persisted audio -> replay later
 ```
 
-Do not make a voice message depend on live-call UI state, and do not create a second Person/Memory path for it.
+They may use the same configured TTS provider, but a durable Voice Message does not depend on live-call UI state.
 
-## Completion gate
+## Boundaries
 
-The feature becomes end-to-end only when the same change set provides all of the following:
+- One `VOICE_MESSAGE` is one complete TTS request; no sentence/chunk splitting in V1.
+- Ordinary `MESSAGE` remains text-only and is not automatically materialized.
+- Audio is MediaAsset data, not Memory.
+- Translation has a browser UI slot but no required V1 backend translation service.
+- Space Voice Post is a different social-channel feature and is **not** implemented yet.
+- Raw microphone audio remains a transport/input concern and is not persisted as character memory by default.
 
-1. model/runtime admission of `VOICE_MESSAGE`;
-2. synthesis through the configured formal TTS path;
-3. persisted audio and `pending -> ready/failed` transitions;
-4. browser rendering/playback;
-5. focused recovery/error behavior;
-6. regression coverage across persistence and client delivery.
+## Main modules
 
-Acceptance still requires CI plus manual browser/audio verification before this branch is merged.
+```text
+domain/models.py
+    VOICE_MESSAGE action contract
+
+voice_message_fields.py
+    canonical persisted metadata keys/defaults
+
+application/voice_message_materializer.py
+    formal TTS -> MediaAsset -> ready/failed
+
+application/voice_message_service.py
+    durable state transitions + SSE republish
+
+application/async_conversation.py
+    Direct/Group scheduling hook
+
+web/app.js
+web/groups.js
+    voice bubble projection/playback
+```
+
+Regression coverage lives in `test_voice_message_*.py`, including persistence, materialization, Direct/Group transition and browser contract tests.

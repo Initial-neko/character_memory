@@ -51,8 +51,8 @@ class SpaceMediaExecutor:
     def _search(self):
         if self._search_provider is not None:
             return self._search_provider
-        avatar_search = getattr(self.access, "avatar_search", None)
-        return getattr(avatar_search, "provider", None) if avatar_search is not None else None
+        services = getattr(self.access, "services", None)
+        return getattr(services, "search_provider", None) if services is not None else None
 
     def _fetcher(self) -> RemoteMediaFetcher:
         if self._remote_fetcher is None:
@@ -64,7 +64,8 @@ class SpaceMediaExecutor:
     def _providers(self) -> dict[str, Any]:
         if self._image_providers is not None:
             return self._image_providers
-        return getattr(self.access, "image_generation_providers", {}) or {}
+        services = getattr(self.access, "services", None)
+        return getattr(services, "image_generation_providers", {}) or {}
 
     @staticmethod
     def _extension(mime_type: str) -> str:

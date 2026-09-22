@@ -25,7 +25,7 @@ class ImageSearchResult:
 
 @dataclass(frozen=True)
 class WebSearchResult:
-    """Reserved result contract for the later general-purpose web_search tool."""
+    """Provider-neutral public web discovery result used by World Observation."""
 
     title: str
     url: str
@@ -81,10 +81,10 @@ def _avatar_shape_ok(width: int | None, height: int | None) -> bool:
 class SearchApiProvider(SearchProvider):
     """SearchAPI.io Google Images adapter.
 
-    Image search stays provider-neutral here. Avatar-specific shape filtering
-    belongs to AvatarSearchService so Space can reuse the same provider for
-    landscapes, screenshots, news imagery and other non-avatar compositions.
-    General web search remains a separate later capability.
+    Search stays provider-neutral here. Avatar-specific shape filtering belongs
+    to AvatarSearchService, while Space can reuse image search and World
+    Observation can reuse web discovery without exposing arbitrary browsing to
+    private chat.
     """
 
     IMAGE_SEARCH_URL = "https://www.searchapi.io/api/v1/search"

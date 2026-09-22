@@ -114,7 +114,18 @@ Image search providers normalize results into a shared result shape including：
 
 This keeps SSRF/download validation, avatar persistence and UI selection independent from a specific search vendor.
 
-Reserved `search_web()` / `WebFetcher.fetch()` boundaries do **not** mean Character chat currently has general-purpose web browsing. Search remains a narrow avatar tool until a separate product/tool design explicitly opens web context to PersonRuntime.
+`SearchProvider` is now shared infrastructure, not Avatar-owned infrastructure:
+
+```text
+SearchProvider
+├─ search_images -> Avatar Search / Space image expression
+└─ search_web    -> World Observation URL discovery
+
+HeadlessBrowserWebFetcher
+└─ rendered public-page observation for World Observation
+```
+
+This still does **not** expose a generic browser tool to Direct/Group chat. World Observation is a separate bounded product path, and raw page content is not automatically Memory or a chat message. Provider construction lives in `runtime_services.py`; `avatar_web.py` only consumes the already-composed service.
 
 ## 6. Generated avatar
 

@@ -1,17 +1,10 @@
-"""State transitions for a persisted VOICE_MESSAGE.
+"""State transitions for an already-persisted VOICE_MESSAGE.
 
-Synthesis is not performed here. The caller synthesizes, stores the audio as a
-media asset, then reports the outcome through these two functions. Each one
-updates the event's metadata and re-publishes the event under its ORIGINAL id,
-so a client that merges an incoming event into its history by id can update the
-existing bubble in place instead of appending a second one.
-
-That is all the id buys: the client side of the contract is not converged yet.
-The browser builds a message through CM.directEventToMessage, which reads
-sticker_id / image_id / action / source_event_* and none of the voice keys, so
-the voice state never reaches the client's message state and no bubble flips
-out of pending today. Wiring those keys through is deferred to the synthesis
-work; nothing depends on it yet, because no runtime path emits VOICE_MESSAGE.
+The scheduler now emits VOICE_MESSAGE in both Direct and Group chat, the
+materializer synthesizes through the formal TTS route, and the browser merges
+pending/ready/failed updates by the original event id. This module owns only
+the durable metadata transition and SSE re-publication; synthesis and audio
+storage remain in voice_message_materializer.py.
 """
 
 from __future__ import annotations

@@ -130,7 +130,7 @@ uv run pytest -q
 
 CI 独立 browser job 安装 Playwright/Chromium，验证正式页面的关键交互 contract。
 
-Browser extra 不属于默认 `all` dev sync，避免完整本地环境无条件安装浏览器依赖。
+Playwright Python runtime 属于 canonical `all` extra，因为 World Observation 在正式 Runtime 使用它；`pytest-playwright` 仍只属于 browser test extra。Chromium 二进制不随 Python extra 自动安装，CI browser job 和本地 `uv run playwright install chromium` 分别准备它。
 
 ### Local live provider tests
 
@@ -198,7 +198,26 @@ CI green **不等于**以下真实链路已经验证：
 - provider status 不泄露 key；
 - generated payload MIME/size validation。
 
-## 6. Visual Capture regression
+## 6. Character Space / World Observation regression
+
+至少持续覆盖：
+
+- Opportunity 可以合法 NO_POST，短 interval 不变成发帖 KPI；
+- Space media hard limit 9、Audience hard limit 10；
+- SEARCH_IMAGE / GENERATE_IMAGE provider failure 对有效文本 fail-soft；
+- SearchProvider 的 avatar shape policy 不污染 Space image search；
+- World Search discovery 与 Headless Browser rendering 是两个边界；
+- 真实 Chromium smoke 必须证明 JavaScript-rendered text，而不是只读初始 HTML；
+- localhost/private/non-http(s) browser target 被拒绝；
+- raw webpage prompt-injection 文本只能作为 untrusted appraisal data，不进入最终 Space publishing context；
+- IGNORE / MEMORY / EXPRESS / MEMORY_AND_EXPRESS 语义保持分离；
+- WORLD_OBSERVATION outward chat action 被 channel policy 丢弃；
+- Search/browser/appraisal failure 不阻断正常 Space Opportunity；
+- route attach 顺序不能决定 Search/World/ImageGen service 是否存在。
+
+当前还缺一个产品级 Eval：Space planning 与 Direct/Group 是否长期保持同一 Persona cognition。这个问题与 Memory governance / World memory policy 仍待讨论，不用 source-string test 假装已经解决。
+
+## 7. Visual Capture regression
 
 Visual Capture 必须单独测试，不与 ImageGen 混为一个 suite。
 
@@ -226,7 +245,7 @@ Voice integration：
 - invalid ASR transcript 同时不得上传当前 capture frames；
 - valid transcript 仍走同一个 PersonRuntime。
 
-## 7. Media / TTS regression
+## 8. Media / TTS regression
 
 CI contract：
 
@@ -249,7 +268,7 @@ uv run python scripts/benchmark_media.py --wav path/to/test.wav --iterations 20
 
 测量 cold/warm ASR/TTS、HTTP total、RAM/VRAM，而不是凭感觉决定 GPU。
 
-## 8. Settings regression
+## 9. Settings regression
 
 Settings Center 至少验证：
 
@@ -263,7 +282,7 @@ Settings Center 至少验证：
 - complete Settings validation 在写文件前发生；
 - 保存后明确 `restart_required`，不制造局部 hot-reload 假象。
 
-## 9. Sticker regression
+## 10. Sticker regression
 
 至少验证：
 
@@ -275,7 +294,7 @@ Settings Center 至少验证：
 - metadata 缺失时只有启用 AI tagger 才允许自动补标签；
 - legacy character asset route 仍兼容已有客户端。
 
-## 10. Smoke eval
+## 11. Smoke eval
 
 `evals/smoke.jsonl` 保留作为最小 provider/runtime 冒烟数据。
 
@@ -291,7 +310,7 @@ Settings Center 至少验证：
 - minimum Recall count；
 - Context contains。
 
-## 11. Future evaluation work
+## 12. Future evaluation work
 
 后续候选：
 

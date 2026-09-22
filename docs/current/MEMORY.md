@@ -2,24 +2,29 @@
 
 本文定义当前已经确认的 Memory 原则和 baseline。Memory 仍然是 Persistent Person 的核心研究面之一，但不会为了“更像长期记忆系统”提前堆复杂层次。
 
-## 1. Event Log 是历史事实源
+## 1. Durable Facts 是历史事实源
 
-原始经历首先进入 append-only Event Log。
+原始经历先进入它所属的 durable fact store，而不是为了形式统一全部复制进一个 `events` 表。
 
 ```text
-Event Log = Source of Truth
+Direct fact        -> events
+Group shared fact  -> conversation_events
+Space shared fact  -> space_*
+Media fact         -> media_assets
+
+Durable Facts = Source of Truth
 Memory / Mental State / Diary / Summary = derived cognition
 ```
 
 因此：
 
-- Memory 写错，不修改原始 Event；
-- Memory 策略未来换版本，可以从 Event 重建；
-- Diary 不能替代当天真实事件；
-- 每条派生 Memory 保留 `source_event_id`；
+- Memory 写错，不修改原始 durable fact；
+- Memory 策略未来换版本，可以从有 provenance 的事实重新推导；
+- Diary 不能替代当天真实经历；
+- 派生 Memory 应保留可追溯 source/provenance；
 - 图片/语音等媒体二进制不是 Memory，值得长期记住的意义应语言化后进入正常 Memory Candidate。
 
-群聊尤其要区分：房间里的共享事实只在 `conversation_events` 中保存一次，不为每个人复制一份“原始事实”；每个 Character 可以基于同一事实形成不同 Memory。
+群聊里的共享事实只在 `conversation_events` 保存一次；Space post/comment/like/view 也有自己的 shared fact 表。每个 Character 可以基于同一共享事实形成不同的认知派生。
 
 ## 2. Memory 使用自然语言
 
@@ -198,7 +203,34 @@ one shared conversation event
 
 某一个 group member 本轮 structured output 失败，也不应该让其他成员失去形成 reaction/memory 的机会。
 
-## 9. 尚未决定
+## 9. Memory governance is not solved yet
+
+当前系统有自动 Memory Candidate + deterministic admission，但**还没有完整的人为干预手段**。用户/开发者目前缺少一套明确的产品 contract 来：
+
+- 查看某个人物为什么记住了某条 Memory；
+- 手动删除、纠正、降权或固定一条 Memory；
+- 标记“这只是临时上下文，不应该长期记住”；
+- 控制某类来源（Direct / Group / Space / World）是否允许进入长期 Memory；
+- 在错误 Memory 已经影响 Mental State / Intent 后进行可追溯修复。
+
+这不是简单增加一个 CRUD 页面就能解决的问题。Memory 是 derived cognition，干预必须保留 provenance，并明确“修改 Memory”与“修改原始 durable fact”的区别。
+
+### World Observation memory policy is an open decision
+
+当前 World Observation 的安全边界是：raw webpage text 不直接进入 Memory；只有 Appraisal 产生的 safe summary 才有机会通过同一 PersonRuntime admission。
+
+但以下产品问题尚未定案：
+
+- 人物看到互联网信息，什么情况下应当形成长期 Memory？
+- “知道一个世界事实”与“这件事对我重要”是否应该使用同一种 Memory？
+- 来源 URL、可信度、时效性/过期语义应如何保存？
+- 新闻/网页更新后，旧 World Memory 如何修正或失效？
+- 用户是否能禁止某个 Character 记住互联网观察？
+- World Memory 是否需要独立类型/metadata，还是继续使用语言级 EPISODIC/SELF 等类型？
+
+在这些问题讨论清楚前，不把 World 观察自动扩大成“搜到就记住”，也不在本轮架构整理中新增复杂 Knowledge Graph 或事实数据库。
+
+## 10. 尚未决定
 
 以下故意没有写死：
 

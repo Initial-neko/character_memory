@@ -4,8 +4,6 @@ from dataclasses import asdict
 
 from pydantic import BaseModel, Field
 
-from character_memory.browser_web import HeadlessBrowserWebFetcher
-from character_memory.world_observation import WorldObservationService
 
 
 class WorldFetchRequest(BaseModel):
@@ -29,16 +27,9 @@ def attach_world_routes(app) -> None:
         raise RuntimeError("create_api() must expose app.state.character_memory before world routes are attached")
 
     settings = access.settings
-    avatar_search = getattr(access, "avatar_search", None)
-    search_provider = getattr(avatar_search, "provider", None) if avatar_search is not None else None
-    fetcher = HeadlessBrowserWebFetcher(
-        timeout_seconds=float(getattr(settings, "web_browser_timeout_seconds", 20.0)),
-        render_wait_ms=int(getattr(settings, "web_browser_render_wait_ms", 700)),
-        channel=str(getattr(settings, "web_browser_channel", "auto") or "auto"),
-    )
-    observer = WorldObservationService(search_provider, fetcher)
-    access.world_fetcher = fetcher
-    access.world_observer = observer
+    services = access.services
+    fetcher = services.world_fetcher
+    observer = services.world_observer
 
     @app.get("/v1/world/status")
     def world_status():

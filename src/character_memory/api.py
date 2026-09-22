@@ -5,7 +5,6 @@ from datetime import datetime
 import logging
 import os
 from pathlib import Path
-from types import SimpleNamespace
 import threading
 import time
 
@@ -28,6 +27,7 @@ from character_memory.images import load_image_catalog
 from character_memory.logging_utils import configure_logging
 from character_memory.media import MediaStorage
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft, normalize_character_id, save_persona
+from character_memory.runtime_services import CharacterRuntimeAccess, build_runtime_services
 from character_memory.stickers import StickerTagSuggestion, import_sticker_bundle, load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.voice_message_fields import voice_fields
@@ -101,6 +101,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         resolve_media_dir(settings),
         max_bytes=int(getattr(settings, "media_max_bytes", 8 * 1024 * 1024)),
     )
+    services = build_runtime_services(settings)
     runtime_error: str | None = None
     runtime_loading = False
     init_lock = threading.Lock()
@@ -449,13 +450,14 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     # One application runtime access point. Feature route modules (group chat,
     # future media tools) reuse this instead of creating their own model/store.
-    app.state.character_memory = SimpleNamespace(
+    app.state.character_memory = CharacterRuntimeAccess(
         settings=settings,
         get_bundle=get_bundle,
         require_bundle=require_bundle,
         store=lambda: app_bundle.store if app_bundle is not None else read_store,
         read_store=read_store,
         media_storage=media_storage,
+        services=services,
         character_profiles=character_profiles,
         global_sticker_catalog=global_sticker_catalog,
         refresh_runtime_sticker_catalog=refresh_runtime_sticker_catalog,
@@ -502,6 +504,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             stop_space = getattr(space_scheduler, "stop", None)
             if callable(stop_space):
                 stop_space()
+        services.close()
         if own_bundle:
             if app_bundle is not None:
                 app_bundle.close()

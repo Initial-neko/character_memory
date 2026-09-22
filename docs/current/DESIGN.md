@@ -131,13 +131,17 @@ Voice 不是一个新的 Voice Agent，ImageGen 也不是一个独立角色。�
 
 验证 Persona、Memory、Recall、Mental State、Action Choice、长期一致性和关系可解释性。
 
-当前仓库仍然主要服务这一阶段。
+这个核心目标仍然没有结束。Voice / Avatar / ImageGen / World Observation 的评价标准仍然是：**有没有帮助验证同一个人物跨渠道仍然是同一个人**，而不是“功能数量多不多”。
 
-Voice / Avatar / ImageGen 虽然已经有原型，但它们的评价标准仍然是：**有没有帮助验证同一个人跨渠道仍然是同一个人**，而不是“功能数量多不多”。
+### Phase 1.x — Society foundation（当前已经开始）
+
+Character Space 已经落地 shared Feed、评论、点赞、浏览、角色自主发动态、Audience reaction、作者回复和受限 World Observation。这些是 **Prove the Society 的基础设施与早期实验面**，但还不能等同于“社会关系已经被证明”。
+
+当前要验证的是：人物进入公共空间后，是否仍保持与 Direct/Group 一致的身份、记忆和行为逻辑，而不是因为换了渠道变成另一个 Prompt Agent。
 
 ### Phase 2 — Prove the Society
 
-未来再加入 Profile、Feed、评论、DM、发现与重逢、动态推荐，让不同人物真正构成社会关系空间。
+真正进入这一阶段需要验证持续的多人物关系形成，而不只是“有一个 Feed”。候选能力包括 relationship/interest-aware discovery、重逢、DM/Group autonomy、长期关系网络和动态推荐，并需要独立 Eval 证明这些互动不是随机热闹。
 
 ### Phase 3 — Presence at scale
 

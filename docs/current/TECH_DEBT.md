@@ -8,7 +8,7 @@ This register records only debt that still exists on current `main`. A possible 
 
 SearchProvider, AvatarStore/AvatarSearchService, ImageGenerationProviders and World Browser/Observer are now constructed once by `RuntimeServices` at Character Runtime composition time. Avatar/Visual/World routes consume those services instead of creating infrastructure and publishing it into `app.state` for later routes to discover.
 
-Production behavior no longer depends on `attach_avatar_routes()` running before World/Visual/Space. Transitional aliases remain on the runtime access object for older adapters/tests, but they are not the ownership boundary.
+Production behavior no longer depends on `attach_avatar_routes()` running before World/Visual/Space. Typed `CharacterRuntimeAccess` replaces the former core `SimpleNamespace`. Compatibility properties such as `avatar_store` / `image_generation_providers` delegate to `RuntimeServices`; feature modules may still attach process-local handles such as schedulers/hubs until lifecycle consolidation happens.
 
 
 ### TTS provider/config drift

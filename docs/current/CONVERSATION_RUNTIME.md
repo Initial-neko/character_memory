@@ -156,7 +156,7 @@ member C -> ...
 
 ### Ensemble groups（一键建群）
 
-`POST /v1/ensembles` 建一个空的 `BUILDING` 群，`/research` 联网抓资料并生成候选 Persona 草稿，`/confirm` 由用户勾选后一次性建角色并填充成员，`/cancel` 放弃。confirm **不会自动开聊**——它只建角色、写成员，进群后仍需用户自己发第一句。
+`POST /v1/ensembles` 只创建一个不可见的 `BUILDING` build record，不提前创建真实 GroupConversation；`POST /v1/ensembles/prepare` 是一键入口，会创建 build record 后立即执行联网 research，成功后返回 `READY` Persona 草稿，失败则清理该 build record。兼容的 `/{build_id}/research` 仍可对已有 build 单独执行资料整理。`/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。
 
 一次 confirm 的模型调用量级：每名成员一次 Persona 生成（上限 12 名）加数页网页抓取。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
 

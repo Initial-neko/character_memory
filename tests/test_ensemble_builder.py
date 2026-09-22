@@ -63,7 +63,7 @@ class FakeEnsembleModel:
                     name="Kurisu",
                     age=18,
                     identity="研究者",
-                    description="理性、反应快，对荒唐说法会直接吐槽。",
+                    description="理性、反应快，对荒唐说法会直接吐槽，也会认真维护自己的专业判断和边界。",
                     speech_style="清晰直接，常会指出逻辑问题。",
                     relationship_notes=["经常与 Okabe 争论"],
                     tags=["研究", "吐槽"],

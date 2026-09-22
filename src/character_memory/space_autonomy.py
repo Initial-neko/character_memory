@@ -361,7 +361,9 @@ Sources:
             voice_transcript = str(
                 (voice_relations[0].get("metadata") or {}).get("transcript") or ""
             ).strip()
-        if content:
+        if content and voice_transcript:
+            event_content = f"{content}\n[语音] {voice_transcript}"
+        elif content:
             event_content = content
         elif voice_transcript:
             event_content = f"[语音动态] {voice_transcript}"
@@ -382,6 +384,7 @@ Sources:
                         "media_count": len(relations),
                         "media_types": [item["media_type"] for item in relations],
                         "media_sources": [item["source_type"] for item in relations],
+                        "voice_transcript": voice_transcript or None,
                     },
                 )
             )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -9,6 +10,9 @@ from character_memory.domain.models import SpaceMediaIntent, SpaceMediaIntentTyp
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
+
+
+logger = logging.getLogger("character_memory.space")
 
 
 class CreateSpacePostRequest(BaseModel):
@@ -389,15 +393,27 @@ def attach_space_routes(app):
                 reply_to_comment_id=req.reply_to_comment_id,
                 sticker_id=req.sticker_id,
             )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409 if "at most" in str(exc) else 400, detail=str(exc)) from exc
+        # The comment is already durable at this point. Whether the characters
+        # answer it is a follow-up, so a provider or model failure must not turn
+        # a comment the user successfully wrote into an error they will retry --
+        # retrying would post the same comment twice.
+        try:
             thread_replies = autonomy.process_comment_thread(
                 post_id,
                 comment.id,
                 now=now,
             )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409 if "at most" in str(exc) else 400, detail=str(exc)) from exc
+        except Exception:
+            logger.exception(
+                "space.thread_failed post=%s comment=%s",
+                post_id,
+                comment.id,
+            )
+            thread_replies = []
         return {
             "comment": {
                 **comment.model_dump(mode="json"),
@@ -550,5 +566,11 @@ def attach_space_routes(app):
             }
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            # A diagnostic surface reports the failure instead of a bare 500:
+            # one simulated audience can spend dozens of model calls, and the
+            # operator needs the reason, not an empty error page.
+            logger.exception("space.dev_audience_failed post=%s", post_id)
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return app

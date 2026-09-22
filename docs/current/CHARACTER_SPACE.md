@@ -310,6 +310,7 @@ The product should stay small-scale and legible even if many personas exist.
 - one post may reference at most 9 media assets;
 - one triggered AI reply chain advances at most 4 automatic rounds; a later user reply starts a new bounded interaction opportunity;
 - 10 character commenters/audience members and 9 media assets are hard ceilings, not targets;
+- a written comment is durable before the characters answer it: the automatic replies are a follow-up, so a model or provider failure there is logged and reported as zero replies while the comment POST still succeeds — returning an error would make the client retry a comment that is already stored;
 - the autonomous selector normally processes the configured audience size (default 5), always capped at 10;
 - silence is valid and expected;
 - the frontend should avoid presenting more than roughly 5-10 character identities in one local interaction area.

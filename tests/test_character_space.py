@@ -8,6 +8,7 @@ import yaml
 
 from character_memory.api import create_api
 from character_memory.config import load_settings, set_character_archived
+from character_memory.space_autonomy import SpaceAutonomyService
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
 from character_memory.space_web import attach_space_routes
@@ -456,6 +457,39 @@ def test_browser_user_can_comment_and_reload_the_same_space_fact(tmp_path: Path)
         assert nested["content"] == "那就说定啦。"
         assert nested["reply_to_comment_id"] == target_id
         assert nested["actor_type"] == "USER"
+
+
+def test_a_failed_thread_reply_does_not_report_a_written_comment_as_an_error(tmp_path: Path, monkeypatch):
+    """A comment that was stored stays stored, whatever the characters do next.
+
+    The automatic replies run after the comment is already durable. A model or
+    provider failure there used to escape as a 500, so the client showed
+    "comment failed" and the user retried -- storing the same comment twice.
+    """
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    def explode(self, post_id, comment_id, *, now=None, max_rounds=None):
+        raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr(SpaceAutonomyService, "process_comment_thread", explode)
+
+    with TestClient(app) as client:
+        post_id = client.post(
+            "/v1/space/posts",
+            json={"character_id": "c00", "content": "今天降温了。"},
+        ).json()["post"]["id"]
+
+        response = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={"content": "我这边也是。"},
+        )
+        assert response.status_code == 200
+        assert response.json()["thread_replies"] == []
+
+        comments = client.get(f"/v1/space/posts/{post_id}").json()["post"]["comments"]
+        assert [item["content"] for item in comments] == ["我这边也是。"]
 
 
 def test_space_feed_pages_ten_items_and_can_filter_one_character(tmp_path: Path):

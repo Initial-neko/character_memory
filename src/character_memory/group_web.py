@@ -7,7 +7,7 @@ import threading
 from pydantic import BaseModel, Field, model_validator
 
 from character_memory.application.group_conversation_service import GroupConversationService
-from character_memory.group_store import GroupRepository
+from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.images import load_image_catalog
 from character_memory.voice_message_fields import voice_fields
 
@@ -17,7 +17,7 @@ logger = logging.getLogger("character_memory.group_web")
 
 class CreateGroupRequest(BaseModel):
     name: str = Field(default="新群聊", max_length=80)
-    member_ids: list[str] = Field(min_length=2, max_length=4)
+    member_ids: list[str] = Field(min_length=2, max_length=MAX_GROUP_CHARACTERS)
 
     @model_validator(mode="after")
     def distinct_members(self):

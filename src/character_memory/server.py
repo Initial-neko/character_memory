@@ -19,13 +19,15 @@ from character_memory.world_web import attach_world_routes
 config_path = os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml")
 app = create_api(config_path)
 attach_history_routes(app)
+# RuntimeServices are composed before any feature route attaches. World no
+# longer depends on Avatar route initialization order.
+attach_world_routes(app)
 attach_avatar_routes(app)
 attach_voice_routes(app)
 attach_visual_routes(app)
 attach_group_routes(app, config_path)
 attach_group_member_routes(app)
 attach_search_routes(app)
-attach_world_routes(app)
 attach_space_routes(app)
 attach_async_routes(app)
 install_group_autonomous_visual(app)

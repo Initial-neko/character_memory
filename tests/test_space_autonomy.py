@@ -88,6 +88,59 @@ class FailingMediaModel(SpaceModel):
         )
 
 
+class VoiceSpaceModel(SpaceModel):
+    def structured_for_session(self, prompt, schema, session_id):
+        assert schema is SpacePostPlan
+        self.opportunities += 1
+        assert "VOICE" in prompt
+        return SpacePostPlan(
+            social_post=None,
+            media_intents=[
+                SpaceMediaIntent(
+                    type="VOICE",
+                    voice_text="今天不想打字，就这样说一句。晚安。",
+                )
+            ],
+        )
+
+
+class FakeVoiceExecutor:
+    def execute(self, character_id, intents, *, now, runtime=None):
+        assert character_id == "c00"
+        assert len(intents) == 1
+        assert intents[0].type.value == "VOICE"
+        return {
+            "relations": [
+                {
+                    "media_id": "voice-asset-1",
+                    "media_type": "VOICE",
+                    "source_type": "GENERATED",
+                    "metadata": {
+                        "transcript": intents[0].voice_text,
+                        "duration_ms": 2600,
+                    },
+                }
+            ],
+            "errors": [],
+        }
+
+    def discard(self, relations):
+        pass
+
+    def close(self):
+        pass
+
+
+class ListeningSpaceModel(SpaceModel):
+    def __init__(self):
+        super().__init__()
+        self.reaction_contexts = []
+
+    def react_call_for_session(self, context, session_id):
+        self.reaction_contexts.append(context)
+        return super().react_call_for_session(context, session_id)
+
+
 class WorldMemoryModel(SpaceModel):
     def _reaction(self, context):
         if "WORLD_OBSERVATION" in context:
@@ -390,6 +443,64 @@ def test_space_autonomy_runs_view_reaction_comment_and_author_reply(tmp_path):
     assert any(
         item.event_type == EventType.SPACE_COMMENT_RECEIVED
         for item in store.list_events("c00")
+    )
+    store.close()
+
+
+def test_space_voice_only_post_persists_transcript_as_social_event_context(tmp_path):
+    access, store, _ = _access(tmp_path, ids=("c00",), model=VoiceSpaceModel())
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    service.media_executor = FakeVoiceExecutor()
+    now = datetime(2026, 9, 22, 10, 0, tzinfo=timezone.utc)
+
+    outcome = service.run_opportunity("c00", now=now, cascade=False, source="DEV")
+
+    assert outcome["posted"] is True
+    assert outcome["post"]["content"] == ""
+    assert outcome["post"]["media_count"] == 1
+    assert outcome["post"]["media_items"][0]["media_type"] == "VOICE"
+    assert outcome["post"]["media_items"][0]["metadata"]["transcript"] == "今天不想打字，就这样说一句。晚安。"
+
+    social = [
+        item for item in store.list_events("c00")
+        if item.event_type == EventType.SOCIAL_POST
+    ]
+    assert len(social) == 1
+    assert social[0].content == "[语音动态] 今天不想打字，就这样说一句。晚安。"
+    assert social[0].metadata["media_types"] == ["VOICE"]
+    store.close()
+
+
+def test_space_audience_receives_voice_transcript_as_shared_visible_fact(tmp_path):
+    model = ListeningSpaceModel()
+    access, store, _ = _access(tmp_path, ids=("c00", "c01"), model=model)
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    now = datetime(2026, 9, 22, 10, 30, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "", now, media_id="voice-asset-2")
+    service.media_repository.replace_for_post(
+        post.id,
+        [
+            {
+                "media_id": "voice-asset-2",
+                "media_type": "VOICE",
+                "source_type": "GENERATED",
+                "metadata": {
+                    "transcript": "刚刚路过楼下，风特别舒服。",
+                    "duration_ms": 1900,
+                },
+            }
+        ],
+        now,
+    )
+
+    outcomes = service.process_audience(post.id, now=now)
+
+    assert len(outcomes) == 1
+    assert any(
+        "语音里说：“刚刚路过楼下，风特别舒服。”" in context
+        for context in model.reaction_contexts
     )
     store.close()
 

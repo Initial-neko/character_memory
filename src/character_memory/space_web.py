@@ -103,9 +103,10 @@ def attach_space_routes(app):
             # Dev/Settings can hot-enable it without restarting Character Runtime.
             scheduler.start()
 
-        @app.on_event("shutdown")
-        def _stop_space_autonomy():
-            scheduler.stop()
+    @app.on_event("shutdown")
+    def _stop_space_autonomy():
+        scheduler.stop()
+        autonomy.media_executor.close()
 
     # Expose the feature runtime for tests/diagnostics without initializing LLM.
     access.space_repository = repository
@@ -150,7 +151,7 @@ def attach_space_routes(app):
         raw_source = str(asset.source or "").strip().upper()
         if "SEARCH" in raw_source:
             source_type = "SEARCH"
-        elif raw_source in {"GENERATED", "IMAGEGEN", "AI_GENERATED", "TTS", "VOICE_SYNTH"}:
+        elif "GENERATED" in raw_source or raw_source in {"IMAGEGEN", "AI_GENERATED", "TTS", "VOICE_SYNTH"}:
             source_type = "GENERATED"
         elif raw_source in {"WEB", "FETCHED", "WEB_FETCH"}:
             source_type = "WEB"

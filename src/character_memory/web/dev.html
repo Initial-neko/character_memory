@@ -137,6 +137,18 @@
           <button class="secondary" id="runWorldFetch" type="button">无头浏览器打开 URL</button>
         </div>
         <p class="subtle">World Observation 会先搜索候选 URL，再由 Playwright 无头 Chromium 执行页面 JS 并抽取正文。URL 测试只验证浏览器抓取，不触发角色记忆或 Space 发帖。</p>
+
+        <div class="visual-provider-row">
+          <label>Pulse Topic ID<input id="worldPulseTopicId" type="number" min="1" placeholder="刷新 Pulse 后自动填入最新 Topic" /></label>
+          <button class="secondary" id="refreshWorldPulse" type="button">刷新 World Pulse</button>
+          <button class="secondary" id="discussWorldPulse" type="button">让角色评论 Topic</button>
+          <button class="secondary" id="browseWorldAsCharacter" type="button">选中角色自主上网</button>
+          <button class="secondary" id="runWorldActivity" type="button">执行到期 World Activity</button>
+          <button class="secondary" id="refreshWorldActivity" type="button">刷新 World Activity 状态</button>
+        </div>
+        <p class="subtle">World Pulse 直接读取配置的信息聚合/热榜站点，再由 LLM 去重和汇总；它不会因为出现热点就自动发 Space。Personal Browse 有独立高频时钟，浏览结果只成为人物近期 World Observation；真正发动态仍由 Space Opportunity 决定。</p>
+        <pre id="worldActivityStatus" class="result">等待读取 World Pulse / Personal Browse 状态...</pre>
+
         <p class="subtle">“手动触发”不改变正式 next opportunity；“立即到期”则用于测试真实 Scheduler：把选中角色的 next opportunity 设为现在，后台线程会按 Poll 周期自动执行。</p>
         <p class="subtle" id="spaceStatusAge">尚未读取调度状态。</p>
         <pre id="spaceStatus" class="result">等待读取 Space 调度状态...</pre>

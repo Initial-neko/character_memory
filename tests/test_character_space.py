@@ -35,6 +35,7 @@ def _config(tmp_path: Path, count: int = 12) -> Path:
                 'api_key: ""',
                 'embedding_provider: "deterministic"',
                 f'db_path: "{(tmp_path / "space.db").as_posix()}"',
+                f'media_dir: "{(tmp_path / "media").as_posix()}"',
                 f'persona_path: "{(personas / "c00" / "persona.yaml").as_posix()}"',
             ]
         ),

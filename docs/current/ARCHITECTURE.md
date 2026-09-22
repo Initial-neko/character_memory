@@ -100,7 +100,7 @@ Source Event 先成为 durable fact。Provider 超时或人物 reaction 失败�
 
 不同人物共享 Provider、Embedding 与 SQLite，但 Persona、Memory、Mental State、聊天历史和 Runtime 行为按 Character 隔离。
 
-HTTP feature route 不再负责创建 Search / Avatar / ImageGen / World infrastructure。Character Runtime 在 `create_api()` 阶段通过 `RuntimeServices` 一次装配：
+HTTP feature route 不再负责创建 Search / Avatar / ImageGen / World infrastructure。Character Runtime 在 `create_api()` 阶段通过 `RuntimeServices` 一次装配，并通过 typed `CharacterRuntimeAccess` 暴露稳定核心依赖；不再使用无契约的 `SimpleNamespace` 作为核心 service locator：
 
 ```text
 RuntimeServices

@@ -332,11 +332,18 @@
     if (!CM.isGroupConversation()) return false;
     const group = current();
     const building = group?.status === "BUILDING";
-    CM.dom.sendButton.disabled = Boolean(building);
-    CM.dom.input.disabled = Boolean(building);
-    CM.features.stickers?.setDisabled?.(Boolean(building));
-    CM.features.images?.setDisabled?.(Boolean(building));
-    if (!building) CM.dom.input.focus();
+    if (building) {
+      CM.dom.sendButton.disabled = true;
+      CM.dom.input.disabled = true;
+      CM.features.stickers?.setDisabled?.(true);
+      CM.features.images?.setDisabled?.(true);
+    } else {
+      CM.dom.sendButton.disabled = false;
+      CM.dom.input.disabled = false;
+      CM.features.stickers?.setDisabled?.(false);
+      CM.features.images?.setDisabled?.(false);
+      CM.dom.input.focus();
+    }
     return true;
   }
 

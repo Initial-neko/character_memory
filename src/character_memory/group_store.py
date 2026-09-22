@@ -11,6 +11,9 @@ from pydantic import BaseModel, Field
 from character_memory.time_utils import epoch_us, parse_datetime
 
 
+MAX_GROUP_CHARACTERS = 12
+
+
 class GroupConversation(BaseModel):
     id: str
     name: str

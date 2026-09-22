@@ -231,6 +231,44 @@ class ApiCharacterService:
             "warning": result_count > SOFT_ACTIVE_CHARACTERS,
         }
 
+    def _remove_runtime_character(self, character_id: str) -> None:
+        current = self.current_bundle()
+        if current is None:
+            return
+        if hasattr(current, "runtimes"):
+            current.runtimes.pop(character_id, None)
+        runtime_map = getattr(getattr(current, "chat", None), "runtime", None)
+        if isinstance(runtime_map, dict):
+            runtime_map.pop(character_id, None)
+
+    def _cleanup_created_character(self, character_id: str, persona_dir: Path) -> None:
+        self._remove_runtime_character(character_id)
+        try:
+            shutil.rmtree(persona_dir)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.exception(
+                "api.character rollback_persona failed character=%s dir=%s",
+                character_id,
+                persona_dir,
+            )
+
+        onboarding = self.onboarding
+        avatar_store = getattr(getattr(onboarding, "services", None), "avatar_store", None)
+        avatar_root = getattr(avatar_store, "root", None)
+        if avatar_root is not None:
+            try:
+                shutil.rmtree(Path(avatar_root) / character_id)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.exception(
+                    "api.character rollback_avatar failed character=%s",
+                    character_id,
+                )
+        self.refresh_cache()
+
     def create_from_draft(
         self,
         draft: PersonaDraft,
@@ -275,14 +313,7 @@ class ApiCharacterService:
                 if initialization is not None:
                     profile = {**profile, "initialization": initialization}
             except Exception:
-                try:
-                    path.unlink(missing_ok=True)
-                    path.parent.rmdir()
-                except OSError:
-                    logger.exception(
-                        "api.character rollback_file failed character=%s",
-                        character_id,
-                    )
+                self._cleanup_created_character(character_id, path.parent)
                 raise
 
             logger.info(
@@ -308,21 +339,5 @@ class ApiCharacterService:
             if profile is None:
                 return
 
-            current = self.current_bundle()
-            if current is not None:
-                if hasattr(current, "runtimes"):
-                    current.runtimes.pop(character_id, None)
-                runtime_map = getattr(
-                    getattr(current, "chat", None),
-                    "runtime",
-                    None,
-                )
-                if isinstance(runtime_map, dict):
-                    runtime_map.pop(character_id, None)
-
             persona_path = Path(profile["persona_path"])
-            try:
-                shutil.rmtree(persona_path.parent)
-            except FileNotFoundError:
-                pass
-            self.refresh_cache()
+            self._cleanup_created_character(character_id, persona_path.parent)

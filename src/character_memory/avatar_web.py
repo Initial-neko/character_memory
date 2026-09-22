@@ -6,9 +6,8 @@ from pydantic import BaseModel, Field
 
 from character_memory.avatar_intent import AvatarIntentPlanner, AvatarSearchIntent
 from character_memory.avatars import AvatarSearchService, AvatarStore
-from character_memory.config import load_persona, resolve_avatar_dir, split_archived
+from character_memory.config import load_persona, split_archived
 from character_memory.domain.models import EventType
-from character_memory.search import BraveSearchProvider, SearchApiProvider
 
 
 logger = logging.getLogger("character_memory.avatar_web")
@@ -38,30 +37,11 @@ def attach_avatar_routes(app) -> None:
         raise RuntimeError("create_api() must expose app.state.character_memory before avatar routes are attached")
 
     settings = access.settings
-    avatar_store = AvatarStore(
-        resolve_avatar_dir(settings),
-        max_bytes=int(getattr(settings, "avatar_max_bytes", 8 * 1024 * 1024)),
-    )
+    services = access.services
+    avatar_store = services.avatar_store
+    avatar_search = services.avatar_search
+    provider = services.search_provider
     provider_name = str(getattr(settings, "search_provider", "searchapi") or "searchapi").strip().lower()
-    provider = None
-    provider_kwargs = {
-        "country": getattr(settings, "search_country", "jp"),
-        "language": getattr(settings, "search_language", "zh-cn"),
-        "safe_search": getattr(settings, "search_safe_search", "strict"),
-    }
-    if provider_name in {"searchapi", "searchapi.io", "search_api"}:
-        provider = SearchApiProvider(
-            getattr(settings, "search_api_key", ""),
-            **provider_kwargs,
-        )
-    elif provider_name == "brave":
-        provider = BraveSearchProvider(
-            getattr(settings, "search_api_key", ""),
-            **provider_kwargs,
-        )
-    avatar_search = AvatarSearchService(provider, avatar_store)
-    app.state.character_memory.avatar_store = avatar_store
-    app.state.character_memory.avatar_search = avatar_search
 
     def profile(character_id: str) -> dict[str, str]:
         for item in access.character_profiles():
@@ -208,7 +188,3 @@ def attach_avatar_routes(app) -> None:
             "avatar_url": avatar_url(character_id),
             "avatar": metadata.model_dump(mode="json"),
         }
-
-    @app.on_event("shutdown")
-    def _close_avatar_resources():
-        avatar_search.close()

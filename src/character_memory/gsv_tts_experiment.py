@@ -17,6 +17,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from character_memory.web_lifecycle import on_app_event
+from character_memory.config import read_archive_state
 from character_memory.voices import (
     TEMPLATE_FILE_SUFFIX,
     VoiceProfile,
@@ -210,6 +211,10 @@ class GsvTtsRuntime:
         """
         personas = Path(self.persona_root)
         persona_paths = sorted(personas.glob("*/persona.yaml")) if personas.exists() else []
+        persona_paths = [
+            path for path in persona_paths
+            if read_archive_state(path) is None
+        ]
         templates = discover_templates(self.voices_root)
         # The template-only map is kept alongside the merged one because
         # ``status()["voices"]`` feeds the Settings Center selector, and

@@ -4,7 +4,6 @@ from datetime import datetime
 import logging
 import os
 from pathlib import Path
-import shutil
 import threading
 
 from character_memory.app import AppBundle, build_app
@@ -19,17 +18,14 @@ from character_memory.api_contracts import (
     SOFT_ACTIVE_CHARACTERS,
     SimulateRequest,
 )
+from character_memory.api_character_service import ApiCharacterService
 from character_memory.api_resource_service import ApiResourceService
 from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.application.proactive_service import ProactiveService
 from character_memory.config import (
-    discover_character_profiles,
     load_persona,
     load_settings,
     resolve_media_dir,
-    resolve_persona_path,
-    set_character_archived,
-    split_archived,
 )
 from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
@@ -39,7 +35,7 @@ from character_memory.core_resource_web import attach_core_resource_routes
 from character_memory.logging_utils import configure_logging
 from character_memory.media import MediaStorage
 from character_memory.message_projection import project_direct_message
-from character_memory.persona_builder import PersonaDraft, normalize_character_id, save_persona
+from character_memory.persona_builder import PersonaDraft
 from character_memory.runtime_services import CharacterRuntimeAccess, build_runtime_services
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.web_assets import attach_static_assets
@@ -114,88 +110,43 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Runtime 初始化失败：{exc}") from exc
 
-    def character_profiles() -> list[dict[str, str]]:
-        if app_bundle is not None and hasattr(app_bundle, "characters"):
-            return list(app_bundle.characters)
-        try:
-            return discover_character_profiles(settings)
-        except (AttributeError, OSError):
-            return [{"id": "rin", "name": "Rin", "identity": "", "tagline": "", "persona_path": getattr(settings, "persona_path", "personas/rin/persona.yaml")}]
+    def register_runtime_character(profile: dict[str, str]) -> None:
+        current = current_bundle()
+        if current is None:
+            return
+        if not hasattr(current, "runtimes") or not hasattr(current, "embeddings") or not hasattr(current, "model"):
+            raise RuntimeError("loaded runtime bundle does not support dynamic character registration")
 
-    def public_profile(profile: dict[str, str]) -> dict[str, str]:
-        return {key: value for key, value in profile.items() if key != "persona_path"}
+        from character_memory.memory.recall import VectorRecall
+        from character_memory.runtime.person_runtime import PersonRuntime
 
-    def refresh_character_cache() -> None:
-        """Re-read the persona tree into the cached bundle list.
+        character_id = profile["id"]
+        persona = load_persona(profile["persona_path"])
+        stickers = global_sticker_catalog()
+        images = load_image_catalog(profile["persona_path"])
+        recall = VectorRecall(current.store, current.embeddings, limit=getattr(settings, "recall_limit", 8))
+        runtime = PersonRuntime(current.store, recall, current.embeddings, current.model, persona, stickers, images)
+        current.runtimes[character_id] = runtime
+        if isinstance(getattr(current.chat, "runtime", None), dict):
+            current.chat.runtime[character_id] = runtime
+        refresh_runtime_sticker_catalog(stickers)
+        characters.refresh_cache()
 
-        The listing filter reads ``archived_at`` off a profile, so a cache built
-        before the marker was written would keep serving the archived character
-        as active. The cache is never filtered itself -- ``ensure_character`` and
-        the group payloads resolve archived characters on purpose -- so only this
-        refresh matters.
-        """
 
-        if app_bundle is not None and hasattr(app_bundle, "characters"):
-            app_bundle.characters[:] = discover_character_profiles(settings)
-
-    def _set_archived(
-        character_id: str,
-        *,
-        archived: bool,
-        confirm_over_soft_limit: bool = False,
-    ) -> dict:
-        """Archive or restore one character. Idempotent, like the group routes."""
-
-        with character_write_lock:
-            try:
-                resolve_persona_path(settings, character_id)
-            except KeyError as exc:
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-            profiles = character_profiles()
-            target = next((item for item in profiles if item["id"] == character_id), None)
-            active_profiles = split_archived(profiles, False)
-            if archived and target is not None and "archived_at" not in target:
-                if len(active_profiles) <= 1:
-                    raise HTTPException(status_code=409, detail="至少保留一个未归档人物")
-            if not archived and target is not None and "archived_at" in target:
-                active_count = len(active_profiles)
-                if active_count >= MAX_ACTIVE_CHARACTERS:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=CharacterCapacityExceeded(active_count, 1).detail(),
-                    )
-                if active_count >= SOFT_ACTIVE_CHARACTERS and not confirm_over_soft_limit:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=CharacterCapacityConfirmationRequired(active_count, 1).detail(),
-                    )
-
-            try:
-                stamp = set_character_archived(settings, character_id, archived)
-            except OSError as exc:
-                logger.exception("api.character archive failed character=%s error=%s", character_id, exc)
-                raise HTTPException(status_code=500, detail=f"归档失败：{exc}") from exc
-
-            refresh_character_cache()
-            logger.info("api.character archived=%s character=%s", archived, character_id)
-
-            profile = next(
-                (item for item in character_profiles() if item["id"] == character_id), None
-            )
-            return {
-                "ok": True,
-                "archived": archived,
-                "archived_at": stamp,
-                "character": public_profile(profile) if profile else {"id": character_id},
-            }
-
-    def ensure_character(character_id: str) -> dict[str, str]:
-        for profile in character_profiles():
-            if profile["id"] == character_id:
-                return profile
-        known = ", ".join(profile["id"] for profile in character_profiles())
-        raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}. Known: {known}")
+    characters = ApiCharacterService(
+        settings=settings,
+        current_bundle=current_bundle,
+        character_write_lock=character_write_lock,
+        register_runtime_character=register_runtime_character,
+    )
+    character_profiles = characters.profiles
+    public_profile = characters.public_profile
+    refresh_character_cache = characters.refresh_cache
+    _set_archived = characters.set_archived
+    ensure_character = characters.ensure
+    check_character_capacity = characters.check_capacity
+    create_character_from_draft = characters.create_from_draft
+    rollback_created_character = characters.rollback_created
 
     resources = ApiResourceService(
         settings=settings,
@@ -214,7 +165,6 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     uploaded_media_payload = resources.uploaded_media_payload
     action_payload = resources.action_payload
     message_payload = resources.message_payload
-
 
     def history_payload(character_id: str, limit: int) -> dict:
         ensure_character(character_id)
@@ -242,104 +192,6 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "latest_message": latest_message,
             "latest_assistant_message_id": latest_assistant_id,
         }
-
-    def register_runtime_character(profile: dict[str, str]) -> None:
-        if app_bundle is None:
-            return
-        if not hasattr(app_bundle, "runtimes") or not hasattr(app_bundle, "embeddings") or not hasattr(app_bundle, "model"):
-            raise RuntimeError("loaded runtime bundle does not support dynamic character registration")
-
-        from character_memory.memory.recall import VectorRecall
-        from character_memory.runtime.person_runtime import PersonRuntime
-
-        character_id = profile["id"]
-        persona = load_persona(profile["persona_path"])
-        stickers = global_sticker_catalog()
-        images = load_image_catalog(profile["persona_path"])
-        recall = VectorRecall(app_bundle.store, app_bundle.embeddings, limit=getattr(settings, "recall_limit", 8))
-        runtime = PersonRuntime(app_bundle.store, recall, app_bundle.embeddings, app_bundle.model, persona, stickers, images)
-        app_bundle.runtimes[character_id] = runtime
-        if isinstance(getattr(app_bundle.chat, "runtime", None), dict):
-            app_bundle.chat.runtime[character_id] = runtime
-        refresh_runtime_sticker_catalog(stickers)
-        refresh_character_cache()
-
-    def check_character_capacity(
-        add_count: int = 1,
-        *,
-        confirm_over_soft_limit: bool = False,
-    ) -> dict:
-        count = max(0, int(add_count))
-        active_count = len(split_archived(character_profiles(), False))
-        result_count = active_count + count
-        if result_count > MAX_ACTIVE_CHARACTERS:
-            raise CharacterCapacityExceeded(active_count, count)
-        if count and result_count > SOFT_ACTIVE_CHARACTERS and not confirm_over_soft_limit:
-            raise CharacterCapacityConfirmationRequired(active_count, count)
-        return {
-            "active_count": active_count,
-            "add_count": count,
-            "result_count": result_count,
-            "soft_limit": SOFT_ACTIVE_CHARACTERS,
-            "hard_limit": MAX_ACTIVE_CHARACTERS,
-            "warning": result_count > SOFT_ACTIVE_CHARACTERS,
-        }
-
-    def create_character_from_draft(
-        draft: PersonaDraft,
-        requested_id: str = "",
-        *,
-        confirm_over_soft_limit: bool = False,
-        skip_capacity_check: bool = False,
-    ) -> dict:
-        with character_write_lock:
-            if not skip_capacity_check:
-                check_character_capacity(
-                    1,
-                    confirm_over_soft_limit=confirm_over_soft_limit,
-                )
-            character_id = normalize_character_id(draft.name, requested_id)
-            path = save_persona(settings.persona_path, draft, character_id)
-            try:
-                profiles = discover_character_profiles(settings)
-                profile = next(profile for profile in profiles if profile["id"] == character_id)
-                register_runtime_character(profile)
-            except Exception:
-                try:
-                    path.unlink(missing_ok=True)
-                    path.parent.rmdir()
-                except OSError:
-                    logger.exception("api.character rollback_file failed character=%s", character_id)
-                raise
-            logger.info(
-                "api.character created character=%s path=%s runtime_loaded=%s",
-                character_id,
-                path,
-                app_bundle is not None,
-            )
-            return profile
-
-    def rollback_created_character(character_id: str) -> None:
-        """Best-effort rollback for a character created inside a batch build."""
-        with character_write_lock:
-            profile = next(
-                (item for item in discover_character_profiles(settings) if item["id"] == character_id),
-                None,
-            )
-            if profile is None:
-                return
-            if app_bundle is not None:
-                if hasattr(app_bundle, "runtimes"):
-                    app_bundle.runtimes.pop(character_id, None)
-                runtime_map = getattr(getattr(app_bundle, "chat", None), "runtime", None)
-                if isinstance(runtime_map, dict):
-                    runtime_map.pop(character_id, None)
-            persona_path = Path(profile["persona_path"])
-            try:
-                shutil.rmtree(persona_path.parent)
-            except FileNotFoundError:
-                pass
-            refresh_character_cache()
 
     def dispatch_proactive_once() -> list[dict]:
         if not getattr(settings, "api_key", ""):

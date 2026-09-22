@@ -199,6 +199,10 @@ def test_voice_message_frontend_has_native_shared_bubble_not_audio_controls():
     assert "new Audio(" in app
     assert "<audio controls" not in app
     assert "CM.voiceMessageHtml(message)" in common
+    assert "voice-transcript-always" in common
+    assert 'class="voice-transcript hidden"' not in common
+    assert "data-voice-text" not in common
+    assert "data-voice-translation" not in common
     # Both surfaces render through the one shared body renderer. The exact
     # argument list is not pinned here: Group passes its surface variant, and
     # the markup that variant produces is asserted behaviourally in

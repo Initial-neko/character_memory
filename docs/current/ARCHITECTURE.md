@@ -16,6 +16,7 @@ Browser
 Character Runtime :8000                                         │
 ├─ FastAPI / Direct / Group / SSE                               │
 ├─ ReactionScheduler / PersonRuntime                            │
+├─ SpaceAutonomyScheduler / GroupAutonomyScheduler              │
 ├─ Persona / Memory / Mental State / Intent                     │
 ├─ Vision + Visual Capture context                              │
 ├─ ImageGen / autonomous visual                                 │
@@ -218,6 +219,7 @@ space_opportunity_runs
 ```text
 Direct fact        -> events
 Group shared fact  -> conversation_events
+Group autonomy     -> hidden GROUP_OPPORTUNITY provenance + CHARACTER_MESSAGE
 Space shared fact  -> space_*
 Media fact         -> media_assets
                      ↓

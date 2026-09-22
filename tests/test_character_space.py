@@ -264,9 +264,8 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "media_items",
         "slice(0, 9)",
         "data-space-media-count",
-        "space-media-single",
-        "space-media-quad",
-        "space-media-nine",
+        'images.length === 1 ? "single"',
+        'images.length <= 4 ? "quad" : "nine"',
     ]:
         assert token in script
     for token in [

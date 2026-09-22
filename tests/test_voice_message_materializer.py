@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
+from character_memory.application.async_conversation import ConversationEventHub, ReactionScheduler, direct_channel
 from character_memory.application.voice_message_materializer import (
     VoiceMessageMaterializer,
     _response_detail,
@@ -79,6 +80,58 @@ def test_direct_voice_message_is_one_tts_request_and_one_persisted_asset(tmp_pat
     assert asset is not None
     assert asset.source == "VOICE_MESSAGE"
     assert (tmp_path / "media" / asset.storage_name).read_bytes() == WAV
+
+
+def test_direct_response_publisher_materializes_proactive_voice_messages(tmp_path):
+    store = SQLiteStore(tmp_path / "proactive-publish.db")
+    now = datetime(2026, 9, 22, 10, 0, tzinfo=timezone.utc)
+    source = store.append_event(Event(
+        character_id="momo",
+        event_type=EventType.PROACTIVE_INTENT,
+        event_time=now,
+        content="到点后重新判断",
+        metadata={"conversation_id":"browser-session"},
+    ))
+    voice = store.append_event(Event(
+        character_id="momo",
+        event_type=EventType.CHARACTER_MESSAGE,
+        event_time=now,
+        content="我用语音提醒你一下。",
+        metadata={
+            "action":"VOICE_MESSAGE",
+            "source_event_id":source.id,
+            "source_event_type":"PROACTIVE_INTENT",
+            "conversation_id":"browser-session",
+            **voice_pending_fields(),
+        },
+    ))
+
+    class _Recorder:
+        def __init__(self):
+            self.calls = []
+
+        def materialize_direct(self, event, *, conversation_id):
+            self.calls.append((event.id, conversation_id))
+
+    recorder = _Recorder()
+    hub = ConversationEventHub()
+    scheduler = ReactionScheduler(lambda: None, lambda: [], hub, voice_materializer=recorder)
+    try:
+        published = scheduler.publish_direct_responses(
+            store,
+            "momo",
+            "browser-session",
+            source.id,
+        )
+        assert [item["id"] for item in published] == [voice.id]
+        assert recorder.calls == [(voice.id, "browser-session")]
+        channel_events = list(hub._channel(direct_channel("momo", "browser-session")).events)
+        assert channel_events[-1][1] == "character_event"
+        assert channel_events[-1][2]["metadata"]["voice_status"] == "pending"
+    finally:
+        scheduler.close()
+        hub.close()
+        store.close()
 
 
 def test_direct_voice_message_failure_keeps_text_and_marks_failed(tmp_path):

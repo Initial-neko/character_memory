@@ -26,6 +26,7 @@ class SpaceComment(BaseModel):
     id: int
     post_id: int
     character_id: str
+    actor_type: str = "CHARACTER"
     content: str
     created_at: datetime
     reply_to_comment_id: int | None = None
@@ -76,6 +77,7 @@ class SpaceRepository:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     post_id INTEGER NOT NULL,
                     character_id TEXT NOT NULL,
+                    actor_type TEXT NOT NULL DEFAULT 'CHARACTER',
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     created_at_epoch INTEGER NOT NULL,
@@ -169,6 +171,14 @@ class SpaceRepository:
                 self.store.conn.execute(
                     "ALTER TABLE space_opportunity_runs ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'"
                 )
+            comment_columns = {
+                str(row["name"])
+                for row in self.store.conn.execute("PRAGMA table_info(space_comments)").fetchall()
+            }
+            if "actor_type" not in comment_columns:
+                self.store.conn.execute(
+                    "ALTER TABLE space_comments ADD COLUMN actor_type TEXT NOT NULL DEFAULT 'CHARACTER'"
+                )
             self.store._ensure_migration_table_locked()
             self.store.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
@@ -182,6 +192,10 @@ class SpaceRepository:
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
                 ("space/003-interval-opportunities", datetime.now().astimezone().isoformat()),
             )
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
+                ("space/005-comment-actors", datetime.now().astimezone().isoformat()),
+            )
             self.store._maybe_commit()
 
     @staticmethod
@@ -189,6 +203,7 @@ class SpaceRepository:
         return SpacePost(
             id=int(row["id"]),
             character_id=str(row["character_id"]),
+            actor_type=str(row["actor_type"] or "CHARACTER"),
             content=str(row["content"]),
             created_at=parse_datetime(row["created_at"]),
             media_id=row["media_id"],
@@ -321,10 +336,14 @@ class SpaceRepository:
         content: str,
         now: datetime,
         *,
+        actor_type: str = "CHARACTER",
         reply_to_comment_id: int | None = None,
     ) -> SpaceComment:
         if self.get_post(post_id) is None:
             raise KeyError("space post not found")
+        normalized_actor_type = str(actor_type or "CHARACTER").strip().upper()
+        if normalized_actor_type not in {"CHARACTER", "USER"}:
+            raise ValueError("space comment actor_type must be CHARACTER or USER")
         clean_content = str(content or "").strip()
         if not clean_content:
             raise ValueError("space comment must not be empty")
@@ -338,27 +357,38 @@ class SpaceRepository:
                 raise ValueError("reply target does not belong to this post")
 
         with self.store._lock:
-            existing = self.store.conn.execute(
-                "SELECT 1 FROM space_comments WHERE post_id=? AND character_id=? LIMIT 1",
-                (int(post_id), character_id),
-            ).fetchone()
-            if existing is None:
-                row = self.store.conn.execute(
-                    "SELECT COUNT(DISTINCT character_id) AS total FROM space_comments WHERE post_id=?",
-                    (int(post_id),),
+            if normalized_actor_type == "CHARACTER":
+                existing = self.store.conn.execute(
+                    "SELECT 1 FROM space_comments WHERE post_id=? AND character_id=? AND actor_type='CHARACTER' LIMIT 1",
+                    (int(post_id), character_id),
                 ).fetchone()
-                if int(row["total"] if row is not None else 0) >= MAX_COMMENTERS_PER_POST:
-                    raise ValueError(f"a space post may have at most {MAX_COMMENTERS_PER_POST} character commenters")
+                if existing is None:
+                    row = self.store.conn.execute(
+                        "SELECT COUNT(DISTINCT character_id) AS total FROM space_comments "
+                        "WHERE post_id=? AND actor_type='CHARACTER'",
+                        (int(post_id),),
+                    ).fetchone()
+                    if int(row["total"] if row is not None else 0) >= MAX_COMMENTERS_PER_POST:
+                        raise ValueError(f"a space post may have at most {MAX_COMMENTERS_PER_POST} character commenters")
             cur = self.store.conn.execute(
-                "INSERT INTO space_comments(post_id,character_id,content,created_at,created_at_epoch,reply_to_comment_id) "
-                "VALUES(?,?,?,?,?,?)",
-                (int(post_id), character_id, clean_content, now.isoformat(), epoch_us(now), reply_to_comment_id),
+                "INSERT INTO space_comments(post_id,character_id,actor_type,content,created_at,created_at_epoch,reply_to_comment_id) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (
+                    int(post_id),
+                    character_id,
+                    normalized_actor_type,
+                    clean_content,
+                    now.isoformat(),
+                    epoch_us(now),
+                    reply_to_comment_id,
+                ),
             )
             self.store._maybe_commit()
         return SpaceComment(
             id=int(cur.lastrowid),
             post_id=int(post_id),
             character_id=character_id,
+            actor_type=normalized_actor_type,
             content=clean_content,
             created_at=now,
             reply_to_comment_id=reply_to_comment_id,

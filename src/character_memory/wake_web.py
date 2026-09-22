@@ -31,7 +31,8 @@ def attach_wake_routes(app):
     if access is None:
         raise RuntimeError("create_api() must expose app.state.character_memory before wake routes are attached")
     hub = getattr(access, "stream_hub", None)
-    if hub is None:
+    scheduler = getattr(access, "reaction_scheduler", None)
+    if hub is None or scheduler is None:
         raise RuntimeError("attach_async_routes() must run before attach_wake_routes()")
 
     settings = access.settings
@@ -49,35 +50,14 @@ def attach_wake_routes(app):
         if not any(profile["id"] == character_id for profile in access.character_profiles()):
             raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}")
 
-    def response_events(outcome: WakeOutcome):
-        store = access.store()
-        with store._lock:
-            rows = store.conn.execute(
-                "SELECT * FROM events WHERE character_id=? AND event_type=? "
-                "AND CAST(json_extract(metadata_json,'$.source_event_id') AS INTEGER)=? ORDER BY id",
-                (
-                    outcome.character_id,
-                    EventType.CHARACTER_MESSAGE.value,
-                    int(outcome.source_event_id),
-                ),
-            ).fetchall()
-        return [store._event_from_row(row) for row in rows]
-
     def publish(outcome: WakeOutcome) -> None:
         channel = direct_channel(outcome.character_id, outcome.conversation_id)
-        for event in response_events(outcome):
-            hub.publish(
-                channel,
-                "character_event",
-                {
-                    "id": event.id,
-                    "character_id": event.character_id,
-                    "event_type": event.event_type.value,
-                    "event_time": event.event_time.isoformat(),
-                    "content": event.content,
-                    "metadata": event.metadata,
-                },
-            )
+        scheduler.publish_direct_responses(
+            access.store(),
+            outcome.character_id,
+            outcome.conversation_id,
+            outcome.source_event_id,
+        )
         hub.publish(
             channel,
             "reaction_complete",

@@ -15,6 +15,7 @@ The current implementation provides:
 - autonomous image search, AI-generated Space images, and one autonomous Space voice attachment through the same media contract;
 - optional public-web World Observation through Playwright headless Chromium before the final Space decision;
 - explicit seen/like/comment state;
+- browser users can add durable comments directly in the feed and expand/collapse the complete inline comment list;
 - autonomous interval-based Space opportunities for active characters;
 - autonomous audience reactions through the same PersonRuntime;
 - author reactions to received Space comments;
@@ -304,8 +305,9 @@ The product should stay small-scale and legible even if many personas exist.
 
 - one automatic post audience must never exceed 10 characters;
 - one post may have at most 10 distinct character commenters;
+- human-user comments are durable shared facts but do not consume that 10-character commenter ceiling;
 - one post may reference at most 9 media assets;
-- 10 commenters/audience members and 9 media assets are hard ceilings, not targets;
+- 10 character commenters/audience members and 9 media assets are hard ceilings, not targets;
 - the autonomous selector normally processes the configured audience size (default 5), always capped at 10;
 - silence is valid and expected;
 - the frontend should avoid presenting more than roughly 5-10 character identities in one local interaction area.
@@ -351,7 +353,7 @@ Dev Console proxies them under `/v1/dev/space/*`.
 - relationship/interest-aware audience ranking;
 - Link Preview fetching/rendering;
 - push/SSE updates for Space;
-- a full post-detail interaction page;
+- a separate full post-detail page (the feed itself now supports user comments and full inline expansion);
 - multi-step reply threads beyond one author reaction.
 
 ## Main modules

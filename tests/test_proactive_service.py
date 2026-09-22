@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 from character_memory.application.proactive_service import ProactiveService
@@ -105,3 +106,11 @@ def test_unanswered_proactive_message_blocks_another_proactive_turn(tmp_path):
     assert chat.calls == []
     assert any(row["status"] == "PENDING" for row in store.list_intents("momo"))
     store.close()
+
+
+def test_background_proactive_dispatch_reuses_direct_voice_publisher():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "src" / "character_memory" / "api.py").read_text(encoding="utf-8")
+
+    assert "scheduler.publish_direct_responses(" in source
+    assert 'source_event.metadata.get("conversation_id")' in source

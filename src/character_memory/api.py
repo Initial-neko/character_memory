@@ -34,7 +34,6 @@ from character_memory.core_direct_web import attach_core_direct_routes
 from character_memory.core_resource_web import attach_core_resource_routes
 from character_memory.logging_utils import configure_logging
 from character_memory.media import MediaStorage
-from character_memory.message_projection import project_direct_message
 from character_memory.persona_builder import PersonaDraft
 from character_memory.runtime_services import CharacterRuntimeAccess, build_runtime_services
 from character_memory.storage.sqlite import SQLiteStore
@@ -44,14 +43,6 @@ from character_memory.web_lifecycle import on_app_event
 
 logger = logging.getLogger("character_memory.api")
 _PROACTIVE_POLL_SECONDS = 30.0
-_STICKER_VISION_MIME = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-}
-
 
 def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = None):
     from fastapi import FastAPI, HTTPException
@@ -333,6 +324,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         current_bundle=current_bundle,
         require_bundle=require_bundle,
         runtime_status=runtime_status,
+        proactive_poll_seconds=_PROACTIVE_POLL_SECONDS,
         character_profiles=character_profiles,
         public_profile=public_profile,
         set_archived=_set_archived,

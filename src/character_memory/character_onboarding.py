@@ -254,7 +254,9 @@ class CharacterOnboardingService:
                 character_id,
                 exc,
             )
-            return {"status": "error", "source": "local_fallback", "error": str(exc)}
+            raise RuntimeError(
+                f"mandatory initial avatar could not be prepared for {character_id}: {exc}"
+            ) from exc
 
     def ensure_voice(self, profile: dict[str, Any]) -> dict[str, Any]:
         persona_dir = Path(profile["persona_path"]).parent

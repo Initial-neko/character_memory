@@ -14,6 +14,7 @@ from urllib.parse import quote
 import numpy as np
 from pydantic import BaseModel, Field
 
+from character_memory.web_lifecycle import on_app_event
 
 DEFAULT_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 DEFAULT_SPEAKER = "Vivian"
@@ -373,7 +374,7 @@ def create_qwen3_tts_app(runtime: Qwen3TtsRuntime | None = None):
     app = FastAPI(title="Character Memory Qwen3-TTS Experiment", version="0.1")
     app.state.qwen3_tts = engine
 
-    @app.on_event("startup")
+    @on_app_event(app, "startup")
     def startup():
         if engine.preload:
             engine.load()

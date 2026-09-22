@@ -1,5 +1,7 @@
 # Release and Version Policy
 
+The current pre-release risk/feature/configuration audit is maintained in [RELEASE_READINESS.md](RELEASE_READINESS.md). This file defines policy; the readiness register records the current release decision surface.
+
 Character Memory uses a lightweight release model for the current 0.x phase.
 
 ## Branch model

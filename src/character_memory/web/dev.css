@@ -179,3 +179,59 @@ td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
   font-size: 12px;
   line-height: 1.55;
 }
+
+
+/* Dev surface modes --------------------------------------------------------
+ * Simple is the operating dashboard; Detailed Dev is the lab. Backend defaults
+ * remain backend defaults instead of becoming a wall of browser-side knobs. */
+.dev-mode-toggle { white-space: nowrap; }
+.dev-mode-hint {
+  flex-basis: 100%;
+  max-width: 560px;
+  color: var(--ui-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: right;
+}
+
+body[data-dev-mode="simple"] [data-dev-surface="detailed"],
+body[data-dev-mode="simple"] details.level-group[data-level="advanced"],
+body[data-dev-mode="simple"] details.level-group[data-level="diagnostic"],
+body[data-dev-mode="simple"] details.debug-output {
+  display: none !important;
+}
+
+.dev-key-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+.dev-key-controls label,
+.level-row label:not(.visual-check) {
+  display: grid;
+  gap: 5px;
+}
+.dev-key-controls small,
+.level-row label small,
+.visual-provider-row label small {
+  color: var(--ui-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+
+.llm-usage-common {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+body[data-dev-mode="simple"] .feature-grid {
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .dev-key-controls { grid-template-columns: 1fr; }
+  .dev-mode-hint { text-align: left; max-width: none; }
+}

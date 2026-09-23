@@ -489,10 +489,14 @@
           <p class="memory-help">这里展示 Runtime 实际保存并发送给 Provider 的 messages，以及 Provider 返回的原始结构化文本。可用 Logical Call ID 与 Dev 的 LLM Usage 对照。</p>
           <h4>发送给模型的 messages</h4>
           <div class="trace-message-list">${CM.traceMessagesHtml(trace.model_messages)}</div>
-          <h4>Provider 原始响应</h4>
-          <pre class="trace-raw-response">${CM.escapeHtml(CM.hiddenIfEmpty(trace.raw_model_response))}</pre>
+          <h3 class="debug-subheading">Raw Model Response</h3>
           <details class="debug-output">
-            <summary>Compiled Context</summary>
+            <summary>查看 Provider 原始响应</summary>
+            <pre class="trace-raw-response">${CM.escapeHtml(CM.hiddenIfEmpty(trace.raw_model_response))}</pre>
+          </details>
+          <h4>Compiled Context</h4>
+          <details class="debug-output">
+            <summary>查看编译后的上下文</summary>
             <pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.context))}</pre>
           </details>
         </details>
@@ -509,8 +513,10 @@
         <details class="inspector-details">
           <summary>Recall / Memory · ${recalled.length} recalled · ${memoryCandidates.length} candidates</summary>
           <div class="card-list">${recalled.map(memory => `<div class="card"><strong>${CM.escapeHtml(memory.memory_type)}</strong><span> · importance ${CM.escapeHtml(memory.importance)}</span><div>${CM.escapeHtml(memory.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div>
-          <details class="debug-output"><summary>Memory Admission / Write JSON</summary><pre>${CM.escapeHtml(JSON.stringify({
-            decisions: trace.memory_decisions || [],
+          <h3 class="debug-subheading">Memory Admission</h3>
+          <details class="debug-output"><summary>查看 Admission JSON</summary><pre>${CM.escapeHtml(JSON.stringify(trace.memory_decisions || [], null, 2))}</pre></details>
+          <h3 class="debug-subheading">Memory Write</h3>
+          <details class="debug-output"><summary>查看候选与写入 ID</summary><pre>${CM.escapeHtml(JSON.stringify({
             candidates: memoryCandidates,
             created_memory_ids: trace.created_memory_ids || [],
           }, null, 2))}</pre></details>
@@ -518,7 +524,8 @@
 
         <details class="inspector-details">
           <summary>Intent / Task · ${intents.length} candidates</summary>
-          <pre>${CM.escapeHtml(JSON.stringify({candidates:intents, created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre>
+          <h3 class="debug-subheading">Intent</h3>
+          <details class="debug-output"><summary>查看 Intent JSON</summary><pre>${CM.escapeHtml(JSON.stringify({candidates:intents, created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre></details>
         </details>
 
         <details class="inspector-details">
@@ -530,8 +537,10 @@
         <details class="inspector-details">
           <summary>其他执行细节 · Timing / Sticker / Channel</summary>
           <h4>耗时</h4>${CM.timingHtml(trace.timings)}
-          <details class="debug-output"><summary>Sticker Retrieval</summary><pre>${CM.escapeHtml(JSON.stringify(trace.sticker_retrieval || {}, null, 2))}</pre></details>
-          <details class="debug-output"><summary>Channel Decisions</summary><pre>${CM.escapeHtml(JSON.stringify(trace.channel_decisions || [], null, 2))}</pre></details>
+          <h3 class="debug-subheading">Sticker Retrieval</h3>
+          <details class="debug-output"><summary>查看 Sticker Retrieval JSON</summary><pre>${CM.escapeHtml(JSON.stringify(trace.sticker_retrieval || {}, null, 2))}</pre></details>
+          <h4>Channel Decisions</h4>
+          <details class="debug-output"><summary>查看 Channel Decisions JSON</summary><pre>${CM.escapeHtml(JSON.stringify(trace.channel_decisions || [], null, 2))}</pre></details>
         </details>`;
     } catch (error) {
       CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;

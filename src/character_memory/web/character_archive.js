@@ -91,16 +91,41 @@
       </section>`;
   }
 
-  // The archive/restore response carries the result of the best-effort GSV
+  // The archive/restore response carries the outcome of the best-effort GSV
   // registry refresh. Archive itself succeeds either way -- the row disappears
   // and the record stays on disk -- so a failed refresh used to be a 200 the
   // archive module threw away, leaving a running GSV sidecar still resolving a
-  // character the user had just archived. Surface it instead.
-  function voiceReloadWarning(result) {
+  // character the user had just archived. Surface it instead -- but only the
+  // half of it the user can do something about.
+  //
+  // Three outcomes arrive here, and telling the last two apart is the point:
+  //
+  //   reloaded     the sidecar took the new roster. Nothing to say.
+  //   rejected     the sidecar answered and refused. It is running and it is
+  //                still holding the old roster, so the standing warning below
+  //                is both actionable and true.
+  //   unreachable  nothing answered, or nothing answered in time. Most installs
+  //                have no GSV sidecar at all, and a reload queued behind a
+  //                synthesis can outlast any timeout. Neither is the user's to
+  //                fix, and neither may claim a sidecar is running -- the
+  //                standing banner did, on machines that had none.
+  function voiceReloadMessage(result) {
     const registry = result?.voice_registry;
-    if (!registry || registry.reloaded !== false) return "";
+    if (!registry || registry.reloaded !== false) return null;
     const reason = String(registry.reason || "").trim();
-    return `语音注册表没有刷新${reason ? `：${CM.escapeHtml(reason)}` : ""}。人物列表已经更新，但运行中的 GSV sidecar 可能仍按旧名单合成语音；修好 voices 模板后重新归档或恢复一次，或重启 GSV sidecar。`;
+    // A payload without a status predates this split, and every one of those
+    // meant "the refresh did not happen". Fall through to the refusal case so
+    // an older API can only over-report, never go silent.
+    if (registry.status === "unreachable") {
+      return {
+        persistent: false,
+        text: `没有连上 GSV 语音服务${reason ? `（${CM.escapeHtml(reason)}）` : ""}，语音名单这次没有刷新。人物列表已经更新；GSV 下次启动时会自己读到新名单。`,
+      };
+    }
+    return {
+      persistent: true,
+      text: `语音注册表没有刷新${reason ? `：${CM.escapeHtml(reason)}` : ""}。人物列表已经更新，但运行中的 GSV sidecar 可能仍按旧名单合成语音；修好 voices 模板后重新归档或恢复一次，或重启 GSV sidecar。`,
+    };
   }
 
   // The warning gets a channel of its own, because it is a message and not a
@@ -110,23 +135,43 @@
   // or restore is unreachable until the user finds the one button that dismisses
   // it. So the notice is pinned to the page, above the drawer and transparent to
   // the pointer, and the drawer closes exactly as it did before the reload
-  // result was read at all. It clears on the next archive or restore that
-  // reloads cleanly, which is the same event that makes it untrue.
+  // result was read at all.
+  //
+  // It is also never permanent, whatever the outcome. It used to clear only on
+  // the next clean reload, which on a deployment that never has a sidecar is
+  // never -- one strip, fixed at top:84px, for the rest of the session. Now the
+  // refusal carries a real dismiss button, and the unreachable case clears
+  // itself, so no outcome can leave it parked over the sidebar.
+  const VOICE_NOTICE_TRANSIENT_MS = 8000;
   const voiceNotice = document.createElement("div");
   voiceNotice.className = "archive-voice-notice hidden";
   voiceNotice.setAttribute("role", "status");
   document.body.appendChild(voiceNotice);
+  let voiceNoticeTimer = null;
+
+  function hideVoiceNotice() {
+    if (voiceNoticeTimer) {
+      clearTimeout(voiceNoticeTimer);
+      voiceNoticeTimer = null;
+    }
+    voiceNotice.classList.add("hidden");
+    voiceNotice.innerHTML = "";
+  }
 
   function showVoiceReloadWarning(result) {
-    const warning = voiceReloadWarning(result);
-    if (!warning) {
-      voiceNotice.innerHTML = "";
-      voiceNotice.classList.add("hidden");
-      return;
-    }
-    voiceNotice.innerHTML = warning;
+    hideVoiceNotice();
+    const message = voiceReloadMessage(result);
+    if (!message) return;
+    // The container stays pointer-events:none so it cannot shadow a control
+    // underneath it; the button is the one thing that opts back in.
+    voiceNotice.innerHTML = `<span class="archive-voice-notice-text">${message.text}</span><button type="button" class="archive-voice-notice-close" data-archive-voice-dismiss aria-label="关闭提示" title="关闭提示">✕</button>`;
     voiceNotice.classList.remove("hidden");
+    if (!message.persistent) voiceNoticeTimer = setTimeout(hideVoiceNotice, VOICE_NOTICE_TRANSIENT_MS);
   }
+
+  voiceNotice.addEventListener("click", event => {
+    if (event.target.closest("[data-archive-voice-dismiss]")) hideVoiceNotice();
+  });
 
   async function archiveCharacter(characterId) {
     if (!characterId) return;

@@ -248,7 +248,9 @@ Dev ImageGen 可以持久化测试 MediaAsset，方便继续做 avatar/media 检
 - archive / restore 会 best-effort 触发当前 GSV registry reload；
 - `voice.yaml` 不改写，因此 restore 后原 voice mapping 可以直接恢复。
 
-archive / restore 响应中的 `voice_registry` 报告这次 reload 结果；成功结果会明确标记 `reloaded=true`。归档本身成功但 registry reload 失败时仍返回成功，同时浏览器用固定页级提示条显示失败；提示条不接收 pointer event，也不会为了展示错误而阻止归档抽屉关闭。
+archive / restore 响应中的 `voice_registry` 报告这次 reload 结果，`status` 区分三种：`reloaded`（sidecar 收下了新名单）、`rejected`（sidecar 用 reload route 自己定义的 400 拒绝——它确实在运行，也确实还持有旧名单）、`unreachable`（没有任何人给出拒绝：没有 sidecar、超时、或端口前面站着别的东西。回环上没人监听的端口不一定拒绝连接，TUN 模式的代理会回一个 502，所以"收到了 HTTP 响应"不算证据）。三种情况下归档本身都成功。
+
+只有 `rejected` 会留下页级提示条，并且带一个可点的关闭按钮——它说"运行中的 GSV sidecar 可能仍按旧名单合成语音"，这话只有在 sidecar 答过话时才成立。`unreachable` 只给一条会自动消失的短提示，不声称有 sidecar 在运行：大多数部署根本没有 GSV sidecar（`dev_stack` 只在 `.external/GSV-TTS-Lite/.venv` 存在时启动它）。提示条容器保持 `pointer-events:none`，只有关闭按钮例外，因此它不会挡住底下的控件（此前它挡住侧边栏导致浏览器冒烟测点不中元素），也不会为了展示错误而阻止归档抽屉关闭。
 
 ## 4. Settings boundary
 

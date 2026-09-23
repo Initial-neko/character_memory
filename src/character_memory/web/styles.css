@@ -39,8 +39,12 @@ button,textarea { font:inherit; }
 .character-archive-empty { color:var(--ui-muted); font-size:12px; padding:10px; }
 /* Archive/restore may succeed while the live GSV registry reload fails. Keep
  * that runtime warning visible after the drawer closes, without intercepting
- * the next click. */
-.archive-voice-notice { position:fixed; left:50%; top:84px; transform:translateX(-50%); z-index:40; max-width:min(560px,calc(100vw - 32px)); padding:11px 14px; border:1px solid var(--ui-danger-line); border-radius:var(--ui-r-md); background:var(--ui-danger-bg); color:var(--ui-danger); font-size:12px; line-height:1.6; box-shadow:0 10px 26px rgba(25,30,40,.16); pointer-events:none; }
+ * the next click: the strip itself stays transparent to the pointer, and the
+ * dismiss button is the one part that opts back in. */
+.archive-voice-notice { position:fixed; left:50%; top:84px; transform:translateX(-50%); z-index:40; max-width:min(560px,calc(100vw - 32px)); padding:11px 14px; border:1px solid var(--ui-danger-line); border-radius:var(--ui-r-md); background:var(--ui-danger-bg); color:var(--ui-danger); font-size:12px; line-height:1.6; box-shadow:0 10px 26px rgba(25,30,40,.16); pointer-events:none; display:flex; align-items:flex-start; gap:10px; }
+.archive-voice-notice-text { min-width:0; }
+.archive-voice-notice-close { pointer-events:auto; flex:none; min-height:0; padding:0 4px; border:0; background:transparent; color:inherit; font-size:12px; line-height:1.6; cursor:pointer; }
+.archive-voice-notice-close:hover { opacity:.7; }
 .character-list { display:grid; gap:4px; overflow:auto; }
 /* The 38px right padding is the lane the row's ⋯ button sits in. It used to be
  * a separate `padding-right` declaration above this one, which this shorthand

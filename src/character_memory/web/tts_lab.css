@@ -2,6 +2,14 @@
  * used to paint white cards with #d7dbe3 borders on top of dev.css's dark
  * ground, which left near-white body text on a white card. */
 
+.tts-lab-textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  resize: vertical;
+}
+
 .tts-lab-controls {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, .5fr) auto;

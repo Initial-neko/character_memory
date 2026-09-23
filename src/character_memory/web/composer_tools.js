@@ -43,14 +43,24 @@
     trigger.setAttribute("aria-expanded", "false");
   }
 
+  function open() {
+    // Half of the one-popover-at-a-time contract; stickers.js is the other
+    // half. Both triggers stop propagation so their own panel survives the
+    // document click that closes the other, which is exactly why the click
+    // alone cannot be the contract.
+    CM.emit("composerPopoverOpened", "composerTools");
+    menu.classList.remove("hidden");
+    trigger.setAttribute("aria-expanded", "true");
+  }
+
   function syncDisabled() {
     trigger.disabled = toolButtons.every(({button}) => button.disabled);
   }
 
   trigger.addEventListener("click", event => {
     event.stopPropagation();
-    const open = menu.classList.toggle("hidden") === false;
-    trigger.setAttribute("aria-expanded", String(open));
+    if (menu.classList.contains("hidden")) open();
+    else close();
   });
 
   for (const {button} of toolButtons) {
@@ -63,6 +73,7 @@
   document.addEventListener("click", event => {
     if (!event.target.closest(".composer-tools-menu") && !event.target.closest(".composer-tools-trigger")) close();
   });
+  CM.on("composerPopoverOpened", name => { if (name !== "composerTools") close(); });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") close();
   });

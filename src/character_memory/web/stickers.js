@@ -20,7 +20,10 @@
     return cache;
   }
 
-  function close() { panel?.classList.add("hidden"); }
+  function close() {
+    panel?.classList.add("hidden");
+    trigger?.setAttribute("aria-expanded", "false");
+  }
   function setDisabled(disabled) { if (trigger) trigger.disabled = Boolean(disabled); }
 
   function packs(stickers) {
@@ -54,7 +57,12 @@
 
   async function open({refresh = false} = {}) {
     if (!panel) return;
+    // The other half of the one-popover-at-a-time contract: composer_tools.js
+    // stops the click that would have closed the "＋" menu, so the two panels
+    // announce themselves instead of relying on the document click.
+    CM.emit("composerPopoverOpened", "stickers");
     panel.classList.remove("hidden");
+    trigger?.setAttribute("aria-expanded", "true");
     panel.innerHTML = '<div class="sticker-loading">正在拿表情包…</div>';
     try { render(await load({refresh})); }
     catch (error) { panel.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
@@ -118,6 +126,11 @@
   trigger.className = "sticker-trigger";
   trigger.textContent = "☺";
   trigger.title = "发送表情包";
+  // The "＋" trigger next to it declares both; a panel that only says it opens
+  // cannot be told apart from one that is open, which is how two of them ended
+  // up stacked.
+  trigger.setAttribute("aria-haspopup", "true");
+  trigger.setAttribute("aria-expanded", "false");
   CM.dom.composer.insertBefore(trigger, CM.dom.input);
   panel = document.createElement("div");
   panel.className = "sticker-panel hidden";
@@ -143,6 +156,7 @@
     await send(sticker);
   });
   document.addEventListener("click", event => { if (!event.target.closest(".sticker-panel") && !event.target.closest(".sticker-trigger")) close(); });
+  CM.on("composerPopoverOpened", name => { if (name !== "stickers") close(); });
   CM.on("conversationChanged", () => close());
 
   CM.registerFeature("stickers", {load, open, close, send, setDisabled, trigger});

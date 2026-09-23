@@ -66,6 +66,60 @@ def test_group_member_api_rejects_unknown_character(tmp_path: Path):
         assert response.status_code == 404
 
 
+def test_existing_group_can_remove_character_without_deleting_character(tmp_path: Path):
+    config = _config(tmp_path)
+    app = create_api(str(config))
+    attach_group_routes(app, str(config))
+    attach_group_member_routes(app)
+
+    with TestClient(app) as client:
+        profiles = client.get("/v1/characters").json()["characters"]
+        first, second, third = [item["id"] for item in profiles[:3]]
+        created = client.post("/v1/groups", json={"name": "缩容群", "member_ids": [first, second, third]})
+        group_id = created.json()["group"]["id"]
+
+        removed = client.delete(f"/v1/groups/{group_id}/members/{second}")
+        assert removed.status_code == 200
+        payload = removed.json()
+        assert payload["removed_member_id"] == second
+        assert payload["group"]["member_ids"] == [first, third]
+
+        remaining_profiles = {item["id"] for item in client.get("/v1/characters").json()["characters"]}
+        assert second in remaining_profiles
+
+        repeated = client.delete(f"/v1/groups/{group_id}/members/{second}")
+        assert repeated.status_code == 404
+
+
+def test_group_member_api_keeps_two_character_minimum(tmp_path: Path):
+    config = _config(tmp_path)
+    app = create_api(str(config))
+    attach_group_routes(app, str(config))
+    attach_group_member_routes(app)
+
+    with TestClient(app) as client:
+        profiles = client.get("/v1/characters").json()["characters"]
+        first, second = [item["id"] for item in profiles[:2]]
+        created = client.post("/v1/groups", json={"name": "最小群", "member_ids": [first, second]})
+        group_id = created.json()["group"]["id"]
+
+        response = client.delete(f"/v1/groups/{group_id}/members/{first}")
+        assert response.status_code == 400
+        assert "至少 2" in response.json()["detail"]
+
+        current = client.get(f"/v1/groups/{group_id}/history?limit=10")
+        assert current.status_code == 200
+        assert current.json()["group"]["member_ids"] == [first, second]
+
+
+def test_group_settings_exposes_remove_member_flow():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "src" / "character_memory" / "web" / "group_settings.js").read_text(encoding="utf-8")
+    assert "/members/\${encodeURIComponent(characterId)}" in script
+    assert "移出群聊" in script
+    assert "移出成员后也从下一轮起生效" in script
+
+
 def test_group_settings_exposes_add_member_flow():
     root = Path(__file__).resolve().parents[1]
     script = (root / "src" / "character_memory" / "web" / "group_settings.js").read_text(encoding="utf-8")

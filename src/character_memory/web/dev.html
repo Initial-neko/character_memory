@@ -32,6 +32,7 @@
       </div>
       <div class="service-links" data-level="common">
         <a class="secondary-link" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">打开 Chat :8000</a>
+        <a class="secondary-link" data-dev-surface="detailed" href="http://127.0.0.1:8001/health" target="_blank" rel="noreferrer">Media :8001</a>
         <a class="secondary-link" href="http://127.0.0.1:9002/tts" target="_blank" rel="noreferrer">TTS Workbench :9002</a>
         <button id="refreshAll" class="secondary">刷新状态</button>
         <button id="devModeToggle" class="secondary dev-mode-toggle" type="button" aria-pressed="false">Detailed Dev</button>
@@ -65,7 +66,7 @@
 
     <section class="grid feature-grid">
       <article class="card" id="llmSmokeCard" data-dev-surface="detailed">
-        <div class="card-title-row"><h2>LLM Smoke</h2><span class="pill">cloud</span></div>
+        <div class="card-title-row"><h2>LLM</h2><span class="pill">cloud</span></div>
         <div data-level="common">
           <label for="llmPrompt">Prompt</label>
           <textarea id="llmPrompt" rows="3">请只回复：LLM 接口正常。</textarea>
@@ -84,7 +85,7 @@
       </article>
 
       <article class="card" id="ttsSmokeCard" data-dev-surface="detailed">
-        <div class="card-title-row"><h2>TTS Smoke</h2><span class="pill">media</span></div>
+        <div class="card-title-row"><h2>TTS</h2><span class="pill">media</span></div>
         <div data-level="common">
           <label for="ttsText">Text</label>
           <textarea id="ttsText" rows="2">你好，这是 Character Memory 的语音测试。</textarea>
@@ -447,7 +448,7 @@
       </article>
 
       <article class="card" id="asrSmokeCard" data-dev-surface="detailed">
-        <div class="card-title-row"><h2>ASR Smoke</h2><span class="pill">media</span></div>
+        <div class="card-title-row"><h2>ASR</h2><span class="pill">media</span></div>
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 上传、录音与转写" data-hint="上传 WAV 或用浏览器麦克风">
           <summary>诊断 · 上传、录音与转写</summary>
           <div class="asr-controls">

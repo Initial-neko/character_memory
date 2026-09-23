@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 
 from character_memory.domain.models import PersonReaction
 from character_memory.llm.client import OpenAICompatibleModel
@@ -11,6 +12,7 @@ from character_memory.llm.usage import (
     LlmUsageStore,
     infer_usage_context,
     llm_usage_scope,
+    provider_label,
 )
 
 
@@ -244,6 +246,64 @@ def test_missing_provider_usage_is_explicitly_unknown_not_estimated(tmp_path):
     assert row["input_chars"] > 0
     assert usage["summary"]["token_known_requests"] == 0
     assert usage["summary"]["token_coverage"] == 0.0
+
+
+def test_success_http_with_malformed_payload_is_still_metered(tmp_path):
+    usage_path = tmp_path / "malformed-usage.db"
+
+    def handler(request: httpx.Request):
+        return httpx.Response(
+            200,
+            request=request,
+            headers={"x-request-id": "req-malformed-1"},
+            json={
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 1,
+                    "total_tokens": 9,
+                }
+            },
+        )
+
+    model = OpenAICompatibleModel(
+        "key",
+        model="demo-model",
+        base_url="https://example.test/v1",
+        usage_recorder=LlmUsageRecorder(usage_path),
+    )
+    model.client.close()
+    model.client = httpx.Client(transport=httpx.MockTransport(handler), timeout=30)
+    try:
+        with pytest.raises((KeyError, IndexError, TypeError)):
+            model._request(
+                [{"role": "user", "content": "hello"}],
+                conversation_id="dev-console",
+                usage_logical_call_id="logical-malformed-1",
+            )
+    finally:
+        model.close()
+
+    store = LlmUsageStore(usage_path)
+    try:
+        usage = store.usage(hours=24, limit=10)
+    finally:
+        store.close()
+
+    assert usage["summary"]["requests"] == 1
+    assert usage["summary"]["logical_calls"] == 1
+    assert usage["summary"]["errors"] == 1
+    assert usage["summary"]["total_tokens"] == 9
+    row = usage["recent"][0]
+    assert row["status"] == "ERROR"
+    assert row["logical_call_id"] == "logical-malformed-1"
+    assert row["error_type"].startswith("RESPONSE_")
+    assert row["request_id"] == "req-malformed-1"
+
+
+def test_provider_label_distinguishes_local_openai_compatible_ports():
+    assert provider_label("http://127.0.0.1:1234/v1") == "127.0.0.1:1234"
+    assert provider_label("http://127.0.0.1:9010/v1") == "127.0.0.1:9010"
+    assert provider_label("https://api.openai.com/v1") == "api.openai.com"
 
 
 def test_usage_context_inference_covers_non_runtime_feature_sessions():

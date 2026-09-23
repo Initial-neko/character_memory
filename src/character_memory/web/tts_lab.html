@@ -24,7 +24,12 @@
       </div>
     </header>
 
-    <section class="grid status-grid" id="providerStatusGrid" aria-label="TTS provider status"></section>
+    <div class="load-state-row" aria-live="polite">
+      <span id="providerLoadStatus" class="subtle">正在读取 Provider 状态…</span>
+    </div>
+    <section class="grid status-grid" id="providerStatusGrid" aria-label="TTS provider status">
+      <article class="card status-card status-placeholder"><div class="subtle">正在读取 Provider 状态…</div></article>
+    </section>
 
     <section class="card wide">
       <div class="card-title-row">
@@ -32,7 +37,7 @@
           <h2>试听文本</h2>
           <p class="subtle">建议用同一句中文逐个对比音色、咬字、停顿与长句稳定性。</p>
         </div>
-        <div class="actions"><button class="primary" id="compareReady">生成全部可用 Provider</button></div>
+        <div class="actions"><button class="primary" id="compareReady" disabled>生成全部可用 Provider</button></div>
       </div>
       <textarea id="ttsLabText" rows="6">刚才其实想了很久，不过后来觉得，有些事情可能没有想象中那么复杂。嗯，今天应该还挺顺利的。</textarea>
       <div class="tts-lab-controls">
@@ -45,7 +50,7 @@
         <label>Speed
           <input id="ttsLabSpeed" type="number" min="0.5" max="2" step="0.05" value="1.0" />
         </label>
-        <button class="primary" id="generateTtsLab">Generate</button>
+        <button class="primary" id="generateTtsLab" disabled>Generate</button>
       </div>
       <div id="singleResult" class="tts-lab-single">
         <audio id="ttsLabAudio" controls></audio>
@@ -64,7 +69,7 @@
           <p class="subtle">根据自然语言描述生成新声线。该工具独立于正式聊天 TTS，不进入 Provider 下拉框，也不会随正常 stack 自动加载大模型。</p>
         </div>
         <div class="actions">
-          <span id="voiceDesignBadge" class="badge">unknown</span>
+          <span id="voiceDesignBadge" class="badge">读取中</span>
           <button id="refreshVoiceDesign" class="secondary">刷新 VoiceDesign</button>
         </div>
       </div>
@@ -105,6 +110,7 @@
           </div>
         </div>
         <div class="voice-design-output">
+          <p id="voiceDesignLoadStatus" class="subtle load-state-message" aria-live="polite">正在读取 Voice Design 状态…</p>
           <details class="debug-output">
             <summary>原始状态（调试用）</summary>
             <pre id="voiceDesignStatus" class="result">等待 VoiceDesign sidecar...</pre>

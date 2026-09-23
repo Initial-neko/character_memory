@@ -74,3 +74,37 @@
   .tts-lab-controls { grid-template-columns: 1fr; }
   .voice-design-options { grid-template-columns: 1fr; }
 }
+
+
+.load-state-row {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  margin: -8px 0 10px;
+}
+
+.load-state-message.ok { color: var(--ui-ok, #73c991); }
+.load-state-message.warn { color: var(--ui-warn, #e2b86b); }
+.load-state-message.bad { color: var(--ui-danger, #e07b7b); }
+
+.status-placeholder {
+  min-height: 86px;
+  display: flex;
+  align-items: center;
+}
+
+.load-error {
+  display: grid;
+  gap: 8px;
+}
+.load-error p { margin: 0; }
+
+@media (max-width: 560px) {
+  .service-links {
+    flex-wrap: wrap;
+  }
+  .service-links .secondary-link,
+  .service-links button {
+    min-width: 0;
+  }
+}

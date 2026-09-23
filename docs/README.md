@@ -18,6 +18,7 @@ Source code and tests are the final implementation authority. `docs/current/` is
 
 ### Architecture and runtime
 
+- [Project status / roadmap](current/PROJECT_STATUS.md)
 - [Architecture](current/ARCHITECTURE.md)
 - [Product design](current/DESIGN.md)
 - [Codebase layout](current/CODEBASE_LAYOUT.md)
@@ -62,6 +63,7 @@ Historical notes never override current code or `docs/current/`.
 
 `docs/current/` 可以有多份专题文档，但同一个事实只应有一个主要 owner：
 
+- `PROJECT_STATUS.md` — 当前 main / open integration / accepted next work / deferred work 的唯一状态 owner；
 - `DESIGN.md` — 产品目标、阶段与价值边界；
 - `ARCHITECTURE.md` — 进程、数据边界、composition root 与主要运行流；
 - `CODEBASE_LAYOUT.md` — 文件/module ownership 与“改某能力先看哪里”；
@@ -80,9 +82,11 @@ Historical notes never override current code or `docs/current/`.
 
 When a feature changes durable behavior:
 
-1. update the relevant `docs/current/` document in the same PR;
-2. keep `README.md` focused on project overview, setup, architecture, and stable entry points;
-3. use the PR/issue for implementation plans, checklists, review logs, and handoff notes;
-4. do not add tool-specific documentation trees or generated task ledgers to `docs/`.
+1. current behavior belongs in the relevant `docs/current/` contract only after it exists on the target branch;
+2. meaningful open/integration tracks belong in `PROJECT_STATUS.md`, not prematurely in current architecture docs;
+3. update `CHANGELOG.md` for user-visible or architecture-significant changes after they land;
+4. keep `README.md` focused on project overview, setup, architecture, stable entry points, and links;
+5. use the PR/issue for implementation plans, checklists, review logs, and handoff notes;
+6. do not add tool-specific documentation trees or generated task ledgers to `docs/`.
 
 Git history already preserves superseded implementation plans. The working tree should describe the project people can run today.

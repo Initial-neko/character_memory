@@ -342,7 +342,11 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         # Feature modules may own background workers that still use the shared
         # SQLite/model bundle. Stop them before the core closes those resources.
         feature_state = getattr(app.state, "character_memory", None)
-        for scheduler_name in ("space_scheduler", "group_autonomy_scheduler"):
+        for scheduler_name in (
+            "space_scheduler",
+            "group_autonomy_scheduler",
+            "world_activity_scheduler",
+        ):
             scheduler = getattr(feature_state, scheduler_name, None) if feature_state is not None else None
             if scheduler is not None:
                 stop_scheduler = getattr(scheduler, "stop", None)

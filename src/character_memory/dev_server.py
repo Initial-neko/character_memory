@@ -15,7 +15,6 @@ from character_memory.web_lifecycle import on_app_event
 from character_memory.app import build_model
 from character_memory.config import Settings, load_settings
 from character_memory.resource_metrics import collect_resource_snapshot
-from character_memory.settings_store import SettingsStore
 from character_memory.web_assets import attach_static_assets
 
 
@@ -301,15 +300,6 @@ def create_dev_app(
 
     @app.post("/v1/dev/group-autonomy/config")
     def dev_group_autonomy_config(req: DevGroupAutonomyConfigRequest):
-        persisted = SettingsStore(config_path).save_values(
-            {
-                "group_autonomy_enabled": req.enabled,
-                "group_autonomy_interval_minutes": req.interval_minutes,
-                "group_autonomy_max_messages": req.max_messages,
-                "group_autonomy_user_quiet_minutes": req.user_quiet_minutes,
-                "group_autonomy_poll_seconds": req.poll_seconds,
-            }
-        )
         runtime = request_character(
             "POST",
             "/v1/group-autonomy/config",
@@ -317,7 +307,12 @@ def create_dev_app(
             json=req.model_dump(),
             timeout=10.0,
         )
-        return {"persisted": persisted, "runtime": runtime}
+        return {
+            "scope": "runtime-only",
+            "persisted": False,
+            "note": "Dev Console overrides only the current Character Runtime. Persist formal values in Settings Center.",
+            "runtime": runtime,
+        }
 
     @app.post("/v1/dev/group-autonomy/due/{conversation_id}")
     def dev_group_autonomy_due(conversation_id: str):
@@ -360,22 +355,6 @@ def create_dev_app(
 
     @app.post("/v1/dev/space/config")
     def dev_space_config(req: DevSpaceConfigRequest):
-        persisted = SettingsStore(config_path).save_values(
-            {
-                "space_autonomy_enabled": req.enabled,
-                "space_opportunity_interval_minutes": req.interval_minutes,
-                "space_max_posts_per_day": req.max_posts_per_day,
-                "space_media_enabled": req.media_enabled,
-                "space_media_max_items": req.media_max_items,
-                "space_image_search_enabled": req.image_search_enabled,
-                "space_image_generation_enabled": req.image_generation_enabled,
-                "space_world_observation_enabled": req.world_observation_enabled,
-                "space_world_max_pages": req.world_max_pages,
-                "space_world_max_chars_per_page": req.world_max_chars_per_page,
-                "space_audience_size": req.audience_size,
-                "space_scheduler_poll_seconds": req.poll_seconds,
-            }
-        )
         runtime = request_character(
             "POST",
             "/v1/space/dev/config",
@@ -384,9 +363,42 @@ def create_dev_app(
             timeout=10.0,
         )
         return {
-            "persisted": persisted,
+            "scope": "runtime-only",
+            "persisted": False,
+            "note": "Dev Console overrides only the current Character Runtime. Persist formal values in Settings Center.",
             "runtime": runtime,
         }
+
+    @app.get("/v1/dev/encounters/status")
+    def dev_encounter_status():
+        return request_character(
+            "GET",
+            "/v1/encounters/status",
+            operation="encounter-status",
+            timeout=10.0,
+        )
+
+    @app.post("/v1/dev/encounters/due")
+    def dev_encounter_due():
+        return request_character(
+            "POST",
+            "/v1/encounters/dev/due",
+            operation="encounter-due",
+            timeout=10.0,
+        )
+
+    @app.post("/v1/dev/encounters/opportunity")
+    def dev_encounter_opportunity(source_type: str = "AUTO"):
+        normalized = str(source_type or "AUTO").strip().upper()
+        if normalized not in {"AUTO", "WEB", "GENERATED"}:
+            raise HTTPException(status_code=400, detail="source_type must be AUTO, WEB or GENERATED")
+        return request_character(
+            "POST",
+            "/v1/encounters/dev/opportunity",
+            operation="encounter-opportunity",
+            json={"source_type": normalized},
+            timeout=300.0,
+        )
 
     @app.get("/v1/dev/world/status")
     def dev_world_status():

@@ -134,7 +134,7 @@ class Settings(BaseModel):
 
     # Random Encounter: a lightweight discovery pool separate from the formal
     # character list. Candidates may be explored even when the active chat list
-    # is full; only accepting a candidate consumes one of the 10 active slots.
+    # is full; accepting one consumes a formal slot (warn after 10, hard-stop at 20).
     encounter_enabled: bool = True
     encounter_interval_minutes: float = Field(default=1440.0, ge=10.0, le=10080.0)
     encounter_web_probability: float = Field(default=0.5, ge=0.0, le=1.0)

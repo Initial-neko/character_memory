@@ -20,6 +20,7 @@ class LlmUsageContext:
     character_id: str = ""
     conversation_id: str = ""
     logical_call_id: str = ""
+    attempt: int = 0
 
 
 _CURRENT_USAGE: ContextVar[LlmUsageContext] = ContextVar(
@@ -40,6 +41,7 @@ def llm_usage_scope(
     character_id: str | None = None,
     conversation_id: str | None = None,
     logical_call_id: str | None = None,
+    attempt: int | None = None,
     override: bool = False,
 ) -> Iterator[LlmUsageContext]:
     """Attach product-level attribution to every provider request in the block.
@@ -66,6 +68,7 @@ def llm_usage_scope(
         character_id=pick(base.character_id, character_id),
         conversation_id=pick(base.conversation_id, conversation_id),
         logical_call_id=pick(base.logical_call_id, logical_call_id),
+        attempt=max(0, int(attempt)) if attempt is not None else base.attempt,
     )
     token = _CURRENT_USAGE.set(merged)
     try:

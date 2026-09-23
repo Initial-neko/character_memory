@@ -4,7 +4,27 @@ This file records user-visible and architecture-significant release changes. His
 
 ## Unreleased
 
-No queued release changes yet.
+Current `main` has moved beyond the `0.5.0-rc.1` release-candidate baseline. The package version remains `0.5.0rc1` until the next release decision.
+
+### Product / UX
+
+- Reworked one-prompt AI group creation to be draft-first: research and member drafts remain invisible until one confirmation creates/reuses Characters and creates the real GroupConversation. Failed builds no longer leak visible zero-member groups.
+- Decoupled live-call microphone state from Camera/Screen sharing so visual-only sessions remain usable; AI TTS output is independent from local microphone state.
+- Reduced Dev Console first-screen complexity with common / advanced / diagnostic control levels.
+- Fixed composer-popover overlap, low-contrast metadata text, clipped sticker-pack tabs, and undersized message-meta touch targets.
+- Settings Center now owns persisted Space / Group / Random Encounter configuration; Dev owns runtime-only diagnostics/tuning.
+- Archived characters leave active voice/GSV/proactive paths while preserving historical media and voice mapping for restore.
+
+### Reliability
+
+- World/browser batch fetch now skips one guard-rejected or unresolvable candidate instead of aborting all otherwise valid candidates.
+- AI-group FAILED builds can no longer confirm stale member drafts.
+- Legacy zero-member Ensemble build artifacts are hidden from the normal Group list.
+- Live microphone/capture ownership follows latest-request semantics so a retired permission request cannot silently become the active stream later.
+
+### Documentation / architecture
+
+- Project status, open integration tracks and accepted next work are now maintained separately from current-branch architecture contracts.
 
 ## 0.5.0-rc.1 - 2026-09-22
 

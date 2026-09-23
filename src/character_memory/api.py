@@ -143,6 +143,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         current_bundle=current_bundle,
         character_write_lock=character_write_lock,
         register_runtime_character=register_runtime_character,
+        services=services,
     )
     character_profiles = characters.profiles
     public_profile = characters.public_profile

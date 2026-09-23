@@ -498,7 +498,7 @@ Kokoro/Sherpa/CosyVoice 的音质横向试听应在 `:9002/tts` 做；正式 Bro
 
 ## 13. Current non-goals
 
-当前仍未把以下能力作为稳定 contract：
+这些条目属于 NON-GOAL / research boundary，而不是默认 backlog；统一状态定义见 [STATUS.md](STATUS.md)。当前仍未把以下能力作为稳定 contract：
 
 - WebRTC full duplex
 - barge-in / user speech interrupting TTS

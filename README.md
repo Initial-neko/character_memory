@@ -14,19 +14,25 @@
 
 README 只描述可运行入口和已经落地的主能力；尚未完成端到端闭环的能力会明确标记为 foundation / in progress，而不是用实施计划冒充现状。
 
+当前 `main` 已经继续向前迭代，但 package version 仍是 `0.5.0rc1`。因此“当前 main 的能力”与“已经切出的 RC artifact”不能混为一谈。**SHIPPED / IN PROGRESS / BACKLOG / DEFERRED / NON-GOAL 的统一状态表见 [Current Status & Roadmap](docs/current/STATUS.md)。**
+
 开发和贡献约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，仓库级工程规则见 [AGENTS.md](AGENTS.md)。文档索引见 [docs/README.md](docs/README.md)，版本与发布策略见 [docs/current/RELEASES.md](docs/current/RELEASES.md)，版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 当前能力
 
 - 多 Character Persona；`personas/*/persona.yaml` 是人物定义事实源。
+- Character onboarding：新建人物会记录 creation provenance，初始化首头像（ImageGen → Web Search → 本地 fallback），可用时选择既有 voice template；持久化 base Persona 可查看但只读。
 - SQLite Event Log、Memory、Mental State、Intent、Runtime Trace。
 - 本地 BGE Embedding + Vector Recall；同一进程内所有人物共享 Embedding / LLM Provider。
 - `PersonReaction.actions[0..3]`：`MESSAGE / EMOJI / STICKER / IMAGE`，以及内部工具意图 `GENERATE_IMAGE`。
 - `actions=[]` 是合法沉默；辅助 Memory/Intent 字段允许安全容错，主 outward action contract 仍严格。
 - Direct Chat + Group Chat；群聊共享事实只保存一次，成员按因果顺序逐个判断。已有群聊还可以获得稀疏的自主交流机会：轮转 seed 可沉默，短链消息有硬上限，新 User fact 可 supersede 过时自主结果。
+- One-prompt Ensemble：一句话描述群体后先做公开资料研究，生成候选成员，由用户确认后复用正式 Character + Group 生命周期。
 - 异步消息接受：用户消息先持久化并立即返回 202，人物反应通过 SSE 渐进推送。
 - Message Search、Group Mentions、Unread、Intent Preview、Group Archive/Restore。
 - Character Space：共享帖子/评论/点赞/已查看/媒体事实；未归档角色默认每 24H 获得一次可沉默的自主发帖机会（测试时可调成 1H/30min/10min），可自然选择文字、互联网搜图、AI 生图或一条语音动态，并可在发帖前通过 Search + Headless Chromium 做受限 World Observation；Audience 最多 10 个候选角色，经同一人物状态决定忽略/点赞/评论，作者可自主回复。
+- World Activity：World Pulse 周期性读取配置的聚合/趋势页形成有界共享话题，角色可独立评论；每个角色还有独立 Personal Browse 时钟。观察世界与 Space 发帖解耦，不会因为浏览就自动发动态、发私聊或直接写长期 Memory。
+- Random Encounter：WEB / GENERATED 临时候选人物有独立持久化池、短期聊天、接受/忽略与定时机会；在用户确认接受前不会污染正式 Character 列表。
 - 用户图片输入 + Vision；浏览器 Camera / Display Capture 会选择关键帧作为本轮 transient Vision context，不把帧二进制长期写进聊天事实。
 - ImageGen：Direct 与 Group 中 Character 都可以自主选择 `SELFIE / SCENE`；同时保留用户显式“AI 生成图片”草稿工具。
 - Avatar Search / Avatar Generate / 从聊天图片设头像。
@@ -55,6 +61,8 @@ Character Runtime :8000                                         │
 ├─ Vision / Visual Capture context                              │
 ├─ ImageGen / autonomous visual                                 │
 ├─ Character Space / World Observation / Headless Browser       │
+├─ World Pulse / independent Personal Browse                     │
+├─ Ensemble creation / Random Encounter                          │
 └─ SQLite + local media metadata/files                          │
                                                                 │
 Media Runtime :8001 <-------------------------------------------┘
@@ -174,12 +182,14 @@ Playwright Python runtime 已进入 canonical `all` extra，因为 World Observa
 
 **当前实现以源码为最终事实源。** 当前文档集中在 [`docs/current/`](docs/current/)：
 
+- [Current Status & Roadmap](docs/current/STATUS.md)
 - [Architecture](docs/current/ARCHITECTURE.md)
 - [Product Design](docs/current/DESIGN.md)
 - [Codebase Layout](docs/current/CODEBASE_LAYOUT.md)
 - [Person Runtime](docs/current/PERSON_RUNTIME.md)
 - [Conversation Runtime](docs/current/CONVERSATION_RUNTIME.md)
 - [Character Space](docs/current/CHARACTER_SPACE.md)
+- [World Activity](docs/current/WORLD_ACTIVITY.md)
 - [Memory](docs/current/MEMORY.md)
 - [Visual Capture](docs/current/VISUAL_CAPTURE.md)
 - [Visual Generation](docs/current/VISUAL_GENERATION.md)

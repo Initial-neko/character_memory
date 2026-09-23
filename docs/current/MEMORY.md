@@ -243,13 +243,13 @@ World appraisal 的 `summary` 只服务本轮理解/表达，本身永远不是�
 -> 可以成为 Person Memory
 ```
 
-raw webpage text 仍然是 untrusted data，不直接进入 Memory 或最终 Space prompt。
+raw webpage text 仍然是 untrusted data，不直接进入 Memory 或最终 Space prompt。World Activity 的 Personal Browse 也只先形成近期 `WORLD_OBSERVATION` 事实，不因为“浏览过”就直接创建长期 Memory；详见 [WORLD_ACTIVITY.md](WORLD_ACTIVITY.md)。
 
 来源 URL / query 继续保存在 WORLD_OBSERVATION Event metadata 作为 provenance。更复杂的 freshness / confidence / 世界知识缓存暂不实现。
 
 ## 10. 尚未决定
 
-以下故意没有写死：
+这些决策的状态与优先级统一由 [STATUS.md](STATUS.md) 收敛；这里保留 Memory 领域本身的未决 contract。以下故意没有写死：
 
 - 最终 Memory Writer 算法；
 - admission threshold 是否按 Memory Type 动态调整；

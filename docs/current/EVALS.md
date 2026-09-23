@@ -333,7 +333,8 @@ Settings Center 至少验证：
 
 ## 12. Future evaluation work
 
-后续候选：
+Implementation priority is tracked in [STATUS.md](STATUS.md). These are evaluation candidates, not all active implementation tasks:
+
 
 - Model-as-Judge adapter；
 - Persona Identification Accuracy；

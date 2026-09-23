@@ -18,6 +18,7 @@ Source code and tests are the final implementation authority. `docs/current/` is
 
 ### Architecture and runtime
 
+- [Current status & roadmap](current/STATUS.md) — shipped / in progress / backlog / deferred / non-goal
 - [Architecture](current/ARCHITECTURE.md)
 - [Product design](current/DESIGN.md)
 - [Codebase layout](current/CODEBASE_LAYOUT.md)
@@ -63,6 +64,7 @@ Historical notes never override current code or `docs/current/`.
 
 `docs/current/` 可以有多份专题文档，但同一个事实只应有一个主要 owner：
 
+- `STATUS.md` — **唯一的实现状态 owner**：SHIPPED / IN PROGRESS / BACKLOG / DEFERRED / NON-GOAL；
 - `DESIGN.md` — 产品目标、阶段与价值边界；
 - `ARCHITECTURE.md` — 进程、数据边界、composition root 与主要运行流；
 - `CODEBASE_LAYOUT.md` — 文件/module ownership 与“改某能力先看哪里”；
@@ -78,13 +80,16 @@ Historical notes never override current code or `docs/current/`.
 
 其它文档引用 owner 文档，不复制整套 topology、端口、Provider 列表或同一行为定义。README 只保留可运行摘要和链接。
 
+状态信息尤其不能散落成互相冲突的“计划”：专题文档可以写本领域的 current gap / boundary，但优先级、是否正在实现、是否只是 deferred research，一律由 `STATUS.md` 收敛。Open PR 只能标为 IN PROGRESS，不能提前进入“当前能力”。
+
 ## Documentation policy
 
 When a feature changes durable behavior:
 
-1. update the relevant `docs/current/` document in the same PR;
-2. keep `README.md` focused on project overview, setup, architecture, and stable entry points;
-3. use the PR/issue for implementation plans, checklists, review logs, and handoff notes;
-4. do not add tool-specific documentation trees or generated task ledgers to `docs/`.
+1. update the relevant `docs/current/` contract in the same PR;
+2. update `current/STATUS.md` when the implementation state changes;
+3. keep `README.md` focused on project overview, setup, architecture, stable entry points, and a short status link;
+4. use the PR/issue for implementation plans, checklists, review logs, and handoff notes;
+5. do not add tool-specific documentation trees or generated task ledgers to `docs/`.
 
 Git history already preserves superseded implementation plans. The working tree should describe the project people can run today.

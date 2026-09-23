@@ -1,6 +1,6 @@
 # Current Architecture
 
-本文描述当前 `main` 的工程结构与运行边界。源码 HEAD 始终是最终事实源。
+本文描述当前 `main` 的工程结构与运行边界。源码 HEAD 始终是最终事实源。实现状态（已上线 / 正在实现 / backlog / deferred）统一见 [STATUS.md](STATUS.md)；本文件不把 open PR 当作当前架构。
 
 ## 1. Runtime topology
 
@@ -16,10 +16,11 @@ Browser
 Character Runtime :8000                                         │
 ├─ FastAPI / Direct / Group / SSE                               │
 ├─ ReactionScheduler / PersonRuntime                            │
-├─ SpaceAutonomyScheduler / GroupAutonomyScheduler              │
+├─ Space / Group / Encounter / WorldActivity schedulers         │
 ├─ Persona / Memory / Mental State / Intent                     │
 ├─ Vision + Visual Capture context                              │
 ├─ ImageGen / autonomous visual                                 │
+├─ Ensemble creation / temporary Random Encounter                │
 └─ SQLite + local media metadata/files                          │
                                                                 │
 Media Runtime :8001 <-------------------------------------------┘
@@ -139,6 +140,39 @@ create_api()
 ```
 
 群聊成员保持顺序判断，是为了让后一个人物可以看到前一个人物刚刚公开表达的内容；不是为了追求表面吞吐量而并行所有成员。
+
+### 3.1 Character creation and discovery workflows
+
+Character creation is not a separate permanent runtime. Current `main` has two higher-level creation/discovery workflows that both converge back to ordinary Character/Group contracts:
+
+```text
+One-prompt Ensemble
+  prompt
+  -> public research
+  -> EnsembleResearch
+  -> candidate PersonaDrafts
+  -> user confirmation
+  -> ordinary Characters
+  -> ordinary Group
+
+Random Encounter
+  scheduled/manual opportunity
+  -> WEB or GENERATED temporary candidate
+  -> temporary encounter chat
+  -> accept / dismiss
+  -> only on accept: ordinary Character
+```
+
+Key boundary:
+
+- `persona_builder.py` produces a draft; `ApiCharacterService` owns formal Character creation;
+- `character_onboarding.py` owns post-create initialization: creation provenance, first avatar, best-effort existing voice-template selection and the read-only persisted-Persona inspector payload;
+- provider/network onboarding work runs outside the character-write lock;
+- first-avatar initialization uses ImageGen -> web search -> dependency-free local PNG fallback, and mandatory initialization failure rolls the newly created Character back;
+- `ensemble_builder.py` may research/create candidates, but confirmed new members go through the same formal Character onboarding path before becoming ordinary Group members;
+- `encounter_store.py` keeps temporary candidates/messages outside the formal Character list;
+- accepting an Encounter is the lifecycle boundary where a temporary candidate becomes a formal Character;
+- neither feature may create a second permanent Persona/Memory runtime.
 
 ## 4. Person Runtime
 
@@ -392,6 +426,36 @@ World Search、Browser Render、Memory、Public Expression 是四个不同边界
 
 详见 [`CHARACTER_SPACE.md`](CHARACTER_SPACE.md) 与 [`MEMORY.md`](MEMORY.md)。
 
+### 11.1 Independent World Activity
+
+Current `main` also has a world-observation path that is deliberately **independent from Space publishing cadence**:
+
+```text
+configured aggregation/trending pages
+  -> WorldActivityScheduler
+  -> bounded World Pulse topics
+  -> optional independent character comments
+
+per-character browse clock
+  -> Personal Browse plan
+  -> Search + rendered public pages
+  -> safe appraisal
+  -> recent WORLD_OBSERVATION fact
+```
+
+Important separation:
+
+- Pulse refresh cadence is not Space opportunity cadence;
+- Personal Browse cadence is per Character and independently jittered;
+- Personal Browse does not auto-publish to Space;
+- Personal Browse does not send Direct messages;
+- Personal Browse does not directly admit long-term Memory;
+- Pulse topics/comments are shared World facts, not Space posts/comments.
+
+The durable scheduler owns separate `PULSE`, `DISCUSS` and `BROWSE:<character>` clocks. Formal `world_*` configuration belongs to Settings Center; Dev Console only exposes diagnostic/manual-trigger operations.
+
+See [`WORLD_ACTIVITY.md`](WORLD_ACTIVITY.md) for the current contract.
+
 ## 12. Media Runtime and formal TTS
 
 `:8001` 独立拥有本地媒体能力：
@@ -469,7 +533,10 @@ Lab 下拉选择只用于试听/benchmark，不会自动改变正式 TTS 默认�
 - Media live smoke；
 - ImageGen provider / rewrite / generate / preview；
 - system RAM / process RSS / NVIDIA VRAM；
-- recent Media metrics。
+- recent Media metrics；
+- Space / Group / Encounter / World Activity diagnostic/manual-trigger surfaces。
+
+LLM usage-by-feature monitoring is tracked as BACKLOG in [STATUS.md](STATUS.md); the previous implementation PR was closed unmerged, so it is not a current-main Dev Console contract.
 
 Dev Console 不持有云 API key，不是任意 URL/header 的 Postman 替代品。Secret 编辑归 Settings Center。
 

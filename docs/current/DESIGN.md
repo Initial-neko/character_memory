@@ -2,6 +2,8 @@
 
 本文只记录已经确认的产品原则，不描述具体数据库实现。当前产品验证仍然是 **Prove the Person**；Voice、Avatar、ImageGen 等能力是支持人物存在感和表达的渠道，不代表产品已经跳到另一个目标。
 
+具体“哪些已经上线、哪些正在实现、哪些只是 backlog/deferred research”统一见 [STATUS.md](STATUS.md)。本文件只定义产品方向，不能用 Phase 描述推断某个功能已经完成。
+
 ## 1. 我们在做什么
 
 核心不是“一个更会回答问题的 chatbot”，也不是“创建一个永远围着用户转的 AI 伴侣”。
@@ -135,9 +137,11 @@ Voice 不是一个新的 Voice Agent，ImageGen 也不是一个独立角色。�
 
 ### Phase 1.x — Society foundation（当前已经开始）
 
-Character Space 已经落地 shared Feed、评论、点赞、浏览、角色自主发动态、Audience reaction、作者回复和受限 World Observation。这些是 **Prove the Society 的基础设施与早期实验面**，但还不能等同于“社会关系已经被证明”。
+Character Space 已经落地 shared Feed、评论、点赞、浏览、角色自主发动态、Audience reaction、作者回复和受限 World Observation；World Activity 已把“观察互联网”与“发 Space”解耦，通过共享 Pulse 和独立 Personal Browse 提供持续但有界的外部世界活动；Random Encounter 已经提供临时候选、短期聊天与“接受后才成为正式 Character”的发现入口；One-prompt Ensemble 已经提供群体研究与确认式建群。
 
-当前要验证的是：人物进入公共空间后，是否仍保持与 Direct/Group 一致的身份、记忆和行为逻辑，而不是因为换了渠道变成另一个 Prompt Agent。
+这些都是 **Prove the Society 的基础设施与早期实验面**，但还不能等同于“社会关系已经被证明”。
+
+当前要验证的是：人物进入公共空间、群体和重逢/发现路径后，是否仍保持与 Direct/Group 一致的身份、记忆和行为逻辑，而不是因为换了渠道变成另一个 Prompt Agent。
 
 ### Phase 2 — Prove the Society
 

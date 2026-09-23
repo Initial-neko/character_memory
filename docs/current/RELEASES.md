@@ -2,6 +2,8 @@
 
 Character Memory uses a lightweight release model for the current 0.x phase.
 
+Implementation status is tracked separately in [STATUS.md](STATUS.md). A package version on `main` is not evidence that every later `main` commit belongs to an already-cut artifact.
+
 ## Branch model
 
 `main` is the active integration branch and must stay CI-green. Normal work lands through short-lived `feature/*`, `fix/*`, `refactor/*`, or `chore/*` branches.
@@ -54,6 +56,8 @@ feature/fix branches
     v0.5.0
 ```
 
+Between release cuts, `main` may continue to carry the last package version while accumulating **Unreleased** changes. When that happens, `CHANGELOG.md -> Unreleased` must stop saying “nothing queued”, and STATUS must distinguish current-main SHIPPED behavior from open PRs.
+
 A release candidate requires:
 
 1. Linux full pytest green.
@@ -69,7 +73,7 @@ Promotion from RC to stable additionally requires a real local soak on the norma
 
 The 0.5 line is the first **Persistent Person Runtime Baseline**: Direct, Group, Memory/Mental State, Voice, Vision/Image, and Character Space are all channels around the same persistent person model rather than separate personalities.
 
-`0.5.0rc1` is the first release-candidate package version for this baseline.
+`0.5.0rc1` is the first release-candidate package version for this baseline. Current `main` has continued moving after that RC snapshot; see [STATUS.md](STATUS.md) and `CHANGELOG.md -> Unreleased` for post-RC work.
 
 ## 1.0 boundary
 

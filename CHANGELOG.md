@@ -4,7 +4,30 @@ This file records user-visible and architecture-significant release changes. His
 
 ## Unreleased
 
-No queued release changes yet.
+Current `main` has moved beyond the `0.5.0-rc.1` artifact. Open PRs are not listed here until merged; implementation status lives in `docs/current/STATUS.md`.
+
+### Product
+
+- Added Random Encounter as a temporary candidate pool with WEB/GENERATED discovery, short-lived candidate chat, scheduler, and accept/dismiss lifecycle before a candidate becomes a formal Character.
+- Added World Activity with independent World Pulse refresh/discussion and per-character Personal Browse clocks, explicitly decoupled from Character Space publishing and long-term Memory admission.
+- Added bounded threaded Character Space replies with reply-to-reply interaction while keeping the visual thread shallow.
+- Prefetches older Character Space cursor pages and supports generated avatar candidate batches with style presets.
+- Reworked Character onboarding so new Characters persist creation provenance, receive a guaranteed first avatar through ImageGen -> web search -> local fallback, select an existing voice template when available, and expose the persisted base Persona through a read-only inspector.
+- Ensemble-created Characters now converge on the same onboarding lifecycle instead of owning a parallel creation path.
+
+### Runtime / correctness
+
+- Preserves the model's own Space plan output for diagnostics when structured planning resolves to an empty action.
+- Browser World fetching skips candidate URLs rejected by the public-network guard instead of aborting the whole batch.
+- Decoupled call microphone capture from screen sharing and hardened browser capture ownership against late permission grants; a retired/hung-up call can no longer adopt a microphone stream that arrives after it is no longer wanted.
+- Rebuilt archived-character voice lifecycle so archived Characters leave active voice/GSV/proactive paths while retaining reversible voice mappings.
+
+### UI / developer surfaces
+
+- Added hierarchical common/advanced/diagnostic levels to Settings Center and Dev Console so the first screen stays focused.
+- Moved raw JSON diagnostic payloads behind explicit disclosure controls.
+- Fixed chat bubble/sticker/caption consistency, contrast/focus states and small-button hit areas.
+- Repaired the one-prompt AI group creation lifecycle on the current runtime baseline.
 
 ## 0.5.0-rc.1 - 2026-09-22
 

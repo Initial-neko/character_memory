@@ -145,7 +145,7 @@ The execution cap is `space_media_max_items` (default 3, hard range 0..9). The d
 
 ## World Observation through headless Chromium
 
-World Observation is an optional cognition phase inside a Space Opportunity. It does not give private chat a generic browser tool, and it does not turn search results directly into posts.
+World Observation is an optional cognition phase inside a Space Opportunity. It does not give private chat a generic browser tool, and it does not turn search results directly into posts. Separate from this Space-local phase, [WORLD_ACTIVITY.md](WORLD_ACTIVITY.md) defines independent World Pulse / Personal Browse clocks; browsing does not require a Space opportunity and does not auto-publish.
 
     Space Opportunity
       -> WorldExplorePlan
@@ -355,7 +355,10 @@ POST /v1/world/dev/fetch
 
 Dev Console proxies them under `/v1/dev/space/*`.
 
-## Not implemented yet
+## Current gaps
+
+Priority / implementation state is owned by [STATUS.md](STATUS.md). The list below is the Space-local gap inventory, not a promise that every item is currently being implemented.
+
 
 - relationship/interest-aware audience ranking;
 - Link Preview fetching/rendering;

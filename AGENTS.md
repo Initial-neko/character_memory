@@ -15,6 +15,51 @@ The current implementation is defined by:
 
 Historical notes under `docs/archive/` are not current API or runtime contracts.
 
+Implementation state is owned by `docs/current/STATUS.md`. Do not infer that an open PR, old plan, archived milestone, or TODO is already shipped.
+
+## Architecture map
+
+The codebase is intentionally layered without a framework-heavy service container:
+
+```text
+server.py
+  -> create_api()
+     -> AppBundle / RuntimeServices / typed route access
+  -> attach feature HTTP adapters
+
+application/
+  -> Direct/Group orchestration, async scheduling, autonomy, wake/proactive
+
+runtime/
+  -> PersonRuntime, shared PersonContextBuilder, ReactionEngine, resource gating
+
+domain/
+  -> structured contracts (Event / Memory / PersonReaction / ActionDecision)
+
+storage/ + memory/
+  -> durable facts, migrations, search/history, embedding/recall
+
+feature modules
+  -> Space, Encounter, Ensemble, Avatar, Visual, Voice, World
+
+web/
+  -> native HTML/CSS/JS product surfaces; no React build chain
+```
+
+Key ownership rules:
+
+- `api.py` is composition/lifecycle, not a bucket for new endpoints.
+- `server.py` is the fastest map of Character Runtime route assembly.
+- `RuntimeServices` owns shared Search / Avatar / ImageGen / World infrastructure; route attach order must not create dependencies.
+- Direct and Group share the reaction/materialization core but retain explicit channel policy.
+- Space/World use the same Person data but still have channel-specific planning; do not force a universal action schema without a product reason.
+- Formal Character creation converges through `ApiCharacterService` + `CharacterOnboardingService`; Ensemble and accepted Encounter candidates must not invent parallel permanent persona/onboarding paths.
+- onboarding network/provider work must stay outside the character-write lock, and mandatory initialization failure must preserve rollback semantics.
+- durable facts remain authoritative; Memory/Mental State/Intent/Trace are derived cognition.
+- Media, Vision, ImageGen, Voice and Avatar are channels/tools of the same Person, never separate personalities.
+
+For file-level navigation, read `docs/current/CODEBASE_LAYOUT.md` before broad edits. For runtime topology, read `docs/current/ARCHITECTURE.md`.
+
 ## Development workflow
 
 - Make focused changes with focused tests.
@@ -42,8 +87,10 @@ Browser smoke tests and live-model checks have separate environment requirements
 
 When behavior changes:
 
-- update the relevant file in `docs/current/`;
-- keep `README.md` limited to project overview, setup, primary architecture, and stable entry points;
+- update the relevant contract file in `docs/current/`;
+- update `docs/current/STATUS.md` when something moves between IN PROGRESS / SHIPPED / BACKLOG / DEFERRED;
+- keep `README.md` limited to project overview, setup, primary architecture, stable entry points, and a short status pointer;
+- keep architecture ownership reflected here and in `CODEBASE_LAYOUT.md` when modules/services move;
 - use `docs/archive/` only for historical milestones that are still worth keeping;
 - do not create tool-specific documentation trees such as `docs/superpowers/`.
 
@@ -65,3 +112,5 @@ A PR should state:
 - known limitations or deferred work.
 
 Do not merge an incomplete experimental feature merely because its supporting contract landed. Keep the distinction between foundation, runtime integration, and user-visible completion explicit.
+
+Before opening a PR that changes architecture or a user-visible capability, verify that its status wording is consistent across the owning topic doc, `STATUS.md`, README summary (if affected), and this repository guide (if ownership moved). Open PR behavior must never be described as current-main behavior.

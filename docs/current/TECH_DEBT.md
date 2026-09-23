@@ -1,6 +1,8 @@
-# V1 Technical Debt Register
+# Current Technical Debt Register
 
-This register records only debt that still exists on current `main`. A possible refactor is not automatically a required refactor.
+This document owns the **technical rationale and debt details** for current `main`. The implementation-state/priority summary lives in [STATUS.md](STATUS.md).
+
+This file intentionally keeps a short “Recently resolved” section as evidence for why some old refactors are no longer active debt; therefore it is **not** a pure open-TODO list. A possible refactor is not automatically a required refactor, and resolved entries must not be reported as pending work.
 
 ## Recently resolved
 
@@ -107,9 +109,9 @@ A developer-generated, verified local lockfile can therefore be added later with
 
 ### Background worker ownership
 
-Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent polling, Character Wake, Space Autonomy, Group Autonomy and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
+Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent polling, Character Wake, Space Autonomy, Group Autonomy, Random Encounter, World Activity and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
 
-Before adding many more autonomous schedulers, introduce one typed background-service/lifespan owner with start/stop/health semantics. This does not require Redis/Celery or a distributed queue.
+The scheduler count has now grown enough that this is no longer merely cosmetic ownership debt. Before adding another independent autonomous scheduler, introduce one typed background-service/lifespan owner with start/stop/health semantics. This does not require Redis/Celery or a distributed queue.
 
 ## Medium priority / observe before refactoring
 
@@ -150,6 +152,13 @@ ReactionScheduler/SSE delivery remains process-local. SQLite is durable, but mul
 ### Life / Inspector and historical CSS
 
 The frozen life simulation/inspector and milestone-named CSS remain supported code, not dead code. Removal/renaming would create broad churn and belongs to a larger version if product direction warrants it.
+
+## Status ownership
+
+- active engineering debt and its trigger/rationale live here;
+- product backlog and open PR status live in [STATUS.md](STATUS.md);
+- historical milestone plans live under `docs/archive/`;
+- when a debt item is resolved, either move it into the short resolved context above or remove it once Git history is sufficient; do not leave it mixed into active-priority sections.
 
 ## Priority rule
 

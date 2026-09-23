@@ -16,6 +16,14 @@ The bug these cover, in one line: every archive on a deployment with no GSV
 sidecar used to pin a banner to ``top:84px`` for the rest of the session, saying
 a running sidecar might still be synthesizing the old roster -- on a machine
 that had no sidecar to synthesize with -- and it could not be dismissed.
+
+The ``page`` fixture is the pytest-playwright harness the browser CI job
+installs, as in test_chat_ui_playwright.py. Driving a browser from a fixture of
+our own here does not work: the plugin runs the sync API inside an asyncio loop,
+where ``sync_playwright()`` refuses to start ("It looks like you are using
+Playwright Sync API inside the asyncio loop"), which is how this file's first
+version passed locally and failed the moment CI ran it. Nothing here starts a
+server either: ``set_content`` is enough for a module that only needs a DOM.
 """
 
 from __future__ import annotations
@@ -30,6 +38,10 @@ from test_character_archive import (
     _voice_registry_after_archive,
 )
 
+if os.getenv("RUN_PLAYWRIGHT") == "1":
+    from playwright.sync_api import expect
+else:
+    expect = None
 
 pytestmark = [
     pytest.mark.browser,
@@ -83,6 +95,17 @@ _PAGE = """<!doctype html>
 
 
 @pytest.fixture
+def archive_page(page):
+    """The real archive module, on a page with the real stylesheet."""
+
+    page.set_default_timeout(15000)
+    page.set_content(_PAGE, wait_until="domcontentloaded")
+    page.add_style_tag(path=str(WEB / "styles.css"))
+    page.add_script_tag(path=str(WEB / "character_archive.js"))
+    return page
+
+
+@pytest.fixture
 def registry_payloads(tmp_path: Path, monkeypatch) -> dict[str, dict]:
     """The three outcomes, produced by the route rather than by this file."""
 
@@ -104,12 +127,6 @@ def _scratch(tmp_path: Path, name: str) -> Path:
     directory = tmp_path / name
     directory.mkdir()
     return directory
-
-
-def _open(page) -> None:
-    page.set_content(_PAGE, wait_until="domcontentloaded")
-    page.add_style_tag(path=str(WEB / "styles.css"))
-    page.add_script_tag(path=str(WEB / "character_archive.js"))
 
 
 def _archive(page, payload: dict) -> None:
@@ -142,65 +159,50 @@ def _notice_state(page) -> dict:
     )
 
 
-def test_a_clean_reload_leaves_nothing_on_screen(registry_payloads):
-    sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+def test_a_clean_reload_leaves_nothing_on_screen(archive_page, registry_payloads):
+    _archive(archive_page, {"voice_registry": registry_payloads["reloaded"]})
 
-    with sync_playwright() as driver:
-        browser = driver.chromium.launch()
-        page = browser.new_page()
-        _open(page)
-        _archive(page, {"voice_registry": registry_payloads["reloaded"]})
-
-        state = _notice_state(page)
-        assert state["hidden"] is True
-        assert state["text"] == ""
-        assert state["drawerCloses"] == 1, "the drawer closes on every path, warning or not"
-        browser.close()
+    state = _notice_state(archive_page)
+    assert state["hidden"] is True
+    assert state["text"] == ""
+    assert state["drawerCloses"] == 1, "the drawer closes on every path, warning or not"
 
 
-def test_a_refused_reload_warns_truthfully_and_can_be_dismissed(registry_payloads):
+def test_a_refused_reload_warns_truthfully_and_can_be_dismissed(archive_page, registry_payloads):
     """The sidecar answered, so the warning is allowed to say a sidecar is running.
 
     And it has to be gettable-rid-of: the drawer is already closed, so a notice
     with no dismiss and no timer is furniture for the rest of the session.
     """
 
-    sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+    _archive(archive_page, {"voice_registry": registry_payloads["rejected"]})
 
-    with sync_playwright() as driver:
-        browser = driver.chromium.launch()
-        page = browser.new_page()
-        _open(page)
-        _archive(page, {"voice_registry": registry_payloads["rejected"]})
+    state = _notice_state(archive_page)
+    assert state["hidden"] is False
+    assert "sidecar" in state["text"], state["text"]
+    assert "murasame" in state["text"], "the sidecar's own sentence is the actionable part"
+    assert state["drawerCloses"] == 1, "a failed refresh must not hold the drawer open"
 
-        state = _notice_state(page)
-        assert state["hidden"] is False
-        assert "sidecar" in state["text"], state["text"]
-        assert "murasame" in state["text"], "the sidecar's own sentence is the actionable part"
-        assert state["drawerCloses"] == 1, "a failed refresh must not hold the drawer open"
+    # The strip must not stand between the user and the sidebar: it stays
+    # transparent to the pointer and only the button opts back in. This is the
+    # property that a Playwright click on `.character-archive-entry` depends on.
+    assert state["canvasPointerEvents"] == "none"
+    assert state["dismissPointerEvents"] == "auto"
+    assert state["hasDismiss"] is True
 
-        # The strip must not stand between the user and the sidebar: it stays
-        # transparent to the pointer and only the button opts back in. This is
-        # the property that a Playwright click on `.character-archive-entry`
-        # depends on.
-        assert state["canvasPointerEvents"] == "none"
-        assert state["dismissPointerEvents"] == "auto"
-        assert state["hasDismiss"] is True
+    # It survives the flow that produced it -- this is the standing warning, not
+    # the transient one -- so it cannot be a race that makes the dismissal below
+    # look like it worked.
+    archive_page.wait_for_timeout(1500)
+    assert _notice_state(archive_page)["hidden"] is False
 
-        # It survives the flow that produced it -- this is the standing warning,
-        # not the transient one -- so it cannot be a race that makes the
-        # dismissal below look like it worked.
-        page.wait_for_timeout(1500)
-        assert _notice_state(page)["hidden"] is False
-
-        page.click(DISMISS)
-        state = _notice_state(page)
-        assert state["hidden"] is True
-        assert state["text"] == ""
-        browser.close()
+    archive_page.click(DISMISS)
+    state = _notice_state(archive_page)
+    assert state["hidden"] is True
+    assert state["text"] == ""
 
 
-def test_an_unreachable_sidecar_never_gets_a_standing_banner(registry_payloads):
+def test_an_unreachable_sidecar_never_gets_a_standing_banner(archive_page, registry_payloads):
     """The reported bug, as the user experiences it.
 
     No sidecar is running. Whatever the module chooses to say -- a note that
@@ -210,52 +212,37 @@ def test_an_unreachable_sidecar_never_gets_a_standing_banner(registry_payloads):
     claim a sidecar is doing anything: there is none.
     """
 
-    sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+    _archive(archive_page, {"voice_registry": registry_payloads["unreachable"]})
 
-    with sync_playwright() as driver:
-        browser = driver.chromium.launch()
-        page = browser.new_page()
-        _open(page)
-        _archive(page, {"voice_registry": registry_payloads["unreachable"]})
+    state = _notice_state(archive_page)
+    assert state["drawerCloses"] == 1
+    assert state["canvasPointerEvents"] == "none"
 
-        state = _notice_state(page)
-        assert state["drawerCloses"] == 1
-        assert state["canvasPointerEvents"] == "none"
+    if not state["hidden"]:
+        assert "sidecar" not in state["text"], (
+            "there is no sidecar running, so nothing may say one is synthesizing: " + state["text"]
+        )
+        # Gone on its own, with nobody clicking anything.
+        expect(archive_page.locator(NOTICE)).to_be_hidden(timeout=TRANSIENT_CLEAR_MS)
 
-        if not state["hidden"]:
-            assert "sidecar" not in state["text"], (
-                "there is no sidecar running, so nothing may say one is synthesizing: " + state["text"]
-            )
-            # Gone on its own, with nobody clicking anything.
-            page.wait_for_selector(NOTICE, state="hidden", timeout=TRANSIENT_CLEAR_MS)
-            assert _notice_state(page)["hidden"] is True
-
-        # And archiving again in the same session does not bring back the strip
-        # that could only be cleared by a clean reload -- the one this module
-        # used to leave parked over the sidebar for the rest of the session.
-        _archive(page, {"voice_registry": registry_payloads["unreachable"]})
-        state = _notice_state(page)
-        assert state["hidden"] or state["hasDismiss"], state
-        browser.close()
+    # And archiving again in the same session does not bring back the strip that
+    # could only be cleared by a clean reload -- the one this module used to
+    # leave parked over the sidebar for the rest of the session.
+    _archive(archive_page, {"voice_registry": registry_payloads["unreachable"]})
+    state = _notice_state(archive_page)
+    assert state["hidden"] or state["hasDismiss"], state
 
 
-def test_a_response_without_a_status_still_warns():
+def test_a_response_without_a_status_still_warns(archive_page):
     """An API older than this fix can only over-report, never go silent.
 
     Every payload from that version meant "the refresh did not happen", because
     that version had no way to say anything else.
     """
 
-    sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+    _archive(archive_page, {"voice_registry": {"ok": False, "reloaded": False, "reason": "boom"}})
 
-    with sync_playwright() as driver:
-        browser = driver.chromium.launch()
-        page = browser.new_page()
-        _open(page)
-        _archive(page, {"voice_registry": {"ok": False, "reloaded": False, "reason": "boom"}})
-
-        state = _notice_state(page)
-        assert state["hidden"] is False
-        assert "sidecar" in state["text"]
-        assert state["hasDismiss"] is True
-        browser.close()
+    state = _notice_state(archive_page)
+    assert state["hidden"] is False
+    assert "sidecar" in state["text"]
+    assert state["hasDismiss"] is True

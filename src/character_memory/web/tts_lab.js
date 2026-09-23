@@ -1,7 +1,10 @@
 (() => {
   const $ = (id) => document.getElementById(id);
+  const STATUS_TIMEOUT_MS = 8000;
   const state = {
     providers: [],
+    providersState: "idle",
+    voiceDesignState: "idle",
     voiceDesignUrl: null,
     // VoiceDesign is not reproducible, so the freeze step needs the opaque
     // artifact token that addresses the exact audio the user auditioned, plus
@@ -16,6 +19,38 @@
 
   function pretty(value) {
     return JSON.stringify(value, null, 2);
+  }
+
+  async function fetchJsonWithTimeout(url, options = {}, timeoutMs = STATUS_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {...options, signal: controller.signal});
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(body || `HTTP ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  function providerLoadMessage(text, tone = "") {
+    const node = $("providerLoadStatus");
+    node.textContent = text;
+    node.className = `subtle load-state-message ${tone}`.trim();
+  }
+
+  function voiceDesignLoadMessage(text, tone = "") {
+    const node = $("voiceDesignLoadStatus");
+    node.textContent = text;
+    node.className = `subtle load-state-message ${tone}`.trim();
   }
 
   function badgeClass(ready) {
@@ -34,7 +69,7 @@
       title.textContent = provider.label || provider.id;
       const badge = document.createElement("span");
       badge.className = badgeClass(provider.ready);
-      badge.textContent = provider.ready ? (provider.loaded ? "loaded" : "ready") : "unavailable";
+      badge.textContent = provider.ready ? (provider.loaded ? "已加载" : "就绪") : "不可用";
       header.append(title, badge);
       const body = document.createElement("pre");
       body.className = "status-block";
@@ -71,7 +106,7 @@
     for (const provider of state.providers) {
       const option = document.createElement("option");
       option.value = provider.id;
-      option.textContent = `${provider.label || provider.id}${provider.ready ? "" : " · unavailable"}`;
+      option.textContent = `${provider.label || provider.id}${provider.ready ? "" : " · 不可用"}`;
       select.appendChild(option);
     }
     if (state.providers.some((item) => item.id === previous)) select.value = previous;
@@ -83,29 +118,54 @@
     const provider = selectedProvider();
     const voice = $("ttsLabVoice");
     voice.innerHTML = "";
-    const voices = provider?.voices?.length ? provider.voices : [provider?.default_voice || "default"];
+    if (!provider) {
+      $("ttsLabSpeed").disabled = true;
+      $("generateTtsLab").disabled = true;
+      return;
+    }
+    const voices = provider.voices?.length ? provider.voices : [provider.default_voice || "default"];
     for (const value of voices) {
       const option = document.createElement("option");
       option.value = String(value);
       option.textContent = String(value);
       voice.appendChild(option);
     }
-    if (provider?.default_voice && voices.includes(provider.default_voice)) voice.value = provider.default_voice;
-    $("ttsLabSpeed").disabled = provider ? provider.supports_speed === false : false;
-    $("generateTtsLab").disabled = !provider?.ready;
+    if (provider.default_voice && voices.includes(provider.default_voice)) voice.value = provider.default_voice;
+    $("ttsLabSpeed").disabled = provider.supports_speed === false;
+    $("generateTtsLab").disabled = !provider.ready;
   }
 
   async function loadProviders() {
+    const started = performance.now();
+    state.providersState = "loading";
+    state.providers = [];
     $("refreshProviders").disabled = true;
+    $("generateTtsLab").disabled = true;
+    $("compareReady").disabled = true;
+    $("providerStatusGrid").innerHTML = '<article class="card status-card status-placeholder"><div class="subtle">正在读取 Provider 状态…</div></article>';
+    providerLoadMessage("正在读取 Provider 状态…");
     try {
-      const response = await fetch("/v1/providers");
-      if (!response.ok) throw new Error(await response.text());
-      const data = await response.json();
+      const data = await fetchJsonWithTimeout("/v1/providers");
       state.providers = data.providers || [];
+      state.providersState = "ready";
       renderProviderStatus();
       renderProviderSelect();
+      const readyCount = state.providers.filter((item) => item.ready).length;
+      $("compareReady").disabled = readyCount === 0;
+      providerLoadMessage(
+        `已读取 ${state.providers.length} 个 Provider · ${readyCount} 个可用 · ${Math.round(performance.now() - started)} ms`,
+        readyCount ? "ok" : "warn",
+      );
+      if (!state.providers.length) {
+        $("providerStatusGrid").innerHTML = '<article class="card status-card"><div class="subtle">Provider 列表为空，请检查 TTS Lab Runtime。</div></article>';
+      }
     } catch (error) {
-      $("providerStatusGrid").innerHTML = `<article class="card"><pre class="result">ERROR: ${error.message}</pre></article>`;
+      state.providersState = "error";
+      state.providers = [];
+      renderProviderSelect();
+      $("providerStatusGrid").innerHTML = `<article class="card status-card"><div class="load-error"><strong>Provider 状态读取失败</strong><p>${String(error.message || error)}</p><p class="subtle">可以点击右上角“刷新 Provider”重试。</p></div></article>`;
+      providerLoadMessage(`读取失败：${error.message}`, "bad");
+      $("compareReady").disabled = true;
     } finally {
       $("refreshProviders").disabled = false;
     }
@@ -149,7 +209,14 @@
 
   async function generateSingle() {
     const provider = selectedProvider();
-    if (!provider?.ready) return;
+    if (!provider?.ready) {
+      $("ttsLabSummary").textContent = state.providersState === "loading"
+        ? "Provider 状态仍在加载，请稍候。"
+        : "当前没有可用 Provider，请先刷新 Provider 状态。";
+      $("ttsLabResult").textContent = $("ttsLabSummary").textContent;
+      $("generateTtsLab").disabled = true;
+      return;
+    }
     const button = $("generateTtsLab");
     button.disabled = true;
     $("ttsLabSummary").textContent = "生成中...";
@@ -218,8 +285,8 @@
     root.innerHTML = "";
     const providers = state.providers.filter((item) => item.ready);
     if (!providers.length) {
-      root.innerHTML = '<div class="subtle">当前没有可用 Provider。</div>';
-      button.disabled = false;
+      root.innerHTML = '<div class="subtle">当前没有可用 Provider。请先刷新 Provider 状态并检查 Runtime。</div>';
+      button.disabled = true;
       return;
     }
     const views = new Map();
@@ -262,7 +329,7 @@
     const payload = status?.voice_design || {};
     const ready = Boolean(payload.ready);
     badge.className = ready ? "badge ok" : "badge bad";
-    badge.textContent = ready ? (payload.loaded ? "loaded" : "ready") : "unavailable";
+    badge.textContent = ready ? (payload.loaded ? "已加载" : "就绪") : "不可用";
     generate.disabled = !ready;
     $("voiceDesignStatus").textContent = pretty({
       ready,
@@ -274,14 +341,32 @@
     });
   }
 
-  async function loadVoiceDesignStatus() {
+  async function loadVoiceDesignStatus(options = {}) {
+    const quiet = Boolean(options?.quiet);
+    const started = performance.now();
+    state.voiceDesignState = "loading";
     $("refreshVoiceDesign").disabled = true;
+    $("generateVoiceDesign").disabled = true;
+    if (!quiet) {
+      $("voiceDesignBadge").className = "badge";
+      $("voiceDesignBadge").textContent = "读取中";
+      voiceDesignLoadMessage("正在读取 Voice Design 状态…");
+    }
     try {
-      const response = await fetch("/v1/voice-design/status");
-      if (!response.ok) throw new Error(await response.text());
-      renderVoiceDesignStatus(await response.json());
+      const data = await fetchJsonWithTimeout("/v1/voice-design/status");
+      state.voiceDesignState = "ready";
+      renderVoiceDesignStatus(data);
+      const payload = data?.voice_design || {};
+      voiceDesignLoadMessage(
+        `${payload.ready ? "Voice Design 已就绪" : "Voice Design 当前不可用"} · ${Math.round(performance.now() - started)} ms`,
+        payload.ready ? "ok" : "warn",
+      );
+      return Boolean(payload.ready);
     } catch (error) {
+      state.voiceDesignState = "error";
       renderVoiceDesignStatus({voice_design: {ready: false, reason: error.message}});
+      voiceDesignLoadMessage(`状态读取失败：${error.message}`, "bad");
+      return false;
     } finally {
       $("refreshVoiceDesign").disabled = false;
     }
@@ -378,8 +463,7 @@
       $("voiceDesignResult").textContent = "ERROR: " + error.message;
     } finally {
       renderFreezeState();
-      const status = await fetch("/v1/voice-design/status").then(r => r.ok ? r.json() : null).catch(() => null);
-      button.disabled = !status?.voice_design?.ready;
+      await loadVoiceDesignStatus({quiet: true});
     }
   }
 

@@ -468,7 +468,7 @@ def test_voice_design_instruction_uses_traits_not_exact_age(tmp_path):
             name="Kurisu",
             age="18岁（大学一年级）",
             identity="研究者",
-            description="理性、敏锐，有自己的专业判断。",
+            description="理性、敏锐，对研究和事实有很强的专业判断，也会明确表达自己的边界。",
             speech_style="清晰直接，节奏自然。",
             personality=["理性", "敏锐"],
         )

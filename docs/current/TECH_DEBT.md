@@ -2,6 +2,8 @@
 
 This register records only debt that still exists on current `main`. A possible refactor is not automatically a required refactor.
 
+Active product/integration work is intentionally tracked in [PROJECT_STATUS.md](PROJECT_STATUS.md), not duplicated here. An item should move into this debt register only when the debt exists on `main` and remains worth tracking after the relevant PR/feature work is reconciled.
+
 ## Recently resolved
 
 ### Bounded Autonomous Group Chat

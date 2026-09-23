@@ -602,7 +602,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: $("mediaSmokeInput").value,
+          text: "你好，这是 Character Memory 的媒体往返测试。",
         }),
       });
       $("mediaSmokeLatency").textContent = `${data.total_ms} ms total`;

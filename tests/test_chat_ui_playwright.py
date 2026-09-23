@@ -7,7 +7,7 @@ Every one of these shipped broken and none of them is visible from the source:
   trigger stops propagation and so neither trigger's click ever reached the
   other's document-level closer;
 * the sticker pack strip was one `overflow-x: auto` row in a 408px box, so
-  packs past the fifth were clipped by the panel's `overflow: hidden` with no
+  packs past the sixth were clipped by the panel's `overflow: hidden` with no
   scrollbar and no gesture to find them;
 * the "想法" and "···" buttons under each assistant message measured 28x14 and
   22x14 -- under half of WCAG 2.5.8's 24x24 minimum, on a phone-sized screen;
@@ -15,9 +15,14 @@ Every one of these shipped broken and none of them is visible from the source:
 
 ``ui.css``'s tokens and ``styles.css``'s rules are asserted statically in
 test_ui_baseline.py; this file asserts what the browser actually paints, on a
-throwaway copy of the app (its own DB, its own persona and sticker library), so
-a stylesheet that is loaded after these rules -- or a JS file that stops a click
--- cannot make the static assertions pass while the page is still broken.
+throwaway copy of the app (its own DB, persona and sticker library), so a
+stylesheet loaded after these rules -- or a JS file that stops a click -- cannot
+make the static assertions pass while the page is still broken.
+
+The ``page`` fixture is the pytest-playwright harness the browser CI job
+installs, as in test_p0_17b_playwright.py. With bare playwright and no plugin,
+run the standalone script instead: this file cannot provide that fixture for
+itself without fighting the plugin one.
 """
 
 from __future__ import annotations
@@ -34,9 +39,9 @@ from urllib.request import urlopen
 import pytest
 
 if os.getenv("RUN_PLAYWRIGHT") == "1":
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import expect
 else:
-    sync_playwright = None
+    expect = None
 
 pytestmark = [
     pytest.mark.browser,
@@ -46,8 +51,8 @@ pytestmark = [
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STICKERS = ROOT / "src" / "character_memory" / "web" / "stickers" / "default"
 
-# Eight packs is what the report measured: with the built-in one that is nine
-# tabs, comfortably past the 408px the strip has to hold.
+# Seven packs of our own, plus the built-in one: nine tabs against the 408px the
+# strip has to hold, which is the shape the report measured clipped tabs in.
 PACKS = ["基础情绪包", "甜蜜撒娇包", "炸毛生气包", "困惑思考包", "慵懒睡眠包", "加班打工包", "周末出门包"]
 
 
@@ -65,14 +70,13 @@ def _write_stickers(root: Path) -> None:
     sources = sorted(DEFAULT_STICKERS.glob("*.svg"))
     lines = ["stickers:"]
     for index, name in enumerate(PACKS):
-        source = sources[index % len(sources)]
         file_name = f"pack{index}.svg"
-        shutil.copyfile(source, sticker_dir / file_name)
+        shutil.copyfile(sources[index % len(sources)], sticker_dir / file_name)
         lines += [
             f"  - id: pack{index}",
             f"    file: {file_name}",
             f"    label: {name}·一",
-            f"    tags: [测试]",
+            "    tags: [测试]",
             f"    pack_id: pack{index}",
             f"    pack_name: {name}",
         ]
@@ -149,29 +153,25 @@ def chat_server(tmp_path_factory):
         process.kill()
 
 
-@pytest.fixture(scope="module")
-def page(chat_server):
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(channel="chromium")
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
-        page = context.new_page()
-        page.goto(f"{chat_server}/", wait_until="networkidle")
-        page.wait_for_selector(".composer-tools-trigger", timeout=20000)
-        page.wait_for_selector(".sticker-trigger", timeout=20000)
-        page.set_default_timeout(15000)
-        yield page
-        browser.close()
+@pytest.fixture
+def chat(page, chat_server):
+    """The chat page, with a character open and the direct stream connected."""
+
+    page.set_default_timeout(15000)
+    page.goto(chat_server, wait_until="domcontentloaded")
+    expect(page.locator(".composer-tools-trigger")).to_be_visible()
+    expect(page.locator(".sticker-trigger")).to_be_visible()
+    page.wait_for_function(
+        "() => Boolean(CM.state.characterId) && Boolean(CM.state.directStream)"
+        " && CM.state.directStream.readyState === EventSource.OPEN"
+    )
+    return page
 
 
-def _open(page, selector: str) -> None:
-    """Click a composer trigger and wait for the click to be handled.
-
-    Each trigger stops propagation, so Playwright's actionability check cannot
-    be what makes these waits deterministic: the panel is what has to settle.
-    """
-
-    page.click(selector)
-    page.wait_for_timeout(400)
+def _close_popovers(page) -> None:
+    page.keyboard.press("Escape")
+    page.mouse.click(720, 300)
+    page.wait_for_timeout(300)
 
 
 def _popovers(page) -> dict:
@@ -197,45 +197,75 @@ def _popovers(page) -> dict:
     )
 
 
-def _close_popovers(page) -> None:
-    page.keyboard.press("Escape")
-    page.mouse.click(720, 300)
-    page.wait_for_timeout(300)
+def _ensure_assistant_message(page) -> None:
+    """One exchange through the API, the way test_p0_17b seeds its markers.
+
+    The meta row only exists once the character has answered, and the two
+    buttons only exist on that answer.
+    """
+
+    if page.locator(".message-row.assistant .detail-button").count():
+        return
+    status = page.evaluate(
+        """async () => {
+          const characterId = CM.state.characterId;
+          const response = await fetch('/v1/chat/messages', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({character_id: characterId,
+                                  conversation_id: CM.conversationIdFor(characterId),
+                                  message: 'meta-row probe'})
+          });
+          return response.status;
+        }"""
+    )
+    assert status == 202, f"seeding a message returned HTTP {status}"
+    expect(page.locator(".message-row.assistant .detail-button").first).to_be_visible(timeout=25000)
 
 
-def test_the_two_composer_popovers_never_stack(page):
+def test_the_two_composer_popovers_never_stack(chat):
     """Opening one closes the other, in both orders and from either trigger."""
 
+    page = chat
     _close_popovers(page)
 
-    _open(page, ".sticker-trigger")
-    assert _popovers(page) == {"sticker": True, "tools": False, "overlap": False,
-                              "stickerExpanded": "true", "toolsExpanded": "false"}
+    page.click(".sticker-trigger")
+    page.wait_for_timeout(400)
+    state = _popovers(page)
+    assert state["sticker"] is True, "the sticker panel has to open"
+    assert state["tools"] is False
+    assert state["stickerExpanded"] == "true"
+    assert state["toolsExpanded"] == "false"
 
-    _open(page, ".composer-tools-trigger")
+    page.click(".composer-tools-trigger")
+    page.wait_for_timeout(400)
     state = _popovers(page)
     assert state["tools"] is True, "the tools menu has to open"
-    assert state["sticker"] is False, "the sticker panel is still behind it"
+    assert state["sticker"] is False, "the sticker panel is still open behind it"
     assert state["overlap"] is False, "two floating panels painted on top of each other"
     assert state["stickerExpanded"] == "false"
 
-    _open(page, ".sticker-trigger")
+    page.click(".sticker-trigger")
+    page.wait_for_timeout(400)
     state = _popovers(page)
     assert state["sticker"] is True
     assert state["tools"] is False, "the tools menu stayed open under the sticker panel"
     assert state["toolsExpanded"] == "false"
 
     _close_popovers(page)
-    assert _popovers(page) == {"sticker": False, "tools": False, "overlap": False,
-                              "stickerExpanded": "false", "toolsExpanded": "false"}
+    state = _popovers(page)
+    assert state["sticker"] is False and state["tools"] is False, "Escape closes both"
+    assert state["stickerExpanded"] == "false" and state["toolsExpanded"] == "false"
 
 
-def test_every_sticker_pack_tab_is_inside_the_panel(page):
+def test_every_sticker_pack_tab_is_inside_the_panel(chat):
     """A pack nobody can see is a pack nobody can pick."""
 
+    page = chat
     _close_popovers(page)
-    _open(page, ".sticker-trigger")
-    page.wait_for_selector(".sticker-pack-tab", timeout=15000)
+    page.click(".sticker-trigger")
+    expect(page.locator(".sticker-pack-tab").first).to_be_visible()
+    expect(page.locator(".sticker-pack-tab")).to_have_count(len(PACKS) + 1)
 
     report = page.evaluate(
         """() => {
@@ -247,33 +277,22 @@ def test_every_sticker_pack_tab_is_inside_the_panel(page):
             .filter(el => { const r = el.getBoundingClientRect();
               return r.width === 0 || r.left < rect.left - 0.5 || r.right > rect.right + 0.5; })
             .map(el => el.textContent.trim());
-          return {count: tabs.length, outside,
+          return {outside,
                   hidesSomething: panel.scrollWidth > panel.clientWidth + 1,
                   stripScrollsSideways: strip.scrollWidth > strip.clientWidth + 1};
         }"""
     )
 
-    assert report["count"] == len(PACKS) + 1, "one tab per pack (plus the built-in one) must render"
     assert report["outside"] == [], f"packs clipped out of the panel: {report['outside']}"
-    assert report["hidesSomething"] is False
+    assert report["hidesSomething"] is False, "the panel still hides part of what it holds"
     assert report["stripScrollsSideways"] is False, "the strip must not need a sideways scroll"
     _close_popovers(page)
 
 
-def _ensure_assistant_message(page) -> None:
-    """One exchange through the real composer: the meta row only exists once the
-    character has answered, and the buttons only exist on that answer."""
-
-    if page.locator(".message-row.assistant .detail-button").count():
-        return
-    page.fill(".composer textarea", "晚上好")
-    page.get_by_role("button", name="发送", exact=True).click()
-    page.wait_for_selector(".message-row.assistant .detail-button", timeout=25000)
-
-
-def test_message_meta_buttons_meet_the_touch_target_minimum(page):
+def test_message_meta_buttons_meet_the_touch_target_minimum(chat):
     """24x24 at the 10px those two buttons are set in, without moving the row."""
 
+    page = chat
     _ensure_assistant_message(page)
 
     report = page.evaluate(
@@ -281,7 +300,8 @@ def test_message_meta_buttons_meet_the_touch_target_minimum(page):
           const row = document.querySelector('.message-row.assistant .message-meta');
           const buttons = [...row.querySelectorAll('.detail-button')].map(el => {
             const r = el.getBoundingClientRect();
-            return {text: el.textContent.trim(), width: r.width, height: r.height, left: r.left, right: r.right};
+            return {text: el.textContent.trim(), width: r.width, height: r.height,
+                    left: r.left, right: r.right};
           });
           return {rowHeight: row.getBoundingClientRect().height, buttons};
         }"""
@@ -291,9 +311,9 @@ def test_message_meta_buttons_meet_the_touch_target_minimum(page):
     for button in report["buttons"]:
         assert button["width"] >= 24, f"{button['text']} is {button['width']:.1f}px wide"
         assert button["height"] >= 24, f"{button['text']} is {button['height']:.1f}px tall"
-    # The padding that makes the target is given back as margin, so the row
-    # still measures the 14px line it did before -- the transcript's rhythm is
-    # not what this fix is allowed to spend.
+    # The padding that makes the target is given back as margin, so the row still
+    # measures the 14px line it did before -- the transcript's rhythm is not what
+    # this fix is allowed to spend.
     assert report["rowHeight"] <= 15, f"the meta row grew to {report['rowHeight']:.1f}px"
 
     ordered = sorted(report["buttons"], key=lambda item: item["left"])
@@ -301,18 +321,19 @@ def test_message_meta_buttons_meet_the_touch_target_minimum(page):
         assert first["right"] <= second["left"], "the grown targets overlap each other"
 
 
-def test_message_meta_text_clears_wcag_aa(page):
+def test_message_meta_text_clears_wcag_aa(chat):
     """The timestamps the browser paints, not the token the stylesheet declares."""
 
+    page = chat
     _ensure_assistant_message(page)
+
     values = page.evaluate(
         """() => {
-          const parse = (value) => value.match(/rgba?\\(([^)]+)\\)/)[1].split(',').map(Number);
+          const parse = value => value.match(/rgba?\\(([^)]+)\\)/)[1].split(',').map(Number);
           const meta = document.querySelector('.message-row.assistant .message-meta');
           let node = meta;
           while (node) {
-            const colour = getComputedStyle(node).backgroundColor;
-            const parts = parse(colour);
+            const parts = parse(getComputedStyle(node).backgroundColor);
             if ((parts[3] ?? 1) === 1) return {text: parse(getComputedStyle(meta).color), background: parts};
             node = node.parentElement;
           }

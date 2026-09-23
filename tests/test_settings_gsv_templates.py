@@ -196,4 +196,32 @@ def test_a_configured_template_that_no_longer_exists_stays_visible(tmp_path):
     first = field["options"][0]
     assert first["value"] == "ghost"
     assert "当前配置" in first["label"]
+    assert "GSV 模板不存在" in first["label"]
     assert first["disabled"] is True
+    assert "不受这个警告影响" in field["help"]
+    assert "Provider=kokoro" in field["help"]
+
+
+def test_missing_gsv_default_is_a_blocking_warning_when_gsv_is_formal_provider(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    import character_memory.settings_server as settings_server
+    from character_memory.settings_store import SettingsStore
+
+    store = SettingsStore(str(tmp_path / "config.yaml"), env_path=str(tmp_path / ".env"))
+    store.save_values({
+        "GSV_TTS_VOICE": "ghost",
+        "tts_provider": "gsv",
+        "tts_voice": "murasame",
+    })
+    app = settings_server.create_settings_app(
+        store=store,
+        runtime_http_client=_FakeProviderClient({"gsv": _GSV_PROVIDER}),
+    )
+
+    with TestClient(app) as client:
+        field = _gsv_field(client)
+
+    assert "当前正式 TTS 正在使用 GSV" in field["help"]
+    assert "会受影响" in field["help"]

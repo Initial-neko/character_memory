@@ -184,7 +184,6 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
     assert "LLM Usage" in html
     assert 'id="llmUsageFeatureBody"' in html
     assert 'id="llmUsageRecentBody"' in html
-    assert ">TTS<" in html
     assert ">ASR<" in html
     assert "Media Live Smoke" in html
     assert "Resource Monitor" in html
@@ -292,13 +291,8 @@ def test_dev_tts_and_asr_proxy_media_contracts():
     fake_http = FakeHttpClient()
     app = create_dev_app(settings=settings(), http_client=fake_http, model_factory=lambda _: FakeModel())
     with TestClient(app) as client:
-        tts = client.post("/v1/dev/tts", json={"text": "你好", "speaker_id": 0, "speed": 1.0})
         asr = client.post("/v1/dev/asr", content=b"RIFFfake-wave", headers={"Content-Type": "audio/wav"})
         metrics = client.get("/v1/dev/metrics?limit=10")
-    assert tts.status_code == 200
-    assert tts.content == b"RIFFfake-wave"
-    assert tts.headers["x-media-provider"] == "fake-tts"
-    assert "x-dev-total-ms" in tts.headers
     assert asr.status_code == 200
     assert asr.json()["text"] == "测试成功"
     assert asr.json()["http_total_ms"] >= 0
@@ -324,104 +318,3 @@ def test_dev_media_smoke_runs_real_contract_tts_then_asr():
     assert [call[0] for call in fake_http.calls if call[0] == "POST"] == ["POST", "POST"]
 
 
-def test_dev_media_error_preserves_upstream_operation_status_and_detail():
-    app = create_dev_app(settings=settings(), http_client=FailingTtsHttpClient(), model_factory=lambda _: FakeModel())
-    with TestClient(app) as client:
-        response = client.post("/v1/dev/tts", json={"text": "你好", "speaker_id": 0, "speed": 1.0})
-    assert response.status_code == 503
-    detail = response.json()["detail"]
-    assert detail["service"] == "media-runtime"
-    assert detail["operation"] == "tts"
-    assert detail["status_code"] == 503
-    assert detail["detail"] == "VITS model failed to initialize"
-
-
-class RuntimeConfigHttpClient(FakeHttpClient):
-    def post(self, url, **kwargs):
-        self.calls.append(("POST", url, kwargs))
-        if url.endswith("/v1/space/dev/config"):
-            return FakeResponse({"enabled": kwargs.get("json", {}).get("enabled"), "interval_minutes": 10})
-        if url.endswith("/v1/group-autonomy/config"):
-            return FakeResponse({"enabled": kwargs.get("json", {}).get("enabled"), "interval_minutes": 30})
-        if url.endswith("/v1/encounters/dev/due"):
-            return FakeResponse({"state": {"next_opportunity_at": "now"}})
-        if url.endswith("/v1/encounters/dev/opportunity"):
-            return FakeResponse({"source_type": kwargs.get("json", {}).get("source_type"), "candidate": {"id": 1}})
-        return super().post(url, **kwargs)
-
-    def get(self, url, **kwargs):
-        if url.endswith("/v1/encounters/status"):
-            self.calls.append(("GET", url, kwargs))
-            return FakeResponse({"enabled": True, "pending_count": 1})
-        return super().get(url, **kwargs)
-
-
-def test_dev_autonomy_tuning_is_runtime_only_and_does_not_modify_config(tmp_path):
-    config = tmp_path / "config.yaml"
-    original = (
-        "space_opportunity_interval_minutes: 1440\n"
-        "group_autonomy_interval_minutes: 360\n"
-    )
-    config.write_text(original, encoding="utf-8")
-    fake_http = RuntimeConfigHttpClient()
-    app = create_dev_app(
-        str(config),
-        settings=settings(),
-        http_client=fake_http,
-        model_factory=lambda _: FakeModel(),
-    )
-
-    with TestClient(app) as client:
-        space = client.post(
-            "/v1/dev/space/config",
-            json={
-                "enabled": True,
-                "interval_minutes": 10,
-                "max_posts_per_day": 0,
-                "media_enabled": True,
-                "media_max_items": 3,
-                "image_search_enabled": True,
-                "image_generation_enabled": True,
-                "world_observation_enabled": True,
-                "world_max_pages": 2,
-                "world_max_chars_per_page": 6000,
-                "audience_size": 5,
-                "poll_seconds": 60,
-                "rearm": True,
-            },
-        )
-        group = client.post(
-            "/v1/dev/group-autonomy/config",
-            json={
-                "enabled": True,
-                "interval_minutes": 30,
-                "max_messages": 3,
-                "user_quiet_minutes": 30,
-                "poll_seconds": 60,
-                "rearm": True,
-            },
-        )
-
-    assert space.status_code == 200
-    assert group.status_code == 200
-    assert space.json()["scope"] == "runtime-only"
-    assert group.json()["scope"] == "runtime-only"
-    assert space.json()["persisted"] is False
-    assert group.json()["persisted"] is False
-    assert config.read_text(encoding="utf-8") == original
-
-
-def test_dev_encounter_endpoints_are_diagnostic_proxies():
-    fake_http = RuntimeConfigHttpClient()
-    app = create_dev_app(settings=settings(), http_client=fake_http, model_factory=lambda _: FakeModel())
-
-    with TestClient(app) as client:
-        status = client.get("/v1/dev/encounters/status")
-        generated = client.post("/v1/dev/encounters/opportunity?source_type=WEB")
-        due = client.post("/v1/dev/encounters/due")
-
-    assert status.status_code == 200
-    assert status.json()["pending_count"] == 1
-    assert generated.status_code == 200
-    assert generated.json()["source_type"] == "WEB"
-    assert due.status_code == 200

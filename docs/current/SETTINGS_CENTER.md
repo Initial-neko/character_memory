@@ -152,7 +152,7 @@ world_pulse_discussion_interval_minutes: 360
 world_pulse_max_topics: 8
 world_pulse_commenter_count: 4
 world_browse_enabled: true
-world_browse_interval_minutes: 90
+world_browse_interval_minutes: 30
 world_pulse_source_max_chars: 8000
 world_browse_max_pages: 2
 world_activity_poll_seconds: 60

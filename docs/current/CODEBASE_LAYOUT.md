@@ -86,7 +86,10 @@ core_direct_web.py      root/health/legacy direct/runtime diagnostic HTTP surfac
 server.py               application assembly / attach feature routes
 async_web.py            async message accept + SSE routes
 group_web.py            group HTTP surface
+group_members_web.py    group membership/settings mutation surface
 group_autonomy_web.py   autonomous Group status/config/manual opportunity HTTP surface
+ensemble_web.py         one-prompt AI group draft/research/confirm HTTP surface
+encounter_web.py        Random Encounter status/manual candidate HTTP surface
 history_web.py          history APIs
 message_projection.py   shared message projection for history/group HTTP surfaces
 memory_web.py           minimal Memory Inspector / pin / forget / correct APIs
@@ -96,6 +99,7 @@ space_web.py            Character Space HTTP surface
 avatar_web.py           avatar HTTP/search adapter
 visual_web.py           ImageGen/visual tool HTTP surface
 visual_capture_web.py   Camera/Screen transient Vision routes
+voice_web.py            voice template/character voice HTTP surface
 wake_web.py             wake/debug HTTP surface
 ```
 
@@ -127,6 +131,10 @@ space_store.py               Character Space shared posts/comments/reactions/vie
 space_media.py               ordered Space <-> MediaAsset relation
 space_media_executor.py      Space SEARCH_IMAGE / GENERATE_IMAGE / VOICE execution
 space_autonomy.py            Space opportunity + World appraisal + Audience loop
+ensemble_builder.py          one-prompt group build state/research/confirm orchestration
+encounter.py                 Random Encounter candidate orchestration
+encounter_store.py           pending/accepted encounter persistence
+character_onboarding.py      post-create provenance/avatar/voice initialization + Persona inspection
 media.py                    media asset storage/contracts
 media_runtime.py            local ASR/Sherpa TTS providers/runtime
 media_bootstrap.py          Windows/native media bootstrap
@@ -140,6 +148,8 @@ envfile.py                  .env read/write + precedence/atomic multi-key helper
 settings_store.py           config/env persistence + migration/backup
 settings_server.py          :8003 Settings Center FastAPI + runtime apply orchestration
 persona_builder.py          character draft/build flow
+dev_server.py               :8002 Dev Console backend
+dev_stack.py                local multi-process stack launcher
 resource_metrics.py         local resource sampling
 logging_utils.py            logging setup
 time_utils.py               datetime helpers
@@ -223,7 +233,9 @@ src/character_memory/web/
 app.js                  conversation/composer core
 groups.js               group UX
 realtime_reconcile.js   realtime reconciliation
-persona.js              character UI
+persona.js              character creation + read-only Persona inspection UI
+ensemble.js             one-prompt AI group builder UI
+encounter.js            Random Encounter UI
 mentions.js             @ mention
 group_settings.js       group settings
 stickers.js             sticker UI/import
@@ -274,6 +286,9 @@ message_content.js      Direct/Group shared message body renderer
 | LLM 回复/structured output | `domain/models.py` → `llm/client.py` → `runtime/person_runtime.py` |
 | Direct async/SSE | `application/async_conversation.py` → `async_web.py` → `web/app.js` |
 | Group chat | `group_store.py` → `application/group_conversation_service.py` → `group_web.py` → `web/groups.js` |
+| AI 一句话建群 | `ensemble_builder.py` → `ensemble_web.py` → `persona_builder.py` / `api_character_service.py` → `web/ensemble.js` |
+| Character 创建/初始化 | `persona_builder.py` → `api_character_service.py` → `character_onboarding.py` → `core_character_web.py` → `web/persona.js` |
+| Random Encounter | `encounter_store.py` → `encounter.py` → `encounter_web.py` → `web/encounter.js` |
 | Autonomous Group Chat | `group_store.py` → `application/group_autonomy.py` → `group_autonomy_web.py` → existing Group SSE/UI |
 | Character Space | `space_store.py` → `space_autonomy.py` → `space_media_executor.py` / `world_observation.py` → `space_web.py` → `web/space.js` |
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
@@ -283,6 +298,7 @@ message_content.js      Direct/Group shared message body renderer
 | Sticker | `stickers.py` → `runtime/sticker_retrieval.py` → `web/stickers.js` |
 | 用户图片/Vision | `media.py` → `api.py/async_web.py` → `web/images.js` |
 | Camera/Screen Vision | `visual_capture_web.py` → `web/visual_capture.js` / `web/voice.js` |
+| Live call microphone/visual lifecycle | `web/voice.js` → `web/visual_capture.js` → `visual_capture_web.py` / Media Runtime |
 | ImageGen | `visual_generation.py` → `visual_runtime.py` → `visual_web.py` → `web/ai_images.js` |
 | Shared Search / World | `runtime_services.py` → `search.py` → `browser_web.py` / `world_observation.py` → `world_web.py` |
 | Avatar | `runtime_services.py` → `avatars.py` / `avatar_intent.py` → `avatar_web.py` → `web/avatars.js` |

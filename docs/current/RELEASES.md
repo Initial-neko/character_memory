@@ -71,6 +71,14 @@ The 0.5 line is the first **Persistent Person Runtime Baseline**: Direct, Group,
 
 `0.5.0rc1` is the first release-candidate package version for this baseline.
 
+The active `main` branch may move ahead of an RC while the package version remains unchanged. In that state:
+
+- `CHANGELOG.md#Unreleased` records landed user-visible/architecture-significant changes;
+- [PROJECT_STATUS.md](PROJECT_STATUS.md) records active integration and accepted next work;
+- the RC tag/release remains the immutable acceptance baseline.
+
+Do not infer that current `main` equals the RC merely because `pyproject.toml` still reports `0.5.0rc1`.
+
 ## 1.0 boundary
 
 Do not treat 1.0 as a feature-count milestone. It should wait until the project is prepared to make explicit compatibility promises around durable schema/migrations, configuration, public HTTP contracts, upgrade/rollback behavior, and release support.

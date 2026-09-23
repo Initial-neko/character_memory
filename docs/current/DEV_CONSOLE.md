@@ -119,7 +119,7 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 支持：
 
 - 选择一个未归档 Character；
-- 直接调整并持久化 Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / World Observation / World Pages / World Text / Audience / Scheduler Poll；
+- 临时热调整 Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / World Observation / World Pages / World Text / Audience / Scheduler Poll；
 - 快捷档 `10min / 30min / 1H / 6H / 24H`；
 - `立即手动触发一次`：立即跑一次完整 Space Opportunity，不改变正式 next time；
 - `让选中角色立即到期`：把 next opportunity 设为现在，用真实后台 Scheduler 验证；
@@ -130,7 +130,19 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 - 无头浏览器打开 URL：只验证一个公开 URL 的渲染/正文抽取，不触发角色记忆或 Space 发帖；
 - 查看每个人的 last/next opportunity、last status，以及最近 opportunity run history。
 
-配置会写回 `config.yaml`，同时热应用到当前 Character Runtime。测试时可设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。
+这里的 Space / Group Autonomy 调参只热应用到当前 Character Runtime，不写 `config.yaml`；正式值由 Settings Center 保存，重启 Character Runtime 后回到正式值。测试时可临时设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。
+
+### Random Encounter
+
+Random Encounter 的正式配置只在 Settings Center 保存。Dev Console 只提供状态观察与手动验收，并且整张卡位于 `diagnostic` 层，不进入首屏：
+
+```text
+GET  /v1/dev/encounters/status
+POST /v1/dev/encounters/opportunity?source_type=AUTO|WEB|GENERATED
+POST /v1/dev/encounters/due
+```
+
+`AUTO` 按正式的 `encounter_web_probability` 决定走互联网资料还是系统生成；`WEB` / `GENERATED` 用于强制验证单一路径。手动 opportunity 不修改正式 next opportunity；`due` 才把真实 Scheduler 的下一次机会设为现在。候选人物在用户明确留下前不占正式角色位。
 
 ### TTS
 
@@ -211,6 +223,18 @@ Dev ImageGen 可以持久化测试 MediaAsset，方便继续做 avatar/media 检
 ### Metrics
 
 显示 Media Runtime bounded latency buffer，帮助分辨 ASR/TTS warm path 和 HTTP total。
+
+### 归档人物与语音
+
+归档是生命周期标记，不是删除：`persona.yaml`、`voice.yaml` 和历史媒体都保留，但角色会立刻退出 active voice / GSV / proactive wake 路径。
+
+- `/v1/voice-templates` 不再把 archived 角色放进正式语音快照；
+- 对 archived 角色设置 voice 返回 409；
+- GSV registry 扫描跳过 archived persona，并拒绝继续按 archived character id 合成；
+- archive / restore 会 best-effort 触发当前 GSV registry reload；
+- `voice.yaml` 不改写，因此 restore 后原 voice mapping 可以直接恢复。
+
+archive / restore 响应中的 `voice_registry` 报告这次 reload 结果。归档本身成功但 registry reload 失败时仍返回成功，同时浏览器用固定页级提示条显示失败；提示条不接收 pointer event，也不会为了展示错误而阻止归档抽屉关闭。
 
 ## 4. Settings boundary
 

@@ -83,6 +83,29 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 
 折叠样式定义在 `ui.css`（不是 `dev.css`）：Chat 页的「本轮详情 / Runtime」抽屉用同一套折叠块，而 `index.html` 不加载 `dev.css`。
 
+### 控件分层（levels）
+
+Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema，所以分层契约直接写在 DOM 上，和 Settings 的 `common / advanced / diagnostic` 是同一套三级：
+
+```html
+<div class="level-row" data-level="common"> … 首屏控件 … </div>
+<details class="level-group" data-level="advanced" data-title="高级 · …" data-hint="…">
+  <summary>高级 · …</summary>
+  … 折叠内容 …
+</details>
+```
+
+判定规则只有一条：**一个控件属于离它最近的、声明了 `data-level` 的祖先**；`common` 直接渲染在卡片里，`advanced` / `diagnostic` 渲染成默认收起的 `<details class="level-group">`。
+
+**没有声明 level 的控件落在 `diagnostic`**——和 Settings 的 `field_level()` 一样，漏标只会让控件被藏起来，不会跑到首屏。`web/dev_levels.js` 提供这条规则（`levelOf`）并做两件事：
+
+- `sweep`：把任何没有声明祖先的控件移进所属卡片的 `diagnostic` 组（没有就建一个）。这是"漏标 = 不暴露"的运行时一半。
+- `refreshSummaries`：用组内真实控件的 label 重写 `<summary>`，写成 `高级 · 调度与上限（6 项）：A · B · C … — hint`，所以收起的组一定说得出里面是什么，也不会和内容脱节。
+
+`data-title` 是组的名字，`data-hint` 说明为什么需要打开它，两者都由 `tests/test_dev_console_levels.py` 强制。
+
+当前首屏是 13 个控件（`common`），全部在 1440×900 的第一屏内：刷新状态、LLM 的 Prompt + Run LLM、TTS 的 Text + Generate、Space / Group 各自的开关 + 目标选择 + 应用测试配置 + 立即手动触发一次。`first_screen` 的名单同样由测试固定：把一个控件提上首屏必须同时改 markup 和测试。
+
 ### LLM
 
 通过服务端配置的 OpenAI-compatible Provider 发送开发 probe。

@@ -802,6 +802,7 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="applySpaceConfig"',
         'id="forceSpaceDue"',
         'id="spaceStatusAge"',
+        'id="spaceScheduleSummary"',
         'id="spaceRunId"',
         'id="loadSpaceRunRaw"',
         'id="spaceRunResult"',
@@ -819,6 +820,7 @@ def test_dev_console_exposes_space_autonomy_controls():
     assert '.boot-warning' in (web / "dev.css").read_text(encoding="utf-8")
     assert 'value="VOICE"' in html
     assert "spaceMediaVoiceText" in script
+    assert "renderSpaceScheduleSummary" in script
 
     for token in [
         "/v1/dev/space/status",

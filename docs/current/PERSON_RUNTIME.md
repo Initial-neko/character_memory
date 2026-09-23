@@ -155,7 +155,7 @@ WebUI 可以展示轻量 `已读 · 没有回复`，但不会伪造一条 Charac
 
 Runtime 每轮只允许模型选择当前 Available Stickers 中真实存在的 ID。未知资源会被丢弃并进入 Trace。
 
-Sticker 当前是 application/global resource：运行时可以合并内置 pack、全局导入 pack 和 legacy character-local manifest。具体 ownership 见 [`STICKERS.md`](STICKERS.md)。
+Sticker 当前是 application/global resource：运行时可以合并内置 pack、全局导入 pack 和 legacy character-local manifest。具体 ownership 见 [`CONVERSATION_RUNTIME.md#stickers`](CONVERSATION_RUNTIME.md#stickers)。
 
 ### Existing Image
 

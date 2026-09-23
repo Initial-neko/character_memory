@@ -20,6 +20,7 @@ Historical notes under `docs/archive/` are not current API or runtime contracts.
 - Make focused changes with focused tests.
 - Do not commit generated task ledgers, agent transcripts, step-by-step implementation plans, or review scratchpads as product documentation.
 - Durable architecture/product behavior belongs in `docs/current/`.
+- Prefer extending an existing stable-domain document. Add a new `docs/current/*.md` only for an independent runtime boundary, lifecycle, or durable ownership reason; do not create one document per provider, UI widget, PR, or feature slice.
 - Temporary implementation planning belongs in the issue/PR or local untracked notes.
 - Avoid compatibility layers unless a change explicitly requires one. Prefer a clear failure over silent schema/config drift.
 - Keep cross-process and file-format contracts covered by real round-trip tests.

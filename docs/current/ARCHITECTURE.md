@@ -331,7 +331,7 @@ Visual Capture 当前支持 `CAMERA` 与 `DISPLAY`：
 
 关键约束：**Capture frame bytes 不是聊天附件。** Event 只保存 `frame_count / sources / captured_at_ms` 等摘要 metadata，真正帧只用于当前模型 turn。
 
-详见 [`VISUAL_CAPTURE.md`](VISUAL_CAPTURE.md)。
+详见 [`VISUAL.md`](VISUAL.md)。
 
 ## 10. Visual generation
 
@@ -367,7 +367,7 @@ Group 不建立第二套 ImageGen。生成完成后以对应 Character 身份写
 
 显式用户生图工具仍先生成 draft，再由用户确认发送。
 
-详见 [`VISUAL_GENERATION.md`](VISUAL_GENERATION.md)。
+详见 [`VISUAL.md`](VISUAL.md)。
 
 ## 11. Character Space and World Observation
 
@@ -390,7 +390,7 @@ World Search、Browser Render、Memory、Public Expression 是四个不同边界
 
 **尚未定案的架构问题：** Space/World 的 planning/appraisal 目前仍有一部分在 `SpaceAutonomyService` 自己编译上下文并直接调用 model，而不是完全复用 PersonRuntime 的 Context/Recall pipeline。这个问题与“哪些 World 信息值得长期记忆、用户如何干预 Memory”绑在一起，当前只登记，不在本轮 composition-root 重构中擅自统一。
 
-详见 [`CHARACTER_SPACE.md`](CHARACTER_SPACE.md) 与 [`MEMORY.md`](MEMORY.md)。
+详见 [`SOCIAL_WORLD.md`](SOCIAL_WORLD.md) 与 [`MEMORY.md`](MEMORY.md)。
 
 ## 12. Media Runtime and formal TTS
 

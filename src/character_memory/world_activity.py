@@ -1182,11 +1182,23 @@ class WorldActivityScheduler:
         *,
         now: datetime | None = None,
     ) -> None:
-        self.repository.force_due(
-            str(kind).strip().upper(),
-            subject_id,
-            now or datetime.now().astimezone(),
-        )
+        stamp = now or datetime.now().astimezone()
+        normalized_kind = str(kind).strip().upper()
+        interval_by_kind = {
+            "PULSE": self._interval("world_pulse_refresh_minutes", 60.0),
+            "DISCUSS": self._interval("world_pulse_discussion_interval_minutes", 360.0),
+            "BROWSE": self._interval("world_browse_interval_minutes", 30.0),
+        }
+        interval = interval_by_kind.get(normalized_kind)
+        if interval is not None:
+            self.repository.ensure_state(
+                normalized_kind,
+                subject_id,
+                stamp,
+                delay_minutes=0.0,
+                interval_minutes=interval,
+            )
+        self.repository.force_due(normalized_kind, subject_id, stamp)
         self._wake.set()
 
     def _loop(self) -> None:

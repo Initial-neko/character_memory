@@ -82,27 +82,6 @@
         </details>
       </article>
 
-      <article class="card">
-        <div class="card-title-row"><h2>TTS</h2><span class="pill">media</span></div>
-        <div data-level="common">
-          <label for="ttsText">Text</label>
-          <textarea id="ttsText" rows="2">你好，这是 Character Memory 的语音测试。</textarea>
-          <div class="actions"><button class="primary" id="runTts">Generate</button><span id="ttsLatency" class="metric-inline">-</span></div>
-          <audio id="ttsAudio" controls></audio>
-        </div>
-        <details class="level-group" data-level="advanced" data-title="高级 · Speaker / Speed" data-hint="有合理默认，通常不用改">
-          <summary>高级 · Speaker / Speed</summary>
-          <div class="two-col">
-            <label>Speaker ID<input id="speakerId" type="number" min="0" value="0" /></label>
-            <label>Speed<input id="ttsSpeed" type="number" min="0.5" max="2" step="0.1" value="1.0" /></label>
-          </div>
-        </details>
-        <details class="debug-output">
-          <summary>原始响应（调试用）</summary>
-          <pre id="ttsResult" class="result">等待请求...</pre>
-        </details>
-      </article>
-
       <article class="card" id="spaceAutonomyCard">
         <div class="card-title-row">
           <div><h2>Character Space Autonomy</h2><p class="subtle">测试阶段可把正式 Opportunity 从 24H 调成 1H / 30min / 10min，并直接观察一段时间。到点只是让角色判断一次，仍然可以不发；一天可以发多条。</p></div>
@@ -462,7 +441,9 @@
         <div class="card-title-row"><h2>Media Live Smoke</h2><span class="pill">real inference</span></div>
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 运行 Media Smoke" data-hint="真实 TTS → ASR 往返">
           <summary>诊断 · 运行 Media Smoke</summary>
-          <p class="subtle">真实执行 TTS → WAV → ASR。它不是 mock；失败时会显示 Media Runtime 的原始状态码与 detail。</p>
+          <p class="subtle">真实执行正式 TTS → WAV → ASR 往返，使用 Settings Center 当前配置的 Provider / Voice / Speed。它不是 mock。</p>
+          <label for="mediaSmokeInput">Text</label>
+          <textarea id="mediaSmokeInput" rows="2">你好，这是 Character Memory 的媒体自检。</textarea>
           <div class="actions">
             <button class="primary" id="runMediaSmoke">Run Media Smoke</button>
             <span id="mediaSmokeLatency" class="metric-inline">-</span>

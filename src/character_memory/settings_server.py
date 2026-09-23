@@ -248,9 +248,25 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                         0,
                         {
                             "value": current_template,
-                            "label": f"{current_template} (当前配置 · 尚无此模板)",
+                            "label": f"{current_template} (当前配置 · GSV 模板不存在)",
                             "disabled": True,
                         },
+                    )
+                    if current_provider == "gsv":
+                        template_field["help"] = (
+                            f"当前正式 TTS 正在使用 GSV，但默认模板 {current_template!r} 不存在。"
+                            "请选择已有模板，或先到 TTS Workbench 创建模板；依赖默认模板的 GSV 请求会受影响。"
+                        )
+                    else:
+                        template_field["help"] = (
+                            f"GSV 默认模板 {current_template!r} 不存在，但当前正式 TTS Provider 是 "
+                            f"{current_provider or '未选择'}，当前 voice={current_voice or '未选择'} 不受这个警告影响。"
+                            "只有切换到 GSV，或某条 GSV 请求需要回退到默认模板时才会受影响。"
+                        )
+                elif current_provider != "gsv":
+                    template_field["help"] = (
+                        "这是 GSV sidecar 的默认模板，不是当前正式 TTS 的 Voice。"
+                        f"当前正式 Provider={current_provider or '未选择'}，voice={current_voice or '未选择'}。"
                     )
                 if not template_field["options"]:
                     # An empty dropdown gives the user nothing to do; say why it

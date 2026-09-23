@@ -740,7 +740,9 @@ The old Qwen3-TTS 0.6B sidecar and benchmark scripts remain for manual experimen
 
 Qwen3 1.7B VoiceDesign at `:9015` is a separate tool. Workbench prompt polish uses the public `PersonModel.complete_text_for_session()` contract and the normal configured Character Memory LLM; it does not depend on the OpenAI adapter's private transport method.
 
-The freeze flow is described in `VOICE_AND_TTS.md`.
+VoiceDesign is **explicit opt-in tooling**. `character-stack` does not auto-start `:9015`, and ordinary Character / Ensemble creation must not silently invoke it. One-prompt Ensemble exposes a single optional “为新角色生成专属音色” choice; only when the user selects it **and** the manually-started VoiceDesign sidecar reports ready does the background design flow run. Its instruct is derived from identity / personality / speech style rather than depending on an exact numeric age. Generation/freeze remains best-effort: unavailable sidecar, CUDA/model errors or a single failed character never roll back the already-created Character or Group, and the existing default/fallback voice remains valid.
+
+The freeze flow is described in this document and the One-prompt Ensemble lifecycle is owned by `CONVERSATION_RUNTIME.md`.
 
 ### 10. CosyVoice
 

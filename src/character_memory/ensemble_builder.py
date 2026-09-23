@@ -3,30 +3,116 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
+import os
 import re
+import threading
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+import httpx
+from pydantic import BaseModel, Field, field_validator
 
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
-from character_memory.llm.usage import llm_usage_scope
-from character_memory.persona_builder import PersonaBuilder, PersonaDraft
+from character_memory.persona_builder import PersonaDraft
 from character_memory.time_utils import epoch_us
 
 
 logger = logging.getLogger("character_memory.ensemble")
 
 
+def _age_hint_to_int(value: str | int | None) -> int | None:
+    """Best-effort age extraction; unknown/compound age text is never fatal."""
+
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= 120 else None
+    text = str(value).strip()
+    if not text:
+        return None
+    prioritized = re.search(r"(?<!\d)(\d{1,3})\s*岁", text)
+    candidates = [prioritized.group(1)] if prioritized else re.findall(r"(?<!\d)\d{1,4}(?!\d)", text)
+    for raw in candidates:
+        age = int(raw)
+        if 1 <= age <= 120:
+            return age
+    return None
+
+
+def _clean_list(items: list[str], *, limit: int) -> list[str]:
+    return [str(item).strip() for item in items if str(item).strip()][:limit]
+
+
+def member_research_to_persona(member: "EnsembleMemberResearch") -> PersonaDraft:
+    """Deterministically turn researched facts into a usable Persona.
+
+    Ensemble used to ask the LLM for a second strict PersonaDraft JSON per
+    member. One malformed scalar then failed the whole batch. Research already
+    contains the character facts we need, so creation should be a local,
+    predictable projection instead of another structured-model round trip.
+    """
+
+    personality = _clean_list(member.personality or member.tags, limit=6)
+    if not personality:
+        personality = ["有自己的判断", "会保留真实情绪和边界"]
+    elif len(personality) == 1:
+        personality.append("有自己的判断")
+
+    speech = str(member.speech_style or "").strip()
+    identity = str(member.identity or "").strip()
+    description = str(member.description or "").strip()
+    if not speech:
+        speech = "自然贴合人物公开设定，说话有自己的节奏，不机械复述资料。"
+
+    tagline_source = speech or identity or description
+    tagline = " ".join(tagline_source.split())[:120] or f"{member.name} 的人物草稿"
+
+    return PersonaDraft(
+        name=member.name.strip(),
+        age=_age_hint_to_int(member.age),
+        identity=identity[:240],
+        tagline=tagline,
+        description=description[:1600],
+        personality=personality,
+        conversation=speech[:320],
+        expression="表达贴合人物性格和当下情绪，不过度表演，也不机械重复固定口癖。",
+        questions="真正好奇或需要确认时才追问，一次聚焦一个自然问题。",
+        silence="没有自然想说的话时可以沉默，不为了维持对话强行输出。",
+        initiative="遇到与自己的兴趣、关系或共同经历有关的事情时会自然主动提起。",
+        disagreement="不同意时会按人物自己的价值判断表达理由，不为了迎合用户假装赞同。",
+        care="通过符合人物性格的具体反应、行动和记住细节来表达关心。",
+        boundaries=["不无条件迎合用户", "关系通过共同经历自然发展"],
+    )
+
+
 class EnsembleMemberResearch(BaseModel):
     name: str = Field(min_length=1, max_length=48)
-    age: int | None = Field(default=None, ge=1, le=120)
+    # Age is weak research metadata, not a creation invariant. Public material
+    # often says things like "18岁（大学一年级）" or "年龄不详"; keeping the raw
+    # hint prevents one formatting choice from killing the whole ensemble.
+    age: str | int | None = None
     identity: str = Field(min_length=1, max_length=500)
     description: str = Field(min_length=20, max_length=1800)
     speech_style: str = Field(default="", max_length=800)
+    personality: list[str] = Field(default_factory=list, max_length=8)
     relationship_notes: list[str] = Field(default_factory=list, max_length=10)
     tags: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("personality", "relationship_notes", "tags", mode="before")
+    @classmethod
+    def _normalize_text_list(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()][:8]
+        if isinstance(value, str):
+            return [
+                item.strip()
+                for item in re.split(r"[、,，;；\n]+", value)
+                if item.strip()
+            ][:8]
+        return [str(value).strip()] if str(value).strip() else []
 
 
 class EnsembleResearch(BaseModel):
@@ -240,6 +326,13 @@ class EnsembleBuilderService:
         self.access = access
         self.repository = repository
         self.groups = GroupRepository(access.store())
+        self.voice_design_lab_base = str(
+            getattr(
+                access,
+                "voice_design_lab_base_url",
+                os.getenv("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002"),
+            )
+        ).rstrip("/")
 
     @staticmethod
     def _group_name_hint(prompt: str) -> str:
@@ -278,10 +371,21 @@ class EnsembleBuilderService:
 
     def payload(self, build: dict[str, Any]) -> dict[str, Any]:
         drafts = list(build.get("drafts") or [])
-        new_count = sum(1 for item in drafts if not item.get("existing_character_id"))
+        ready = [item for item in drafts if item.get("status", "READY") == "READY" and item.get("draft")]
+        failed = [item for item in drafts if item.get("status") == "FAILED"]
+        new_count = sum(1 for item in ready if not item.get("existing_character_id"))
         group = self.groups.get_group(build["group_id"], include_archived=True)
         return {
             **build,
+            "ready_member_count": len(ready),
+            "failed_members": [
+                {
+                    "index": int(item.get("index", -1)),
+                    "canonical_name": str(item.get("canonical_name") or "角色"),
+                    "error": str(item.get("error") or "人物草稿整理失败"),
+                }
+                for item in failed
+            ],
             "group": {
                 "id": group.id,
                 "name": group.name,
@@ -306,12 +410,9 @@ class EnsembleBuilderService:
     def prepare(self, prompt: str, *, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now().astimezone()
         build = self.start(prompt, now=now)
-        build_id = build["group_id"]
-        try:
-            return self.research(build_id, now=now)
-        except Exception:
-            self.repository.delete(build_id)
-            raise
+        # research() persists FAILED state on errors. Do not delete the build:
+        # retry/recovery must not force the user to repeat already accepted input.
+        return self.research(build["group_id"], now=now)
 
     def _observe(self, prompt: str) -> tuple[str, list[Any], list[dict[str, str]]]:
         query = f"{prompt} 角色 成员 人物 资料 wiki"
@@ -361,6 +462,8 @@ Content:
 - overview：一句到几句群体背景。
 - members：2～{MAX_GROUP_CHARACTERS} 位最核心、明确属于用户所指群体的成员。
 - 每位成员保留 canonical name、公开身份、性格/行为特征、说话风格、与同群其他成员的关系摘要。
+- age 只是弱提示：可以是数字、"18岁（大学一年级）"、"年龄不详"或 null，不要为了年龄字段编造信息。
+- personality / relationship_notes / tags 尽量使用短列表；资料不足时允许为空。
 - 不抄原作长台词，不补写资料没有支持的具体事件。
 - 如果来源之间有差异，采用最稳妥的公开共识，不要为了凑人数编角色。
 """
@@ -392,40 +495,49 @@ Content:
             query, observations, sources = self._observe(build["prompt"])
             research = self._research(build["prompt"], observations, now)
             drafts: list[dict[str, Any]] = []
-            builder = PersonaBuilder(self.access.require_bundle().model)
             for index, member in enumerate(research.members[:MAX_GROUP_CHARACTERS]):
-                relation_text = "；".join(member.relationship_notes[:8])
-                description = (
-                    f"基于公开资料复刻这个虚构/公开角色用于长期 AI 角色聊天。"
-                    f"角色名固定为：{member.name}。公开身份：{member.identity}。"
-                    f"资料摘要：{member.description}。说话风格：{member.speech_style or '自然贴合人物设定'}。"
-                    f"与同群成员关系：{relation_text or '按公开资料中的群体关系自然处理'}。"
-                    "不要抄原作长台词；保留人物自己的判断、沉默、分歧和边界，不要变成只会迎合用户的客服。"
-                )
-                with llm_usage_scope(
-                    feature="ENSEMBLE",
-                    purpose="ENSEMBLE_PERSONA",
-                    conversation_id=group_id,
-                    override=True,
-                ):
-                    draft = builder.generate(
-                        description,
-                        name=member.name,
-                        age=member.age,
-                        tags=["群像复刻", *member.tags[:6]],
+                item: dict[str, Any] = {
+                    "index": index,
+                    "canonical_name": member.name,
+                    "identity": member.identity,
+                    "relationship_notes": member.relationship_notes,
+                    "research": member.model_dump(mode="json"),
+                    "existing_character_id": self._match_existing(member.name),
+                }
+                try:
+                    draft = member_research_to_persona(member)
+                    item.update(
+                        {
+                            "status": "READY",
+                            "draft": draft.model_dump(mode="json"),
+                            "error": "",
+                        }
                     )
-                drafts.append(
-                    {
-                        "index": index,
-                        "canonical_name": member.name,
-                        "identity": member.identity,
-                        "relationship_notes": member.relationship_notes,
-                        "draft": draft.model_dump(mode="json"),
-                        "existing_character_id": self._match_existing(member.name),
-                    }
-                )
-            if len(drafts) < 2:
-                raise RuntimeError("公开资料不足以确认至少两位群成员")
+                except Exception as exc:
+                    # A single odd member must not destroy an otherwise usable
+                    # group. Keep enough source data to retry just this member.
+                    item.update(
+                        {
+                            "status": "FAILED",
+                            "draft": None,
+                            "error": f"人物草稿整理失败：{exc}",
+                        }
+                    )
+                    logger.warning(
+                        "ensemble.member_draft failed group=%s index=%s name=%s error=%s",
+                        group_id,
+                        index,
+                        member.name,
+                        exc,
+                    )
+                drafts.append(item)
+            ready_count = sum(
+                1
+                for item in drafts
+                if item.get("status") == "READY" and item.get("draft")
+            )
+            if ready_count < 2:
+                raise RuntimeError("可用群成员不足两位，请调整描述后重试")
             if self.groups.get_group(group_id, include_archived=True) is not None:
                 self.groups.rename_group(group_id, research.group_name, now)
             build = self.repository.save_research(
@@ -449,12 +561,158 @@ Content:
             logger.exception("ensemble.research failed group=%s error=%s", group_id, exc)
             raise
 
+    def retry_member(
+        self,
+        group_id: str,
+        index: int,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Retry only one failed member using the already persisted research."""
+
+        now = now or datetime.now().astimezone()
+        build = self.repository.get(group_id)
+        if build is None:
+            raise KeyError("ensemble build not found")
+        drafts = list(build.get("drafts") or [])
+        target = next((item for item in drafts if int(item.get("index", -1)) == int(index)), None)
+        if target is None:
+            raise KeyError("ensemble member not found")
+        raw = target.get("research")
+        if not isinstance(raw, dict):
+            raise ValueError("这个成员没有可重试的研究资料")
+
+        try:
+            member = EnsembleMemberResearch.model_validate(raw)
+            draft = member_research_to_persona(member)
+            target.update(
+                {
+                    "status": "READY",
+                    "draft": draft.model_dump(mode="json"),
+                    "error": "",
+                    "existing_character_id": self._match_existing(member.name),
+                }
+            )
+        except Exception as exc:
+            target.update({"status": "FAILED", "draft": None, "error": f"人物草稿整理失败：{exc}"})
+
+        ready_count = sum(
+            1 for item in drafts if item.get("status") == "READY" and item.get("draft")
+        )
+        if ready_count >= 2:
+            build = self.repository.save_research(
+                group_id,
+                group_name=build["group_name"],
+                overview=build.get("overview") or "",
+                source_query=build.get("source_query") or "",
+                sources=list(build.get("sources") or []),
+                drafts=drafts,
+                now=now,
+            )
+        else:
+            build = self.repository.set_status(
+                group_id,
+                "FAILED",
+                now,
+                error="可用群成员不足两位",
+            )
+            # set_status does not rewrite drafts_json; persist the retry result.
+            with self.repository.store._lock:
+                self.repository.store.conn.execute(
+                    "UPDATE ensemble_builds SET drafts_json=? WHERE group_id=?",
+                    (json.dumps(drafts, ensure_ascii=False, separators=(",", ":")), group_id),
+                )
+                self.repository.store._maybe_commit()
+            build = self.repository.get(group_id)
+        return self.payload(build)
+
+    @staticmethod
+    def _voice_design_instruction(draft: PersonaDraft) -> str:
+        traits = "、".join(_clean_list(draft.personality, limit=6))
+        return (
+            f"为角色 {draft.name} 设计自然、可长期聊天的中文声线。"
+            f"角色身份：{draft.identity}。性格特点：{traits or draft.description[:160]}。"
+            f"说话方式：{draft.conversation}。"
+            "优先体现人物气质、节奏、音色和情绪边界；不要依赖精确年龄数字，"
+            "不要做夸张广播腔，也不要把角色身份内容念进音色描述。"
+        )[:1000]
+
+    def _run_voice_design_batch(self, items: list[tuple[str, PersonaDraft]]) -> None:
+        """Best-effort optional voice creation; never part of the group commit."""
+
+        try:
+            with httpx.Client(timeout=300.0) as client:
+                status_response = client.get(
+                    f"{self.voice_design_lab_base}/v1/voice-design/status",
+                    timeout=1.5,
+                )
+                status_response.raise_for_status()
+                status = (status_response.json() or {}).get("voice_design") or {}
+                if not status.get("ready"):
+                    logger.info(
+                        "ensemble.voice_design skipped reason=%s",
+                        status.get("reason") or "qwen3 voice design is not ready",
+                    )
+                    return
+
+                for character_id, draft in items:
+                    try:
+                        sample_text = f"你好，我是{draft.name}。之后有话就自然地聊吧。"
+                        generated = client.post(
+                            f"{self.voice_design_lab_base}/v1/voice-design/generate",
+                            json={
+                                "text": sample_text,
+                                "language": "Chinese",
+                                "instruct": self._voice_design_instruction(draft),
+                                "max_new_tokens": 2048,
+                            },
+                            timeout=300.0,
+                        )
+                        generated.raise_for_status()
+                        artifact_id = str(
+                            generated.headers.get("x-voice-design-artifact") or ""
+                        ).strip()
+                        if not artifact_id:
+                            raise RuntimeError("VoiceDesign did not return an artifact id")
+                        frozen = client.post(
+                            f"{self.voice_design_lab_base}/v1/voice-design/freeze",
+                            json={
+                                "character_id": character_id,
+                                "artifact_id": artifact_id,
+                            },
+                            timeout=30.0,
+                        )
+                        frozen.raise_for_status()
+                        logger.info(
+                            "ensemble.voice_design ready character=%s",
+                            character_id,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "ensemble.voice_design failed character=%s error=%s",
+                            character_id,
+                            exc,
+                        )
+        except Exception as exc:
+            logger.info("ensemble.voice_design unavailable error=%s", exc)
+
+    def _start_voice_design(self, items: list[tuple[str, PersonaDraft]]) -> None:
+        if not items:
+            return
+        threading.Thread(
+            target=self._run_voice_design_batch,
+            args=(list(items),),
+            name="ensemble-voice-design",
+            daemon=True,
+        ).start()
+
     def confirm(
         self,
         group_id: str,
         selected_indices: list[int],
         *,
         confirm_over_soft_limit: bool = False,
+        use_voice_design: bool = False,
         now: datetime | None = None,
     ) -> dict[str, Any]:
         now = now or datetime.now().astimezone()
@@ -465,7 +723,7 @@ Content:
             if build["status"] == "ACTIVE":
                 return self.payload(build)
             if build["status"] == "FAILED":
-                raise ValueError("上次资料整理失败，请重新开始这次 AI 建群")
+                raise ValueError("上次资料整理失败，请先重试整理")
             raise ValueError("群像资料还没有准备好")
 
         drafts = list(build.get("drafts") or [])
@@ -474,7 +732,12 @@ Content:
         for raw in selected_indices:
             idx = int(raw)
             item = index_map.get(idx)
-            if item is not None and item not in selected:
+            if (
+                item is not None
+                and item.get("status", "READY") == "READY"
+                and item.get("draft")
+                and item not in selected
+            ):
                 selected.append(item)
         if len(selected) < 2:
             raise ValueError("至少选择两位群成员")
@@ -497,6 +760,7 @@ Content:
 
         created_ids: list[str] = []
         member_ids: list[str] = []
+        voice_design_items: list[tuple[str, PersonaDraft]] = []
         legacy_group = self.groups.get_group(group_id, include_archived=True)
         created_group_id: str | None = None
         active_group_id = group_id
@@ -524,6 +788,7 @@ Content:
                 character_id = str(profile["id"])
                 created_ids.append(character_id)
                 member_ids.append(character_id)
+                voice_design_items.append((character_id, draft))
             if legacy_group is not None:
                 self.groups.rename_group(group_id, build["group_name"], now)
                 self.groups.replace_members(group_id, member_ids, now)
@@ -563,6 +828,16 @@ Content:
                             character_id,
                         )
             raise
+
+        if use_voice_design and voice_design_items:
+            # Explicit opt-in only. The :9015 VoiceDesign sidecar is still a
+            # manually-started feature; if it is absent or fails, the group and
+            # default/fallback voices remain valid. Even thread scheduling is
+            # outside the core commit boundary.
+            try:
+                self._start_voice_design(voice_design_items)
+            except Exception as exc:
+                logger.warning("ensemble.voice_design schedule_failed error=%s", exc)
 
         logger.info(
             "ensemble.confirm build=%s group=%s members=%d new_characters=%d",

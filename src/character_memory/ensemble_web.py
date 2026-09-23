@@ -12,6 +12,7 @@ class EnsembleStartRequest(BaseModel):
 class EnsembleConfirmRequest(BaseModel):
     selected_indices: list[int] = Field(min_length=2, max_length=12)
     confirm_over_soft_limit: bool = False
+    use_voice_design: bool = False
 
 
 def attach_ensemble_routes(app):
@@ -47,9 +48,15 @@ def attach_ensemble_routes(app):
         build_id = build["group_id"]
         try:
             return {"build": service.research(build_id)}
-        except Exception as exc:
-            repository.delete(build_id)
-            raise HTTPException(status_code=502, detail=f"资料整理失败：{exc}") from exc
+        except Exception:
+            # Keep the durable build so the user can retry without losing the
+            # original request. The raw validation/provider exception stays in
+            # logs/build diagnostics instead of being rendered as a 502/Pydantic
+            # wall of text in the product UI.
+            failed = repository.get(build_id)
+            if failed is None:
+                raise HTTPException(status_code=502, detail="资料整理暂时失败，请稍后重试")
+            return {"build": service.payload(failed)}
 
     @app.get("/v1/ensembles/{group_id}")
     def get_ensemble(group_id: str):
@@ -67,6 +74,15 @@ def attach_ensemble_routes(app):
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"资料整理失败：{exc}") from exc
 
+    @app.post("/v1/ensembles/{group_id}/members/{index}/retry")
+    def retry_ensemble_member(group_id: str, index: int):
+        try:
+            return {"build": service.retry_member(group_id, index)}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/v1/ensembles/{group_id}/confirm")
     def confirm_ensemble(group_id: str, req: EnsembleConfirmRequest):
         try:
@@ -75,6 +91,7 @@ def attach_ensemble_routes(app):
                     group_id,
                     req.selected_indices,
                     confirm_over_soft_limit=req.confirm_over_soft_limit,
+                    use_voice_design=req.use_voice_design,
                 )
             }
         except KeyError as exc:

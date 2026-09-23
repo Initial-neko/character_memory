@@ -156,9 +156,17 @@ member C -> ...
 
 ### Ensemble groups（一键建群）
 
-`POST /v1/ensembles` 只创建一个不可见的 `BUILDING` build record，不提前创建真实 GroupConversation；`POST /v1/ensembles/prepare` 是一键入口，会创建 build record 后立即执行联网 research，成功后返回 `READY` Persona 草稿，失败则清理该 build record。兼容的 `/{build_id}/research` 仍可对已有 build 单独执行资料整理。`/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。
+`POST /v1/ensembles` 只创建一个不可见的 `BUILDING` build record，不提前创建真实 GroupConversation；`POST /v1/ensembles/prepare` 是一键入口，会创建 build record 后执行联网 research。失败时 build 保留为可重试状态，不再因为一次 Provider / structured-output 错误把整次输入和进度删掉。兼容的 `/{build_id}/research` 可继续对已有 build 重试资料整理；单个失败成员还可以通过 `/{build_id}/members/{index}/retry` 局部恢复。
 
-一次 confirm 的模型调用量级：每名成员一次 Persona 生成（上限 12 名）加数页网页抓取。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
+Research 只负责整理群体事实。成员 Persona 不再为每个人额外发起一次严格 JSON LLM 调用，而是从 `EnsembleMemberResearch` 做确定性 projection。年龄是弱资料：允许 `18`、`18岁（大学一年级）`、`年龄不详` 或 null；只有能可靠抽出 1..120 的整数时才进入 `PersonaDraft.age`，否则保持 null。角色 identity、description、personality、speech style、relationship 才是建模和后续声线设计的主要输入。
+
+成员整理采用 partial-success：一位成员格式异常只标为 `FAILED` 并保留 research 原始字段，其他可用成员继续；只要至少 2 位成员是 `READY`，整个 build 就可以进入确认页。前端默认隐藏内部 Pydantic/Provider 细节，用户只看到可理解的“重试这一位 / 重试整理 / 修改描述”。
+
+`/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。
+
+可选 `use_voice_design=true` 只在用户显式勾选后生效。它要求用户已经手动启动 Qwen3 VoiceDesign sidecar；群聊和 Character 核心 commit 完成后，后台才按角色 identity/personality/speech style 逐个尝试 VoiceDesign + freeze。VoiceDesign 未启动、不可用或单个角色生成失败都只记日志并保留现有默认/回退 voice，绝不回滚 Character 或 Group。
+
+模型调用量级因此从“1 次群体 research + 每名成员 1 次 Persona structured call”收敛为主要的群体 research 调用；成员 Persona projection 为本地确定性转换。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
 
 ### Member failure isolation
 

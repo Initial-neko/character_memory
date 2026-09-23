@@ -6,11 +6,13 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import character_memory.ensemble_builder as ensemble_module
 from character_memory.ensemble_builder import (
     EnsembleBuilderService,
     EnsembleMemberResearch,
     EnsembleRepository,
     EnsembleResearch,
+    member_research_to_persona,
 )
 from character_memory.ensemble_web import attach_ensemble_routes
 from character_memory.group_store import GroupRepository
@@ -265,13 +267,50 @@ def test_failed_build_cannot_confirm_stale_drafts(tmp_path):
         service.confirm(started["group_id"], [0, 1], now=now)
         assert False, "FAILED build must not be confirmable"
     except ValueError as exc:
-        assert "重新开始" in str(exc)
+        assert "重试整理" in str(exc)
 
     assert GroupRepository(store).list_groups() == []
     store.close()
 
 
-def test_prepare_failure_leaves_no_real_group_or_build_record(tmp_path):
+def test_age_text_is_weak_metadata_and_does_not_block_persona_creation():
+    member = EnsembleMemberResearch(
+        name="Kurisu",
+        age="18岁（东京电机大学一年级）",
+        identity="研究者",
+        description="理性、反应快，对荒唐说法会直接吐槽，也会认真维护自己的专业判断和边界。",
+        speech_style="清晰直接，常会指出逻辑问题。",
+        personality=["理性", "直接"],
+        relationship_notes="经常与 Okabe 争论；重视专业判断",
+        tags="研究、吐槽",
+    )
+
+    draft = member_research_to_persona(member)
+
+    assert draft.age == 18
+    assert draft.name == "Kurisu"
+    assert "清晰直接" in draft.conversation
+    assert "理性" in draft.personality
+
+
+def test_unknown_age_is_allowed_and_character_traits_remain_primary():
+    member = EnsembleMemberResearch(
+        name="Mystery",
+        age="年龄不详",
+        identity="身份明确但年龄没有可靠公开资料",
+        description="说话克制、观察细致，有自己的价值判断，不会为了配合别人随意改变立场。",
+        speech_style="短句、节奏慢、语气平静。",
+        tags=["克制", "细致"],
+    )
+
+    draft = member_research_to_persona(member)
+
+    assert draft.age is None
+    assert draft.identity.startswith("身份明确")
+    assert draft.conversation.startswith("短句")
+
+
+def test_prepare_failure_preserves_failed_build_for_retry(tmp_path):
     access, store, observer, _, _ = _access(tmp_path)
     observer.observe = lambda *args, **kwargs: {
         "query": "none",
@@ -291,12 +330,16 @@ def test_prepare_failure_leaves_no_real_group_or_build_record(tmp_path):
 
     assert GroupRepository(store).list_groups() == []
     with store._lock:
-        count = store.conn.execute("SELECT COUNT(*) AS total FROM ensemble_builds").fetchone()["total"]
-    assert count == 0
+        rows = store.conn.execute(
+            "SELECT group_id,status,error FROM ensemble_builds"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "FAILED"
+    assert "公开资料" in rows[0]["error"]
     store.close()
 
 
-def test_prepare_route_maps_research_value_error_to_502_and_cleans_build(tmp_path):
+def test_prepare_route_returns_failed_build_without_raw_502_detail(tmp_path):
     store = SQLiteStore(str(tmp_path / "ensemble-web.db"))
     access = SimpleNamespace(
         read_store=store,
@@ -320,15 +363,142 @@ def test_prepare_route_maps_research_value_error_to_502_and_cleans_build(tmp_pat
             json={"prompt": "复刻一个公开作品群聊"},
         )
 
-    assert response.status_code == 502
-    assert response.json()["detail"] == (
-        "资料整理失败：media host could not be resolved: example.invalid"
-    )
+    assert response.status_code == 200
+    build = response.json()["build"]
+    assert build["status"] == "BUILDING" or build["status"] == "FAILED"
+    # The product response must not dump provider/Pydantic internals into the UI.
+    assert "media host could not be resolved" not in json.dumps(response.json(), ensure_ascii=False)
     with store._lock:
         total = store.conn.execute(
             "SELECT COUNT(*) AS total FROM ensemble_builds"
         ).fetchone()["total"]
-    assert total == 0
+    assert total == 1
+    store.close()
+
+
+def test_one_failed_member_does_not_fail_the_whole_ensemble(tmp_path, monkeypatch):
+    access, store, _, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    original = ensemble_module.member_research_to_persona
+
+    def fail_mayuri(member):
+        if member.name == "Mayuri":
+            raise ValueError("simulated malformed member")
+        return original(member)
+
+    monkeypatch.setattr(ensemble_module, "member_research_to_persona", fail_mayuri)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    build = service.research(started["group_id"])
+
+    assert build["status"] == "READY"
+    assert build["ready_member_count"] == 2
+    assert [item["canonical_name"] for item in build["failed_members"]] == ["Mayuri"]
+    ready = [item for item in build["drafts"] if item.get("status") == "READY"]
+    assert {item["canonical_name"] for item in ready} == {"Kurisu", "Okabe"}
+    store.close()
+
+
+def test_failed_member_can_be_retried_without_rerunning_group_research(tmp_path, monkeypatch):
+    access, store, observer, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    original = ensemble_module.member_research_to_persona
+    failed_once = {"value": False}
+
+    def fail_once(member):
+        if member.name == "Mayuri" and not failed_once["value"]:
+            failed_once["value"] = True
+            raise ValueError("temporary member conversion failure")
+        return original(member)
+
+    monkeypatch.setattr(ensemble_module, "member_research_to_persona", fail_once)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    build = service.research(started["group_id"])
+    observation_calls = len(observer.calls)
+
+    retried = service.retry_member(started["group_id"], 2)
+
+    assert len(observer.calls) == observation_calls
+    assert retried["ready_member_count"] == 3
+    assert retried["failed_members"] == []
+    assert retried["drafts"][2]["status"] == "READY"
+    store.close()
+
+
+def test_voice_design_is_explicit_opt_in_and_never_part_of_default_confirm(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    ready = service.research(started["group_id"])
+    calls = []
+    service._start_voice_design = lambda items: calls.append(list(items))
+
+    service.confirm(started["group_id"], [0, 1], use_voice_design=False)
+
+    assert calls == []
+    store.close()
+
+
+def test_voice_design_opt_in_schedules_best_effort_work_after_group_commit(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    ready = service.research(started["group_id"])
+    calls = []
+    service._start_voice_design = lambda items: calls.append(list(items))
+
+    result = service.confirm(started["group_id"], [0, 1], use_voice_design=True)
+
+    assert result["status"] == "ACTIVE"
+    assert len(calls) == 1
+    # Kurisu already exists in the fixture, so only the newly-created Okabe
+    # gets optional VoiceDesign work.
+    assert [character_id for character_id, _draft in calls[0]] == ["okabe"]
+    store.close()
+
+
+def test_voice_design_scheduling_failure_does_not_rollback_group(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    service.research(started["group_id"])
+
+    def fail_schedule(_items):
+        raise RuntimeError("thread unavailable")
+
+    service._start_voice_design = fail_schedule
+    result = service.confirm(started["group_id"], [0, 1], use_voice_design=True)
+
+    assert result["status"] == "ACTIVE"
+    assert result["group"]["status"] == "ACTIVE"
+    assert result["group"]["member_ids"] == ["kurisu", "okabe"]
+    store.close()
+
+
+def test_voice_design_instruction_uses_traits_not_exact_age(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    service = EnsembleBuilderService(access, EnsembleRepository(store))
+    draft = member_research_to_persona(
+        EnsembleMemberResearch(
+            name="Kurisu",
+            age="18岁（大学一年级）",
+            identity="研究者",
+            description="理性、敏锐，对研究和事实有很强的专业判断，也会明确表达自己的边界。",
+            speech_style="清晰直接，节奏自然。",
+            personality=["理性", "敏锐"],
+        )
+    )
+
+    instruct = service._voice_design_instruction(draft)
+
+    assert "理性" in instruct
+    assert "清晰直接" in instruct
+    assert "18" not in instruct
+    assert "不要依赖精确年龄数字" in instruct
     store.close()
 
 
@@ -344,7 +514,10 @@ def test_ensemble_web_assets_are_loaded():
     for token in [
         "/v1/ensembles/prepare",
         "/confirm",
+        "/members/",
         "data-ensemble-member",
+        "data-ensemble-voice-design",
+        "use_voice_design",
         "确认并开始群聊",
         "groups?.enter",
     ]:
@@ -352,6 +525,8 @@ def test_ensemble_web_assets_are_loaded():
     for token in [
         ".ensemble-builder",
         ".ensemble-member-card",
+        ".ensemble-member-failed",
+        ".ensemble-voice-option",
         ".ensemble-capacity",
         ".character-overflow-entry",
         ".character-overflow-card",

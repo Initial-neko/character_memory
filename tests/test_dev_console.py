@@ -111,6 +111,9 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
     assert 'href="http://127.0.0.1:9002/tts"' in html
     assert "TTS Workbench :9002" in html
     assert ">LLM<" in html
+    assert "LLM Usage" in html
+    assert 'id="llmUsageFeatureBody"' in html
+    assert 'id="llmUsageRecentBody"' in html
     assert ">TTS<" in html
     assert ">ASR<" in html
     assert "Media Live Smoke" in html
@@ -121,6 +124,7 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
         "/v1/dev/status",
         "/v1/dev/resources",
         "/v1/dev/llm",
+        "/v1/dev/llm-usage",
         "/v1/dev/tts",
         "/v1/dev/asr",
         "/v1/dev/media-smoke",
@@ -164,6 +168,48 @@ def test_dev_llm_uses_configured_provider_path():
     assert response.json()["reply"] == "pong"
     assert response.json()["model"] == "fake-model"
     assert response.json()["total_ms"] >= 0
+
+
+def test_dev_llm_usage_reads_configured_character_database(tmp_path):
+    cfg = settings().model_copy(update={"db_path": str(tmp_path / "usage.db")})
+    from character_memory.llm.usage import LlmUsageStore
+
+    store = LlmUsageStore(cfg.db_path)
+    try:
+        store.add(
+            {
+                "provider": "example.test",
+                "model": "fake-model",
+                "feature": "GROUP",
+                "purpose": "GROUP_REACTION",
+                "session_id": "s1",
+                "conversation_id": "group:test",
+                "character_id": "rin",
+                "logical_call_id": "logical-1",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "input_tokens": 20,
+                "output_tokens": 5,
+                "total_tokens": 25,
+                "input_chars": 80,
+                "output_chars": 20,
+                "duration_ms": 12.0,
+                "usage_source": "PROVIDER",
+            }
+        )
+    finally:
+        store.close()
+
+    app = create_dev_app(settings=cfg, http_client=FakeHttpClient(), model_factory=lambda _: FakeModel())
+    with TestClient(app) as client:
+        response = client.get("/v1/dev/llm-usage?hours=24&limit=10")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["requests"] == 1
+    assert data["summary"]["total_tokens"] == 25
+    assert data["by_feature"][0]["feature"] == "GROUP"
+    assert data["by_feature"][0]["purpose"] == "GROUP_REACTION"
 
 
 def test_dev_tts_and_asr_proxy_media_contracts():

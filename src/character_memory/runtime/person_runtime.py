@@ -397,6 +397,7 @@ class PersonRuntime:
                     "model_messages": model_call.trace.request_messages,
                     "raw_model_response": model_call.trace.response_text,
                     "model_attempt": model_call.trace.attempt,
+                    "llm_logical_call_id": getattr(model_call.trace, "logical_call_id", ""),
                     "model_used": model_used,
                     "vision_images": len(image_data_urls or []),
                     "last_chat_event": last_chat_event.model_dump(mode="json") if last_chat_event is not None else None,

@@ -4,7 +4,8 @@ from dataclasses import dataclass
 import time
 from typing import Any, Callable
 
-from character_memory.domain.models import Event
+from character_memory.domain.models import Event, EventType
+from character_memory.llm.usage import llm_usage_scope
 from character_memory.runtime.context import compile_context
 
 
@@ -97,15 +98,47 @@ def evaluate_reaction(
     resolved_session = session_id or str(
         event.metadata.get("conversation_id") or f"{event.character_id}:default"
     )
-    stage = time.perf_counter()
-    if image_data_urls:
-        model_call = runtime.model.react_call_with_images_for_session(
-            context,
-            image_data_urls,
-            resolved_session,
-        )
+    channel = str(event.metadata.get("channel") or "").upper()
+    if channel == "SPACE":
+        feature = "SPACE"
+        if event.event_type == EventType.SPACE_POST_SEEN:
+            purpose = "SPACE_AUDIENCE"
+        elif event.event_type == EventType.SPACE_COMMENT_RECEIVED:
+            purpose = "SPACE_REPLY"
+        else:
+            purpose = "SPACE_OPPORTUNITY"
+    elif resolved_session.startswith("group:"):
+        feature = "GROUP"
+        purpose = "GROUP_AUTONOMY" if event.event_type == EventType.TIME_TICK else "GROUP_REACTION"
+    elif event.event_type == EventType.PROACTIVE_INTENT:
+        feature = "PROACTIVE"
+        purpose = "PROACTIVE_REACTION"
+    elif event.event_type == EventType.WORLD_OBSERVATION:
+        feature = "WORLD"
+        purpose = "WORLD_REACTION"
     else:
-        model_call = runtime.model.react_call_for_session(context, resolved_session)
+        feature = "DIRECT"
+        purpose = "DIRECT_REACTION"
+
+    if image_data_urls:
+        purpose = f"{purpose}_VISION"
+
+    stage = time.perf_counter()
+    with llm_usage_scope(
+        feature=feature,
+        purpose=purpose,
+        character_id=event.character_id,
+        conversation_id=str(event.metadata.get("conversation_id") or resolved_session),
+        override=True,
+    ):
+        if image_data_urls:
+            model_call = runtime.model.react_call_with_images_for_session(
+                context,
+                image_data_urls,
+                resolved_session,
+            )
+        else:
+            model_call = runtime.model.react_call_for_session(context, resolved_session)
     reaction = model_call.value
     reaction, sticker_decisions, image_decisions = runtime._sanitize_resource_actions(
         reaction,

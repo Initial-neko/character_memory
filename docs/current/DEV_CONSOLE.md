@@ -132,6 +132,47 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 
 配置会写回 `config.yaml`，同时热应用到当前 Character Runtime。测试时可设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。
 
+### LLM Usage
+
+Dev Console 提供正式的 LLM Usage Explorer，用于回答“系统到底在哪里调用了模型、调用了多少次、哪类功能消耗了多少 Token”。
+
+统计来自 Character Runtime 与 Dev Console 共用的 `llm_calls` 计量表，而不是解析日志。每次真实的 OpenAI-compatible `/chat/completions` HTTP 请求都会产生一条记录，并保留：
+
+- Feature / Purpose，例如 `GROUP / GROUP_REACTION`、`SPACE / SPACE_REPLY`、`ENSEMBLE / ENSEMBLE_PERSONA`；
+- Model / Provider；
+- Character / Conversation / Session；
+- Logical Call ID 与 Attempt；
+- Input / Output / Total Token；
+- Input / Output chars；
+- latency、status、error type、request id；
+- vision image count 与 JSON mode。
+
+Structured Output 的 schema repair 仍然属于同一个 Logical Call，但每一次实际 HTTP attempt 单独计量。因此 Dev 页面可以同时看到“逻辑调用数”和“真实请求数”，并直接观察 Retry Rate。
+
+Token 只采用 Provider 响应中的正式 `usage`。Provider 没有返回 token usage 时，不使用 `chars / 4` 之类的伪精确估算；Token 显示为未知，同时继续保留字符数并显示 Token Coverage。
+
+默认展示最近 24 小时，也可以切换 1H / 7D / 30D。页面提供：
+
+- 总 Requests / Logical Calls；
+- Input / Output / Total Tokens；
+- Token Coverage；
+- Retry / Error Rate；
+- Average latency；
+- 按 Feature + Purpose 聚合；
+- 按 Model 聚合；
+- 最近真实 Provider 请求表。
+
+Usage 表只保存调用元数据与用量，不复制 Prompt / Response 正文。需要检查具体角色上下文、模型请求和原始响应时，继续使用 Runtime Trace；PersonRuntime Trace 会记录对应的 `llm_logical_call_id`，用于与 Usage 数据关联。
+
+接口：
+
+```text
+GET /v1/dev/llm-usage?hours=24&limit=80
+GET :8000/v1/llm/usage?hours=24&limit=80
+```
+
+当前 Feature 归因覆盖 Direct、Group、Space、Proactive、World、Persona、Ensemble、Encounter、Life、Avatar、Visual、Sticker 与 Dev Probe。新增 LLM 功能时，应在调用边界补充 Purpose，而不是让生产数据长期落入 `OTHER`。
+
 ### TTS
 
 调用正式 Media Runtime TTS：

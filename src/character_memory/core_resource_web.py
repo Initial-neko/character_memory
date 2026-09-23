@@ -6,6 +6,7 @@ import time
 
 from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.config import resolve_sticker_dir
+from character_memory.llm.usage import LlmUsageStore
 from character_memory.stickers import import_sticker_bundle
 
 
@@ -17,8 +18,19 @@ def _ms(started: float) -> float:
 
 
 def attach_core_resource_routes(app, access: CoreApiRouteAccess):
-    from fastapi import Body, HTTPException
+    from fastapi import Body, HTTPException, Query
     from fastapi.responses import FileResponse
+
+    @app.get("/v1/llm/usage")
+    def llm_usage(
+        hours: int = Query(default=24, ge=1, le=2160),
+        limit: int = Query(default=80, ge=1, le=300),
+    ):
+        store = LlmUsageStore(access.settings.db_path)
+        try:
+            return store.usage(hours=hours, limit=limit)
+        finally:
+            store.close()
 
     @app.get("/v1/stickers")
     def stickers(character_id: str | None = None):

@@ -74,6 +74,37 @@ th { color: var(--ui-muted); font-weight: 600; }
 td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
 .future p { margin: 0; color: var(--ui-muted); }
 
+.llm-usage-card { align-self: stretch; }
+.usage-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 4px 0 18px;
+}
+.usage-stat {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface-soft);
+}
+.usage-stat span, .usage-stat small {
+  display: block;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.usage-stat strong {
+  display: block;
+  margin: 5px 0 3px;
+  color: var(--ui-text);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-section-title { margin: 0 0 8px; font-size: 13px; color: var(--ui-muted); }
+.usage-table-wrap { max-height: 330px; overflow: auto; }
+.usage-table th:first-child, .usage-table td:first-child { position: sticky; left: 0; background: var(--ui-surface); }
+.usage-recent-wrap { max-height: 420px; }
+
 /* Levels. Every control declares one in the markup (`data-level`), dev_levels.js
  * names the group it landed in, and this is what the declared groups look like.
  * The first screen is `common`; `advanced` and `diagnostic` are real, closed
@@ -98,6 +129,7 @@ td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
 .dev-console .status-block { min-height: 64px; max-height: 260px; overflow-y: auto; }
 
 @media (max-width: 900px) {
+  .usage-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .status-grid, .feature-grid { grid-template-columns: 1fr; }
   .wide { grid-column: auto; }
   .topbar { align-items: flex-start; flex-direction: column; }

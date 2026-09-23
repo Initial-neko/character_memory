@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from character_memory.config import Settings
 from character_memory.domain.models import WorldObservation
 from character_memory.storage.sqlite import SQLiteStore
+from character_memory.time_utils import epoch_us
 from character_memory.world_activity import (
     PersonalBrowseAppraisal,
     PersonalBrowsePlan,

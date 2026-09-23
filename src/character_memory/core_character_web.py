@@ -44,13 +44,22 @@ def attach_core_character_routes(app, access: CoreApiRouteAccess):
         listed = split_archived(access.character_profiles(), archived)
         return {"characters": [access.character_summary(profile) for profile in listed]}
 
+    def _set_archived_and_refresh_voice(character_id: str, *, archived: bool, confirm_over_soft_limit: bool = False):
+        result = access.set_archived(
+            character_id,
+            archived=archived,
+            confirm_over_soft_limit=confirm_over_soft_limit,
+        )
+        result["voice_registry"] = access.refresh_voice_registry()
+        return result
+
     @app.post("/v1/characters/{character_id}/archive")
     def archive_character(character_id: str):
-        return access.set_archived(character_id, archived=True)
+        return _set_archived_and_refresh_voice(character_id, archived=True)
 
     @app.post("/v1/characters/{character_id}/restore")
     def restore_character(character_id: str, confirm_over_soft_limit: bool = False):
-        return access.set_archived(
+        return _set_archived_and_refresh_voice(
             character_id,
             archived=False,
             confirm_over_soft_limit=confirm_over_soft_limit,

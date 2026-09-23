@@ -59,6 +59,10 @@ FIRST_SCREEN = {
     "groupAutonomyGroup",
     "applyGroupAutonomyConfig",
     "runGroupAutonomyOpportunity",
+    "devModeToggle",
+    "spaceIntervalMinutes",
+    "spaceMaxPostsPerDay",
+    "groupAutonomyInterval",
 }
 # The band is the point of the exercise: the page it replaced exposed 87
 # controls, every one of them a live field, with nothing saying where to start.

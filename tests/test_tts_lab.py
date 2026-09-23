@@ -432,12 +432,44 @@ def test_tts_lab_web_ui_exposes_provider_voice_and_ab_controls():
     assert 'id="voiceDesignInstruct"' in html
     assert 'id="generateVoiceDesign"' in html
     assert 'id="polishVoiceDesign"' in html
-    assert 'fetch("/v1/providers")' in script
+    assert 'fetchJsonWithTimeout("/v1/providers")' in script
     assert 'fetch("/v1/tts"' in script
-    assert 'fetch("/v1/voice-design/status")' in script
+    assert 'fetchJsonWithTimeout("/v1/voice-design/status")' in script
     assert 'fetch("/v1/voice-design/polish"' in script
     assert 'fetch("/v1/voice-design/generate"' in script
     assert "decodeURIComponent" in script
+
+
+
+
+def test_tts_lab_status_requests_are_bounded_and_actions_are_gated():
+    html = Path("src/character_memory/web/tts_lab.html").read_text(encoding="utf-8")
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+
+    assert 'id="providerLoadStatus"' in html
+    assert 'id="voiceDesignLoadStatus"' in html
+    assert 'id="generateTtsLab" disabled' in html
+    assert 'id="compareReady" disabled' in html
+    assert 'id="generateVoiceDesign" disabled' in html
+
+    assert "const STATUS_TIMEOUT_MS = 8000" in script
+    assert "AbortController" in script
+    assert "controller.abort()" in script
+    assert "请求超时" in script
+    assert 'state.providersState = "loading"' in script
+    assert 'state.providersState = "error"' in script
+    assert 'state.voiceDesignState = "loading"' in script
+    assert "当前没有可用 Provider，请先刷新 Provider 状态" in script
+    assert 'await loadVoiceDesignStatus({quiet: true})' in script
+
+    node = shutil.which("node")
+    if node:
+        checked = subprocess.run(
+            [node, "--check", "src/character_memory/web/tts_lab.js"],
+            capture_output=True,
+            text=True,
+        )
+        assert checked.returncode == 0, checked.stderr
 
 
 # --- Voice Design -> character freeze contract -------------------------------

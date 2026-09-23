@@ -446,8 +446,38 @@ class OpenAICompatibleModel(PersonModel):
             )
             raise ProviderHTTPError(r.status_code, url, body, request_id)
 
-        data = r.json()
-        text = data["choices"][0]["message"]["content"]
+        data = None
+        try:
+            data = r.json()
+            text = data["choices"][0]["message"]["content"]
+        except Exception as exc:
+            # A 2xx response is still a real provider attempt even when its
+            # payload is malformed or missing the OpenAI-compatible shape.
+            # Meter it before propagating the parse/shape failure so request,
+            # retry and error-rate telemetry cannot silently undercount.
+            self._record_usage(
+                messages=messages,
+                conversation_id=conversation_id,
+                session_id=session_id,
+                selected_model=selected_model,
+                logical_call_id=logical_call_id,
+                attempt=resolved_attempt,
+                duration_ms=duration_ms,
+                status="ERROR",
+                data=data if isinstance(data, dict) else None,
+                json_object=json_object,
+                error_type=f"RESPONSE_{type(exc).__name__}",
+                request_id=request_id,
+            )
+            logger.exception(
+                "provider.request invalid_response model=%s session=%s duration_ms=%d request_id=%s",
+                selected_model,
+                session_id,
+                int(duration_ms),
+                request_id or "-",
+            )
+            raise
+
         self._record_usage(
             messages=messages,
             conversation_id=conversation_id,

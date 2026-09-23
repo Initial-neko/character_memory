@@ -137,6 +137,7 @@ def _access(tmp_path):
     model = FakeEnsembleModel()
     observer = FakeWorldObserver()
     created = []
+    creation_records = []
 
     access = SimpleNamespace(
         read_store=store,
@@ -157,11 +158,19 @@ def _access(tmp_path):
             raise ValueError("soft confirmation required")
         return {"active_count": active, "result_count": result}
 
-    def create_character(draft, requested_id="", *, confirm_over_soft_limit=False, skip_capacity_check=False):
+    def create_character(
+        draft,
+        requested_id="",
+        *,
+        confirm_over_soft_limit=False,
+        skip_capacity_check=False,
+        creation=None,
+    ):
         character_id = draft.name.lower()
         profile = {"id": character_id, "name": draft.name, "identity": draft.identity}
         profiles.append(profile)
         created.append(character_id)
+        creation_records.append({"character_id": character_id, **(creation or {})})
         return profile
 
     def rollback(character_id):
@@ -172,6 +181,7 @@ def _access(tmp_path):
     access.check_character_capacity = check_capacity
     access.create_character_from_draft = create_character
     access.rollback_created_character = rollback
+    access.creation_records = creation_records
     return access, store, observer, profiles, created
 
 
@@ -233,6 +243,12 @@ def test_ensemble_confirmation_fills_same_group_and_only_creates_missing_charact
     assert result["group"]["member_ids"] == ["kurisu", "okabe", "mayuri"]
     assert created == ["okabe", "mayuri"]
     assert {item["id"] for item in profiles} == {"kurisu", "okabe", "mayuri"}
+    assert [item["source"] for item in access.creation_records] == [
+        "ENSEMBLE_BUILDER",
+        "ENSEMBLE_BUILDER",
+    ]
+    assert all(item["group_id"] == result["group_id"] or item["group_id"] == started["group_id"] for item in access.creation_records)
+    assert all("LAB MEM" in item["prompt"] for item in access.creation_records)
     store.close()
 
 

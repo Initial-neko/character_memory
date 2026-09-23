@@ -155,7 +155,7 @@ def test_dev_console_doc_keeps_up_with_the_runtime_only_scope():
 
     doc = Path("docs/current/DEV_CONSOLE.md").read_text(encoding="utf-8")
 
-    for stale in ("直接调整并持久化", "配置会写回 `config.yaml`", "### TTS\n"):
+    for stale in ("直接调整并持久化", "配置会写回 `config.yaml`"):
         assert stale not in doc, stale
     assert "不写 `config.yaml`" in doc, "the runtime-only scope has to be stated"
 
@@ -181,7 +181,7 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
     assert 'href="http://127.0.0.1:9002/tts"' in html
     assert "TTS Workbench :9002" in html
     assert ">LLM<" in html
-    assert ">TTS<" not in html
+    assert ">TTS<" in html
     assert ">ASR<" in html
     assert "Media Live Smoke" in html
     assert "Resource Monitor" in html

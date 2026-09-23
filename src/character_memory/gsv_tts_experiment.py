@@ -17,10 +17,12 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from character_memory.web_lifecycle import on_app_event
+from character_memory.config import read_archive_state
 from character_memory.voices import (
     TEMPLATE_FILE_SUFFIX,
     VoiceProfile,
     VoiceProfileError,
+    _character_id,
     discover_character_voices,
     discover_templates,
     resolve_voice_registry,
@@ -186,6 +188,7 @@ class GsvTtsRuntime:
         # selector reads the distinction (``_voice_ids``). ``_load_voices``
         # overwrites this from the tree it actually found.
         self._templates: dict[str, VoiceProfile] = dict(voices or {})
+        self._archived_character_ids: set[str] = set()
         self._voices_error: str | None = None
         if voices is not None:
             self._voices: dict[str, VoiceProfile] = dict(voices)
@@ -209,7 +212,18 @@ class GsvTtsRuntime:
         and degrades to the default template at request time.
         """
         personas = Path(self.persona_root)
-        persona_paths = sorted(personas.glob("*/persona.yaml")) if personas.exists() else []
+        all_persona_paths = sorted(personas.glob("*/persona.yaml")) if personas.exists() else []
+        self._archived_character_ids = {
+            character_id
+            for path in all_persona_paths
+            if read_archive_state(path) is not None
+            for character_id in [_character_id(path)]
+            if character_id
+        }
+        persona_paths = [
+            path for path in all_persona_paths
+            if read_archive_state(path) is None
+        ]
         templates = discover_templates(self.voices_root)
         # The template-only map is kept alongside the merged one because
         # ``status()["voices"]`` feeds the Settings Center selector, and
@@ -244,11 +258,13 @@ class GsvTtsRuntime:
         """
         previous_voices = self._voices
         previous_templates = self._templates
+        previous_archived = self._archived_character_ids
         try:
             self._voices = self._load_voices()
         except VoiceProfileError as exc:
             self._voices = previous_voices
             self._templates = previous_templates
+            self._archived_character_ids = previous_archived
             self._voices_error = str(exc)
             print(f"gsv-tts voices unavailable: {exc}", flush=True)
         else:
@@ -319,6 +335,10 @@ class GsvTtsRuntime:
         ``GsvTtsResult.voice`` never report a profile that was not applied.
         """
         name = str(requested or self.default_voice).strip() or self.default_voice
+        if name in self._archived_character_ids:
+            raise RuntimeError(
+                f"Voice synthesis is disabled for archived character {name!r}; restore the character before speaking."
+            )
         # The registry is one flat namespace, and a character id is allowed to
         # shadow a template name: ``resolve_voice_registry`` re-keys a
         # character's profile onto its id, so the character wins the key. Reading

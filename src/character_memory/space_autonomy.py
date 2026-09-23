@@ -929,6 +929,13 @@ class SpaceAutonomyScheduler:
                     "last_status": state.get("last_status"),
                     "last_post_id": state.get("last_post_id"),
                     "posts_today": self._posts_today(character_id, now),
+                    "configured_interval_minutes": float(
+                        state.get("configured_interval_minutes") or self.interval_minutes()
+                    ),
+                    "minutes_until_next": round(
+                        max(0, int(state["next_opportunity_at_epoch"]) - epoch_us(now)) / 60_000_000,
+                        1,
+                    ),
                     "due": epoch_us(now) >= int(state["next_opportunity_at_epoch"]),
                 }
             )
@@ -1055,9 +1062,15 @@ class SpaceAutonomyScheduler:
             self.access.settings.space_scheduler_poll_seconds = self.poll_seconds
 
         if rearm:
-            next_at = now + timedelta(minutes=self.interval_minutes())
+            interval = self.interval_minutes()
+            next_at = now + timedelta(minutes=interval)
             for profile in self.service._active_profiles():
-                self.repository.set_next_opportunity(profile["id"], next_at, now)
+                self.repository.set_next_opportunity(
+                    profile["id"],
+                    next_at,
+                    now,
+                    interval_minutes=interval,
+                )
 
         self._wake.set()
         return self.status(now)

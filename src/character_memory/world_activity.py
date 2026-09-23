@@ -89,10 +89,23 @@ class WorldPulseRepository:
     """Durable World Pulse topics/comments plus restart-safe activity clocks."""
 
     MIGRATION = "world/001-pulse-and-browsing"
+    SCHEDULE_MIGRATION = "world/002-effective-schedule-config"
 
     def __init__(self, store):
         self.store = store
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema)
+        self.store.apply_schema_migration(self.SCHEDULE_MIGRATION, self._add_schedule_config)
+
+    def _add_schedule_config(self) -> None:
+        columns = {
+            str(row["name"])
+            for row in self.store.conn.execute("PRAGMA table_info(world_activity_state)").fetchall()
+        }
+        if "configured_interval_minutes" not in columns:
+            self.store.conn.execute(
+                "ALTER TABLE world_activity_state "
+                "ADD COLUMN configured_interval_minutes REAL NOT NULL DEFAULT 0"
+            )
 
     def _create_schema(self) -> None:
         self.store.conn.executescript(
@@ -131,6 +144,7 @@ class WorldPulseRepository:
                 last_run_at_epoch INTEGER,
                 next_run_at TEXT NOT NULL,
                 next_run_at_epoch INTEGER NOT NULL,
+                configured_interval_minutes REAL NOT NULL DEFAULT 0,
                 last_status TEXT NOT NULL DEFAULT 'READY',
                 last_error TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY(kind,subject_id)
@@ -307,26 +321,61 @@ class WorldPulseRepository:
         now: datetime,
         *,
         delay_minutes: float,
+        interval_minutes: float | None = None,
     ) -> dict:
+        normalized_interval = (
+            max(10.0, float(interval_minutes)) if interval_minutes is not None else None
+        )
+        next_at = now + timedelta(minutes=max(0.0, float(delay_minutes)))
         with self.store.transaction():
             row = self.store.conn.execute(
                 "SELECT * FROM world_activity_state WHERE kind=? AND subject_id=?",
                 (kind, subject_id),
             ).fetchone()
             if row is None:
-                next_at = now + timedelta(minutes=max(0.0, float(delay_minutes)))
                 self.store.conn.execute(
                     """
                     INSERT INTO world_activity_state(
-                        kind,subject_id,next_run_at,next_run_at_epoch,last_status
-                    ) VALUES(?,?,?,?,?)
+                        kind,subject_id,next_run_at,next_run_at_epoch,
+                        configured_interval_minutes,last_status
+                    ) VALUES(?,?,?,?,?,?)
                     """,
-                    (kind, subject_id, next_at.isoformat(), epoch_us(next_at), "READY"),
+                    (
+                        kind,
+                        subject_id,
+                        next_at.isoformat(),
+                        epoch_us(next_at),
+                        normalized_interval or 0.0,
+                        "READY",
+                    ),
                 )
-                row = self.store.conn.execute(
-                    "SELECT * FROM world_activity_state WHERE kind=? AND subject_id=?",
-                    (kind, subject_id),
-                ).fetchone()
+            elif (
+                normalized_interval is not None
+                and abs(float(row["configured_interval_minutes"] or 0.0) - normalized_interval) > 1e-9
+            ):
+                # Persisted clocks survive restarts. If the configured cadence
+                # changed, that old cursor is no longer truthful, so re-arm once
+                # using this kind's normal initial delay. Same-config restarts
+                # keep the existing cursor untouched.
+                self.store.conn.execute(
+                    """
+                    UPDATE world_activity_state
+                    SET next_run_at=?,next_run_at_epoch=?,configured_interval_minutes=?,
+                        last_status='READY',last_error=''
+                    WHERE kind=? AND subject_id=?
+                    """,
+                    (
+                        next_at.isoformat(),
+                        epoch_us(next_at),
+                        normalized_interval,
+                        kind,
+                        subject_id,
+                    ),
+                )
+            row = self.store.conn.execute(
+                "SELECT * FROM world_activity_state WHERE kind=? AND subject_id=?",
+                (kind, subject_id),
+            ).fetchone()
         return dict(row)
 
     def due(self, kind: str, subject_id: str, now: datetime) -> bool:
@@ -358,19 +407,29 @@ class WorldPulseRepository:
         *,
         status: str,
         error: str = "",
+        interval_minutes: float | None = None,
     ) -> None:
+        normalized_interval = (
+            max(10.0, float(interval_minutes)) if interval_minutes is not None else 0.0
+        )
         with self.store.transaction():
             self.store.conn.execute(
                 """
                 INSERT INTO world_activity_state(
                     kind,subject_id,last_run_at,last_run_at_epoch,
-                    next_run_at,next_run_at_epoch,last_status,last_error
-                ) VALUES(?,?,?,?,?,?,?,?)
+                    next_run_at,next_run_at_epoch,configured_interval_minutes,
+                    last_status,last_error
+                ) VALUES(?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(kind,subject_id) DO UPDATE SET
                     last_run_at=excluded.last_run_at,
                     last_run_at_epoch=excluded.last_run_at_epoch,
                     next_run_at=excluded.next_run_at,
                     next_run_at_epoch=excluded.next_run_at_epoch,
+                    configured_interval_minutes=CASE
+                        WHEN excluded.configured_interval_minutes > 0
+                        THEN excluded.configured_interval_minutes
+                        ELSE world_activity_state.configured_interval_minutes
+                    END,
                     last_status=excluded.last_status,
                     last_error=excluded.last_error
                 """,
@@ -381,6 +440,7 @@ class WorldPulseRepository:
                     epoch_us(now),
                     next_at.isoformat(),
                     epoch_us(next_at),
+                    normalized_interval,
                     status,
                     str(error or "")[:1200],
                 ),
@@ -945,6 +1005,7 @@ class WorldActivityScheduler:
             completed + timedelta(minutes=next_minutes),
             status=status,
             error=error,
+            interval_minutes=base_minutes,
         )
         self.repository.finish_run(
             run_id,
@@ -980,6 +1041,7 @@ class WorldActivityScheduler:
                 "global",
                 now,
                 delay_minutes=0.0,
+                interval_minutes=pulse_interval,
             )
             if self.repository.due("PULSE", "global", now):
                 outcomes.append(
@@ -997,6 +1059,7 @@ class WorldActivityScheduler:
                 "global",
                 now,
                 delay_minutes=min(30.0, discuss_interval),
+                interval_minutes=discuss_interval,
             )
             if self.repository.due("DISCUSS", "global", now):
                 topics = self.repository.list_topics(limit=10)
@@ -1040,6 +1103,7 @@ class WorldActivityScheduler:
                         now,
                         now + timedelta(minutes=min(30.0, discuss_interval)),
                         status="NO_TOPIC",
+                        interval_minutes=discuss_interval,
                     )
 
         if bool(getattr(self.access.settings, "world_browse_enabled", True)):
@@ -1053,6 +1117,7 @@ class WorldActivityScheduler:
                         character_id,
                         browse_interval,
                     ),
+                    interval_minutes=browse_interval,
                 )
                 if self.repository.due("BROWSE", character_id, now):
                     outcomes.append(
@@ -1070,6 +1135,17 @@ class WorldActivityScheduler:
         return outcomes
 
     def status(self) -> dict:
+        now = datetime.now().astimezone()
+        states = []
+        for item in self.repository.states():
+            next_epoch = int(item.get("next_run_at_epoch") or 0)
+            states.append({
+                **item,
+                "minutes_until_next": round(
+                    max(0, next_epoch - epoch_us(now)) / 60_000_000,
+                    1,
+                ),
+            })
         return {
             "enabled": self.enabled(),
             "pulse_enabled": bool(
@@ -1094,7 +1170,7 @@ class WorldActivityScheduler:
             "sources": list(
                 getattr(self.access.settings, "world_pulse_sources", [])
             ),
-            "states": self.repository.states(),
+            "states": states,
             "recent_runs": self.repository.recent_runs(limit=50),
             "topics": self.repository.list_topics(limit=10),
         }

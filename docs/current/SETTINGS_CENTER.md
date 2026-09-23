@@ -136,6 +136,30 @@ encounter_poll_seconds: 60
 
 The enabled flag, interval, and web/generated mix are advanced settings; pending and poll limits stay diagnostic. Dev Console exposes only status/manual-trigger diagnostics and never becomes a second persisted editor for these fields.
 
+### 3.3 World Activity
+
+World Activity has its own formal Settings section because going online is no longer tied to Space publishing:
+
+```yaml
+world_activity_enabled: true
+world_pulse_enabled: true
+world_pulse_sources:
+  - https://tophub.today/
+  - https://news.ycombinator.com/
+  - https://github.com/trending
+world_pulse_refresh_minutes: 60
+world_pulse_discussion_interval_minutes: 360
+world_pulse_max_topics: 8
+world_pulse_commenter_count: 4
+world_browse_enabled: true
+world_browse_interval_minutes: 90
+world_pulse_source_max_chars: 8000
+world_browse_max_pages: 2
+world_activity_poll_seconds: 60
+```
+
+Behavior switches, source pages and user-visible cadences are advanced; text/page/poll ceilings stay diagnostic. `Pulse Sources` is edited one public URL per line and persists as a real YAML list. Dev Console has no World Activity save controls: it only refreshes, discusses, browses and runs due work against the Settings-owned values.
+
 ## 4. Search / World Browser
 
 The Search / ImageGen card also owns the headless World Browser transport settings:

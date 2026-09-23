@@ -71,7 +71,12 @@
 
   function fieldInput(field, value) {
     let input;
-    if (field.type === "select") {
+    if (field.type === "textarea-list") {
+      input = document.createElement("textarea");
+      input.rows = 5;
+      input.value = Array.isArray(value) ? value.join("\n") : (value == null ? "" : String(value));
+      input.dataset.list = "true";
+    } else if (field.type === "select") {
       input = document.createElement("select");
       for (const option of field.options || []) {
         const el = document.createElement("option");
@@ -460,7 +465,8 @@
       if (input.disabled) return;
       const name = input.dataset.setting;
       let value;
-      if (input.type === "checkbox") value = input.checked;
+      if (input.dataset.list === "true") value = input.value.split("\n").map(item => item.trim()).filter(Boolean);
+      else if (input.type === "checkbox") value = input.checked;
       else if (input.type === "number") value = input.value === "" ? null : Number(input.value);
       else value = input.value;
 

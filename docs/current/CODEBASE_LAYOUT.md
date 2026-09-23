@@ -91,7 +91,7 @@ history_web.py          history APIs
 message_projection.py   shared message projection for history/group HTTP surfaces
 memory_web.py           minimal Memory Inspector / pin / forget / correct APIs
 search_web.py           durable message search APIs
-world_web.py            World Observation diagnostic HTTP surface
+world_web.py            World Observation + World Pulse/Personal Browse HTTP surface
 space_web.py            Character Space HTTP surface
 avatar_web.py           avatar HTTP/search adapter
 visual_web.py           ImageGen/visual tool HTTP surface
@@ -122,6 +122,7 @@ group_autonomous_visual.py  group autonomous ImageGen glue/adapter
 runtime_services.py          Search/Avatar/ImageGen/World composition root
 browser_web.py               public headless Chromium renderer
 world_observation.py         search discovery -> rendered WorldObservation
+world_activity.py            Pulse aggregation/comments + Personal Browse + durable scheduler
 remote_media.py              SSRF-safe public image downloader
 space_store.py               Character Space shared posts/comments/reactions/views + schedule ledger
 space_media.py               ordered Space <-> MediaAsset relation

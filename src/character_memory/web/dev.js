@@ -692,6 +692,96 @@
     }
   }
 
+  async function refreshWorldActivity() {
+    const statusNode = $("worldActivityStatus");
+    if (!statusNode) return;
+    try {
+      const [status, pulse] = await Promise.all([
+        jsonFetch("/v1/dev/world/activity"),
+        jsonFetch("/v1/dev/world/pulse"),
+      ]);
+      statusNode.textContent = pretty({status, pulse});
+      const latest = pulse.topics?.[0];
+      if (latest?.id && !$("worldPulseTopicId").value) {
+        $("worldPulseTopicId").value = String(latest.id);
+      }
+    } catch (error) {
+      statusNode.textContent = `ERROR: ${error.message}`;
+    }
+  }
+
+  async function refreshWorldPulse() {
+    const button = $("refreshWorldPulse");
+    button.disabled = true;
+    $("worldActivityResult").textContent = "正在读取聚合站点并汇总 World Pulse...";
+    try {
+      const data = await jsonFetch("/v1/dev/world/pulse/refresh", {method:"POST"});
+      $("worldActivityResult").textContent = pretty(data);
+      const latest = data.topics?.[0];
+      if (latest?.id) $("worldPulseTopicId").value = String(latest.id);
+      await refreshWorldActivity();
+    } catch (error) {
+      $("worldActivityResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function discussWorldPulse() {
+    const button = $("discussWorldPulse");
+    const topicId = Number($("worldPulseTopicId").value || 0);
+    if (!topicId) {
+      $("worldActivityResult").textContent = "ERROR: 请先刷新 Pulse 或填写 Topic ID。";
+      return;
+    }
+    button.disabled = true;
+    $("worldActivityResult").textContent = `正在让角色判断是否评论 World Pulse #${topicId}...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/world/pulse/${topicId}/discuss`, {method:"POST"});
+      $("worldActivityResult").textContent = pretty(data);
+      await refreshWorldActivity();
+    } catch (error) {
+      $("worldActivityResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function browseWorldAsCharacter() {
+    const button = $("browseWorldAsCharacter");
+    const characterId = $("spaceCharacter").value;
+    if (!characterId) {
+      $("worldActivityResult").textContent = "ERROR: 请先选择 Character。";
+      return;
+    }
+    button.disabled = true;
+    $("worldActivityResult").textContent = `正在让 ${characterId} 独立上网浏览...`;
+    try {
+      const data = await jsonFetch(`/v1/dev/world/browse/${encodeURIComponent(characterId)}`, {method:"POST"});
+      $("worldActivityResult").textContent = pretty(data);
+      await refreshWorldActivity();
+    } catch (error) {
+      $("worldActivityResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runWorldActivity() {
+    const button = $("runWorldActivity");
+    button.disabled = true;
+    $("worldActivityResult").textContent = "正在执行当前已经到期的 World Activity...";
+    try {
+      const data = await jsonFetch("/v1/dev/world/activity/run", {method:"POST"});
+      $("worldActivityResult").textContent = pretty(data);
+      await refreshWorldActivity();
+    } catch (error) {
+      $("worldActivityResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function refreshEncounterStatus() {
     const status = $("encounterStatus");
     if (!status) return;
@@ -767,7 +857,7 @@
     }
   }
 
-  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); refreshGroupAutonomyStatus(); refreshEncounterStatus(); });
+  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); refreshGroupAutonomyStatus(); refreshEncounterStatus(); refreshWorldActivity(); });
   $("runLlm").addEventListener("click", runLlm);
   $("runSpaceOpportunity").addEventListener("click", runSpaceOpportunity);
   $("forceSpaceDue").addEventListener("click", forceSpaceDue);
@@ -790,6 +880,11 @@
   $("runEncounterOpportunity").addEventListener("click", runEncounterOpportunity);
   $("forceEncounterDue").addEventListener("click", forceEncounterDue);
   $("refreshEncounterStatus").addEventListener("click", refreshEncounterStatus);
+  $("refreshWorldPulse").addEventListener("click", refreshWorldPulse);
+  $("discussWorldPulse").addEventListener("click", discussWorldPulse);
+  $("browseWorldAsCharacter").addEventListener("click", browseWorldAsCharacter);
+  $("runWorldActivity").addEventListener("click", runWorldActivity);
+  $("refreshWorldActivity").addEventListener("click", refreshWorldActivity);
   document.querySelectorAll(".group-autonomy-preset").forEach((button) => {
     button.addEventListener("click", () => {
       $("groupAutonomyInterval").value = button.dataset.minutes || "360";
@@ -816,6 +911,7 @@
   loadGroupAutonomyGroups();
   refreshGroupAutonomyStatus();
   refreshEncounterStatus();
+  refreshWorldActivity();
   scheduleResourceRefresh();
 
   // Every control above is wired, so the failure banner in the markup can stand
@@ -831,6 +927,7 @@
       refreshSpaceStatus();
       loadSpaceCharacters();
       refreshEncounterStatus();
+      refreshWorldActivity();
     }
   });
 })();

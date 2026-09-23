@@ -240,6 +240,33 @@
         </details>
       </article>
 
+      <article class="card wide" id="worldActivityCard">
+        <div class="card-title-row">
+          <div><h2>World Activity</h2><p class="subtle">Pulse 与 Personal Browse 使用独立时钟，不等于 Space 发帖。正式参数只在 Settings Center 保存。</p></div>
+          <span class="pill">world diagnostics</span>
+        </div>
+        <details class="level-group" data-level="diagnostic" data-title="诊断 · World Pulse / Personal Browse" data-hint="手动运行真实网络观察，不修改正式配置">
+          <summary>诊断 · World Pulse / Personal Browse</summary>
+          <div class="visual-provider-row">
+            <label>Pulse Topic ID<input id="worldPulseTopicId" type="number" min="1" placeholder="刷新后自动填入最新 Topic" /></label>
+            <button class="secondary" id="refreshWorldPulse" type="button">刷新 World Pulse</button>
+            <button class="secondary" id="discussWorldPulse" type="button">让角色评论 Topic</button>
+            <button class="secondary" id="browseWorldAsCharacter" type="button">选中 Space Character 自主上网</button>
+            <button class="secondary" id="runWorldActivity" type="button">执行当前到期任务</button>
+            <button class="secondary" id="refreshWorldActivity" type="button">刷新状态</button>
+          </div>
+          <p class="subtle">这里没有配置保存入口。Pulse 读取 Settings 中的聚合页并做有限去重/摘要；Personal Browse 的结果只成为近期 WORLD_OBSERVATION，不自动发布 Space、发送 Direct 或直接写长期 Memory。</p>
+        </details>
+        <details class="debug-output">
+          <summary>World Activity 状态 / Pulse Topics（调试用）</summary>
+          <pre id="worldActivityStatus" class="result">等待读取 World Pulse / Personal Browse 状态...</pre>
+        </details>
+        <details class="debug-output">
+          <summary>World Activity 执行结果（调试用）</summary>
+          <pre id="worldActivityResult" class="result">等待手动执行...</pre>
+        </details>
+      </article>
+
       <article class="card" id="groupAutonomyCard">
         <div class="card-title-row">
           <div><h2>Autonomous Group Chat</h2><p class="subtle">让已有群聊偶尔自己聊起来。一次机会只允许一条很短的角色链；seed 沉默则什么都不发生，新用户消息始终优先。</p></div>

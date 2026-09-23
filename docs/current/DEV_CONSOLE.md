@@ -132,6 +132,20 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 
 这里的 Space / Group Autonomy 调参只热应用到当前 Character Runtime，不写 `config.yaml`；正式值由 Settings Center 保存，重启 Character Runtime 后回到正式值。测试时可临时设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。
 
+### World Activity
+
+World Activity 的正式参数只在 Settings Center 保存。Dev Console 的整张 World Activity 卡位于 `diagnostic` 层，只用于真实手动验收：
+
+```text
+GET  /v1/dev/world/activity
+GET  /v1/dev/world/pulse
+POST /v1/dev/world/pulse/refresh
+POST /v1/dev/world/pulse/{topic_id}/discuss
+POST /v1/dev/world/browse/{character_id}
+POST /v1/dev/world/activity/run
+```
+
+这里不会修改 `world_*` 配置。Pulse refresh 读取正式聚合页；discuss 让少量角色独立判断是否有话想说；Personal Browse 只形成近期 `WORLD_OBSERVATION(channel=PERSONAL_BROWSE)`，不会自动发 Space、Direct message 或直接写长期 Memory。
 ### Random Encounter
 
 Random Encounter 的正式配置只在 Settings Center 保存。Dev Console 只提供状态观察与手动验收，并且整张卡位于 `diagnostic` 层，不进入首屏：

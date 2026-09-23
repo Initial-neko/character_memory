@@ -133,6 +133,15 @@ def _is_level_group(group: dict) -> bool:
     return "level-group" in (group["attrs"].get("class") or "").split()
 
 
+def test_llm_prompt_uses_full_card_width():
+    markup = (WEB / "dev.html").read_text(encoding="utf-8")
+    styles = (WEB / "dev.css").read_text(encoding="utf-8")
+    assert 'class="dev-llm-prompt"' in markup
+    assert ".dev-llm-prompt" in styles
+    assert "width: 100%" in styles
+    assert "min-height: 150px" in styles
+
+
 def test_every_control_declares_a_level():
     """An undeclared control is swept into `diagnostic` -- so this is the proof
     that the markup does not depend on the rescue. Failing here means a control

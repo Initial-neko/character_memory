@@ -756,6 +756,14 @@ body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-compact); }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.debug-subheading {
+  margin: 12px 0 5px;
+  color: var(--ui-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+
 .trace-io {
   border-color: var(--ui-line-strong);
 }

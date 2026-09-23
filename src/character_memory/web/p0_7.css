@@ -19,12 +19,16 @@
 
 .sticker-trigger:hover { background: var(--ui-hover); }
 
+/* A column, so the pack tabs can take a second row without the panel growing:
+ * the grid below them is the one part that shrinks, and it already scrolls. */
 .sticker-panel {
   position: absolute;
   left: 50%;
   right: auto;
   bottom: calc(100% - 2px);
   z-index: 20;
+  display: flex;
+  flex-direction: column;
   width: min(430px, calc(100% - 48px));
   max-height: 360px;
   overflow: hidden;
@@ -76,12 +80,19 @@
   line-height: 1.4;
 }
 
+/* Wrapped, not scrolled.
+ *
+ * The strip was one `overflow-x: auto` row inside a 408px content box, and a
+ * fifteen-pack library measures 1118px of up-to-104px pills: the panel's own
+ * `overflow: hidden` cut off the sixth one, `scrollbar-width: thin` painted
+ * nothing over it, and no gesture said the rest was there. A second row costs
+ * the grid a little height and hides nothing -- the panel is a column now, so
+ * the grid yields that height back. */
 .sticker-pack-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  overflow-x: auto;
   padding: 2px 0 8px;
-  scrollbar-width: thin;
 }
 
 .sticker-pack-tab {
@@ -108,6 +119,8 @@
   grid-template-columns: repeat(6, 52px);
   justify-content: center;
   gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
   max-height: 230px;
   overflow-y: auto;
   padding: 2px 0;

@@ -39,7 +39,14 @@
    * WCAG AA's 4.5:1, on the type least able to afford it. Dark keeps its own
    * #8b949e, which is 5.62:1 on #161b22. */
   --ui-muted: #686c74;
-  --ui-faint: #a0a3aa;
+  /* Was #a0a3aa: 2.53:1 on white and 2.24:1 on the sunken surface -- under
+   * WCAG AA like `muted` was, and on the same 10px/11px type (timestamps, the
+   * sticker pack footer, the composer hint). #6a6d73 is the lightest grey on
+   * that hue which clears 4.5:1 on every surface it can land on -- 5.19:1 on
+   * --ui-surface, 4.97:1 on --ui-surface-soft, 4.85:1 on --ui-bg, 4.60:1 on
+   * --ui-surface-sunken. AA leaves about 0.1 of contrast between it and
+   * --ui-muted, so the two read close together on purpose, not by accident. */
+  --ui-faint: #6a6d73;
 
   /* Ink-filled primary action, matching the composer's send button. */
   --ui-accent: #202123;
@@ -85,7 +92,11 @@
 
   --ui-text: #e6edf3;
   --ui-muted: #8b949e;
-  --ui-faint: #6e7681;
+  /* No dark page paints with `faint` today -- the Dev Console and the TTS
+   * Workbench only ever reach for `muted`. It was #6e7681 (3.77:1 on
+   * --ui-surface, 3.31:1 on --ui-surface-soft), so the next page that does
+   * reach for it inherits an AA-clean value instead of a failing one. */
+  --ui-faint: #848e9b;
 
   --ui-accent: #238636;
   --ui-accent-hover: #2ea043;

@@ -273,6 +273,42 @@ def test_muted_text_clears_wcag_aa_on_every_light_surface():
         assert ratio >= 4.5, f"dark --ui-muted on --{surface}: {ratio:.2f}:1"
 
 
+def test_faint_text_clears_wcag_aa_on_every_light_surface():
+    """``--ui-faint`` is the other half of the small type, and it failed too.
+
+    It paints the message timestamps (10px) and the date separators (11px) --
+    2.53:1 on white and 2.24:1 on the sunken surface as #a0a3aa, so half the
+    transcript's metadata was unreadable at the size it is set in. It also
+    paints the sticker panel's footer and the composer hint, and on the sunken
+    surface the broken-sticker fallback, so the value has to clear 4.5:1 on
+    every surface a page can put it on, not just on white.
+
+    The two tokens are now close together (5.19:1 against 5.27:1 on white):
+    that is the whole of the room WCAG AA leaves for a de-emphasised grey at
+    10px, and a lighter `faint` is the failing token this test exists to stop.
+    """
+
+    css = (WEB / "ui.css").read_text(encoding="utf-8")
+    light = _tokens(css)
+    dark = _tokens(css, ':root[data-theme="dark"]')
+    assert light["ui-faint"] != dark["ui-faint"], "dark must keep its own faint"
+
+    # De-emphasis survives the fix: `faint` still reads lighter than `muted`.
+    assert _relative_luminance(light["ui-faint"]) > _relative_luminance(light["ui-muted"])
+
+    for surface in ("ui-surface", "ui-surface-soft", "ui-bg", "ui-surface-sunken"):
+        ratio = _contrast(light["ui-faint"], light[surface])
+        assert ratio >= 4.5, f"--ui-faint on --{surface}: {ratio:.2f}:1"
+
+    # No dark page paints with `faint` today (the Dev Console and the TTS
+    # Workbench only use `muted`), which is exactly why the value has to be
+    # checked: the first page that reaches for it must not inherit a failing
+    # #6e7681 (3.77:1 on --ui-surface, 3.31:1 on --ui-surface-soft).
+    for surface in ("ui-surface", "ui-surface-soft", "ui-bg"):
+        ratio = _contrast(dark["ui-faint"], dark[surface])
+        assert ratio >= 4.5, f"dark --ui-faint on --{surface}: {ratio:.2f}:1"
+
+
 def test_a_sticker_is_a_message_sized_box_not_a_shrink_to_fit_image():
     """A sticker used to render at whatever its containing block allowed.
 

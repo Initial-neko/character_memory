@@ -410,12 +410,9 @@ class EnsembleBuilderService:
     def prepare(self, prompt: str, *, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now().astimezone()
         build = self.start(prompt, now=now)
-        build_id = build["group_id"]
-        try:
-            return self.research(build_id, now=now)
-        except Exception:
-            self.repository.delete(build_id)
-            raise
+        # research() persists FAILED state on errors. Do not delete the build:
+        # retry/recovery must not force the user to repeat already accepted input.
+        return self.research(build["group_id"], now=now)
 
     def _observe(self, prompt: str) -> tuple[str, list[Any], list[dict[str, str]]]:
         query = f"{prompt} 角色 成员 人物 资料 wiki"
@@ -465,6 +462,8 @@ Content:
 - overview：一句到几句群体背景。
 - members：2～{MAX_GROUP_CHARACTERS} 位最核心、明确属于用户所指群体的成员。
 - 每位成员保留 canonical name、公开身份、性格/行为特征、说话风格、与同群其他成员的关系摘要。
+- age 只是弱提示：可以是数字、"18岁（大学一年级）"、"年龄不详"或 null，不要为了年龄字段编造信息。
+- personality / relationship_notes / tags 尽量使用短列表；资料不足时允许为空。
 - 不抄原作长台词，不补写资料没有支持的具体事件。
 - 如果来源之间有差异，采用最稳妥的公开共识，不要为了凑人数编角色。
 """
@@ -724,7 +723,7 @@ Content:
             if build["status"] == "ACTIVE":
                 return self.payload(build)
             if build["status"] == "FAILED":
-                raise ValueError("上次资料整理失败，请重新开始这次 AI 建群")
+                raise ValueError("上次资料整理失败，请先重试整理")
             raise ValueError("群像资料还没有准备好")
 
         drafts = list(build.get("drafts") or [])

@@ -21,9 +21,37 @@ from character_memory.visual_runtime import configure_direct_visual_runtime
 logger = logging.getLogger("character_memory.visual_web")
 
 
+_AVATAR_STYLE_GUIDANCE = {
+    "AUTO": "根据 Persona 和角色世界观自动选择最契合、可长期保持一致的头像画风；不要为了候选差异改变人物身份。",
+    "ANIME_CLEAN": "清爽二次元角色插画风；线条干净，面部清晰，色彩克制，背景简洁，适合作为聊天头像。",
+    "SOFT_ILLUSTRATION": "柔和半写实插画风；自然光影与细腻五官，保留角色辨识度，不做摄影棚海报感。",
+    "NATURAL_PORTRAIT": "自然人像风；真实但不过度照片化，构图像日常社交头像，背景简单，避免证件照和商业棚拍。",
+}
+
+_AVATAR_VARIATIONS = (
+    "正面或轻微三分之四视角，神情自然稳定。",
+    "轻微三分之四视角，表情柔和，保持相同服装与核心视觉身份。",
+    "更靠近头像构图，神情有一点角色个性，但不要夸张。",
+    "构图稍有变化，仍保持同一人物、同一画风与相同核心外观。",
+)
+
+
 class AvatarGenerateRequest(BaseModel):
     provider: str = Field(default="", max_length=32)
     hint: str = Field(default="", max_length=600)
+    style: str = Field(default="AUTO", max_length=32)
+    count: int = Field(default=4, ge=1, le=4)
+
+    @model_validator(mode="after")
+    def supported_style(self):
+        self.style = str(self.style or "AUTO").strip().upper()
+        if self.style not in _AVATAR_STYLE_GUIDANCE:
+            raise ValueError(
+                "avatar style must be one of: "
+                + ", ".join(_AVATAR_STYLE_GUIDANCE)
+            )
+        self.hint = self.hint.strip()
+        return self
 
 
 class AvatarFromChatRequest(BaseModel):
@@ -384,67 +412,139 @@ def attach_visual_routes(app) -> None:
 
     @app.post("/v1/characters/{character_id}/avatar/generate")
     def generate_avatar_candidate(character_id: str, req: AvatarGenerateRequest):
-        item = profile(character_id)
+        profile(character_id)
         provider_name, provider = provider_for(req.provider)
         started = time.perf_counter()
-        current, _runtime, persona = runtime_persona(character_id, item)
-        mental_state = access.read_store.get_mental_state(character_id)
-        reference = current_avatar_data_url(character_id) if provider.supports_reference_images else None
+        style_guidance = _AVATAR_STYLE_GUIDANCE[req.style]
+        base_intent = (
+            req.hint
+            or "保持人物核心身份，生成适合作为当前聊天头像的自然候选"
+        )
+        visual_intent = (
+            f"{base_intent}\n"
+            f"统一头像画风要求：{style_guidance}\n"
+            "候选之间只允许构图、视角和细微表情变化；"
+            "人物身份、年龄感、发色、眼睛、服装基调与整体画风必须保持一致。"
+        )
+        rewrite_req = ImageRewriteRequest(
+            instruction=visual_intent,
+            provider=provider_name,
+            purpose=VisualPurpose.AVATAR,
+            use_avatar_reference=True,
+        )
+        created_assets = []
+
+        def rollback_created_assets() -> None:
+            store = access.store()
+            for asset in reversed(created_assets):
+                try:
+                    store.delete_media_asset(asset.id)
+                except Exception:
+                    logger.exception(
+                        "visual.avatar rollback_db_failed character=%s media_id=%s",
+                        character_id,
+                        asset.id,
+                    )
+                    continue
+                try:
+                    access.media_storage.delete(asset)
+                except Exception:
+                    logger.exception(
+                        "visual.avatar rollback_file_failed character=%s media_id=%s",
+                        character_id,
+                        asset.id,
+                    )
+
         try:
-            visual_intent = req.hint.strip() or "生成一张保持人物核心身份、适合作为当前聊天头像的自然头像"
-            prompt = VisualPromptPlanner(current.model).compile_prompt(
+            # Reuse the exact same prompt-polish path as /images/rewrite so
+            # avatar generation does not grow a second style/prompt compiler.
+            _current, polished_prompt, reference, aspect_ratio = compile_instruction(
                 character_id,
-                purpose=VisualPurpose.AVATAR,
-                persona=persona,
-                mental_state=mental_state,
-                recent_dialogue=recent_dialogue(character_id),
-                visual_intent=visual_intent,
-                has_reference_image=bool(reference),
+                rewrite_req,
+                provider=provider,
             )
-            result = provider.generate(
-                ImageGenerationRequest(
-                    prompt=prompt,
-                    aspect_ratio=visual_aspect_ratio(VisualPurpose.AVATAR),
-                    size="1K",
-                    reference_images=[reference] if reference else [],
+            candidates = []
+            for index in range(req.count):
+                variation = _AVATAR_VARIATIONS[index % len(_AVATAR_VARIATIONS)]
+                candidate_prompt = (
+                    f"{polished_prompt}\n\n"
+                    f"Candidate variation {index + 1}: {variation} "
+                    "Do not change the character identity or the selected visual style."
                 )
-            )
-            asset = access.media_storage.save_bytes(
-                character_id=character_id,
-                original_name=f"generated-avatar-{provider_name}.png",
-                payload=result.payload,
-                created_at=datetime.now().astimezone(),
-                source="GENERATED_AVATAR_CANDIDATE",
-            )
-            access.store().add_media_asset(asset)
+                result = provider.generate(
+                    ImageGenerationRequest(
+                        prompt=candidate_prompt,
+                        aspect_ratio=aspect_ratio,
+                        size="1K",
+                        reference_images=[reference] if reference else [],
+                    )
+                )
+                payload, _mime_type, extension = generated_payload_bytes(result.payload)
+                asset = access.media_storage.save_bytes(
+                    character_id=character_id,
+                    original_name=(
+                        f"generated-avatar-{provider_name}-{index + 1}.{extension}"
+                    ),
+                    payload=payload,
+                    created_at=datetime.now().astimezone(),
+                    source="GENERATED_AVATAR_CANDIDATE",
+                )
+                created_assets.append(asset)
+                access.store().add_media_asset(asset)
+                candidates.append(
+                    {
+                        "index": index + 1,
+                        "media_id": asset.id,
+                        "url": f"/v1/media/{asset.id}",
+                        "source": asset.source,
+                        "provider": result.provider,
+                        "model": result.model,
+                        "supports_reference_images": bool(
+                            provider.supports_reference_images
+                        ),
+                    }
+                )
         except HTTPException:
+            rollback_created_assets()
             raise
         except ValueError as exc:
+            rollback_created_assets()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
-            logger.exception("visual.avatar generate_failed character=%s provider=%s error=%s", character_id, provider_name, exc)
-            raise HTTPException(status_code=502, detail=f"头像生成失败：{exc}") from exc
+            rollback_created_assets()
+            logger.exception(
+                "visual.avatar generate_failed character=%s provider=%s style=%s count=%s error=%s",
+                character_id,
+                provider_name,
+                req.style,
+                req.count,
+                exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"头像候选生成失败：{exc}",
+            ) from exc
+
         elapsed = round((time.perf_counter() - started) * 1000, 1)
         logger.info(
-            "visual.avatar generated character=%s provider=%s model=%s media=%s duration_ms=%.1f",
+            "visual.avatar generated character=%s provider=%s style=%s candidates=%d duration_ms=%.1f",
             character_id,
-            result.provider,
-            result.model,
-            asset.id,
+            provider_name,
+            req.style,
+            len(candidates),
             elapsed,
         )
         return {
             "character_id": character_id,
-            "candidate": {
-                "media_id": asset.id,
-                "url": f"/v1/media/{asset.id}",
-                "source": asset.source,
-                "provider": result.provider,
-                "model": result.model,
-                "supports_reference_images": bool(provider.supports_reference_images),
-            },
-            "visual_intent": visual_intent,
-            "aspect_ratio": visual_aspect_ratio(VisualPurpose.AVATAR),
+            # Compatibility for older clients that only know the singular field.
+            "candidate": candidates[0],
+            "candidates": candidates,
+            "style": req.style,
+            "style_guidance": style_guidance,
+            "visual_intent": base_intent,
+            "polished_prompt": polished_prompt,
+            "aspect_ratio": aspect_ratio,
+            "used_avatar_reference": bool(reference),
             "duration_ms": elapsed,
         }
 

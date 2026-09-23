@@ -74,6 +74,10 @@
   let feedActiveCharacterCount = 0;
   let feedLoading = false;
   let feedEpoch = 0;
+  let autoPrefetchPages = 0;
+  let autoPrefetchTimer = null;
+  const AUTO_PREFETCH_PAGES = 2;
+  const AUTO_PREFETCH_AHEAD_PX = 1600;
   const expandedComments = new Set();
   const expandedThreads = new Set();
   const replyTargets = new Map();
@@ -361,17 +365,43 @@
     more.classList.remove("hidden");
     more.disabled = feedLoading || !feedHasMore;
     more.textContent = feedLoading
-      ? "正在加载更多动态…"
+      ? "正在自动加载更多动态…"
       : feedHasMore
-        ? "继续向下滚动加载更多"
+        ? "更多动态会自动加载"
         : "已经看到全部动态";
   }
 
-  async function loadFeed({append = false} = {}) {
+  function clearAutoPrefetch() {
+    if (autoPrefetchTimer != null) {
+      window.clearTimeout(autoPrefetchTimer);
+      autoPrefetchTimer = null;
+    }
+  }
+
+  function shouldAutoPrefetch() {
+    if (!opened || feedLoading || !feedHasMore || !feedNextBeforeId) return false;
+    if (autoPrefetchPages < AUTO_PREFETCH_PAGES) return true;
+    if (!more) return false;
+    return more.getBoundingClientRect().top <= window.innerHeight + AUTO_PREFETCH_AHEAD_PX;
+  }
+
+  function scheduleAutoPrefetch() {
+    clearAutoPrefetch();
+    if (!shouldAutoPrefetch()) return;
+    autoPrefetchTimer = window.setTimeout(() => {
+      autoPrefetchTimer = null;
+      if (!shouldAutoPrefetch()) return;
+      loadFeed({append:true, automatic:true}).catch(console.warn);
+    }, 40);
+  }
+
+  async function loadFeed({append = false, automatic = false} = {}) {
     if (append && (feedLoading || !feedHasMore || !feedNextBeforeId)) return;
 
     const epoch = append ? feedEpoch : ++feedEpoch;
     if (!append) {
+      clearAutoPrefetch();
+      autoPrefetchPages = 0;
       postsById = new Map();
       feedHasMore = false;
       feedNextBeforeId = null;
@@ -418,13 +448,14 @@
           ? posts.map(postHtml).join("")
           : '<div class="space-empty"><strong>这里还没有动态</strong><span>角色真正想公开表达时，内容会出现在这里。</span></div>';
       }
+      if (append && automatic && freshPosts.length) autoPrefetchPages += 1;
       updateFeedMeta();
     } catch (error) {
       if (epoch !== feedEpoch) return;
       failed = true;
       if (append && more) {
         more.disabled = false;
-        more.textContent = `加载更多失败：${error.message} · 点此重试`;
+        more.textContent = `自动加载失败：${error.message} · 点此重试`;
         more.classList.remove("hidden");
       } else {
         feed.innerHTML = `<div class="error">空间读取失败：${CM.escapeHtml(error.message)}</div>`;
@@ -432,7 +463,10 @@
     } finally {
       if (epoch === feedEpoch) {
         feedLoading = false;
-        if (!failed) updateFeedMore();
+        if (!failed) {
+          updateFeedMore();
+          scheduleAutoPrefetch();
+        }
       }
     }
   }
@@ -445,6 +479,7 @@
   }
 
   function close() {
+    clearAutoPrefetch();
     stopVoice();
     closeLightbox();
     setOpen(false);
@@ -597,11 +632,11 @@
   if (more && "IntersectionObserver" in window) {
     const feedObserver = new IntersectionObserver(entries => {
       if (!opened || feedLoading || !feedHasMore) return;
-      if (entries.some(entry => entry.isIntersecting)) {
-        loadFeed({append:true}).catch(console.warn);
-      }
-    }, {rootMargin:"480px 0px"});
+      if (entries.some(entry => entry.isIntersecting)) scheduleAutoPrefetch();
+    }, {rootMargin:`${AUTO_PREFETCH_AHEAD_PX}px 0px`});
     feedObserver.observe(more);
+  } else {
+    window.addEventListener("scroll", scheduleAutoPrefetch, {passive:true});
   }
 
   nav.addEventListener("click", () => open(null).catch(console.error));

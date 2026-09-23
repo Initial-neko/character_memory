@@ -260,7 +260,9 @@ POST /v1/characters/{character_id}/avatar/generate
 POST /v1/characters/{character_id}/avatar/from-chat
 ```
 
-Generate 只创建候选，不应无提示自动替换当前头像。
+Avatar Generate 不维护第二套 Prompt 编译器。它复用显式 Image 工具的 `ImageRewriteRequest -> compile_instruction -> VisualPromptPlanner` 路径，把用户补充偏好和有限画风 preset 一起润色成一个稳定的 AVATAR prompt。
+
+一次请求可以生成 1~4 张候选（UI 默认 4）。同一批共享润色后的基础 Prompt，只允许构图、视角、轻微表情发生变化；身份与画风必须保持一致。Generate 只创建候选，不应无提示自动替换当前头像。
 
 `from-chat` 可以从合法 MediaAsset 或 Character Image 设置当前 avatar，并把内容复制到 avatar storage，使当前头像不依赖源媒体文件未来是否仍存在。
 

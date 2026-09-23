@@ -31,6 +31,11 @@ def test_avatar_ui_uses_llm_hint_and_search_session_ids_without_arbitrary_image_
     assert "JSON.stringify({hint, limit:12})" in avatars
     assert "visual_intent" in avatars
     assert "AI 搜索词" in avatars
+    assert "data-avatar-style" in avatars
+    assert "data-avatar-count" in avatars
+    assert "avatar-generated-grid" in avatars
+    assert "polished_prompt" in avatars
+    assert "生成候选头像" in avatars
 
 
 def test_example_config_declares_searchapi_avatar_storage_and_bounded_world_browser():

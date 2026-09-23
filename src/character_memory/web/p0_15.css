@@ -95,7 +95,9 @@ body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
  * unstyled select and an unstyled button are not the same height. */
 .avatar-search-field { margin-bottom: 2px; }
 .avatar-generation-controls { align-items: end; gap: 10px; }
-.avatar-provider-field { min-width: 220px; flex: 1 1 220px; max-width: 320px; }
+.avatar-provider-field { min-width: 180px; flex: 1 1 180px; max-width: 280px; }
+.avatar-style-field { min-width: 180px; flex: 1 1 180px; max-width: 260px; }
+.avatar-count-field { min-width: 96px; flex: 0 0 96px; }
 
 .avatar-results { min-height: 64px; }
 .avatar-search-summary { color: var(--ui-muted); font-size: 11px; margin: 2px 0 10px; }
@@ -148,17 +150,23 @@ body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
 
 /* An AI-generated candidate. It used to live in p0_16.css, which is the search
  * file -- every other .avatar-* class is here, so this one is too. */
-.avatar-generated-candidate {
+.avatar-generated-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+.avatar-generated-candidate {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
   border: 1px solid var(--ui-line);
   border-radius: var(--ui-r-lg);
-  padding: 10px;
+  padding: 9px;
   background: var(--ui-surface);
 }
 .avatar-generated-candidate img {
   display: block;
-  width: min(100%, 420px);
+  width: 100%;
   aspect-ratio: 1 / 1;
   object-fit: cover;
   border-radius: var(--ui-r-md);
@@ -173,5 +181,8 @@ body:not(.group-mode) .header-avatar.avatar-editable:hover::after {
 @media (max-width: 720px) {
   .avatar-candidate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .avatar-generation-controls { align-items: stretch; flex-direction: column; }
-  .avatar-provider-field { max-width: none; }
+  .avatar-provider-field,
+  .avatar-style-field,
+  .avatar-count-field { max-width: none; width: 100%; flex-basis: auto; }
+  .avatar-generated-grid { grid-template-columns: 1fr; }
 }

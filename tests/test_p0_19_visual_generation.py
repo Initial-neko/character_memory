@@ -7,17 +7,22 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from character_memory.avatars import AvatarStore
 from character_memory.media import MediaStorage
+from character_memory.storage.sqlite import SQLiteStore
 from character_memory.visual_generation import (
     AgnesImageProvider,
     ImageGenerationRequest,
+    ImageGenerationResult,
     MsimgProvider,
     VisualPromptPlanner,
     VisualPurpose,
     visual_aspect_ratio,
 )
+from character_memory.visual_web import attach_visual_routes
 
 
 _PNG = b"\x89PNG\r\n\x1a\nvisual-test"
@@ -178,3 +183,152 @@ def test_generated_media_can_be_copied_to_avatar_with_provenance(tmp_path):
     assert metadata.title == "better selfie"
     assert avatars.asset_path("mika").read_bytes() == _PNG
     avatars.close()
+
+
+class _AvatarBatchProvider:
+    supports_reference_images = False
+
+    def __init__(self, *, fail_at: int | None = None):
+        self.fail_at = fail_at
+        self.calls = 0
+
+    def configured(self):
+        return True
+
+    def available(self):
+        return True
+
+    def generate(self, request):
+        self.calls += 1
+        if self.fail_at is not None and self.calls == self.fail_at:
+            raise RuntimeError("provider rate limited")
+        return ImageGenerationResult(
+            provider="fake",
+            model="fake-image",
+            payload=_PNG,
+            mime_type="image/png",
+        )
+
+
+class _AvatarPromptModel:
+    def _request(self, messages, *, conversation_id=None, json_object=False, model=None):
+        assert conversation_id == "visual-plan:mika:avatar"
+        return "same character, stable portrait identity, clean avatar composition"
+
+
+def _avatar_batch_app(tmp_path, provider):
+    store = SQLiteStore(tmp_path / "avatar-batch.db")
+    media = MediaStorage(tmp_path / "media")
+    avatars = AvatarStore(tmp_path / "avatars")
+    runtime = SimpleNamespace(persona="Mika, black hair, blue eyes")
+    bundle = SimpleNamespace(
+        model=_AvatarPromptModel(),
+        runtimes={"mika": runtime},
+    )
+    access = SimpleNamespace(
+        settings=SimpleNamespace(image_generation_provider="fake"),
+        services=SimpleNamespace(
+            avatar_store=avatars,
+            image_generation_providers={"fake": provider},
+        ),
+        read_store=store,
+        media_storage=media,
+        character_profiles=lambda: [
+            {
+                "id": "mika",
+                "name": "Mika",
+                "identity": "tester",
+                "persona_path": "unused.yaml",
+            }
+        ],
+        require_bundle=lambda: bundle,
+        store=lambda: store,
+    )
+    app = FastAPI()
+    app.state.character_memory = access
+    attach_visual_routes(app)
+    return app, store, media, avatars
+
+
+def test_avatar_candidate_batch_reuses_image_prompt_polish_contract():
+    from character_memory.visual_web import AvatarGenerateRequest
+
+    request = AvatarGenerateRequest(
+        provider="agnes",
+        hint="更温暖一点",
+        style="anime_clean",
+        count=4,
+    )
+    assert request.style == "ANIME_CLEAN"
+    assert request.count == 4
+
+    source = (
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        / "src"
+        / "character_memory"
+        / "visual_web.py"
+    ).read_text(encoding="utf-8")
+    assert "rewrite_req = ImageRewriteRequest(" in source
+    assert "compile_instruction(" in source
+    assert '"candidates": candidates' in source
+    assert "GENERATED_AVATAR_CANDIDATE" in source
+    assert "_AVATAR_STYLE_GUIDANCE" in source
+
+
+def test_avatar_candidate_batch_api_persists_exact_requested_count(tmp_path):
+    provider = _AvatarBatchProvider()
+    app, store, media, avatars = _avatar_batch_app(tmp_path, provider)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/characters/mika/avatar/generate",
+            json={
+                "provider": "fake",
+                "style": "ANIME_CLEAN",
+                "count": 4,
+                "hint": "温暖一点",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["candidates"]) == 4
+    assert provider.calls == 4
+    media_ids = [item["media_id"] for item in body["candidates"]]
+    assert len(set(media_ids)) == 4
+    assert all(store.get_media_asset(media_id) is not None for media_id in media_ids)
+    assert all(media.asset_path(store.get_media_asset(media_id)) is not None for media_id in media_ids)
+    with store._lock:
+        total = store.conn.execute("SELECT COUNT(*) AS total FROM media_assets").fetchone()["total"]
+    assert total == 4
+    avatars.close()
+    store.close()
+
+
+def test_avatar_candidate_batch_failure_rolls_back_db_and_files(tmp_path):
+    provider = _AvatarBatchProvider(fail_at=3)
+    app, store, media, avatars = _avatar_batch_app(tmp_path, provider)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/characters/mika/avatar/generate",
+            json={"provider": "fake", "count": 4},
+        )
+
+    assert response.status_code == 502
+    assert "provider rate limited" in response.json()["detail"]
+    assert provider.calls == 3
+    with store._lock:
+        total = store.conn.execute("SELECT COUNT(*) AS total FROM media_assets").fetchone()["total"]
+    assert total == 0
+    assert not media.root.exists() or list(media.root.iterdir()) == []
+    avatars.close()
+    store.close()
+
+
+def test_avatar_candidate_batch_rejects_unknown_style():
+    from pydantic import ValidationError
+    from character_memory.visual_web import AvatarGenerateRequest
+
+    with pytest.raises(ValidationError, match="avatar style must be one of"):
+        AvatarGenerateRequest(style="oil-painting-by-random-name")

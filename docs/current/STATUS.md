@@ -37,7 +37,7 @@ Open PRs never upgrade a capability to SHIPPED. Topic docs under `docs/current/`
 | World Activity / Pulse | SHIPPED | Shared bounded Pulse topics/comments plus independent per-character Personal Browse clocks; world observation is decoupled from Space posting and long-term Memory admission. |
 | Stickers | SHIPPED | Global catalog/import, AI vision auto-tag when requested, shared Direct/Group/Space sticker use. |
 | Settings Center | SHIPPED | Persistent config/secrets ownership, provider health gating, runtime-apply vs restart semantics. |
-| Dev Console | SHIPPED | Health, LLM/media/visual/world/resource diagnostics and autonomy controls. LLM Usage Explorer is still IN PROGRESS in #112. |
+| Dev Console | SHIPPED | Health, LLM/media/visual/world/resource diagnostics and autonomy controls. LLM Usage Explorer is IN PROGRESS in #118 and is not current-main behavior yet. |
 | Media/TTS Runtime | SHIPPED | SenseVoice ASR, Sherpa, Kokoro, Edge and GSV formal routing; Workbench remains separate from the stable browser-facing TTS route. |
 | Mobile browser access | SHIPPED baseline | Tailscale Serve path and mobile web contract; no native Android/iOS client is claimed. |
 | Life/Diary simulation | SHIPPED but frozen | Supported research code remains available; product expansion is intentionally frozen. |
@@ -45,29 +45,66 @@ Open PRs never upgrade a capability to SHIPPED. Topic docs under `docs/current/`
 
 ## 3. Work currently in progress
 
-At the time of this audit there are **no open feature/fix PRs** in the repository.
+### PR #118 — LLM Usage Explorer v2
 
-A previously implemented Dev LLM Usage Explorer (#112) was closed without merge after `main` moved forward. It is therefore **not current-main behavior and not IN PROGRESS**. The requirement remains useful and is tracked below as BACKLOG until it is rebuilt/reopened on the current architecture.
+Status: **IN PROGRESS**
+
+#118 is the current-main rebuild of the superseded #112 branch. Its goal is to add real model-call metering without regressing the current Dev/Settings/World Activity/Onboarding contracts.
+
+Target contract on the PR branch:
+
+- meter every real OpenAI-compatible `/chat/completions` HTTP attempt;
+- distinguish physical HTTP attempts from one logical model call;
+- record Provider/Model, Feature/Purpose, Character/Conversation/Session, latency/status/request id;
+- use exact Provider-reported Token usage when available and expose Token coverage when it is not;
+- attribute calls across Direct / Group / Space / Persona / Ensemble / Encounter / Life / Avatar / Visual / Sticker / Dev;
+- expose Requests vs Logical Calls, Retry/Error rates, Feature/Purpose aggregation, Model aggregation and recent requests in Dev;
+- correlate Runtime Trace with usage through `llm_logical_call_id`.
+
+Until #118 merges, `DEV_CONSOLE.md` must continue to describe the current-main Dev surface and must not claim this Explorer exists.
+
+### PR #120 — archived-character GSV reload notice
+
+Status: **IN PROGRESS**
+
+#120 refines the already-shipped archived-character voice lifecycle. The missing behavior is not archive/restore itself; it is truthful diagnosis of the optional GSV sidecar reload result.
+
+Target delta:
+
+- distinguish `reloaded`, `rejected` and `unreachable`;
+- do not show a standing “sidecar is still running” warning when no sidecar exists or a timeout/gateway response makes that unknowable;
+- keep an actual refusal visible and dismissible;
+- preserve archive success even when optional registry refresh is unavailable.
+
+This is a correctness/UX follow-up on an existing SHIPPED capability, not a new product surface.
 
 ## 4. Accepted product backlog
 
 These are known product gaps. They are accepted directions, but no delivery date is implied.
 
-### Dev LLM usage observability
+### Model-call cost optimization after observability
 
-Status: **BACKLOG** (previous PR #112 closed unmerged)
+Status: **BACKLOG after #118**
 
-Accepted requirement:
+Do not redesign model orchestration from intuition before the Usage Explorer has accumulated real data.
 
-- meter every real LLM HTTP request without making telemetry able to break chat;
-- distinguish physical HTTP attempts from one logical model call;
-- attribute usage to Direct / Group / Space / Persona / Ensemble / Encounter / Life / Avatar / Visual / Sticker / Dev;
-- show exact provider-reported input/output/total Token when available;
-- show Token coverage instead of fabricating exact Token counts when provider usage is absent;
-- expose retry/error rate, latency, feature/purpose and model aggregation in Dev;
-- correlate Runtime Trace with usage through a logical call id.
+Questions to answer first:
 
-Any new implementation must be rebuilt/reconciled against current `main` rather than merging the stale closed branch as-is.
+- how much Group cost comes from members that ultimately stay silent;
+- how many HTTP attempts are Structured Output retries rather than new logical calls;
+- how much Space audience/reply propagation costs per visible action;
+- how much one-prompt Ensemble creation costs per created member;
+- which features grow primarily because of input-context size rather than output size.
+
+The first concrete optimization candidate is Ensemble Persona generation. Its current cost shape is approximately:
+
+```text
+1 group research call
++ N independent Persona generation calls
++ structured-output retries
+```
+
+After #118 provides evidence, evaluate bounded batch Persona generation (for example 3-4 members per batch) while preserving per-character validation/failure isolation. The same rule applies to any future Group speaker-selection optimization: measure first, then simplify the expensive path without changing Person semantics.
 
 ### Character Space / social layer
 

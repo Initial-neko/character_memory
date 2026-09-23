@@ -10,9 +10,9 @@
 
 ## 项目状态
 
-这是一个快速迭代中的实验项目。当前包版本进入 **0.5.0rc1**，作为第一条 Persistent Person Runtime release-candidate 基线；稳定版仍以真实运行验收后的不可变 Git tag / GitHub Release 为准，而不是额外维护一个会漂移的 stable 分支。
+这是一个快速迭代中的实验项目。当前包版本仍是 **0.5.0rc1**，它代表 2026-09-22 的第一条 Persistent Person Runtime release-candidate 基线；当前 `main` 已经包含 RC 之后的未发布改动，因此“包版本是 rc1”不等于“main 与 rc1 完全相同”。稳定版仍以真实运行验收后的不可变 Git tag / GitHub Release 为准，而不是额外维护一个会漂移的 stable 分支。
 
-README 只描述可运行入口和已经落地的主能力；尚未完成端到端闭环的能力会明确标记为 foundation / in progress，而不是用实施计划冒充现状。
+README 只描述可运行入口和已经落地的主能力。**当前 / 正在集成 / 下一步 / 延后事项**统一维护在 [Project Status](docs/current/PROJECT_STATUS.md)，避免把开放 PR 提前写成已经落地的架构事实。
 
 开发和贡献约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，仓库级工程规则见 [AGENTS.md](AGENTS.md)。文档索引见 [docs/README.md](docs/README.md)，版本与发布策略见 [docs/current/RELEASES.md](docs/current/RELEASES.md)，版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -24,6 +24,7 @@ README 只描述可运行入口和已经落地的主能力；尚未完成端到�
 - `PersonReaction.actions[0..3]`：`MESSAGE / EMOJI / STICKER / IMAGE`，以及内部工具意图 `GENERATE_IMAGE`。
 - `actions=[]` 是合法沉默；辅助 Memory/Intent 字段允许安全容错，主 outward action contract 仍严格。
 - Direct Chat + Group Chat；群聊共享事实只保存一次，成员按因果顺序逐个判断。已有群聊还可以获得稀疏的自主交流机会：轮转 seed 可沉默，短链消息有硬上限，新 User fact 可 supersede 过时自主结果。
+- 一句话 AI 建群：先创建不可见 Ensemble 草稿并完成公开资料研究/Persona 草稿，用户一次确认后才真正创建/复用 Character 与 Group；失败不会留下可见的 0 人空群。
 - 异步消息接受：用户消息先持久化并立即返回 202，人物反应通过 SSE 渐进推送。
 - Message Search、Group Mentions、Unread、Intent Preview、Group Archive/Restore。
 - Character Space：共享帖子/评论/点赞/已查看/媒体事实；未归档角色默认每 24H 获得一次可沉默的自主发帖机会（测试时可调成 1H/30min/10min），可自然选择文字、互联网搜图、AI 生图或一条语音动态，并可在发帖前通过 Search + Headless Chromium 做受限 World Observation；Audience 最多 10 个候选角色，经同一人物状态决定忽略/点赞/评论，作者可自主回复。
@@ -71,6 +72,37 @@ Qwen3 VoiceDesign :9015 (manual/optional tool, never a formal chat Provider)
 ```
 
 这些服务是独立进程。Voice、Vision、Camera/Screen Share 与 ImageGen 都复用同一个 Persistent Person，不存在第二套“语音人物”或“视觉人物”。
+
+## 代码架构
+
+仓库的代码层次按职责分，而不是按页面功能各自复制一套 Runtime：
+
+```text
+Browser / HTTP route adapters
+        ↓
+application/ orchestration
+        ↓
+runtime/ + domain/ Person cognition/action contracts
+        ↓
+storage/ + memory/ durable/derived state
+        ↓
+llm/ + Search/Image/TTS/Browser provider boundaries
+```
+
+主要 composition owner：
+
+```text
+api.py              Character Runtime composition + lifecycle
+server.py           feature route assembly
+runtime_services.py Search / Avatar / ImageGen / World shared infrastructure
+application/        Direct / Group / autonomy orchestration
+runtime/            PersonRuntime / context / reaction evaluation
+domain/             structured-output and durable domain contracts
+storage/            SQLite persistence/search/history
+web/                browser feature modules; no bundler
+```
+
+路由模块应保持薄：新领域逻辑优先进入 application/runtime/service，而不是继续堆进 `*_web.py`。修改具体能力时的最短阅读路径见 [Codebase Layout](docs/current/CODEBASE_LAYOUT.md)；跨模块运行边界见 [Architecture](docs/current/ARCHITECTURE.md)。
 
 ## 开发环境
 
@@ -174,6 +206,7 @@ Playwright Python runtime 已进入 canonical `all` extra，因为 World Observa
 
 **当前实现以源码为最终事实源。** 当前文档集中在 [`docs/current/`](docs/current/)：
 
+- [Project Status / Roadmap](docs/current/PROJECT_STATUS.md)
 - [Architecture](docs/current/ARCHITECTURE.md)
 - [Product Design](docs/current/DESIGN.md)
 - [Codebase Layout](docs/current/CODEBASE_LAYOUT.md)

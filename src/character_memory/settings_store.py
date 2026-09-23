@@ -390,6 +390,96 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "world-activity",
+        "title": "World Activity",
+        "description": "角色上网观察与 Space 发帖解耦。这里保存 Pulse / Personal Browse 的正式调度参数；Dev Console 只负责手动验收。",
+        "fields": [
+            {"name": "world_activity_enabled", "label": "World Activity", "type": "checkbox", "level": "advanced"},
+            {"name": "world_pulse_enabled", "label": "World Pulse", "type": "checkbox", "level": "advanced"},
+            {
+                "name": "world_pulse_sources",
+                "label": "Pulse Sources",
+                "type": "textarea-list",
+                "level": "advanced",
+                "help": "每行一个公开信息聚合/趋势页面 URL；最多 12 个。页面内容始终作为不可信外部数据。",
+            },
+            {
+                "name": "world_pulse_refresh_minutes",
+                "label": "Pulse Refresh (min)",
+                "type": "number",
+                "min": 10,
+                "max": 10080,
+                "step": 10,
+                "level": "advanced",
+            },
+            {
+                "name": "world_pulse_discussion_interval_minutes",
+                "label": "Pulse Discussion (min)",
+                "type": "number",
+                "min": 10,
+                "max": 10080,
+                "step": 10,
+                "level": "advanced",
+            },
+            {
+                "name": "world_pulse_max_topics",
+                "label": "Max Pulse Topics",
+                "type": "number",
+                "min": 1,
+                "max": 12,
+                "step": 1,
+                "level": "advanced",
+            },
+            {
+                "name": "world_pulse_commenter_count",
+                "label": "Pulse Commenter Candidates",
+                "type": "number",
+                "min": 0,
+                "max": 10,
+                "step": 1,
+                "level": "advanced",
+                "help": "只是候选人数；每个角色仍可独立判断保持沉默。",
+            },
+            {"name": "world_browse_enabled", "label": "Personal Browse", "type": "checkbox", "level": "advanced"},
+            {
+                "name": "world_browse_interval_minutes",
+                "label": "Personal Browse Interval (min)",
+                "type": "number",
+                "min": 10,
+                "max": 10080,
+                "step": 10,
+                "level": "advanced",
+            },
+            {
+                "name": "world_pulse_source_max_chars",
+                "label": "Pulse Text / Source",
+                "type": "number",
+                "min": 1000,
+                "max": 20000,
+                "step": 500,
+                "level": "diagnostic",
+            },
+            {
+                "name": "world_browse_max_pages",
+                "label": "Browse Pages / Opportunity",
+                "type": "number",
+                "min": 1,
+                "max": 4,
+                "step": 1,
+                "level": "diagnostic",
+            },
+            {
+                "name": "world_activity_poll_seconds",
+                "label": "World Scheduler Poll (s)",
+                "type": "number",
+                "min": 10,
+                "max": 3600,
+                "step": 10,
+                "level": "diagnostic",
+            },
+        ],
+    },
+    {
         "id": "group-autonomy",
         "title": "Autonomous Group Chat",
         "description": "让已有群聊偶尔自己聊起来。每次 Opportunity 只允许一条很短的角色链；新用户消息始终优先，不会无限自循环。",
@@ -537,6 +627,8 @@ def _yaml_scalar(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return str(value)
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
     return json.dumps(str(value), ensure_ascii=False)
 
 

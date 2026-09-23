@@ -3,6 +3,7 @@
   if (!CM) throw new Error("CM core must load before persona.js");
 
   let personaDraft = null;
+  let personaCreation = null;
   const examples = [
     "反差型冷面吐槽役，平时话少，遇到真正感兴趣的事突然特别投入",
     "脑洞很多的快乐行动派，会记住一起做过的奇怪小事，但也有自己的脾气",
@@ -58,7 +59,10 @@
     const button = document.getElementById("generatePersona");
     if (button) { button.disabled = true; button.textContent = "正在生成…"; }
     try {
-      const result = await CM.api("/v1/characters/draft", {method:"POST", body:JSON.stringify({description, name, age:rawAge ? Number(rawAge) : null, tags:[]})});
+      const age = rawAge ? Number(rawAge) : null;
+      const tags = [];
+      const result = await CM.api("/v1/characters/draft", {method:"POST", body:JSON.stringify({description, name, age, tags})});
+      personaCreation = {source:"PERSONA_BUILDER", prompt:description, name_hint:name, age_hint:age, tags};
       renderDraft(result.draft);
     } finally {
       if (button) { button.disabled = false; button.textContent = "AI 帮我生成"; }
@@ -77,7 +81,7 @@
         throw new Error(`角色已达到 ${capacity.hardLimit || 20} 位上限，请先归档一位人物。`);
       }
       if (needsConfirm && !window.confirm(`当前已有 ${capacity.activeTotal} 位角色。继续创建会超过 10 位提醒阈值，是否仍然新增？`)) return;
-      const result = await CM.api("/v1/characters", {method:"POST", body:JSON.stringify({draft,confirm_over_soft_limit:needsConfirm})});
+      const result = await CM.api("/v1/characters", {method:"POST", body:JSON.stringify({draft,confirm_over_soft_limit:needsConfirm,creation:personaCreation})});
       await CM.loadCharacters();
       CM.closeDrawer();
       await CM.switchCharacter(result.character.id);
@@ -86,9 +90,60 @@
     }
   }
 
+  function listHtml(items) {
+    return (items || []).length
+      ? `<ul>${items.map(item => `<li>${CM.escapeHtml(item)}</li>`).join("")}</ul>`
+      : '<p class="muted">未设置</p>';
+  }
+
+  async function inspect(characterId = CM.state.characterId) {
+    if (!characterId) return;
+    const profile = CM.state.characters.find(item => item.id === characterId) || {id:characterId,name:characterId};
+    CM.openDrawer(`${profile.name || profile.id} · 人物设定`, "基础 Persona 与创建来源只读；成长继续由 Memory、关系和经历形成");
+    CM.dom.drawerBody.innerHTML = "<p>正在读取人物设定…</p>";
+    try {
+      const data = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/persona`);
+      const persona = data.persona || {};
+      const behavior = persona.behavior || {};
+      const creation = data.creation || {};
+      const init = creation.initialization || {};
+      const avatar = init.avatar || {};
+      const voice = init.voice || {};
+      CM.dom.drawerBody.innerHTML = `
+        <div class="persona-card persona-inspector">
+          <div class="persona-card-head"><div class="persona-avatar-large">${CM.escapeHtml((persona.name || profile.name || "AI").slice(0,1))}</div><div><h3>${CM.escapeHtml(persona.name || profile.name || profile.id)}</h3><p>${CM.escapeHtml([persona.identity, persona.tagline].filter(Boolean).join(" · "))}</p></div></div>
+          ${persona.description ? `<p class="persona-description">${CM.escapeHtml(persona.description)}</p>` : ""}
+          <div class="persona-section"><h4>性格</h4>${listHtml(persona.personality)}</div>
+          <div class="persona-section"><h4>交流方式</h4><dl class="kv">
+            <dt>聊天</dt><dd>${CM.escapeHtml(behavior.conversation || "—")}</dd>
+            <dt>表达</dt><dd>${CM.escapeHtml(behavior.expression || "—")}</dd>
+            <dt>追问</dt><dd>${CM.escapeHtml(behavior.questions || "—")}</dd>
+            <dt>沉默</dt><dd>${CM.escapeHtml(behavior.silence || "—")}</dd>
+            <dt>主动</dt><dd>${CM.escapeHtml(behavior.initiative || "—")}</dd>
+            <dt>分歧</dt><dd>${CM.escapeHtml(behavior.disagreement || "—")}</dd>
+            <dt>关心</dt><dd>${CM.escapeHtml(behavior.care || "—")}</dd>
+          </dl></div>
+          <div class="persona-section"><h4>边界</h4>${listHtml(persona.boundaries)}</div>
+          <details class="advanced-persona"><summary>创建来源</summary>
+            <div class="kv">
+              <div>来源</div><div>${CM.escapeHtml(creation.source || "LEGACY")}</div>
+              <div>创建时间</div><div>${CM.escapeHtml(creation.created_at || "旧人物未记录")}</div>
+              <div>初始头像</div><div>${CM.escapeHtml(avatar.status === "ready" ? (avatar.source || "ready") : (avatar.status || "旧人物未记录"))}</div>
+              <div>初始声线</div><div>${CM.escapeHtml(voice.template || voice.fallback_voice || voice.status || "旧人物未记录")}</div>
+            </div>
+            <label class="builder-field"><span>最初创建描述</span><textarea rows="7" readonly>${CM.escapeHtml(creation.prompt || "这个人物创建于来源记录功能之前，没有保存原始描述。")}</textarea></label>
+          </details>
+          <p class="ui-hint">人物创建后基础 Persona 不直接编辑。需要另一版设定时，后续应通过“复制为新人物”创建新角色，而不是重写当前角色的人格历史。</p>
+        </div>`;
+    } catch (error) {
+      CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
+    }
+  }
+
   function openBuilder() {
     personaDraft = null;
-    CM.openDrawer("创建新人物", "AI 先生成草稿，你确认以后才保存");
+    personaCreation = null;
+    CM.openDrawer("创建新人物", "AI 先生成草稿；确认创建后会自动准备首个头像和可用声线");
     CM.dom.drawerBody.innerHTML = formHtml();
   }
 
@@ -99,6 +154,14 @@
   const characterActions = document.getElementById("characterActions");
   (characterActions || CM.dom.characterList).appendChild(createButton);
   createButton.addEventListener("click", openBuilder);
+
+  CM.dom.characterList?.addEventListener("click", event => {
+    const button = event.target.closest("[data-character-persona]");
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    inspect(button.dataset.characterPersona).catch(console.error);
+  });
 
   CM.dom.drawerBody.addEventListener("click", event => {
     const example = event.target.closest("[data-persona-example]");
@@ -116,5 +179,5 @@
     }
   });
 
-  CM.registerFeature("persona", {open:openBuilder});
+  CM.registerFeature("persona", {open:openBuilder, inspect});
 })();

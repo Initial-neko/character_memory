@@ -475,7 +475,7 @@
           <div><span>Model</span><strong>${CM.escapeHtml(trace.model_used || "—")}</strong></div>
           <div><span>Attempt</span><strong>${CM.escapeHtml(trace.model_attempt || "—")}</strong></div>
           <div><span>Actions</span><strong>${CM.escapeHtml(actions.map(item => item.type).join(" / ") || "NO_REPLY")}</strong></div>
-          <div><span>Total</span><strong>${CM.escapeHtml(CM.fmtMs(totalMs))}</strong></div>
+          <div><span>Total</span><strong>${CM.escapeHtml(Number.isFinite(Number(totalMs)) ? CM.fmtMs(totalMs) : "—")}</strong></div>
           <div class="trace-call-id"><span>Logical Call ID</span><code>${CM.escapeHtml(trace.llm_logical_call_id || "—")}</code></div>
         </section>
 

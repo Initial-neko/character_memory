@@ -253,6 +253,43 @@ def test_personal_browse_is_independent_from_space_posting(tmp_path):
     store.close()
 
 
+def test_world_scheduler_rearms_persisted_browse_when_interval_changes(tmp_path):
+    store, access, _ = make_access(tmp_path, count=1)
+    access.settings.world_browse_interval_minutes = 90
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+
+    scheduler.run_once(now=NOW)
+    before = next(
+        item for item in repo.states()
+        if item["kind"] == "BROWSE" and item["subject_id"] == "c00"
+    )
+    assert float(before["configured_interval_minutes"]) == 90
+
+    changed_at = NOW + timedelta(minutes=5)
+    access.settings.world_browse_interval_minutes = 30
+    restarted = WorldActivityScheduler(access, WorldPulseRepository(store), poll_seconds=10)
+    restarted.run_once(now=changed_at)
+    after = next(
+        item for item in repo.states()
+        if item["kind"] == "BROWSE" and item["subject_id"] == "c00"
+    )
+    assert float(after["configured_interval_minutes"]) == 30
+    assert int(after["next_run_at_epoch"]) != int(before["next_run_at_epoch"])
+    assert epoch_us(changed_at) < int(after["next_run_at_epoch"]) <= epoch_us(
+        changed_at + timedelta(minutes=30)
+    )
+
+    preserved = int(after["next_run_at_epoch"])
+    same_config = WorldActivityScheduler(access, WorldPulseRepository(store), poll_seconds=10)
+    same_config.run_once(now=changed_at)
+    final = next(
+        item for item in repo.states()
+        if item["kind"] == "BROWSE" and item["subject_id"] == "c00"
+    )
+    assert int(final["next_run_at_epoch"]) == preserved
+    store.close()
+
 def test_world_activity_scheduler_keeps_independent_clocks(tmp_path):
     store, access, _ = make_access(tmp_path, count=1)
     repo = WorldPulseRepository(store)

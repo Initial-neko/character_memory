@@ -182,6 +182,8 @@ Call Session
 └─ AI TTS output   independent
 ```
 
+麦克风 acquisition 与 Camera/Screen 遵守同一条规则（见 §9）：每次申请领一个序号，只有最新的申请才允许接管麦克风，`stopMicrophone`（挂断和静音都走它）让所有还挂在权限弹窗上的申请作废。挂断或静音之后才被回答的许可会当场 `stop()` 掉拿到的 track 并直接返回，不建 AudioContext、不改通话状态——否则麦克风会在通话结束后继续存活，而那时 overlay 已隐藏、麦克风按钮已 disabled，页面上没有任何控件能把它关掉。
+
 语音输入仍保持原有顺序：
 
 ```text

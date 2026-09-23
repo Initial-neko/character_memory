@@ -792,11 +792,32 @@
     }
   }
 
+  // The permission prompt outlives the click that opened it, so a start may only adopt the
+  // stream the browser hands it while it is still the newest start and nothing has stopped the
+  // microphone since. A track that is still live after the call is over is hardware with no
+  // control left on the page that could switch it off. Same shape as visual_capture's owner
+  // ticket: every start takes a ticket, a newer start retires the one before it, and
+  // stopMicrophone retires whatever is still waiting on the browser.
+  let micRequestSeq = 0;
+  let micOwnerSeq = 0;
+
+  function claimMicTicket() {
+    micRequestSeq += 1;
+    return micRequestSeq;
+  }
+
+  function releaseStream(stream) {
+    // A held stream is real hardware: a start that lost its ticket still has to hand the
+    // microphone back, or its indicator stays lit.
+    stream?.getTracks?.().forEach(track => track.stop());
+  }
+
   async function stopMicrophone({updateStatus = true} = {}) {
+    micOwnerSeq = claimMicTicket(); // whatever the browser is still asking permission for is void now
     voice.micActive = false;
     voice.processor?.disconnect?.();
     voice.sourceNode?.disconnect?.();
-    voice.stream?.getTracks?.().forEach(track => track.stop());
+    releaseStream(voice.stream);
     try { await voice.audioContext?.close?.(); } catch (_) {}
     voice.stream = null;
     voice.audioContext = null;
@@ -813,11 +834,26 @@
   async function startMicrophone({throwOnError = true} = {}) {
     if (!voice.active) throw new Error("请先开始通话");
     if (voice.micActive) return true;
+    const ticket = claimMicTicket();
+    micOwnerSeq = ticket - 1; // this start supersedes every earlier one, whichever answer lands first
     try {
       applyVoiceCapture(await checkMedia());
+      if (ticket <= micOwnerSeq) {
+        // Retired while the runtime was still being checked: do not open a permission prompt
+        // for a microphone nobody wants any more.
+        return false;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
       });
+      if (ticket <= micOwnerSeq) {
+        // The call ended -- or the microphone was muted, or started again -- while the browser
+        // still held the permission prompt, and only now answered it. This stream is live
+        // hardware that no call owns any more: release it, and leave the UI to whoever retired
+        // this start instead of writing "正在听…" back onto it.
+        releaseStream(stream);
+        return false;
+      }
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       const context = new AudioContextClass();
       const source = context.createMediaStreamSource(stream);
@@ -839,6 +875,7 @@
       setPhase("listening", "正在听…");
       return true;
     } catch (error) {
+      if (ticket <= micOwnerSeq) return false; // a retired start reports nothing, not even its own failure
       await stopMicrophone({updateStatus:false});
       if (dom.transcript) {
         dom.transcript.textContent = "麦克风未开启：" + error.message + "。仍可共享屏幕/摄像头，并通过聊天框发送文字。";

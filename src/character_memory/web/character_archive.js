@@ -91,6 +91,43 @@
       </section>`;
   }
 
+  // The archive/restore response carries the result of the best-effort GSV
+  // registry refresh. Archive itself succeeds either way -- the row disappears
+  // and the record stays on disk -- so a failed refresh used to be a 200 the
+  // archive module threw away, leaving a running GSV sidecar still resolving a
+  // character the user had just archived. Surface it instead.
+  function voiceReloadWarning(result) {
+    const registry = result?.voice_registry;
+    if (!registry || registry.reloaded !== false) return "";
+    const reason = String(registry.reason || "").trim();
+    return `语音注册表没有刷新${reason ? `：${CM.escapeHtml(reason)}` : ""}。人物列表已经更新，但运行中的 GSV sidecar 可能仍按旧名单合成语音；修好 voices 模板后重新归档或恢复一次，或重启 GSV sidecar。`;
+  }
+
+  // The warning gets a channel of its own, because it is a message and not a
+  // flow change. Archiving closes the drawer on every path -- that is what the
+  // confirm card is for -- and holding it open just to have somewhere to put
+  // the text leaves a full-viewport backdrop over the sidebar: the next archive
+  // or restore is unreachable until the user finds the one button that dismisses
+  // it. So the notice is pinned to the page, above the drawer and transparent to
+  // the pointer, and the drawer closes exactly as it did before the reload
+  // result was read at all. It clears on the next archive or restore that
+  // reloads cleanly, which is the same event that makes it untrue.
+  const voiceNotice = document.createElement("div");
+  voiceNotice.className = "archive-voice-notice hidden";
+  voiceNotice.setAttribute("role", "status");
+  document.body.appendChild(voiceNotice);
+
+  function showVoiceReloadWarning(result) {
+    const warning = voiceReloadWarning(result);
+    if (!warning) {
+      voiceNotice.innerHTML = "";
+      voiceNotice.classList.add("hidden");
+      return;
+    }
+    voiceNotice.innerHTML = warning;
+    voiceNotice.classList.remove("hidden");
+  }
+
   async function archiveCharacter(characterId) {
     if (!characterId) return;
     if (CM.state.characters.length <= 1) {
@@ -100,13 +137,14 @@
     }
 
     const fallback = CM.state.characters.find(item => item.id !== characterId) || null;
-    await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/archive`, {method:"POST"});
+    const result = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/archive`, {method:"POST"});
 
     if (!CM.isGroupConversation() && CM.state.characterId === characterId && fallback) {
       await CM.switchCharacter(fallback.id);
     }
     await reloadCharacters();
     await refreshArchiveCount().catch(console.error);
+    showVoiceReloadWarning(result);
     CM.closeDrawer();
   }
 
@@ -143,11 +181,12 @@
     const needsConfirm = Number(capacity.activeTotal || 0) >= Number(capacity.softLimit || 10);
     if (needsConfirm && !window.confirm(`当前已有 ${capacity.activeTotal} 位角色。恢复后会超过 10 位提醒阈值，是否继续？`)) return;
     const query = needsConfirm ? "?confirm_over_soft_limit=true" : "";
-    await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/restore${query}`, {method:"POST"});
+    const result = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/restore${query}`, {method:"POST"});
     archived = archived.filter(item => item.id !== characterId);
     await reloadCharacters();
     renderArchivedDrawer();
     renderArchiveListButton();
+    showVoiceReloadWarning(result);
   }
 
   CM.dom.characterList?.addEventListener("click", event => {

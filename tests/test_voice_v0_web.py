@@ -1,4 +1,9 @@
+import json
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def test_voice_assets_are_wired_into_chat_shell():
@@ -160,3 +165,358 @@ def test_voice_does_not_modify_core_controller_ownership():
     voice = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
     assert 'id="voiceCallButton"' not in app
     assert 'CM.registerFeature("voice"' in voice
+
+
+# The microphone button is a real permission prompt, which is the only thing that makes these
+# interleavings reachable: the browser answers whenever the user gets around to it, and by then
+# the call may already be over. The harness parks /health and getUserMedia on promises the
+# scenario releases by hand, so the "prompt is still open" window can be held open on command.
+VOICE_HARNESS = r"""
+const fs = require("fs");
+const vm = require("vm");
+
+const source = fs.readFileSync(process.argv[2], "utf8");
+
+let granted = [];
+let stopped = [];
+let alerts = [];
+let healthWaiters = [];
+let contextsOpened = 0;
+let elements = new Map();
+
+const VOICE_ELEMENT_IDS = [
+  "voiceCallButton", "voiceCallOverlay", "voiceCallAvatar", "voiceCallName", "voiceCallContext",
+  "voiceCallStatus", "voiceCallTranscript", "voiceCallLog", "voiceCallMetrics", "voiceMinimizeButton",
+  "voiceHangupButton", "voiceCallDock", "voiceDockExpandButton", "voiceDockAvatar", "voiceDockTitle",
+  "voiceDockStatus", "voiceDockVisual", "voiceDockHangupButton", "voiceMicButton", "voiceCameraButton",
+  "voiceScreenButton", "voiceVisualStopButton", "voiceVisualPanel", "voiceVisualPreview", "voiceVisualStatus",
+];
+
+function makeElement(id) {
+  const classes = new Set();
+  const attributes = {};
+  const handlers = [];
+  return {
+    id,
+    disabled: false,
+    textContent: "",
+    title: "",
+    innerHTML: "",
+    scrollTop: 0,
+    scrollHeight: 0,
+    classList: {
+      add: name => classes.add(name),
+      remove: name => classes.delete(name),
+      toggle: (name, on) => { if (on) classes.add(name); else classes.delete(name); },
+      contains: name => classes.has(name),
+    },
+    setAttribute(name, value) { attributes[name] = value; },
+    getAttribute(name) { return attributes[name]; },
+    addEventListener(type, handler, options) { handlers.push({type, handler, capture: Boolean(options && options.capture)}); },
+    handlers: () => handlers.slice(),
+    querySelector() { return null; },
+    append() {},
+    appendChild() {},
+    remove() {},
+    focus() {},
+    pause() {},
+    dispatchEvent() { return true; },
+  };
+}
+
+function boot() {
+  granted = [];
+  stopped = [];
+  alerts = [];
+  healthWaiters = [];
+  contextsOpened = 0;
+  elements = new Map();
+
+  function elementFor(id) {
+    if (!elements.has(id)) elements.set(id, makeElement(id));
+    return elements.get(id);
+  }
+  for (const id of VOICE_ELEMENT_IDS) elementFor(id);
+
+  const CM = {
+    dom: {input: elementFor("messageInput")},
+    state: {
+      characters: [{id: "rin", name: "Rin"}],
+      characterId: "rin",
+      conversation: {type: "DIRECT", characterId: "rin", groupId: null},
+    },
+    events: {},
+    features: {groups: {current: () => null}},
+    on(name, handler) { CM.events[name] = handler; },
+    registerFeature(name, feature) { CM.features[name] = feature; return feature; },
+    isGroupConversation() { return false; },
+    currentProfile() { return CM.state.characters[0]; },
+    conversationIdFor(characterId) { return "direct:" + characterId; },
+    directEventToMessage() { return {}; },
+    mergeDirectMessage() {},
+  };
+
+  const sandbox = {
+    console: {debug() {}, log() {}, warn() {}, error() {}, info() {}},
+    localStorage: {getItem: () => null, setItem() {}, removeItem() {}},
+    alert: message => alerts.push(message),
+    // The error paths schedule a status reset 1.2s out; the scenarios below never wait for it.
+    setTimeout: () => 0,
+    clearTimeout() {},
+    performance: {now: () => Date.now()},
+    URLSearchParams,
+    fetch: async url => {
+      if (String(url).endsWith("/health")) {
+        return new Promise(resolve => healthWaiters.push(() => resolve({
+          ok: true, status: 200, json: async () => ({asr: {ready: true}, tts: {ready: true}, voice_capture: {silence_ms: 900}}),
+        })));
+      }
+      return {ok: true, status: 200, json: async () => ({}), text: async () => ""};
+    },
+    navigator: {
+      mediaDevices: {
+        getUserMedia: constraints => new Promise(resolve => granted.push({constraints, resolve})),
+      },
+    },
+    document: {
+      getElementById: id => elementFor(id),
+      createElement: tag => makeElement(tag),
+      addEventListener() {},
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.window.addEventListener = () => {};
+  sandbox.AudioContext = class AudioContext {
+    constructor() { contextsOpened += 1; this.sampleRate = 48000; }
+    createMediaStreamSource() { return {connect() {}, disconnect() {}}; }
+    createScriptProcessor() { return {connect() {}, disconnect() {}, onaudioprocess: null}; }
+    close() { return Promise.resolve(); }
+  };
+  sandbox.EventSource = class EventSource {
+    constructor(url) { this.url = url; }
+    addEventListener() {}
+    close() {}
+  };
+  sandbox.CM = CM;
+  vm.runInContext(source, vm.createContext(sandbox), {filename: "voice.js"});
+
+  function makeStream(label) {
+    const track = {kind: "audio", label, readyState: "live", stop() { stopped.push(label); this.readyState = "ended"; }};
+    return {id: label, getTracks: () => [track], getAudioTracks: () => [track]};
+  }
+
+  // voice.js registers its call, hangup and microphone handlers without capture.
+  function click(id) {
+    const handlers = elementFor(id).handlers();
+    for (const entry of handlers.filter(item => item.capture).concat(handlers.filter(item => !item.capture))) {
+      entry.handler({type: "click", target: elementFor(id), preventDefault() {}});
+    }
+  }
+
+  function releaseHealth() {
+    const waiters = healthWaiters;
+    healthWaiters = [];
+    for (const resolve of waiters) resolve();
+  }
+
+  function releaseMic(index) {
+    const entry = granted[index];
+    entry.stream = makeStream("mic-" + (index + 1));
+    entry.resolve(entry.stream);
+  }
+
+  function releaseAllMic() {
+    for (let index = 0; index < granted.length; index += 1) {
+      if (!granted[index].stream) releaseMic(index);
+    }
+  }
+
+  function snapshot() {
+    const voice = CM.features.voice.state;
+    const mic = elementFor("voiceMicButton");
+    const grantedTracks = granted
+      .filter(entry => entry.stream)
+      .map(entry => entry.stream.getAudioTracks()[0]);
+    const adopted = voice.stream && voice.stream.getAudioTracks()[0];
+    return {
+      requests: granted.length,
+      granted: grantedTracks.map(track => ({label: track.label, readyState: track.readyState})),
+      live: grantedTracks.filter(track => track.readyState === "live").length,
+      adopted: adopted ? {label: adopted.label, readyState: adopted.readyState} : null,
+      stopped: stopped.slice(),
+      alerts: alerts.slice(),
+      contextsOpened,
+      voiceActive: voice.active,
+      micActive: voice.micActive,
+      capturePhase: voice.capturePhase,
+      status: elementFor("voiceCallStatus").textContent,
+      transcript: elementFor("voiceCallTranscript").textContent,
+      overlayHidden: elementFor("voiceCallOverlay").classList.contains("hidden"),
+      mic: {
+        disabled: mic.disabled,
+        text: mic.textContent,
+        active: mic.classList.contains("active"),
+        muted: mic.classList.contains("muted"),
+      },
+    };
+  }
+
+  async function flush(turns = 8) {
+    for (let i = 0; i < turns; i += 1) await new Promise(resolve => setImmediate(resolve));
+  }
+
+  return {click, releaseHealth, releaseMic, releaseAllMic, snapshot, flush};
+}
+
+// Control: a call nobody interferes with still adopts its microphone, asks for exactly one
+// and hands nothing back.
+async function callAlone() {
+  const h = boot();
+  h.click("voiceCallButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.releaseMic(0);
+  await h.flush(2);
+  return h.snapshot();
+}
+
+// The user hangs up while the browser still holds the microphone prompt, and only then
+// answers it. The granted stream must not be adopted: the call it was asked for is over.
+async function hangupDuringPrompt() {
+  const h = boot();
+  h.click("voiceCallButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.click("voiceHangupButton");
+  await h.flush(2);
+  h.releaseAllMic();
+  await h.flush(2);
+  return h.snapshot();
+}
+
+// The hangup lands before the runtime check answers, so the microphone prompt is never
+// opened at all.
+async function hangupDuringRuntimeCheck() {
+  const h = boot();
+  h.click("voiceCallButton");
+  await h.flush(2);
+  h.click("voiceHangupButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  return h.snapshot();
+}
+
+// Muting the microphone while its next prompt is already open, then starting it twice: only
+// the newest start may keep a stream, the ones before it hand theirs back.
+async function muteThenStartTwice() {
+  const h = boot();
+  h.click("voiceCallButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.releaseMic(0, "mic-1");
+  await h.flush(2);
+  h.click("voiceMicButton");
+  await h.flush(2);
+  h.click("voiceMicButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.click("voiceMicButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.releaseAllMic();
+  await h.flush(2);
+  return h.snapshot();
+}
+
+async function main() {
+  process.stdout.write(JSON.stringify({
+    callAlone: await callAlone(),
+    hangupDuringPrompt: await hangupDuringPrompt(),
+    hangupDuringRuntimeCheck: await hangupDuringRuntimeCheck(),
+    muteThenStartTwice: await muteThenStartTwice(),
+  }));
+}
+
+main().catch(error => {
+  process.stderr.write(String((error && error.stack) || error));
+  process.exit(1);
+});
+"""
+
+
+def _run_voice_harness(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to exercise voice.js behaviourally")
+    harness = tmp_path / "voice_harness.cjs"
+    harness.write_text(VOICE_HARNESS, encoding="utf-8")
+    script = Path("src/character_memory/web/voice.js").resolve()
+    completed = subprocess.run(
+        [node, str(harness), str(script)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
+def test_late_microphone_permission_cannot_leave_the_call_microphone_on(tmp_path):
+    payload = _run_voice_harness(tmp_path)
+
+    # Control: an uninterrupted call adopts its microphone, keeps exactly one track live and
+    # opens no second prompt.
+    alone = payload["callAlone"]
+    assert alone["requests"] == 1
+    assert alone["stopped"] == []
+    assert alone["live"] == 1
+    assert alone["contextsOpened"] == 1
+    assert alone["voiceActive"] is True
+    assert alone["micActive"] is True
+    assert alone["adopted"] == {"label": "mic-1", "readyState": "live"}
+    assert alone["mic"] == {"disabled": False, "text": "🎙 麦克风", "active": True, "muted": False}
+
+    # The call ends while the prompt is still open: the late "Allow" is real hardware that no
+    # call owns any more, so it is handed straight back instead of going live behind a closed
+    # overlay with every microphone control disabled.
+    hung_up = payload["hangupDuringPrompt"]
+    assert hung_up["granted"][0]["readyState"] == "ended", "the microphone answered after the hangup was left live"
+    assert hung_up["stopped"] == ["mic-1"]
+    assert hung_up["live"] == 0
+    assert hung_up["adopted"] is None
+    assert hung_up["contextsOpened"] == 0, "a released stream still got an AudioContext"
+    assert hung_up["voiceActive"] is False
+    assert hung_up["micActive"] is False
+    assert hung_up["capturePhase"] == "idle"
+    assert hung_up["overlayHidden"] is True
+    assert hung_up["mic"]["disabled"] is True, "the page kept a control that claims to hold a live microphone"
+    assert hung_up["status"] != "正在听…", "a retired start wrote its listening status back onto the ended call"
+
+    # The hangup lands during the runtime check: no microphone prompt is opened afterwards.
+    during_check = payload["hangupDuringRuntimeCheck"]
+    assert during_check["requests"] == 0, "a retired call still opened a microphone prompt"
+    assert during_check["stopped"] == []
+    assert during_check["voiceActive"] is False
+    assert during_check["micActive"] is False
+    assert during_check["contextsOpened"] == 0
+
+    # A newer start retires the one before it, whichever answer the browser lands first: after
+    # two parked prompts exactly one stream stays live and the other two were handed back.
+    twice = payload["muteThenStartTwice"]
+    assert twice["requests"] == 3
+    assert twice["live"] == 1, "two microphone streams are live at once"
+    assert twice["stopped"] == ["mic-1", "mic-2"]
+    assert twice["adopted"] == {"label": "mic-3", "readyState": "live"}
+    # The call's own start plus the newest retry: the retired start handed its track back
+    # before an AudioContext was ever built for it.
+    assert twice["contextsOpened"] == 2
+    assert twice["voiceActive"] is True
+    assert twice["micActive"] is True
+    assert twice["alerts"] == []

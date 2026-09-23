@@ -112,7 +112,8 @@
       CM.dom.drawerBody.innerHTML = `
         <div class="persona-card persona-inspector">
           <div class="persona-card-head"><div class="persona-avatar-large">${CM.escapeHtml((persona.name || profile.name || "AI").slice(0,1))}</div><div><h3>${CM.escapeHtml(persona.name || profile.name || profile.id)}</h3><p>${CM.escapeHtml([persona.identity, persona.tagline].filter(Boolean).join(" · "))}</p></div></div>
-          ${persona.description ? `<p class="persona-description">${CM.escapeHtml(persona.description)}</p>` : ""}
+          ${persona.description ? `<p class="persona-description persona-description-compact">${CM.escapeHtml(persona.description)}</p>` : ""}
+          <div class="persona-quick-facts">${(persona.personality || []).slice(0, 3).map(item => `<span>${CM.escapeHtml(item)}</span>`).join("") || `<span>暂无性格摘要</span>`}</div>
           <div class="persona-inspector-summary">
             <span>${Array.isArray(persona.personality) ? persona.personality.length : 0} 条性格</span>
             <span>${Array.isArray(persona.boundaries) ? persona.boundaries.length : 0} 条边界</span>

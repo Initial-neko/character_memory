@@ -476,7 +476,9 @@
           <span id="llmUsageWindowBadge" class="pill">24H</span>
         </div>
         <div class="llm-usage-common" data-level="common">
-          <div class="actions">
+          <details class="level-group" data-level="advanced" data-title="高级 · 统计窗口" data-hint="只改变统计范围，不改变运行配置">
+            <summary>高级 · 统计窗口</summary>
+            <div class="actions">
             <label>统计窗口
               <select id="llmUsageWindow">
                 <option value="1">1 小时</option>
@@ -487,6 +489,8 @@
             </label>
             <button id="refreshLlmUsage" class="secondary compact" type="button">刷新用量</button>
           </div>
+            </div>
+          </details>
           <div class="usage-summary" aria-label="LLM usage summary">
             <div class="usage-stat"><span>请求</span><strong id="usageRequests">0</strong><small id="usageLogicalCalls">0 logical</small></div>
             <div class="usage-stat"><span>总 Token</span><strong id="usageTotalTokens">0</strong><small id="usageCoverage">coverage 100%</small></div>

@@ -411,7 +411,11 @@
     if (!message) return;
     CM.dom.input.value = "";
     CM.dom.input.style.height = "auto";
-    try { await CM.sendDirectPayload({message}); }
+    try {
+      const visual = await CM.features.voice?.sendTextWithVisual?.(message);
+      if (visual?.handled) return visual.result;
+      await CM.sendDirectPayload({message});
+    }
     catch (error) {
       const box = document.createElement("div");
       box.className = "error";

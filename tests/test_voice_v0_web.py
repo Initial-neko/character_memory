@@ -50,6 +50,30 @@ def test_voice_call_pins_target_and_survives_conversation_switches():
     assert 'CM.on("conversationChanged", () => { if (voice.active) stopCall(); });' not in script
 
 
+def test_voice_call_can_mute_microphone_without_stopping_visual_or_tts():
+    index = Path("src/character_memory/web/index.html").read_text(encoding="utf-8")
+    script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
+    app = Path("src/character_memory/web/app.js").read_text(encoding="utf-8")
+    groups = Path("src/character_memory/web/groups.js").read_text(encoding="utf-8")
+
+    assert 'id="voiceMicButton"' in index
+    assert "micActive: false" in script
+    assert "async function startMicrophone" in script
+    assert "async function stopMicrophone" in script
+    assert "async function toggleMicrophone" in script
+    stop_mic = script.split("async function stopMicrophone", 1)[1].split("async function startMicrophone", 1)[0]
+    assert "visualSession?.stop" not in stop_mic
+    assert "eventSource?.close" not in stop_mic
+    assert "currentAudio" not in stop_mic
+    start_call = script.split("async function startCall()", 1)[1].split("async function stopCall()", 1)[0]
+    assert "voice.active = true" in start_call
+    assert "startMicrophone({throwOnError:false})" in start_call
+    assert start_call.index("voice.active = true") < start_call.index("startMicrophone({throwOnError:false})")
+    assert "sendTextWithVisual" in script
+    assert "CM.features.voice?.sendTextWithVisual?.(message)" in app
+    assert "CM.features.voice?.sendTextWithVisual?.(message)" in groups
+
+
 def test_voice_call_can_minimize_without_stopping_capture():
     script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
     assert 'function minimizeCall()' in script

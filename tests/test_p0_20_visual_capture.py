@@ -63,6 +63,7 @@ def test_visual_capture_assets_cover_camera_display_keyframes_and_call_persisten
 
     assert "/static/visual_capture.js" in index
     assert "/static/visual_capture.css" in index
+    assert 'id="voiceMicButton"' in index
     assert 'id="voiceCameraButton"' in index
     assert 'id="voiceScreenButton"' in index
     assert 'id="voiceVisualPreview"' in index
@@ -76,6 +77,11 @@ def test_visual_capture_assets_cover_camera_display_keyframes_and_call_persisten
     assert "/v1/visual/direct/messages" in voice
     assert "/v1/visual/groups/" in voice
     assert "visual_frames" in voice
+    assert "micActive" in voice
+    assert "stopMicrophone" in voice
+    assert "sendTextWithVisual" in voice
+    assert "visualFramesForCurrentConversation" in voice
+    assert "fromMs:Math.max(0, now - 15000)" in voice
     assert "voice.visualSession?.stop" in voice
     minimize_block = voice.split("function minimizeCall()", 1)[1].split("function expandCall()", 1)[0]
     assert "visualSession" not in minimize_block

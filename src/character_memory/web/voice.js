@@ -11,6 +11,7 @@
 
   const voice = {
     active: false,
+    micActive: false,
     minimized: false,
     phase: "idle",
     capturePhase: "idle",
@@ -61,6 +62,7 @@
     dockStatus: document.getElementById("voiceDockStatus"),
     dockVisual: document.getElementById("voiceDockVisual"),
     dockHangup: document.getElementById("voiceDockHangupButton"),
+    mic: document.getElementById("voiceMicButton"),
     camera: document.getElementById("voiceCameraButton"),
     screen: document.getElementById("voiceScreenButton"),
     visualStop: document.getElementById("voiceVisualStopButton"),
@@ -166,7 +168,7 @@
       setAvatar(dom.avatar, id, name);
       setAvatar(dom.dockAvatar, id, name);
       if (dom.name) dom.name.textContent = name;
-      if (dom.context) dom.context.textContent = "单聊语音";
+      if (dom.context) dom.context.textContent = "单聊通话";
       if (dom.dockTitle) dom.dockTitle.textContent = name;
     }
   }
@@ -174,7 +176,7 @@
   function updateCallButton() {
     if (!dom.button) return;
     dom.button.classList.toggle("active", voice.active);
-    dom.button.title = voice.active ? "返回正在进行的语音通话" : "语音通话";
+    dom.button.title = voice.active ? "返回正在进行的通话" : "语音/视频通话";
   }
 
   function setPhase(phase, text) {
@@ -188,6 +190,33 @@
     voice.capturePhase = phase;
   }
 
+  function updateMicUi() {
+    if (!dom.mic) return;
+    const active = Boolean(voice.active && voice.micActive);
+    dom.mic.classList.toggle("active", active);
+    dom.mic.classList.toggle("muted", voice.active && !voice.micActive);
+    dom.mic.setAttribute?.("aria-pressed", active ? "true" : "false");
+    dom.mic.textContent = active ? "🎙 麦克风" : "🔇 麦克风";
+    dom.mic.title = active ? "关闭麦克风" : "开启麦克风";
+    dom.mic.disabled = !voice.active;
+  }
+
+  function resumeInputState() {
+    if (!voice.active) return;
+    if (voice.micActive) {
+      setCapturePhase("listening");
+      setPhase("listening", "正在听…");
+      return;
+    }
+    setCapturePhase("idle");
+    const visual = voice.visualSession?.getState?.() || {active:false, source:null};
+    if (visual.active) {
+      setPhase("muted", (visual.source === "DISPLAY" ? "屏幕共享" : "摄像头") + "中 · 麦克风已关闭");
+    } else {
+      setPhase("muted", "麦克风已关闭");
+    }
+  }
+
   function updateVisualUi(snapshot = null) {
     const value = snapshot || voice.visualSession?.getState?.() || {active:false, source:null, candidateCount:0};
     const active = Boolean(value.active);
@@ -199,6 +228,9 @@
       dom.dockVisual.classList.toggle("hidden", !active);
       dom.dockVisual.textContent = value.source === "CAMERA" ? "📷" : value.source === "DISPLAY" ? "🖥" : "";
       dom.dockVisual.title = active ? `${value.source === "CAMERA" ? "摄像头" : "屏幕共享"} · ${value.candidateCount || 0} 个候选帧` : "";
+    }
+    if (voice.active && !voice.micActive && !["waiting", "speaking", "recording"].includes(voice.phase)) {
+      resumeInputState();
     }
   }
 
@@ -219,6 +251,7 @@
     const session = ensureVisualSession();
     await session.startCamera();
     updateVisualUi();
+    resumeInputState();
   }
 
   async function startScreenVisual() {
@@ -226,11 +259,36 @@
     const session = ensureVisualSession();
     await session.startDisplay();
     updateVisualUi();
+    resumeInputState();
   }
 
   function stopVisual({clearCandidates = false} = {}) {
     voice.visualSession?.stop?.({clearCandidates, reason:"视觉已关闭"});
     updateVisualUi();
+    resumeInputState();
+  }
+
+  function visualFramesForCurrentConversation() {
+    if (!voice.active || !isViewingTarget()) return [];
+    const session = voice.visualSession;
+    if (!session?.getState?.().active) return [];
+    const now = performance.now();
+    return session.selectFrames({
+      fromMs:Math.max(0, now - 15000),
+      toMs:now,
+      maxFrames:4,
+    });
+  }
+
+  async function sendTextWithVisual(message) {
+    const text = String(message || "").trim();
+    if (!text) return {handled:false};
+    const visualFrames = visualFramesForCurrentConversation();
+    if (!visualFrames.length) return {handled:false};
+    const sent = await sendTranscript(text, visualFrames);
+    appendCallLog("user", text, sent.message?.id ?? sent.event_id ?? null);
+    if (dom.transcript) dom.transcript.textContent = "你：" + text + " · 附 " + visualFrames.length + " 个视觉关键帧";
+    return {handled:true, result:sent, frameCount:visualFrames.length};
   }
 
   function formatMetrics() {
@@ -433,8 +491,7 @@
         } else {
           voice.currentSpeakerId = null;
           renderCallIdentity();
-          setCapturePhase("listening");
-          setPhase("listening", "正在听…");
+          resumeInputState();
         }
       }
     });
@@ -443,9 +500,10 @@
       if (!voice.active) return;
       let message = "角色响应失败";
       try { message = JSON.parse(event.data || "{}").message || message; } catch (_) {}
-      setCapturePhase("listening");
+      if (voice.micActive) setCapturePhase("listening");
+      else setCapturePhase("idle");
       setPhase("error", message);
-      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      setTimeout(() => voice.active && resumeInputState(), 1200);
     });
   }
 
@@ -501,9 +559,10 @@
       const sent = await sendTranscript(text, turn.visualFrames || []);
       appendCallLog("user", text, sent.message?.id ?? sent.event_id ?? null);
     } catch (error) {
-      setCapturePhase("listening");
+      if (voice.micActive) setCapturePhase("listening");
+      else setCapturePhase("idle");
       setPhase("error", `语音失败：${error.message}`);
-      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      setTimeout(() => voice.active && resumeInputState(), 1200);
     }
   }
 
@@ -533,7 +592,7 @@
   }
 
   async function finishSpeech() {
-    if (!voice.active || !voice.chunks.length) return;
+    if (!voice.active || !voice.micActive || !voice.chunks.length) return;
     const speechEndedAt = performance.now();
     const visualFrames = voice.visualSession?.selectFrames?.({
       fromMs:Math.max(0, voice.speechStartedAt - 1000),
@@ -565,9 +624,13 @@
 
       const validation = validateAsrTranscript(result.text);
       if (!validation.valid) {
-        setCapturePhase("listening");
+        if (voice.micActive) setCapturePhase("listening");
+        else setCapturePhase("idle");
         if (dom.transcript && !voice.playing) dom.transcript.textContent = "没有识别到有效内容";
-        if (!voice.playing) setPhase("listening", "正在听…");
+        if (!voice.playing) {
+          if (voice.micActive) setPhase("listening", "正在听…");
+          else resumeInputState();
+        }
         console.debug("[voice] ignored invalid ASR transcript", validation.reason, validation.text);
         return;
       }
@@ -575,16 +638,18 @@
       const turn = {text:validation.text, visualFrames, asrMs};
       if (voice.playing || voice.queue.length) {
         voice.pendingTurns.push(turn);
-        setCapturePhase("listening");
+        if (voice.micActive) setCapturePhase("listening");
+        else setCapturePhase("idle");
         if (dom.transcript) dom.transcript.textContent = `你：${validation.text} · 已听到，等待对方说完…`;
         return;
       }
       await dispatchRecognizedTurn(turn);
     } catch (error) {
-      setCapturePhase("listening");
+      if (voice.micActive) setCapturePhase("listening");
+      else setCapturePhase("idle");
       if (!voice.playing) {
         setPhase("error", `语音失败：${error.message}`);
-        setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+        setTimeout(() => voice.active && resumeInputState(), 1200);
       } else {
         console.warn("[voice] ASR failed during playback", error);
       }
@@ -649,7 +714,8 @@
         const item = voice.queue.shift();
         voice.currentSpeakerId = item.characterId;
         renderCallIdentity();
-        setCapturePhase("listening");
+        if (voice.micActive) setCapturePhase("listening");
+        else setCapturePhase("idle");
         setPhase("speaking", `${speakerName(item.characterId)} 正在说…`);
         const url = await scheduleSynthesis(item);
         prefetchNext();
@@ -668,7 +734,8 @@
       if (voice.active) {
         voice.currentSpeakerId = null;
         renderCallIdentity();
-        setCapturePhase("listening");
+        if (voice.micActive) setCapturePhase("listening");
+        else setCapturePhase("idle");
         setPhase("error", `TTS 失败：${error.message}`);
       }
     } finally {
@@ -679,7 +746,7 @@
     voice.currentSpeakerId = null;
     renderCallIdentity();
     if (failed) {
-      setTimeout(() => voice.active && setPhase("listening", "正在听…"), 1200);
+      setTimeout(() => voice.active && resumeInputState(), 1200);
       return;
     }
     voice.lastMetrics.total = voice.turnStartedAt ? performance.now() - voice.turnStartedAt + Number(voice.lastMetrics.asr || 0) : null;
@@ -687,13 +754,12 @@
     if (voice.pendingTurns.length) {
       await flushPendingTurns();
     } else {
-      setCapturePhase("listening");
-      setPhase("listening", "正在听…");
+      resumeInputState();
     }
   }
 
   function audioFrame(event) {
-    if (!voice.active || !["listening", "recording"].includes(voice.capturePhase)) return;
+    if (!voice.active || !voice.micActive || !["listening", "recording"].includes(voice.capturePhase)) return;
     const input = event.inputBuffer.getChannelData(0);
     const chunk = new Float32Array(input);
     const level = rms(chunk);
@@ -726,14 +792,28 @@
     }
   }
 
-  async function startCall() {
-    if (voice.active) {
-      expandCall();
-      return;
-    }
-    dom.button.disabled = true;
+  async function stopMicrophone({updateStatus = true} = {}) {
+    voice.micActive = false;
+    voice.processor?.disconnect?.();
+    voice.sourceNode?.disconnect?.();
+    voice.stream?.getTracks?.().forEach(track => track.stop());
+    try { await voice.audioContext?.close?.(); } catch (_) {}
+    voice.stream = null;
+    voice.audioContext = null;
+    voice.sourceNode = null;
+    voice.processor = null;
+    voice.chunks = [];
+    voice.preRoll = [];
+    voice.hotFrames = 0;
+    setCapturePhase("idle");
+    updateMicUi();
+    if (updateStatus) resumeInputState();
+  }
+
+  async function startMicrophone({throwOnError = true} = {}) {
+    if (!voice.active) throw new Error("请先开始通话");
+    if (voice.micActive) return true;
     try {
-      const target = captureTarget();
       applyVoiceCapture(await checkMedia());
       const stream = await navigator.mediaDevices.getUserMedia({
         audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
@@ -746,13 +826,47 @@
       source.connect(processor);
       processor.connect(context.destination);
 
-      voice.active = true;
-      voice.minimized = false;
-      voice.target = target;
       voice.stream = stream;
       voice.audioContext = context;
       voice.sourceNode = source;
       voice.processor = processor;
+      voice.micActive = true;
+      voice.preRoll = [];
+      voice.chunks = [];
+      voice.hotFrames = 0;
+      setCapturePhase("listening");
+      updateMicUi();
+      setPhase("listening", "正在听…");
+      return true;
+    } catch (error) {
+      await stopMicrophone({updateStatus:false});
+      if (dom.transcript) {
+        dom.transcript.textContent = "麦克风未开启：" + error.message + "。仍可共享屏幕/摄像头，并通过聊天框发送文字。";
+      }
+      setPhase("muted", "麦克风未开启 · 可继续屏幕共享");
+      if (throwOnError) throw error;
+      return false;
+    }
+  }
+
+  async function toggleMicrophone() {
+    if (!voice.active) return;
+    if (voice.micActive) await stopMicrophone();
+    else await startMicrophone();
+  }
+
+  async function startCall() {
+    if (voice.active) {
+      expandCall();
+      return;
+    }
+    dom.button.disabled = true;
+    try {
+      const target = captureTarget();
+      voice.active = true;
+      voice.micActive = false;
+      voice.minimized = false;
+      voice.target = target;
       voice.queue = [];
       voice.pendingTurns = [];
       voice.playing = false;
@@ -763,21 +877,25 @@
       voice.preRoll = [];
       voice.chunks = [];
       voice.hotFrames = 0;
-      setCapturePhase("listening");
-      ensureVisualSession();
+      setCapturePhase("idle");
       openVoiceEvents();
 
-      if (dom.transcript) dom.transcript.textContent = "直接说话即可；AI 说话时也会继续听，但不会打断当前语音。摄像头/屏幕开启后只会抽取少量关键帧。";
+      if (dom.transcript) {
+        dom.transcript.textContent = "可语音，也可关闭麦克风后只共享屏幕；共享期间在聊天框发送文字会自动附带当前关键帧。";
+      }
       resetCallLog();
       renderCallIdentity();
       formatMetrics();
+      updateMicUi();
       updateVisualUi();
       dom.dock?.classList.add("hidden");
       dom.overlay?.classList.remove("hidden");
       updateCallButton();
-      setPhase("listening", "正在听…");
+      setPhase("connecting", "正在准备通话…");
+      await startMicrophone({throwOnError:false});
     } catch (error) {
-      alert(`无法开始语音：${error.message}`);
+      await stopCall();
+      alert("无法开始通话：" + error.message);
     } finally {
       dom.button.disabled = false;
     }
@@ -800,16 +918,9 @@
     for (const item of voice.queue) {
       if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
     }
-    voice.processor?.disconnect?.();
-    voice.sourceNode?.disconnect?.();
-    voice.stream?.getTracks?.().forEach(track => track.stop());
+    await stopMicrophone({updateStatus:false});
     voice.visualSession?.stop?.({clearCandidates:true, reason:"视觉已关闭"});
     voice.visualSession = null;
-    try { await voice.audioContext?.close?.(); } catch (_) {}
-    voice.stream = null;
-    voice.audioContext = null;
-    voice.sourceNode = null;
-    voice.processor = null;
     voice.queue = [];
     voice.pendingTurns = [];
     voice.chunks = [];
@@ -820,6 +931,7 @@
     setCapturePhase("idle");
     voice.currentSpeakerId = null;
     voice.target = null;
+    updateMicUi();
     updateVisualUi({active:false, source:null, candidateCount:0});
     setPhase("idle", "");
     dom.overlay?.classList.add("hidden");
@@ -828,6 +940,7 @@
   }
 
   dom.button?.addEventListener("click", startCall);
+  dom.mic?.addEventListener("click", () => toggleMicrophone().catch(error => alert("无法切换麦克风：" + error.message)));
   dom.minimize?.addEventListener("click", minimizeCall);
   dom.hangup?.addEventListener("click", stopCall);
   dom.dockExpand?.addEventListener("click", expandCall);
@@ -844,13 +957,19 @@
     stop:stopCall,
     minimize:minimizeCall,
     expand:expandCall,
+    startMicrophone,
+    stopMicrophone,
+    toggleMicrophone,
     startCamera:startCameraVisual,
     startScreen:startScreenVisual,
     stopVisual,
+    visualFramesForCurrentConversation,
+    sendTextWithVisual,
     state:voice,
     stableSpeakerId,
     validateAsrTranscript,
   });
   updateCallButton();
+  updateMicUi();
   updateVisualUi({active:false, source:null, candidateCount:0});
 })();

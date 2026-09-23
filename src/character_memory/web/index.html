@@ -66,10 +66,11 @@
         <div id="voiceCallContext" class="voice-call-context">单聊通话</div>
         <div id="voiceCallStatus" class="voice-call-status">正在连接…</div>
         <div id="voiceCallMetrics" class="voice-call-metrics"></div>
-        <div class="voice-visual-controls" aria-label="视频与视觉共享">
+        <div class="voice-visual-controls" aria-label="通话媒体控制">
+          <button id="voiceMicButton" class="voice-visual-button" type="button" title="关闭麦克风" aria-pressed="false">🎙 麦克风</button>
           <button id="voiceCameraButton" class="voice-visual-button" type="button" title="开启前置摄像头视频">📷 开启视频</button>
           <button id="voiceScreenButton" class="voice-visual-button" type="button" title="选择标签页、窗口或整个屏幕">🖥 屏幕</button>
-          <button id="voiceVisualStopButton" class="voice-visual-button stop hidden" type="button">关闭视频</button>
+          <button id="voiceVisualStopButton" class="voice-visual-button stop hidden" type="button">关闭共享</button>
         </div>
         <div id="voiceVisualPanel" class="voice-visual-panel hidden">
           <video id="voiceVisualPreview" class="voice-visual-preview" muted autoplay playsinline></video>
@@ -83,7 +84,7 @@
       <section class="voice-call-detail" aria-label="当前语音对话">
         <div class="voice-call-detail-head"><strong>当前对话</strong><span>语音内容会同时写入聊天历史</span></div>
         <div id="voiceCallLog" class="voice-call-log" aria-live="polite"></div>
-        <div id="voiceCallTranscript" class="voice-call-transcript">直接说话即可；停顿后会自动发送。</div>
+        <div id="voiceCallTranscript" class="voice-call-transcript">可语音，也可关闭麦克风后只共享屏幕；共享期间在聊天框发送文字会自动附带当前关键帧。</div>
       </section>
     </div>
   </div>

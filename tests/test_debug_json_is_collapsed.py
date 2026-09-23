@@ -268,8 +268,6 @@ WIRING = {
         "modelStatus",
         "llmReply",
         "llmResult",
-        "ttsLatency",
-        "ttsResult",
         "asrText",
         "asrResult",
         "mediaSmokeText",

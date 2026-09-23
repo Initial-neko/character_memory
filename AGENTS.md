@@ -1,116 +1,72 @@
 # Repository Guidelines
 
-These rules apply to contributors and coding agents working in this repository.
+This file contains repository-wide rules and context routing for contributors and coding agents.
 
-## Project scope
+Keep it short and stable. Detailed architecture, feature behavior, task state, and historical notes belong elsewhere.
 
-Character Memory is an experimental persistent-AI-person project. Keep new capabilities attached to the same Person runtime and durable event model rather than creating parallel personality/state systems.
+## Core invariants
 
-The current implementation is defined by:
+- `main` is the integration source of truth.
+- Extend the existing Person runtime, durable event model, Memory model, and shared services instead of creating parallel systems.
+- Prefer focused branches, focused PRs, and focused tests.
+- Do not commit agent transcripts, generated task ledgers, review scratchpads, temporary implementation plans, secrets, model assets, or machine-specific paths.
+- Maintained documentation describes the current project. Git, Issues, PRs, tags, and releases preserve history.
 
-1. source code on the target branch;
-2. `docs/current/` maintained contracts;
-3. `config.example.yaml` and `pyproject.toml`;
-4. tests.
+## Source precedence
 
-Historical notes under `docs/archive/` are not current API or runtime contracts.
+When sources disagree, use this order:
 
-Implementation state is owned by `docs/current/STATUS.md`. Do not infer that an open PR, old plan, archived milestone, or TODO is already shipped.
+1. current source code and schemas;
+2. tests that exercise current behavior;
+3. maintained contracts under `docs/current/`;
+4. configuration files such as `config.example.yaml` and `pyproject.toml`;
+5. README / release documentation;
+6. archive, research, and historical notes.
 
-## Architecture map
+An open PR is work in progress, not current-main behavior.
 
-The codebase is intentionally layered without a framework-heavy service container:
+## Progressive context loading
 
-```text
-server.py
-  -> create_api()
-     -> AppBundle / RuntimeServices / typed route access
-  -> attach feature HTTP adapters
+Do not preload the whole documentation tree.
 
-application/
-  -> Direct/Group orchestration, async scheduling, autonomy, wake/proactive
+At the start of a task:
 
-runtime/
-  -> PersonRuntime, shared PersonContextBuilder, ReactionEngine, resource gating
+1. read this file;
+2. read the originating Issue / PR when applicable;
+3. identify the affected subsystem;
+4. read only the relevant maintained contract;
+5. inspect the related source and tests.
 
-domain/
-  -> structured contracts (Event / Memory / PersonReaction / ActionDecision)
+Use these routers only when needed:
 
-storage/ + memory/
-  -> durable facts, migrations, search/history, embedding/recall
+- cannot find the code owner → `docs/current/CODEBASE_LAYOUT.md`
+- cannot find the owning document → `docs/README.md`
+- need project-wide implementation status → `docs/current/STATUS.md`
+- change crosses subsystem/runtime boundaries → `docs/current/ARCHITECTURE.md`
+- development, testing, PR, or validation rules → `CONTRIBUTING.md`
+- release/version/tag work → `docs/current/RELEASES.md`
 
-feature modules
-  -> Space, Encounter, Ensemble, Avatar, Visual, Voice, World
+Do not read all of `docs/current/` by default.
+Do not read `docs/archive/`, `docs/research/`, or `CHANGELOG.md` unless the task specifically requires them.
 
-web/
-  -> native HTML/CSS/JS product surfaces; no React build chain
-```
+## Documentation updates
 
-Key ownership rules:
+When a PR changes durable behavior, update the owning maintained document in the same PR.
 
-- `api.py` is composition/lifecycle, not a bucket for new endpoints.
-- `server.py` is the fastest map of Character Runtime route assembly.
-- `RuntimeServices` owns shared Search / Avatar / ImageGen / World infrastructure; route attach order must not create dependencies.
-- Direct and Group share the reaction/materialization core but retain explicit channel policy.
-- Space/World use the same Person data but still have channel-specific planning; do not force a universal action schema without a product reason.
-- Formal Character creation converges through `ApiCharacterService` + `CharacterOnboardingService`; Ensemble and accepted Encounter candidates must not invent parallel permanent persona/onboarding paths.
-- onboarding network/provider work must stay outside the character-write lock, and mandatory initialization failure must preserve rollback semantics.
-- durable facts remain authoritative; Memory/Mental State/Intent/Trace are derived cognition.
-- Media, Vision, ImageGen, Voice and Avatar are channels/tools of the same Person, never separate personalities.
+Replace stale statements with the current truth instead of appending correction history.
+Avoid duplicating the same fact across multiple maintained documents.
 
-For file-level navigation, read `docs/current/CODEBASE_LAYOUT.md` before broad edits. For runtime topology, read `docs/current/ARCHITECTURE.md`.
+Use `docs/README.md` for documentation ownership and routing.
 
-## Development workflow
+## Multi-agent work
 
-- Make focused changes with focused tests.
-- Do not commit generated task ledgers, agent transcripts, step-by-step implementation plans, or review scratchpads as product documentation.
-- Durable architecture/product behavior belongs in `docs/current/`.
-- Temporary implementation planning belongs in the issue/PR or local untracked notes.
-- Avoid compatibility layers unless a change explicitly requires one. Prefer a clear failure over silent schema/config drift.
-- Keep cross-process and file-format contracts covered by real round-trip tests.
-- Do not modify a developer's real `.env` from tests. Use temporary paths.
-- Never commit secrets, local model weights, generated voice clips, or machine-specific absolute paths.
+Issues and PRs are the shared coordination surface.
 
-## Testing
+Before broad parallel work, check open PRs for overlapping ownership.
+Parallelize independent modules; serialize strongly coupled or overlapping changes.
+Do not create persistent agent-specific handoff or task-state documents.
 
-Use the repository environment:
+## Release boundary
 
-```bash
-uv run pytest -q
-```
-
-For focused changes, run the smallest relevant test set first, then the full suite before merge.
-
-Browser smoke tests and live-model checks have separate environment requirements. CI contract tests must not require GPU access or model downloads.
-
-## Documentation
-
-When behavior changes:
-
-- update the relevant contract file in `docs/current/`;
-- update `docs/current/STATUS.md` when something moves between IN PROGRESS / SHIPPED / BACKLOG / DEFERRED;
-- keep `README.md` limited to project overview, setup, primary architecture, stable entry points, and a short status pointer;
-- keep architecture ownership reflected here and in `CODEBASE_LAYOUT.md` when modules/services move;
-- use `docs/archive/` only for historical milestones that are still worth keeping;
-- do not create tool-specific documentation trees such as `docs/superpowers/`.
-
-## Releases
-
-- Keep `main` CI-green; do normal work on short-lived branches.
-- Stable baselines are immutable Git tags / GitHub Releases, not a moving `stable` branch.
-- Update `pyproject.toml`, `CHANGELOG.md`, and `docs/current/RELEASES.md` when cutting a release line.
-- Do not promote a release candidate to stable until the normal stack has had real local soak time in addition to CI.
-- Create a `release/X.Y` maintenance branch only when a shipped stable line needs a hotfix after `main` has moved on.
-
-## Pull requests
-
-A PR should state:
-
-- what changed;
-- why;
-- validation performed;
-- known limitations or deferred work.
-
-Do not merge an incomplete experimental feature merely because its supporting contract landed. Keep the distinction between foundation, runtime integration, and user-visible completion explicit.
-
-Before opening a PR that changes architecture or a user-visible capability, verify that its status wording is consistent across the owning topic doc, `STATUS.md`, README summary (if affected), and this repository guide (if ownership moved). Open PR behavior must never be described as current-main behavior.
+Ordinary feature work must not casually change versions, tags, or release state.
+Follow `docs/current/RELEASES.md` for release work.

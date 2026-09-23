@@ -48,6 +48,7 @@
   border-radius: var(--ui-r-lg);
   background: var(--ui-surface-soft);
 }
+.persona-inspector { display: grid; gap: 4px; }
 .persona-card-head { display: flex; gap: 12px; align-items: center; }
 .persona-card-head h3 { margin: 0 0 4px; font-size: 20px; }
 .persona-card-head p { margin: 0; color: var(--ui-muted); }

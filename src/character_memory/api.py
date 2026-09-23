@@ -153,6 +153,26 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     create_character_from_draft = characters.create_from_draft
     rollback_created_character = characters.rollback_created
 
+    def refresh_voice_registry() -> dict[str, object]:
+        """Best-effort GSV registry refresh after archive/restore.
+
+        Archiving is a lifecycle change, not data deletion. The voice.yaml stays
+        on disk, while a running GSV sidecar should immediately stop resolving
+        that character id until it is restored.
+        """
+        try:
+            from character_memory.tts_lab import GsvVoiceReloader
+
+            reloader = GsvVoiceReloader(timeout_seconds=1.5)
+            try:
+                reloader.reload()
+            finally:
+                reloader.close()
+            return {"ok": True, "reloaded": True}
+        except Exception as exc:
+            logger.warning("api.voice_registry reload skipped/failed error=%s", exc)
+            return {"ok": False, "reloaded": False, "reason": str(exc) or exc.__class__.__name__}
+
     resources = ApiResourceService(
         settings=settings,
         read_store=read_store,
@@ -202,7 +222,11 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         if not getattr(settings, "api_key", ""):
             return []
         now = datetime.now().astimezone()
-        character_ids = [profile["id"] for profile in character_profiles()]
+        character_ids = [
+            profile["id"]
+            for profile in character_profiles()
+            if "archived_at" not in profile
+        ]
         gate = ProactiveService(read_store)
         if not character_ids or not gate.has_due(character_ids, now):
             return []
@@ -342,6 +366,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         character_profiles=character_profiles,
         public_profile=public_profile,
         set_archived=_set_archived,
+        refresh_voice_registry=refresh_voice_registry,
         character_summary=character_summary,
         ensure_character=ensure_character,
         create_character_from_draft=create_character_from_draft,

@@ -484,7 +484,7 @@
           <pre>${CM.escapeHtml(actionText)}</pre>
         </section>
 
-        <details class="inspector-details trace-io" open>
+        <details class="inspector-details trace-io">
           <summary>模型真实输入 / 原始响应</summary>
           <p class="memory-help">这里展示 Runtime 实际保存并发送给 Provider 的 messages，以及 Provider 返回的原始结构化文本。可用 Logical Call ID 与 Dev 的 LLM Usage 对照。</p>
           <h4>发送给模型的 messages</h4>

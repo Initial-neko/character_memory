@@ -166,16 +166,12 @@ class PersonaBuilder:
         ):
             with (lock if lock is not None else nullcontext()):
                 for attempt in range(attempts):
-                    request_kwargs = {
-                        "conversation_id": "persona-builder",
-                        "json_object": True,
-                    }
-                    if hasattr(self.model, "usage_recorder"):
-                        request_kwargs.update(
-                            usage_attempt=attempt + 1,
-                            usage_logical_call_id=logical_call_id,
+                    with llm_usage_scope(attempt=attempt + 1):
+                        text = self.model._request(
+                            messages,
+                            conversation_id="persona-builder",
+                            json_object=True,
                         )
-                    text = self.model._request(messages, **request_kwargs)
                     try:
                         parser = getattr(self.model, "_json", json.loads)
                         draft = PersonaDraft.model_validate(parser(text))

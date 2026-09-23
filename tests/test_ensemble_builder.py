@@ -460,6 +460,25 @@ def test_voice_design_opt_in_schedules_best_effort_work_after_group_commit(tmp_p
     store.close()
 
 
+def test_voice_design_scheduling_failure_does_not_rollback_group(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    service.research(started["group_id"])
+
+    def fail_schedule(_items):
+        raise RuntimeError("thread unavailable")
+
+    service._start_voice_design = fail_schedule
+    result = service.confirm(started["group_id"], [0, 1], use_voice_design=True)
+
+    assert result["status"] == "ACTIVE"
+    assert result["group"]["status"] == "ACTIVE"
+    assert result["group"]["member_ids"] == ["kurisu", "okabe"]
+    store.close()
+
+
 def test_voice_design_instruction_uses_traits_not_exact_age(tmp_path):
     access, store, _, _, _ = _access(tmp_path)
     service = EnsembleBuilderService(access, EnsembleRepository(store))

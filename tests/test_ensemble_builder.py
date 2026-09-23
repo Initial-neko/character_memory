@@ -267,7 +267,7 @@ def test_failed_build_cannot_confirm_stale_drafts(tmp_path):
         service.confirm(started["group_id"], [0, 1], now=now)
         assert False, "FAILED build must not be confirmable"
     except ValueError as exc:
-        assert "重新开始" in str(exc)
+        assert "重试整理" in str(exc)
 
     assert GroupRepository(store).list_groups() == []
     store.close()

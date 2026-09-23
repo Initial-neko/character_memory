@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from character_memory.domain.models import Event, EventType, Memory
+from character_memory.llm.usage import llm_usage_scope
 
 
 class LifeSimulator:
@@ -25,10 +26,17 @@ class LifeSimulator:
         )
 
     def simulate_day(self, character_id: str, day: datetime):
-        plan = self.model.plan_day(
-            self._base(character_id, day)
-            + "\n\n规划这一天 0-3 个符合人物自身生活的事件。不要让所有生活都围绕用户。动态可选；没有自然内容就不要发。"
-        )
+        with llm_usage_scope(
+            feature="LIFE",
+            purpose="LIFE_PLAN",
+            character_id=character_id,
+            conversation_id=f"life:{character_id}:{day.date().isoformat()}",
+            override=True,
+        ):
+            plan = self.model.plan_day(
+                self._base(character_id, day)
+                + "\n\n规划这一天 0-3 个符合人物自身生活的事件。不要让所有生活都围绕用户。动态可选；没有自然内容就不要发。"
+            )
         created = []
         for candidate in plan.events:
             t = day.replace(hour=candidate.hour if candidate.hour is not None else 18, minute=0, second=0, microsecond=0)
@@ -70,11 +78,18 @@ class LifeSimulator:
         events = self.store.list_events(character_id, limit=80, before=end)
         today = [e for e in events if e.event_time.date() == day.date()]
         lines = "\n".join(f"- {e.event_time.strftime('%H:%M')} {e.event_type.value}: {e.content}" for e in today) or "- 今天没有记录到明显事件"
-        result = self.model.write_diary(
-            self._base(character_id, end)
-            + f"\n\n# Today's Events\n{lines}"
-            + "\n\n写当天第一人称日记，并给出下一天可持续的 mental_state_update。日记是主观记录，不是事实源，不得改写原始事件。"
-        )
+        with llm_usage_scope(
+            feature="LIFE",
+            purpose="LIFE_DIARY",
+            character_id=character_id,
+            conversation_id=f"life:{character_id}:{day.date().isoformat()}",
+            override=True,
+        ):
+            result = self.model.write_diary(
+                self._base(character_id, end)
+                + f"\n\n# Today's Events\n{lines}"
+                + "\n\n写当天第一人称日记，并给出下一天可持续的 mental_state_update。日记是主观记录，不是事实源，不得改写原始事件。"
+            )
         t = day.replace(hour=23, minute=30, second=0, microsecond=0)
         event = self.store.append_event(Event(character_id=character_id, event_type=EventType.DIARY, event_time=t, content=result.diary))
         self.store.set_mental_state(character_id, result.mental_state_update, t, event.id)

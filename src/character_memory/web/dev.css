@@ -49,6 +49,15 @@ label { display: block; color: var(--ui-muted); font-size: 13px; margin: 12px 0 
 
 .metric-inline { color: var(--ui-link); font-variant-numeric: tabular-nums; }
 
+.dev-llm-prompt {
+  display: block;
+  width: 100%;
+  min-height: 150px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+
 /* Mono output block: static text areas and live result panes share one look. */
 .status-block, .result {
   margin: 0;

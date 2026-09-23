@@ -1,68 +1,74 @@
 # Repository Guidelines
 
-These rules apply to contributors and coding agents working in this repository.
+This file contains repository-wide rules and context routing for contributors and coding agents.
 
-## Project scope
+Keep it short and stable. Detailed architecture, feature behavior, task state, and history belong in their owning documents, Issues, PRs, or Git history.
 
-Character Memory is an experimental persistent-AI-person project. Keep new capabilities attached to the same Person runtime and durable event model rather than creating parallel personality/state systems.
+## Core rules
 
-The current implementation is defined by:
+- `main` is the integration source of truth.
+- Extend the existing Person runtime, durable event model, Memory model, and shared services instead of creating parallel systems.
+- Prefer focused branches, focused PRs, and focused tests.
+- Prefer extending an existing stable-domain document. Add a new `docs/current/*.md` only for an independent runtime boundary, lifecycle, or durable ownership reason.
+- Do not commit agent transcripts, generated task ledgers, review scratchpads, temporary implementation plans, secrets, model assets, or machine-specific paths.
+- CI contract tests must not require GPU access or model downloads. Browser/live-model checks belong in their explicit runtime validation paths.
+- Maintained documentation describes the current project. Git, Issues, PRs, tags, and releases preserve history.
 
-1. source code on the target branch;
-2. `docs/current/` maintained contracts;
-3. `config.example.yaml` and `pyproject.toml`;
-4. tests.
+## Source precedence
 
-Historical notes under `docs/archive/` are not current API or runtime contracts.
+When sources disagree, use this order:
 
-## Development workflow
+1. current source code and schemas;
+2. tests that exercise current behavior;
+3. maintained contracts under `docs/current/`;
+4. configuration files such as `config.example.yaml` and `pyproject.toml`;
+5. README / release documentation;
+6. archive, research, and historical notes.
 
-- Make focused changes with focused tests.
-- Do not commit generated task ledgers, agent transcripts, step-by-step implementation plans, or review scratchpads as product documentation.
-- Durable architecture/product behavior belongs in `docs/current/`.
-- Prefer extending an existing stable-domain document. Add a new `docs/current/*.md` only for an independent runtime boundary, lifecycle, or durable ownership reason; do not create one document per provider, UI widget, PR, or feature slice.
-- Temporary implementation planning belongs in the issue/PR or local untracked notes.
-- Avoid compatibility layers unless a change explicitly requires one. Prefer a clear failure over silent schema/config drift.
-- Keep cross-process and file-format contracts covered by real round-trip tests.
-- Do not modify a developer's real `.env` from tests. Use temporary paths.
-- Never commit secrets, local model weights, generated voice clips, or machine-specific absolute paths.
+An open PR is work in progress, not current-main behavior.
 
-## Testing
+## Progressive context loading
 
-Use the repository environment:
+Do not preload the whole documentation tree.
 
-```bash
-uv run pytest -q
-```
+At the start of a task:
 
-For focused changes, run the smallest relevant test set first, then the full suite before merge.
+1. read this file;
+2. read the originating Issue / PR when applicable;
+3. identify the affected subsystem;
+4. read only the relevant maintained contract;
+5. inspect the related source and tests.
 
-Browser smoke tests and live-model checks have separate environment requirements. CI contract tests must not require GPU access or model downloads.
+Use these routers only when needed:
 
-## Documentation
+- cannot find the code owner → `docs/current/CODEBASE_LAYOUT.md`
+- cannot find the owning document → `docs/README.md`
+- need project-wide implementation status → `docs/current/STATUS.md`
+- change crosses subsystem/runtime boundaries → `docs/current/ARCHITECTURE.md`
+- need development, testing, PR, or validation rules → `CONTRIBUTING.md`
+- release/version/tag work → `docs/current/RELEASES.md`
 
-When behavior changes:
+Do not read all of `docs/current/` by default.
+Do not read `docs/archive/`, `docs/research/`, or `CHANGELOG.md` unless the task specifically requires them.
 
-- update the relevant file in `docs/current/`;
-- keep `README.md` limited to project overview, setup, primary architecture, and stable entry points;
-- use `docs/archive/` only for historical milestones that are still worth keeping;
-- do not create tool-specific documentation trees such as `docs/superpowers/`.
+## Documentation updates
 
-## Releases
+When a PR changes durable behavior, update the owning maintained document in the same PR.
 
-- Keep `main` CI-green; do normal work on short-lived branches.
-- Stable baselines are immutable Git tags / GitHub Releases, not a moving `stable` branch.
-- Update `pyproject.toml`, `CHANGELOG.md`, and `docs/current/RELEASES.md` when cutting a release line.
-- Do not promote a release candidate to stable until the normal stack has had real local soak time in addition to CI.
-- Create a `release/X.Y` maintenance branch only when a shipped stable line needs a hotfix after `main` has moved on.
+Replace stale statements with the current truth instead of appending correction history.
+Avoid duplicating the same fact across multiple maintained documents.
 
-## Pull requests
+Use `docs/README.md` for documentation ownership and routing.
 
-A PR should state:
+## Multi-agent work
 
-- what changed;
-- why;
-- validation performed;
-- known limitations or deferred work.
+Issues and PRs are the shared coordination surface.
 
-Do not merge an incomplete experimental feature merely because its supporting contract landed. Keep the distinction between foundation, runtime integration, and user-visible completion explicit.
+Before broad parallel work, check open PRs for overlapping ownership.
+Parallelize independent modules; serialize strongly coupled or overlapping changes.
+Do not create persistent agent-specific handoff or task-state documents.
+
+## Release boundary
+
+Ordinary feature work must not casually change versions, tags, or release state.
+Follow `docs/current/RELEASES.md` for release work.

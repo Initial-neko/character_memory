@@ -189,12 +189,23 @@
     voicePlayer = {audio:null, button:null};
   }
 
-  function likesHtml(post) {
+  function engagementHtml(post) {
     const likes = Array.isArray(post.likes) ? post.likes.slice(0, 3) : [];
-    if (!post.like_count) return "";
+    const likeCount = Number(post.like_count || 0);
+    const comments = Array.isArray(post.comments) ? post.comments : [];
+    const commentCount = Number(post.comment_count ?? comments.length);
     const names = likes.map(item => item.character?.name || item.character_id).filter(Boolean);
-    const suffix = post.like_count > names.length ? ` 等 ${post.like_count} 人` : "";
-    return `<div class="space-likes"><span class="space-heart">♡</span><span>${CM.escapeHtml(names.join("、"))}${CM.escapeHtml(suffix)}</span></div>`;
+    const suffix = likeCount > names.length ? ` 等 ${likeCount} 人` : "";
+    const socialProof = likeCount
+      ? `<div class="space-like-proof"><span class="space-heart">♡</span><span>${CM.escapeHtml(names.join("、"))}${CM.escapeHtml(suffix)}</span></div>`
+      : "";
+    return `<div class="space-engagement">
+      <div class="space-engagement-counts">
+        <span><span aria-hidden="true">♡</span> ${likeCount}</span>
+        <span><span aria-hidden="true">◌</span> ${commentCount} 条评论</span>
+      </div>
+      ${socialProof}
+    </div>`;
   }
 
   function commentName(comment) {
@@ -240,17 +251,23 @@
     const content = comment.content
       ? `<span class="space-comment-text">${CM.escapeHtml(comment.content)}</span>`
       : "";
+    const commentProfile = comment.actor_type === "USER"
+      ? {id:"user", name:"我"}
+      : (comment.author || profileFor(comment.character_id));
     return `<div class="space-comment${actorClass}${reply ? " space-comment-reply" : ""}" data-space-comment="${CM.escapeHtml(comment.id)}">
-      <div class="space-comment-main">
-        <strong class="space-comment-author">${CM.escapeHtml(name)}</strong>
-        ${replyTo}
-        ${content}
-        ${commentStickerHtml(comment)}
+      <div class="space-comment-avatar-wrap">${avatarHtml(commentProfile, "space-comment-avatar")}</div>
+      <div class="space-comment-body">
+        <div class="space-comment-main">
+          <strong class="space-comment-author">${CM.escapeHtml(name)}</strong>
+          ${replyTo}
+          ${content}
+          ${commentStickerHtml(comment)}
+        </div>
+        <button class="space-comment-reply-button" type="button"
+          data-space-reply-post="${CM.escapeHtml(post.id)}"
+          data-space-reply-comment="${CM.escapeHtml(comment.id)}"
+          data-space-reply-name="${CM.escapeHtml(name)}">回复</button>
       </div>
-      <button class="space-comment-reply-button" type="button"
-        data-space-reply-post="${CM.escapeHtml(post.id)}"
-        data-space-reply-comment="${CM.escapeHtml(comment.id)}"
-        data-space-reply-name="${CM.escapeHtml(name)}">回复</button>
     </div>`;
   }
 
@@ -297,8 +314,9 @@
       ? `<div class="space-comment-replying">回复 <strong>${CM.escapeHtml(target.name)}</strong><button type="button" data-space-reply-cancel="${CM.escapeHtml(post.id)}">取消</button></div>`
       : "";
     const placeholder = target ? `回复 ${target.name}…` : "评论这条动态…";
-    return `<div class="space-comments">
-      <div class="space-comments-list">${body || '<div class="space-comments-empty">还没有评论</div>'}</div>
+    return `<section class="space-comments" aria-label="评论">
+      <div class="space-comments-head"><strong>评论</strong><span>${allComments.length ? `${allComments.length} 条` : "还没有评论"}</span></div>
+      <div class="space-comments-list">${body || '<div class="space-comments-empty">成为第一个评论的人</div>'}</div>
       ${rootToggle}
       <form class="space-comment-form" data-space-comment-form="${CM.escapeHtml(post.id)}">
         ${replyBanner}
@@ -306,23 +324,27 @@
         <button class="space-comment-submit" type="submit">发送</button>
         <div class="space-comment-error hidden" aria-live="polite"></div>
       </form>
-    </div>`;
+    </section>`;
   }
 
   function postHtml(post) {
     const author = post.author || profileFor(post.character_id);
     const archived = author.archived ? '<span class="space-archived-badge">已归档</span>' : "";
+    const authorMeta = String(author.identity || author.tagline || "").trim();
     return `
       <article class="space-post" data-space-post="${CM.escapeHtml(post.id)}">
         <div class="space-post-avatar">${avatarHtml(author, "space-avatar")}</div>
         <div class="space-post-body">
-          <div class="space-post-head">
-            <div><strong class="space-author">${CM.escapeHtml(author.name || author.id)}</strong>${archived}</div>
+          <header class="space-post-head">
+            <div class="space-author-block">
+              <div><strong class="space-author">${CM.escapeHtml(author.name || author.id)}</strong>${archived}</div>
+              ${authorMeta ? `<span class="space-author-meta">${CM.escapeHtml(authorMeta)}</span>` : ""}
+            </div>
             <time class="space-time">${CM.escapeHtml(CM.fmtDate(post.created_at))} ${CM.escapeHtml(CM.fmtTime(post.created_at))}</time>
-          </div>
+          </header>
           ${post.content ? `<div class="space-content">${CM.escapeHtml(post.content)}</div>` : ""}
           ${mediaHtml(post)}
-          ${likesHtml(post)}
+          ${engagementHtml(post)}
           ${commentsHtml(post)}
         </div>
       </article>

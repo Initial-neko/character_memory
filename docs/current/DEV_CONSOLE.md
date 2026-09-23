@@ -158,6 +158,31 @@ POST /v1/dev/encounters/due
 
 `AUTO` 按正式的 `encounter_web_probability` 决定走互联网资料还是系统生成；`WEB` / `GENERATED` 用于强制验证单一路径。手动 opportunity 不修改正式 next opportunity；`due` 才把真实 Scheduler 的下一次机会设为现在。候选人物在用户明确留下前不占正式角色位。
 
+### LLM Usage
+
+LLM Usage Explorer 是 `diagnostic` 层能力，不进入 Dev Console 首屏。它统计真实 OpenAI-compatible `/chat/completions` HTTP 请求，而不是解析日志；正式运行态和 Dev probe 共用 `llm_calls` 计量表。
+
+每条真实请求记录 Feature / Purpose、Model / Provider、Character / Conversation / Session、Logical Call ID / Attempt、latency、status、request id，以及 Provider 真正返回的 input/output/total token。Provider 不返回 `usage` 时，Token 保持未知，只保留字符数和 Token Coverage；不会用字符数伪造 token。
+
+Structured Output repair/retry 属于同一个 Logical Call，但每个真实 HTTP attempt 单独计量，因此可以同时看到逻辑调用数、真实请求数和 Retry Rate。
+
+Dev 页面可查看 1H / 24H / 7D / 30D：
+
+- Requests / Logical Calls；
+- Input / Output / Total Tokens 和 Token Coverage；
+- Retry / Error Rate 与平均 latency；
+- Feature + Purpose 聚合；
+- Model 聚合；
+- 最近真实请求。
+
+Usage 只保存调用元数据和用量，不复制 Prompt / Response 正文；具体上下文继续由 Runtime Trace 承担，并通过 `llm_logical_call_id` 关联。
+
+```text
+GET /v1/dev/llm-usage?hours=24&limit=80
+GET :8000/v1/llm/usage?hours=24&limit=80
+```
+
+当前归因覆盖 Direct、Group、Space、Proactive、World、Persona、Ensemble、Encounter、Life、Avatar、Visual、Sticker 与 Dev probe。新增 LLM 能力时应在调用边界补 Feature / Purpose，而不是长期落到 `OTHER`。
 ### TTS
 
 调用正式 Media Runtime TTS：

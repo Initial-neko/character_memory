@@ -13,6 +13,14 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from character_memory.domain.models import DailyLifePlan, DiaryResult, PersonReaction
+from character_memory.llm.usage import (
+    LlmUsageRecorder,
+    current_llm_usage_context,
+    infer_usage_context,
+    llm_usage_scope,
+    new_logical_call_id,
+    provider_label,
+)
 
 
 logger = logging.getLogger("character_memory.llm")
@@ -32,6 +40,7 @@ class ModelCallTrace:
     # validated.
     rejected_response_text: str = ""
     validation_error: str = ""
+    logical_call_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -145,6 +154,7 @@ class OpenAICompatibleModel(PersonModel):
         attempts: int = 2,
         session_id: str | None = None,
         vision_model: str = "deepseek-v4-flash-vision-exp",
+        usage_recorder: LlmUsageRecorder | None = None,
     ):
         self.api_key = api_key
         self.model = model
@@ -166,6 +176,7 @@ class OpenAICompatibleModel(PersonModel):
         self.last_model: str = model
         self.client = httpx.Client(timeout=self.timeout)
         self._debug_lock = threading.Lock()
+        self.usage_recorder = usage_recorder
         logger.info(
             "provider.ready model=%s vision_model=%s base_url=%s default_session=%s attempts=%s timeout=%ss",
             self.model,
@@ -247,6 +258,101 @@ class OpenAICompatibleModel(PersonModel):
             safe.append(copied)
         return safe
 
+    @staticmethod
+    def _vision_image_count(messages: list[dict]) -> int:
+        total = 0
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, list):
+                total += sum(
+                    1
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "image_url"
+                )
+        return total
+
+    @staticmethod
+    def _token_usage(data: dict) -> tuple[int | None, int | None, int | None, str]:
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if not isinstance(usage, dict):
+            return None, None, None, "UNAVAILABLE"
+
+        def number(*keys):
+            for key in keys:
+                value = usage.get(key)
+                if value is None:
+                    continue
+                try:
+                    return max(0, int(value))
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        input_tokens = number("prompt_tokens", "input_tokens")
+        output_tokens = number("completion_tokens", "output_tokens")
+        total_tokens = number("total_tokens")
+        if total_tokens is None and input_tokens is not None and output_tokens is not None:
+            total_tokens = input_tokens + output_tokens
+        source = (
+            "PROVIDER"
+            if any(value is not None for value in (input_tokens, output_tokens, total_tokens))
+            else "UNAVAILABLE"
+        )
+        return input_tokens, output_tokens, total_tokens, source
+
+    def _record_usage(
+        self,
+        *,
+        messages: list[dict],
+        conversation_id: str | None,
+        session_id: str,
+        selected_model: str,
+        logical_call_id: str,
+        attempt: int,
+        duration_ms: float,
+        status: str,
+        output_text: str = "",
+        data: dict | None = None,
+        json_object: bool = False,
+        error_type: str = "",
+        request_id: str = "",
+    ) -> None:
+        recorder = self.usage_recorder
+        if recorder is None:
+            return
+        current = current_llm_usage_context()
+        inferred = infer_usage_context(conversation_id)
+        input_tokens, output_tokens, total_tokens, usage_source = self._token_usage(data or {})
+        recorder.record(
+            {
+                "provider": provider_label(self.base_url),
+                "model": selected_model,
+                "feature": current.feature or inferred.feature or "OTHER",
+                "purpose": current.purpose or inferred.purpose or "OTHER",
+                "session_id": session_id,
+                "conversation_id": (
+                    current.conversation_id
+                    or inferred.conversation_id
+                    or str(conversation_id or "")
+                ),
+                "character_id": current.character_id,
+                "logical_call_id": logical_call_id,
+                "attempt": attempt,
+                "status": status,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+                "input_chars": self._message_chars(self._trace_safe_messages(messages)),
+                "output_chars": len(output_text or ""),
+                "duration_ms": duration_ms,
+                "vision_images": self._vision_image_count(messages),
+                "json_mode": json_object,
+                "usage_source": usage_source,
+                "error_type": error_type,
+                "request_id": request_id,
+            }
+        )
+
     def _request(
         self,
         messages: list[dict],
@@ -254,6 +360,8 @@ class OpenAICompatibleModel(PersonModel):
         conversation_id: str | None = None,
         json_object: bool = False,
         model: str | None = None,
+        usage_attempt: int | None = None,
+        usage_logical_call_id: str | None = None,
     ) -> str:
         selected_model = model or self.model
         payload = {"model": selected_model, "messages": messages, "temperature": self.temperature}
@@ -261,6 +369,13 @@ class OpenAICompatibleModel(PersonModel):
             payload["response_format"] = {"type": "json_object"}
         url = f"{self.base_url}/chat/completions"
         session_id = self.resolve_session_id(conversation_id)
+        current = current_llm_usage_context()
+        logical_call_id = (
+            str(usage_logical_call_id or "").strip()
+            or current.logical_call_id
+            or new_logical_call_id("request")
+        )
+        resolved_attempt = max(1, int(usage_attempt or current.attempt or 1))
         started = time.perf_counter()
         logger.info(
             "provider.request start model=%s session=%s messages=%d input_chars=%d json_object=%s",
@@ -276,36 +391,113 @@ class OpenAICompatibleModel(PersonModel):
                 headers=self._headers(include_session=True, conversation_id=conversation_id),
                 json=payload,
             )
-        except Exception:
+        except Exception as exc:
+            duration_ms = (time.perf_counter() - started) * 1000
+            self._record_usage(
+                messages=messages,
+                conversation_id=conversation_id,
+                session_id=session_id,
+                selected_model=selected_model,
+                logical_call_id=logical_call_id,
+                attempt=resolved_attempt,
+                duration_ms=duration_ms,
+                status="ERROR",
+                json_object=json_object,
+                error_type=type(exc).__name__,
+            )
             logger.exception(
                 "provider.request transport_error model=%s session=%s duration_ms=%d",
                 selected_model,
                 session_id,
-                int((time.perf_counter() - started) * 1000),
+                int(duration_ms),
             )
             raise
-        duration_ms = int((time.perf_counter() - started) * 1000)
+
+        duration_ms = (time.perf_counter() - started) * 1000
+        request_id = (
+            r.headers.get("x-request-id")
+            or r.headers.get("request-id")
+            or r.headers.get("cf-ray")
+            or ""
+        )
         if r.is_error:
-            request_id = r.headers.get("x-request-id") or r.headers.get("request-id") or r.headers.get("cf-ray") or ""
             body = self._error_body(r)
+            self._record_usage(
+                messages=messages,
+                conversation_id=conversation_id,
+                session_id=session_id,
+                selected_model=selected_model,
+                logical_call_id=logical_call_id,
+                attempt=resolved_attempt,
+                duration_ms=duration_ms,
+                status="ERROR",
+                json_object=json_object,
+                error_type=f"HTTP_{r.status_code}",
+                request_id=request_id,
+            )
             logger.error(
                 "provider.request failed status=%s model=%s session=%s duration_ms=%d request_id=%s body=%s",
                 r.status_code,
                 selected_model,
                 session_id,
-                duration_ms,
+                int(duration_ms),
                 request_id or "-",
                 body,
             )
             raise ProviderHTTPError(r.status_code, url, body, request_id)
-        data = r.json()
-        text = data["choices"][0]["message"]["content"]
+
+        data = None
+        try:
+            data = r.json()
+            text = data["choices"][0]["message"]["content"]
+        except Exception as exc:
+            # A 2xx response is still a real provider attempt even when its
+            # payload is malformed or missing the OpenAI-compatible shape.
+            # Meter it before propagating the parse/shape failure so request,
+            # retry and error-rate telemetry cannot silently undercount.
+            self._record_usage(
+                messages=messages,
+                conversation_id=conversation_id,
+                session_id=session_id,
+                selected_model=selected_model,
+                logical_call_id=logical_call_id,
+                attempt=resolved_attempt,
+                duration_ms=duration_ms,
+                status="ERROR",
+                data=data if isinstance(data, dict) else None,
+                json_object=json_object,
+                error_type=f"RESPONSE_{type(exc).__name__}",
+                request_id=request_id,
+            )
+            logger.exception(
+                "provider.request invalid_response model=%s session=%s duration_ms=%d request_id=%s",
+                selected_model,
+                session_id,
+                int(duration_ms),
+                request_id or "-",
+            )
+            raise
+
+        self._record_usage(
+            messages=messages,
+            conversation_id=conversation_id,
+            session_id=session_id,
+            selected_model=selected_model,
+            logical_call_id=logical_call_id,
+            attempt=resolved_attempt,
+            duration_ms=duration_ms,
+            status="SUCCESS",
+            output_text=text,
+            data=data,
+            json_object=json_object,
+            request_id=request_id,
+        )
         logger.info(
             "provider.request done status=%s model=%s session=%s duration_ms=%d output_chars=%d",
             r.status_code,
             selected_model,
             session_id,
-            duration_ms,
+            int(duration_ms),
             len(text or ""),
         )
         return text
@@ -383,6 +575,7 @@ class OpenAICompatibleModel(PersonModel):
         rejected_text = ""
         rejected_error = ""
         last_text = ""
+        logical_call_id = current_llm_usage_context().logical_call_id or new_logical_call_id(schema.__name__)
         for attempt in range(self.attempts):
             safe_messages = self._trace_safe_messages(messages)
             attempt_number = attempt + 1
@@ -403,12 +596,16 @@ class OpenAICompatibleModel(PersonModel):
                     selected_model,
                     len(image_data_urls or []),
                 )
-                text = self._request(
-                    messages,
-                    conversation_id=conversation_id,
-                    json_object=True,
-                    model=selected_model,
-                )
+                with llm_usage_scope(
+                    logical_call_id=logical_call_id,
+                    attempt=attempt_number,
+                ):
+                    text = self._request(
+                        messages,
+                        conversation_id=conversation_id,
+                        json_object=True,
+                        model=selected_model,
+                    )
                 attempt_text = text
                 with self._debug_lock:
                     self.last_response_text = text
@@ -428,6 +625,7 @@ class OpenAICompatibleModel(PersonModel):
                         model=selected_model,
                         rejected_response_text=rejected_text,
                         validation_error=rejected_error,
+                        logical_call_id=logical_call_id,
                     ),
                 )
             except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
@@ -564,4 +762,8 @@ class OpenAICompatibleModel(PersonModel):
         }
 
     def close(self) -> None:
-        self.client.close()
+        try:
+            self.client.close()
+        finally:
+            if self.usage_recorder is not None:
+                self.usage_recorder.close()

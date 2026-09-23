@@ -13,6 +13,7 @@ from character_memory.life.runner import DayRunner
 from character_memory.life.simulator import LifeSimulator
 from character_memory.life.ticker import TimeTicker
 from character_memory.llm.client import OpenAICompatibleModel
+from character_memory.llm.usage import LlmUsageRecorder
 from character_memory.memory.embedding import DeterministicEmbedding, OpenAICompatibleEmbedding, SentenceTransformerEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
@@ -81,6 +82,7 @@ def build_model(settings: Settings):
         # model id. Keep a dedicated vision model only as an explicit provider
         # compatibility override.
         vision_model=(str(settings.vision_model or "").strip() or settings.chat_model),
+        usage_recorder=LlmUsageRecorder(settings.db_path),
     )
 
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from character_memory.domain.models import Event, EventType
 from character_memory.encounter_store import EncounterRepository
+from character_memory.llm.usage import llm_usage_scope
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft
 
 
@@ -105,10 +106,16 @@ class EncounterService:
             "不要做成模板化客服；给 TA 一个具体职业或日常、2~3 个明确兴趣、一个小怪癖或反差，"
             "同时保留边界、沉默和不同意见。名字、年龄、表达方式自然即可。"
         )
-        draft = self._persona_builder().generate(
-            description,
-            tags=["随机邂逅", "原创人物", "长期相处"],
-        )
+        with llm_usage_scope(
+            feature="ENCOUNTER",
+            purpose="ENCOUNTER_PERSONA",
+            conversation_id=f"encounter:generated:{now.isoformat(timespec='minutes')}",
+            override=True,
+        ):
+            draft = self._persona_builder().generate(
+                description,
+                tags=["随机邂逅", "原创人物", "长期相处"],
+            )
         return draft, {"theme": theme}
 
     def _web_draft(self, now: datetime) -> tuple[PersonaDraft, dict]:
@@ -159,11 +166,17 @@ Excerpt:
             EncounterWebSeed,
             f"encounter-web-seed:{now.isoformat(timespec='minutes')}",
         )
-        draft = self._persona_builder().generate(
-            seed.inspiration_description,
-            name=seed.suggested_name,
-            tags=["互联网邂逅", *seed.tags[:6]],
-        )
+        with llm_usage_scope(
+            feature="ENCOUNTER",
+            purpose="ENCOUNTER_PERSONA",
+            conversation_id=f"encounter:web:{now.isoformat(timespec='minutes')}",
+            override=True,
+        ):
+            draft = self._persona_builder().generate(
+                seed.inspiration_description,
+                name=seed.suggested_name,
+                tags=["互联网邂逅", *seed.tags[:6]],
+            )
         return draft, {
             "query": query,
             "search_results": int(observed.get("search_results") or 0),

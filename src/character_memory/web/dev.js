@@ -75,11 +75,117 @@
       $("llmResult").textContent = pretty(data);
       $("llmLatency").textContent = `${data.total_ms} ms · ${data.model}`;
       refreshResources();
+      refreshLlmUsage();
     } catch (error) {
       $("llmReply").textContent = `ERROR: ${error.message}`;
       $("llmResult").textContent = pretty({ ok: false, error: error.message });
     } finally {
       button.disabled = false;
+    }
+  }
+
+  function usageNumber(value) {
+    const number = Number(value || 0);
+    return Number.isFinite(number) ? number.toLocaleString("zh-CN") : "0";
+  }
+
+  function usagePercent(numerator, denominator) {
+    const total = Number(denominator || 0);
+    if (!total) return "0%";
+    return `${(Number(numerator || 0) * 100 / total).toFixed(1)}%`;
+  }
+
+  function usageToken(item, key) {
+    return Number(item?.token_known_requests || 0) > 0 ? usageNumber(item?.[key]) : "—";
+  }
+
+  function usageRow(values) {
+    const row = document.createElement("tr");
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = String(value ?? "—");
+      row.appendChild(cell);
+    }
+    return row;
+  }
+
+  async function refreshLlmUsage() {
+    const hours = Number($("llmUsageWindow")?.value || 24);
+    try {
+      const data = await jsonFetch(`/v1/dev/llm-usage?hours=${hours}&limit=80`);
+      const summary = data.summary || {};
+      const requests = Number(summary.requests || 0);
+      const logical = Number(summary.logical_calls || 0);
+      const known = Number(summary.token_known_requests || 0);
+      $("llmUsageWindowBadge").textContent = hours < 24 ? `${hours}H` : hours === 24 ? "24H" : `${Math.round(hours / 24)}D`;
+      $("usageRequests").textContent = usageNumber(requests);
+      $("usageLogicalCalls").textContent = `${usageNumber(logical)} logical`;
+      $("usageTotalTokens").textContent = known ? usageNumber(summary.total_tokens) : "—";
+      $("usageInputTokens").textContent = known ? usageNumber(summary.input_tokens) : "—";
+      $("usageOutputTokens").textContent = known ? usageNumber(summary.output_tokens) : "—";
+      $("usageCoverage").textContent = `token coverage ${usagePercent(known, requests)}`;
+      $("usageRetryRate").textContent = usagePercent(summary.retried_logical_calls, logical);
+      $("usageRetryCalls").textContent = `${usageNumber(summary.retried_logical_calls)} logical calls`;
+      $("usageErrorRate").textContent = usagePercent(summary.errors, requests);
+      $("usageLatency").textContent = `avg ${usageNumber(Math.round(Number(summary.avg_latency_ms || 0)))} ms`;
+
+      const featureBody = $("llmUsageFeatureBody");
+      const features = data.by_feature || [];
+      featureBody.replaceChildren(...(
+        features.length
+          ? features.map((item) => usageRow([
+              item.feature,
+              item.purpose,
+              usageNumber(item.requests),
+              usageNumber(item.logical_calls),
+              usageToken(item, "input_tokens"),
+              usageToken(item, "output_tokens"),
+              usageToken(item, "total_tokens"),
+              usageNumber(item.retried_logical_calls),
+              usageNumber(item.errors),
+              usageNumber(Math.round(Number(item.avg_latency_ms || 0))),
+            ]))
+          : [usageRow(["暂无数据", "", "", "", "", "", "", "", "", ""])]
+      ));
+
+      const modelBody = $("llmUsageModelBody");
+      const models = data.by_model || [];
+      modelBody.replaceChildren(...(
+        models.length
+          ? models.map((item) => usageRow([
+              item.model,
+              usageNumber(item.requests),
+              usageNumber(item.logical_calls),
+              usageToken(item, "input_tokens"),
+              usageToken(item, "output_tokens"),
+              usageToken(item, "total_tokens"),
+              usageNumber(item.retried_logical_calls),
+              usageNumber(item.errors),
+              usageNumber(Math.round(Number(item.avg_latency_ms || 0))),
+            ]))
+          : [usageRow(["暂无数据", "", "", "", "", "", "", "", ""])]
+      ));
+
+      const recentBody = $("llmUsageRecentBody");
+      const recent = data.recent || [];
+      recentBody.replaceChildren(...(
+        recent.length
+          ? recent.map((item) => usageRow([
+              item.created_at ? new Date(item.created_at).toLocaleString() : "—",
+              `${item.feature || "OTHER"} / ${item.purpose || "OTHER"}`,
+              item.character_id || "—",
+              item.model || "—",
+              item.attempt || 1,
+              item.total_tokens == null ? "—" : usageNumber(item.total_tokens),
+              `${usageNumber(Math.round(Number(item.duration_ms || 0)))} ms`,
+              item.status || "—",
+            ]))
+          : [usageRow(["暂无数据", "", "", "", "", "", "", ""])]
+      ));
+    } catch (error) {
+      $("llmUsageFeatureBody").replaceChildren(
+        usageRow([`Usage unavailable: ${error.message}`, "", "", "", "", "", "", "", "", ""])
+      );
     }
   }
 
@@ -857,7 +963,7 @@
     }
   }
 
-  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshSpaceStatus(); refreshGroupAutonomyStatus(); refreshEncounterStatus(); refreshWorldActivity(); });
+  $("refreshAll").addEventListener("click", () => { refreshStatus(); refreshMetrics(); refreshResources(); refreshLlmUsage(); refreshSpaceStatus(); refreshGroupAutonomyStatus(); refreshEncounterStatus(); refreshWorldActivity(); });
   $("runLlm").addEventListener("click", runLlm);
   $("runSpaceOpportunity").addEventListener("click", runSpaceOpportunity);
   $("forceSpaceDue").addEventListener("click", forceSpaceDue);
@@ -900,12 +1006,15 @@
     if (file) setAsrBlob(file, `文件 · ${file.name}`);
   });
   $("refreshMetrics").addEventListener("click", refreshMetrics);
+  $("refreshLlmUsage").addEventListener("click", refreshLlmUsage);
+  $("llmUsageWindow").addEventListener("change", refreshLlmUsage);
   $("refreshResources").addEventListener("click", refreshResources);
   $("resourceInterval").addEventListener("change", scheduleResourceRefresh);
 
   refreshStatus();
   refreshMetrics();
   refreshResources();
+  refreshLlmUsage();
   loadSpaceCharacters();
   refreshSpaceStatus();
   loadGroupAutonomyGroups();
@@ -928,6 +1037,7 @@
       loadSpaceCharacters();
       refreshEncounterStatus();
       refreshWorldActivity();
+      refreshLlmUsage();
     }
   });
 })();

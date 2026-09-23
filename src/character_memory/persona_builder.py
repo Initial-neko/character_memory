@@ -9,6 +9,8 @@ import uuid
 from pydantic import BaseModel, Field, ValidationError
 import yaml
 
+from character_memory.llm.usage import llm_usage_scope, new_logical_call_id
+
 
 class PersonaDraft(BaseModel):
     name: str = Field(min_length=1, max_length=48)
@@ -156,22 +158,33 @@ class PersonaBuilder:
         attempts = max(1, min(int(getattr(self.model, "attempts", 2)), 3))
         lock = getattr(self.model, "_call_lock", None)
         last_error: Exception | None = None
-        with (lock if lock is not None else nullcontext()):
-            for attempt in range(attempts):
-                text = self.model._request(messages, conversation_id="persona-builder", json_object=True)
-                try:
-                    parser = getattr(self.model, "_json", json.loads)
-                    draft = PersonaDraft.model_validate(parser(text))
-                    ensure_safe_persona_text(json.dumps(draft.model_dump(mode="json"), ensure_ascii=False))
-                    return draft
-                except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
-                    last_error = exc
-                    if attempt + 1 >= attempts:
-                        break
-                    messages.extend(
-                        [
-                            {"role": "assistant", "content": text},
-                            {"role": "user", "content": "上一份 JSON 不符合人物草稿字段约束。保留人物含义，只修正 JSON 结构和字段；不要添加解释。"},
-                        ]
-                    )
+        logical_call_id = new_logical_call_id("persona")
+        with llm_usage_scope(
+            feature="PERSONA",
+            purpose="PERSONA_BUILD",
+            logical_call_id=logical_call_id,
+        ):
+            with (lock if lock is not None else nullcontext()):
+                for attempt in range(attempts):
+                    with llm_usage_scope(attempt=attempt + 1):
+                        text = self.model._request(
+                            messages,
+                            conversation_id="persona-builder",
+                            json_object=True,
+                        )
+                    try:
+                        parser = getattr(self.model, "_json", json.loads)
+                        draft = PersonaDraft.model_validate(parser(text))
+                        ensure_safe_persona_text(json.dumps(draft.model_dump(mode="json"), ensure_ascii=False))
+                        return draft
+                    except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+                        last_error = exc
+                        if attempt + 1 >= attempts:
+                            break
+                        messages.extend(
+                            [
+                                {"role": "assistant", "content": text},
+                                {"role": "user", "content": "上一份 JSON 不符合人物草稿字段约束。保留人物含义，只修正 JSON 结构和字段；不要添加解释。"},
+                            ]
+                        )
         raise RuntimeError(f"persona draft invalid after {attempts} attempts: {last_error}") from last_error

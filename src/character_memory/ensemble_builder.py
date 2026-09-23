@@ -11,6 +11,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
+from character_memory.llm.usage import llm_usage_scope
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft
 from character_memory.time_utils import epoch_us
 
@@ -401,12 +402,18 @@ Content:
                     f"与同群成员关系：{relation_text or '按公开资料中的群体关系自然处理'}。"
                     "不要抄原作长台词；保留人物自己的判断、沉默、分歧和边界，不要变成只会迎合用户的客服。"
                 )
-                draft = builder.generate(
-                    description,
-                    name=member.name,
-                    age=member.age,
-                    tags=["群像复刻", *member.tags[:6]],
-                )
+                with llm_usage_scope(
+                    feature="ENSEMBLE",
+                    purpose="ENSEMBLE_PERSONA",
+                    conversation_id=group_id,
+                    override=True,
+                ):
+                    draft = builder.generate(
+                        description,
+                        name=member.name,
+                        age=member.age,
+                        tags=["群像复刻", *member.tags[:6]],
+                    )
                 drafts.append(
                     {
                         "index": index,

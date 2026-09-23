@@ -208,6 +208,50 @@
     }
   }
 
+  function formatScheduleTime(value) {
+    if (!value) return "尚未排程";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
+  }
+
+  function renderSpaceScheduleSummary(data) {
+    const root = $("spaceScheduleSummary");
+    if (!root) return;
+    const items = Array.isArray(data.characters) ? data.characters : [];
+    const selected = $("spaceCharacter")?.value || "";
+    const item = items.find((entry) => entry.character_id === selected) || items[0];
+    if (!item) {
+      root.textContent = `Space：基准 ${data.interval_minutes ?? "—"} min · 暂无可调度人物`;
+      return;
+    }
+    const cap = Number(data.max_posts_per_day || 0);
+    const budget = cap
+      ? `今日 ${item.posts_today || 0}/${cap} 条`
+      : `今日已发 ${item.posts_today || 0} 条 · 无日上限`;
+    root.textContent = [
+      item.name || item.character_id,
+      `配置 ${data.interval_minutes ?? item.configured_interval_minutes ?? "—"} min`,
+      `实际下一次 ${formatScheduleTime(item.next_opportunity_at)}`,
+      `约 ${item.minutes_until_next ?? "—"} min 后`,
+      budget,
+    ].join(" · ");
+  }
+
+  function renderWorldScheduleSummary(data) {
+    const root = $("worldScheduleSummary");
+    if (!root) return;
+    const states = (Array.isArray(data.states) ? data.states : [])
+      .filter((item) => String(item.kind || "").toUpperCase() === "BROWSE");
+    const next = states
+      .filter((item) => Number.isFinite(Number(item.minutes_until_next)))
+      .sort((a, b) => Number(a.minutes_until_next) - Number(b.minutes_until_next))[0];
+    root.textContent = [
+      `Personal Browse 基准 ${data.browse_interval_minutes ?? "—"} min`,
+      `${states.length} 个角色独立时钟`,
+      next ? `最近下一次：${next.subject_id} · 约 ${next.minutes_until_next} min 后` : "尚未排程",
+    ].join(" · ");
+  }
+
   async function refreshSpaceStatus() {
     try {
       const data = await jsonFetch("/v1/dev/space/status");
@@ -225,8 +269,10 @@
       if ($("spaceWorldMaxChars")) $("spaceWorldMaxChars").value = String(data.world_max_chars_per_page ?? 6000);
       if ($("spaceAudienceSize")) $("spaceAudienceSize").value = String(data.audience_size ?? 5);
       if ($("spacePollSeconds")) $("spacePollSeconds").value = String(data.poll_seconds ?? 60);
+      renderSpaceScheduleSummary(data);
     } catch (error) {
       $("spaceStatus").textContent = `ERROR: ${error.message}`;
+      if ($("spaceScheduleSummary")) $("spaceScheduleSummary").textContent = `Space 调度读取失败：${error.message}`;
     }
   }
 
@@ -807,12 +853,14 @@
         jsonFetch("/v1/dev/world/pulse"),
       ]);
       statusNode.textContent = pretty({status, pulse});
+      renderWorldScheduleSummary(status);
       const latest = pulse.topics?.[0];
       if (latest?.id && !$("worldPulseTopicId").value) {
         $("worldPulseTopicId").value = String(latest.id);
       }
     } catch (error) {
       statusNode.textContent = `ERROR: ${error.message}`;
+      if ($("worldScheduleSummary")) $("worldScheduleSummary").textContent = `World Activity 调度读取失败：${error.message}`;
     }
   }
 

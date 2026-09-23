@@ -837,9 +837,16 @@ class GsvVoiceReloader:
     already on disk and GSV picks them up at its next start.
     """
 
-    def __init__(self, base_url: str | None = None, client: httpx.Client | None = None):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        client: httpx.Client | None = None,
+        *,
+        timeout_seconds: float = 10.0,
+    ):
         self.base_url = (base_url or os.getenv("GSV_TTS_BASE_URL", "http://127.0.0.1:9014")).rstrip("/")
-        self.client = client or httpx.Client(timeout=10.0)
+        self.timeout_seconds = max(0.1, float(timeout_seconds))
+        self.client = client or httpx.Client(timeout=self.timeout_seconds)
         self._owns_client = client is None
 
     def close(self) -> None:
@@ -848,7 +855,7 @@ class GsvVoiceReloader:
 
     def reload(self) -> None:
         url = f"{self.base_url}/v1/voices/reload"
-        response = self.client.post(url, timeout=10.0)
+        response = self.client.post(url, timeout=self.timeout_seconds)
         if response.status_code >= 400:
             # Carry the sidecar's own sentence through. It names the template
             # that would not parse -- the one fact the operator needs and the

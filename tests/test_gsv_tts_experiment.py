@@ -1173,3 +1173,27 @@ def test_a_named_template_is_served_while_the_default_template_is_missing(tmp_pa
     # ... and the voice that really is missing still fails, naming itself.
     with pytest.raises(RuntimeError, match="ghost"):
         rig.runtime.synthesize(GsvTtsRequest(text="你好", voice="ghost"))
+
+
+def test_gsv_archived_character_id_is_not_synthesizable_until_restore(tmp_path):
+    personas = _persona_root(tmp_path)
+    _write_template(tmp_path, "murasame")
+    persona_dir = _write_persona(personas, "haru", template="murasame")
+    marker = persona_dir / "archived.yaml"
+    marker.write_text(
+        "archived_at: 2026-09-22T12:00:00+00:00\n",
+        encoding="utf-8",
+    )
+    rig = _Rig(tmp_path, persona_root=personas)
+
+    with pytest.raises(RuntimeError, match="archived character 'haru'"):
+        rig.runtime.synthesize(GsvTtsRequest(text="你好", voice="haru"))
+
+    # The template remains available globally; only the archived character id is
+    # suspended. Restoring removes the marker and an in-place registry reload is enough.
+    assert "murasame" in rig.runtime.status()["voices"]
+    marker.unlink()
+    rig.runtime.reload_voices()
+
+    result, _ = rig.synthesize(voice="haru")
+    assert result.voice == "haru"

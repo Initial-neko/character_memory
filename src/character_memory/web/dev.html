@@ -171,7 +171,7 @@
             </div>
           </div>
 
-          <p class="subtle">应用后会写入 config.yaml，并立即热应用到当前 Character Runtime。修改 Interval 时默认从“现在”重新计算下一次时间；Poll 只影响检查延迟，不会增加 Opportunity 次数。Max Posts / Day 是每天发布上限，0 = 不限——它只是上限，不会强制发帖。</p>
+          <p class="subtle">这里仅热应用到当前 Character Runtime，不写 config.yaml；重启后回到 Settings Center 保存的正式配置。修改 Interval 时默认从“现在”重新计算下一次时间；Poll 只影响检查延迟，不会增加 Opportunity 次数。Max Posts / Day 是每天发布上限，0 = 不限——它只是上限，不会强制发帖。</p>
           <p class="subtle">“手动触发”不改变正式 next opportunity；“立即到期”则用于测试真实 Scheduler：把选中角色的 next opportunity 设为现在，后台线程会按 Poll 周期自动执行。手动触发会忽略 User Quiet Guard（自主群聊同理），方便验收。</p>
         </details>
 
@@ -279,7 +279,7 @@
               <button class="secondary" id="refreshGroupAutonomyStatus" type="button">刷新调度状态</button>
             </div>
           </div>
-          <p class="subtle">手动触发会忽略 User Quiet Guard，方便验收；正式 Scheduler 会遵守 Quiet Guard。自主消息仍写入原来的 conversation_events，群聊页面/SSE 无需第二套渲染。</p>
+          <p class="subtle">这里的调参只作用于当前 Character Runtime，不写 config.yaml；重启后恢复 Settings Center 的正式配置。手动触发会忽略 User Quiet Guard，方便验收；正式 Scheduler 会遵守 Quiet Guard。</p>
         </details>
 
         <details class="debug-output">
@@ -289,6 +289,37 @@
         <details class="debug-output">
           <summary>原始执行结果（调试用）</summary>
           <pre id="groupAutonomyResult" class="result">等待测试...</pre>
+        </details>
+      </article>
+
+      <article class="card wide" id="encounterDiagnosticsCard">
+        <div class="card-title-row">
+          <div><h2>Random Encounter</h2><p class="subtle">正式 Interval / Web Probability / Pending 上限由 Settings Center 保存；这里仅观察状态和手动触发。</p></div>
+          <span class="pill">discovery</span>
+        </div>
+        <details class="level-group" data-level="diagnostic" data-title="诊断 · Random Encounter 手动验收" data-hint="只观察与触发，不改正式配置">
+          <summary>诊断 · Random Encounter 手动验收</summary>
+          <div class="visual-provider-row">
+            <label>Source
+              <select id="encounterSource">
+                <option value="AUTO">AUTO · 按正式概率</option>
+                <option value="WEB">WEB · 强制互联网资料</option>
+                <option value="GENERATED">GENERATED · 强制系统生成</option>
+              </select>
+            </label>
+            <button class="primary" id="runEncounterOpportunity" type="button">立即生成一次邂逅</button>
+            <button class="secondary" id="forceEncounterDue" type="button">让 Scheduler 立即到期</button>
+            <button class="secondary" id="refreshEncounterStatus" type="button">刷新状态</button>
+          </div>
+          <p class="subtle" id="encounterStatusAge">尚未读取邂逅调度状态。</p>
+        </details>
+        <details class="debug-output">
+          <summary>原始调度状态（调试用）</summary>
+          <pre id="encounterStatus" class="result">等待读取 Random Encounter 状态...</pre>
+        </details>
+        <details class="debug-output">
+          <summary>原始执行结果（调试用）</summary>
+          <pre id="encounterResult" class="result">等待测试...</pre>
         </details>
       </article>
 

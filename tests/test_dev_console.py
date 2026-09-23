@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -45,6 +46,14 @@ class FakeHttpClient:
                 }
             )
         return FakeResponse({}, status_code=404, text="not found")
+
+    def request(self, method, url, **kwargs):
+        method = str(method).upper()
+        if method == "GET":
+            return self.get(url, **kwargs)
+        if method == "POST":
+            return self.post(url, **kwargs)
+        return FakeResponse({}, status_code=405, text="method not allowed")
 
     def post(self, url, **kwargs):
         self.calls.append(("POST", url, kwargs))
@@ -104,6 +113,67 @@ def settings():
     )
 
 
+def test_every_element_id_a_web_script_reads_is_still_emitted_by_a_page():
+    """``$("id")`` is a cross-file contract, and one broke with no error at all.
+
+    The Dev Console's Media Live Smoke read its sample text, speaker and speed
+    out of ``ttsText`` / ``speakerId`` / ``ttsSpeed``. A later pass deleted the
+    legacy TTS card that was the only markup emitting those ids, so the button
+    stayed visible and clickable while ``runMediaSmoke`` threw
+    ``Cannot read properties of null`` on every press. Nothing but a live click
+    could have caught it, because the script and the markup never mention each
+    other. Checking every id a web script looks up against the ids the web
+    markup emits turns the next such deletion into a failing test.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    web = root / "src" / "character_memory" / "web"
+    emitted: set[str] = set()
+    for page in sorted(web.glob("*.html")):
+        emitted.update(re.findall(r'id="([^"]+)"', page.read_text(encoding="utf-8")))
+    assert emitted, "the pages emit ids; the extraction above has gone stale"
+
+    missing = {}
+    for script_path in sorted(web.glob("*.js")):
+        text = script_path.read_text(encoding="utf-8")
+        for element_id in sorted(set(re.findall(r'\$\("([A-Za-z][\w-]*)"\)', text))):
+            if element_id not in emitted:
+                missing.setdefault(script_path.name, []).append(element_id)
+    assert missing == {}, f"no page emits these ids any more: {missing}"
+
+
+def test_dev_console_doc_keeps_up_with_the_runtime_only_scope():
+    """The durable doc described a console that no longer exists.
+
+    The Space card stopped persisting ``config.yaml`` and the legacy TTS card
+    the doc described was deleted from the page, but ``docs/current`` is where
+    AGENTS.md puts durable behavior and neither change reached it: the doc still
+    told a reader their Dev tuning was persisted, and still described a TTS
+    surface no page emits. The Random Encounter card and the archive/voice
+    lifecycle landed with the same PR and are pinned here too.
+    """
+
+    doc = Path("docs/current/DEV_CONSOLE.md").read_text(encoding="utf-8")
+
+    for stale in ("直接调整并持久化", "配置会写回 `config.yaml`"):
+        assert stale not in doc, stale
+    assert "不写 `config.yaml`" in doc, "the runtime-only scope has to be stated"
+
+    script = Path("src/character_memory/web/dev.js").read_text(encoding="utf-8")
+    for endpoint in (
+        "/v1/dev/encounters/status",
+        "/v1/dev/encounters/opportunity",
+        "/v1/dev/encounters/due",
+    ):
+        assert endpoint in script
+        assert endpoint in doc, f"{endpoint} is documented nowhere"
+
+    # Archiving is a voice-lifecycle change, not a deletion, and the doc says
+    # which of the two the running GSV sidecar actually sees.
+    assert "409" in doc
+    assert "reloaded" in doc
+
+
 def test_dev_console_assets_cover_runtime_test_surfaces():
     html = Path("src/character_memory/web/dev.html").read_text(encoding="utf-8")
     script = Path("src/character_memory/web/dev.js").read_text(encoding="utf-8")
@@ -121,7 +191,9 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
         "/v1/dev/status",
         "/v1/dev/resources",
         "/v1/dev/llm",
-        "/v1/dev/tts",
+        "/v1/dev/encounters/status",
+        "/v1/dev/encounters/opportunity",
+        "/v1/dev/encounters/due",
         "/v1/dev/asr",
         "/v1/dev/media-smoke",
         "/v1/dev/metrics",
@@ -212,3 +284,94 @@ def test_dev_media_error_preserves_upstream_operation_status_and_detail():
     assert detail["operation"] == "tts"
     assert detail["status_code"] == 503
     assert detail["detail"] == "VITS model failed to initialize"
+
+
+class RuntimeConfigHttpClient(FakeHttpClient):
+    def post(self, url, **kwargs):
+        self.calls.append(("POST", url, kwargs))
+        if url.endswith("/v1/space/dev/config"):
+            return FakeResponse({"enabled": kwargs.get("json", {}).get("enabled"), "interval_minutes": 10})
+        if url.endswith("/v1/group-autonomy/config"):
+            return FakeResponse({"enabled": kwargs.get("json", {}).get("enabled"), "interval_minutes": 30})
+        if url.endswith("/v1/encounters/dev/due"):
+            return FakeResponse({"state": {"next_opportunity_at": "now"}})
+        if url.endswith("/v1/encounters/dev/opportunity"):
+            return FakeResponse({"source_type": kwargs.get("json", {}).get("source_type"), "candidate": {"id": 1}})
+        return super().post(url, **kwargs)
+
+    def get(self, url, **kwargs):
+        if url.endswith("/v1/encounters/status"):
+            self.calls.append(("GET", url, kwargs))
+            return FakeResponse({"enabled": True, "pending_count": 1})
+        return super().get(url, **kwargs)
+
+
+def test_dev_autonomy_tuning_is_runtime_only_and_does_not_modify_config(tmp_path):
+    config = tmp_path / "config.yaml"
+    original = (
+        "space_opportunity_interval_minutes: 1440\n"
+        "group_autonomy_interval_minutes: 360\n"
+    )
+    config.write_text(original, encoding="utf-8")
+    fake_http = RuntimeConfigHttpClient()
+    app = create_dev_app(
+        str(config),
+        settings=settings(),
+        http_client=fake_http,
+        model_factory=lambda _: FakeModel(),
+    )
+
+    with TestClient(app) as client:
+        space = client.post(
+            "/v1/dev/space/config",
+            json={
+                "enabled": True,
+                "interval_minutes": 10,
+                "max_posts_per_day": 0,
+                "media_enabled": True,
+                "media_max_items": 3,
+                "image_search_enabled": True,
+                "image_generation_enabled": True,
+                "world_observation_enabled": True,
+                "world_max_pages": 2,
+                "world_max_chars_per_page": 6000,
+                "audience_size": 5,
+                "poll_seconds": 60,
+                "rearm": True,
+            },
+        )
+        group = client.post(
+            "/v1/dev/group-autonomy/config",
+            json={
+                "enabled": True,
+                "interval_minutes": 30,
+                "max_messages": 3,
+                "user_quiet_minutes": 30,
+                "poll_seconds": 60,
+                "rearm": True,
+            },
+        )
+
+    assert space.status_code == 200
+    assert group.status_code == 200
+    assert space.json()["scope"] == "runtime-only"
+    assert group.json()["scope"] == "runtime-only"
+    assert space.json()["persisted"] is False
+    assert group.json()["persisted"] is False
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_dev_encounter_endpoints_are_diagnostic_proxies():
+    fake_http = RuntimeConfigHttpClient()
+    app = create_dev_app(settings=settings(), http_client=fake_http, model_factory=lambda _: FakeModel())
+
+    with TestClient(app) as client:
+        status = client.get("/v1/dev/encounters/status")
+        generated = client.post("/v1/dev/encounters/opportunity?source_type=WEB")
+        due = client.post("/v1/dev/encounters/due")
+
+    assert status.status_code == 200
+    assert status.json()["pending_count"] == 1
+    assert generated.status_code == 200
+    assert generated.json()["source_type"] == "WEB"
+    assert due.status_code == 200

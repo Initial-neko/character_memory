@@ -120,7 +120,21 @@ space_scheduler_poll_seconds: 60
 
 The interval accepts `10..10080` minutes. `1440` is the normal 24H default; `60` is the recommended 1H soak-test preset. A shorter interval lets one character publish several posts in a day — an Opportunity is a chance to decide, not an obligation, so an interval is not a posting rate. `space_max_posts_per_day` accepts `0..200` and is the publishing ceiling per character per local day; `0` is the default and means no ceiling, which is safe because the interval already paces publishing. Space media is independently gated from posting: space_media_enabled=false keeps text autonomy intact; space_media_max_items accepts 0..9 and caps actual image execution per post; image search and AI ImageGen can be disabled separately. World Observation is separately gated: when enabled the character may choose whether to explore a public topic, with space_world_max_pages (1..4) and space_world_max_chars_per_page (500..16000) bounding browser cost. Search/browse never forces memory or a post. These are execution ceilings/gates only—the character still decides whether media/exploration is natural. Audience size accepts 0..10; `0` means the character may still autonomously post but the post is not automatically distributed to other characters. The hard audience ceiling remains 10.
 
-These fields persist in `config.yaml`. Settings Center changes still report a Character Runtime restart requirement; Dev Console can persist the same values and hot-apply them immediately for testing. Changing the poll interval changes scheduler latency only; it never changes the Opportunity interval.
+These fields persist in `config.yaml`. Settings Center owns the formal values. Dev Console may hot-apply temporary Space / Group Autonomy overrides to the current Character Runtime for testing, but it does not write those temporary values back to `config.yaml`. Changing the poll interval changes scheduler latency only; it never changes the Opportunity interval.
+
+### 3.2 Random Encounter
+
+Settings Center owns the persisted Random Encounter configuration:
+
+```yaml
+encounter_enabled: true
+encounter_interval_minutes: 1440
+encounter_web_probability: 0.5
+encounter_max_pending: 3
+encounter_poll_seconds: 60
+```
+
+The enabled flag, interval, and web/generated mix are advanced settings; pending and poll limits stay diagnostic. Dev Console exposes only status/manual-trigger diagnostics and never becomes a second persisted editor for these fields.
 
 ## 4. Search / World Browser
 

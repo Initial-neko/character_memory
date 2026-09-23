@@ -906,6 +906,44 @@ def test_space_autonomy_settings_reject_too_short_interval(tmp_path: Path, monke
         store.save_values({"space_opportunity_interval_minutes": 5})
 
 
+def test_settings_center_exposes_random_encounter_formal_configuration(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "encounter_enabled: true\n"
+        "encounter_interval_minutes: 1440\n"
+        "encounter_web_probability: 0.5\n"
+        "encounter_poll_seconds: 60\n"
+        "encounter_max_pending: 3\n",
+        encoding="utf-8",
+    )
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    snapshot = store.snapshot()
+    section = next(item for item in snapshot["schema"] if item["id"] == "encounter")
+    levels = {field["name"]: field["level"] for field in section["fields"]}
+    assert levels == {
+        "encounter_enabled": "advanced",
+        "encounter_interval_minutes": "advanced",
+        "encounter_web_probability": "advanced",
+        "encounter_max_pending": "diagnostic",
+        "encounter_poll_seconds": "diagnostic",
+    }
+
+    result = store.save_values(
+        {
+            "encounter_interval_minutes": 720,
+            "encounter_web_probability": 0.75,
+            "encounter_max_pending": 2,
+        }
+    )
+    assert result["changed"] is True
+    loaded = load_settings(str(config))
+    assert loaded.encounter_interval_minutes == 720
+    assert loaded.encounter_web_probability == 0.75
+    assert loaded.encounter_max_pending == 2
+
+
 def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypatch):
     """The page opens on eight fields, and every other field is behind a group.
 
@@ -933,7 +971,7 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     ]
 
     levels = Counter(field["level"] for section in schema for field in section["fields"])
-    assert levels == {"common": 8, "advanced": 15, "diagnostic": 29}
+    assert levels == {"common": 8, "advanced": 18, "diagnostic": 31}
     # Both other levels ship as real groups, so nothing is merely hidden.
     assert {"advanced", "diagnostic"} <= set(levels)
 

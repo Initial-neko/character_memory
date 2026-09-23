@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from character_memory.web_lifecycle import on_app_event
 from character_memory.app import build_model
 from character_memory.config import Settings, load_settings
+from character_memory.llm.usage import LlmUsageStore
 from character_memory.resource_metrics import collect_resource_snapshot
 from character_memory.web_assets import attach_static_assets
 
@@ -709,6 +710,17 @@ def create_dev_app(
             },
             "total_ms": _ms(total_started),
         }
+
+    @app.get("/v1/dev/llm-usage")
+    def llm_usage(
+        hours: int = Query(default=24, ge=1, le=2160),
+        limit: int = Query(default=80, ge=1, le=300),
+    ):
+        store = LlmUsageStore(cfg.db_path)
+        try:
+            return store.usage(hours=hours, limit=limit)
+        finally:
+            store.close()
 
     @app.get("/v1/dev/metrics")
     def metrics(limit: int = Query(default=50, ge=1, le=200)):

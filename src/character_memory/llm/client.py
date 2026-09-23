@@ -17,6 +17,7 @@ from character_memory.llm.usage import (
     LlmUsageRecorder,
     current_llm_usage_context,
     infer_usage_context,
+    llm_usage_scope,
     new_logical_call_id,
     provider_label,
 )
@@ -359,7 +360,7 @@ class OpenAICompatibleModel(PersonModel):
         conversation_id: str | None = None,
         json_object: bool = False,
         model: str | None = None,
-        usage_attempt: int = 1,
+        usage_attempt: int | None = None,
         usage_logical_call_id: str | None = None,
     ) -> str:
         selected_model = model or self.model
@@ -374,6 +375,7 @@ class OpenAICompatibleModel(PersonModel):
             or current.logical_call_id
             or new_logical_call_id("request")
         )
+        resolved_attempt = max(1, int(usage_attempt or current.attempt or 1))
         started = time.perf_counter()
         logger.info(
             "provider.request start model=%s session=%s messages=%d input_chars=%d json_object=%s",
@@ -397,7 +399,7 @@ class OpenAICompatibleModel(PersonModel):
                 session_id=session_id,
                 selected_model=selected_model,
                 logical_call_id=logical_call_id,
-                attempt=usage_attempt,
+                attempt=resolved_attempt,
                 duration_ms=duration_ms,
                 status="ERROR",
                 json_object=json_object,
@@ -426,7 +428,7 @@ class OpenAICompatibleModel(PersonModel):
                 session_id=session_id,
                 selected_model=selected_model,
                 logical_call_id=logical_call_id,
-                attempt=usage_attempt,
+                attempt=resolved_attempt,
                 duration_ms=duration_ms,
                 status="ERROR",
                 json_object=json_object,
@@ -452,7 +454,7 @@ class OpenAICompatibleModel(PersonModel):
             session_id=session_id,
             selected_model=selected_model,
             logical_call_id=logical_call_id,
-            attempt=usage_attempt,
+            attempt=resolved_attempt,
             duration_ms=duration_ms,
             status="SUCCESS",
             output_text=text,
@@ -564,14 +566,16 @@ class OpenAICompatibleModel(PersonModel):
                     selected_model,
                     len(image_data_urls or []),
                 )
-                text = self._request(
-                    messages,
-                    conversation_id=conversation_id,
-                    json_object=True,
-                    model=selected_model,
-                    usage_attempt=attempt_number,
-                    usage_logical_call_id=logical_call_id,
-                )
+                with llm_usage_scope(
+                    logical_call_id=logical_call_id,
+                    attempt=attempt_number,
+                ):
+                    text = self._request(
+                        messages,
+                        conversation_id=conversation_id,
+                        json_object=True,
+                        model=selected_model,
+                    )
                 attempt_text = text
                 with self._debug_lock:
                     self.last_response_text = text

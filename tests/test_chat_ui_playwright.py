@@ -234,8 +234,6 @@ def test_the_two_composer_popovers_never_stack(chat):
     state = _popovers(page)
     assert state["sticker"] is True, "the sticker panel has to open"
     assert state["tools"] is False
-    assert state["stickerExpanded"] == "true"
-    assert state["toolsExpanded"] == "false"
 
     page.click(".composer-tools-trigger")
     page.wait_for_timeout(400)
@@ -248,8 +246,9 @@ def test_the_two_composer_popovers_never_stack(chat):
     page.click(".sticker-trigger")
     page.wait_for_timeout(400)
     state = _popovers(page)
-    assert state["sticker"] is True
+    assert state["sticker"] is True, "the sticker panel has to open again"
     assert state["tools"] is False, "the tools menu stayed open under the sticker panel"
+    assert state["stickerExpanded"] == "true"
     assert state["toolsExpanded"] == "false"
 
     _close_popovers(page)

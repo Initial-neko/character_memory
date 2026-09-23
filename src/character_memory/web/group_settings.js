@@ -16,7 +16,10 @@
     const currentIds = new Set(group?.member_ids || []);
     return CM.state.characters.map(profile => {
       const joined = currentIds.has(profile.id);
-      return `<label class="group-member-option"><input type="checkbox" data-group-member-id="${CM.escapeHtml(profile.id)}" ${joined ? "checked disabled" : ""}><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>${joined ? "已在群聊中" : CM.escapeHtml(profile.identity || "可加入群聊")}</small></span></label>`;
+      if (joined) {
+        return `<div class="group-member-option group-member-option-joined"><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>已在群聊中</small></span><button type="button" class="danger compact" data-group-member-remove="${CM.escapeHtml(profile.id)}">移出群聊</button></div>`;
+      }
+      return `<label class="group-member-option"><input type="checkbox" data-group-member-id="${CM.escapeHtml(profile.id)}"><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>${CM.escapeHtml(profile.identity || "可加入群聊")}</small></span></label>`;
     }).join("");
   }
 
@@ -26,8 +29,8 @@
     if (!group) return;
     const currentName = group.name || CM.dom.characterName.textContent.trim();
     const memberCount = (group.member_ids || []).length;
-    CM.openDrawer("群聊设置", "修改群名称，或把已有 Character 加入当前群聊；历史消息不会重写");
-    CM.dom.drawerBody.innerHTML = `<div class="group-create-form" data-group-settings-id="${CM.escapeHtml(group.id)}"><label>群名称<input type="text" data-group-rename-name maxlength="80" value="${CM.escapeHtml(currentName)}"></label><div class="group-create-actions"><button type="button" class="primary" data-group-rename-confirm>保存名称</button></div><hr><div><strong>群成员</strong><p class="muted">当前 ${memberCount}/12 人。新成员从加入后的下一轮消息开始参与。</p><div class="group-member-options">${memberRows(group)}</div></div><div class="error hidden" data-group-settings-error></div><div class="group-create-actions"><button type="button" data-group-settings-cancel>关闭</button><button type="button" class="primary" data-group-members-confirm ${memberCount >= 12 ? "disabled" : ""}>添加选中成员</button></div></div>`;
+    CM.openDrawer("群聊设置", "修改群名称，添加或移出 Character；历史消息不会重写");
+    CM.dom.drawerBody.innerHTML = `<div class="group-create-form" data-group-settings-id="${CM.escapeHtml(group.id)}"><label>群名称<input type="text" data-group-rename-name maxlength="80" value="${CM.escapeHtml(currentName)}"></label><div class="group-create-actions"><button type="button" class="primary" data-group-rename-confirm>保存名称</button></div><hr><div><strong>群成员</strong><p class="muted">当前 ${memberCount}/12 人。新成员从下一轮消息开始参与；移出成员后也从下一轮起生效。</p><div class="group-member-options">${memberRows(group)}</div></div><div class="error hidden" data-group-settings-error></div><div class="group-create-actions"><button type="button" data-group-settings-cancel>关闭</button><button type="button" class="primary" data-group-members-confirm ${memberCount >= 12 ? "disabled" : ""}>添加选中成员</button></div></div>`;
   }
 
   async function saveRename() {
@@ -84,6 +87,36 @@
     }
   }
 
+  async function removeMember(characterId) {
+    const root = CM.dom.drawerBody.querySelector("[data-group-settings-id]");
+    const groupId = root?.dataset.groupSettingsId;
+    if (!groupId || !characterId || !CM.isGroupConversation() || groupId !== CM.state.conversation.groupId) return;
+    const group = CM.features.groups?.current?.();
+    if (!group || (group.member_ids || []).length <= 2) {
+      const errorBox = CM.dom.drawerBody.querySelector("[data-group-settings-error]");
+      if (errorBox) {
+        errorBox.textContent = "群聊至少需要保留 2 个 Character。";
+        errorBox.classList.remove("hidden");
+      }
+      return;
+    }
+    const profile = CM.state.characters.find(item => item.id === characterId);
+    const label = profile?.name || characterId;
+    try {
+      await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(characterId)}`, {method:"DELETE"});
+      await CM.features.groups?.loadGroups?.();
+      CM.updateHeader();
+      await CM.emit("groupMembersChanged", {groupId, removedMemberId:characterId});
+      showGroupSettings();
+    } catch (error) {
+      const errorBox = CM.dom.drawerBody.querySelector("[data-group-settings-error]");
+      if (errorBox) {
+        errorBox.textContent = `移出「${label}」失败：${error.message}`;
+        errorBox.classList.remove("hidden");
+      }
+    }
+  }
+
   function showRenameGroup() { showGroupSettings(); }
 
   CM.dom.characterName.addEventListener("click", () => showGroupSettings());
@@ -91,6 +124,8 @@
     if (event.target.closest("[data-group-settings-cancel]")) CM.closeDrawer();
     if (event.target.closest("[data-group-rename-confirm]")) saveRename().catch(console.error);
     if (event.target.closest("[data-group-members-confirm]")) addMembers().catch(console.error);
+    const remove = event.target.closest("[data-group-member-remove]");
+    if (remove) removeMember(remove.dataset.groupMemberRemove).catch(console.error);
   });
   CM.dom.drawerBody.addEventListener("keydown", event => {
     if (!event.target.closest("[data-group-rename-name]")) return;
@@ -101,5 +136,5 @@
 
   CM.on("conversationChanged", syncEditableState);
   CM.on("ready", syncEditableState);
-  CM.registerFeature("groupSettings", {showRenameGroup, showGroupSettings, addMembers, syncEditableState});
+  CM.registerFeature("groupSettings", {showRenameGroup, showGroupSettings, addMembers, removeMember, syncEditableState});
 })();

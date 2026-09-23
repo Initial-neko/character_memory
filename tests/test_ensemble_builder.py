@@ -3,12 +3,16 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from character_memory.ensemble_builder import (
     EnsembleBuilderService,
     EnsembleMemberResearch,
     EnsembleRepository,
     EnsembleResearch,
 )
+from character_memory.ensemble_web import attach_ensemble_routes
 from character_memory.group_store import GroupRepository
 from character_memory.storage.sqlite import SQLiteStore
 
@@ -171,7 +175,7 @@ def _access(tmp_path):
     return access, store, observer, profiles, created
 
 
-def test_ensemble_starts_by_creating_the_real_group_before_research(tmp_path):
+def test_ensemble_start_creates_only_an_invisible_build_record(tmp_path):
     access, store, _, _, _ = _access(tmp_path)
     repository = EnsembleRepository(store)
     service = EnsembleBuilderService(access, repository)
@@ -180,9 +184,8 @@ def test_ensemble_starts_by_creating_the_real_group_before_research(tmp_path):
     build = service.start("复刻命运石之门的 LAB MEM，并形成群聊", now=now)
 
     group = GroupRepository(store).get_group(build["group_id"])
-    assert group is not None
-    assert group.member_ids == []
-    assert build["group"]["status"] == "BUILDING"
+    assert group is None
+    assert build["group"] is None
     assert build["status"] == "BUILDING"
     store.close()
 
@@ -204,7 +207,7 @@ def test_ensemble_research_uses_world_observation_and_reuses_existing_character(
     assert len(build["drafts"]) == 3
     kurisu = next(item for item in build["drafts"] if item["canonical_name"] == "Kurisu")
     assert kurisu["existing_character_id"] == "kurisu"
-    assert GroupRepository(store).get_group(started["group_id"]).name == "LAB MEM"
+    assert GroupRepository(store).get_group(started["group_id"]) is None
     store.close()
 
 
@@ -223,12 +226,93 @@ def test_ensemble_confirmation_fills_same_group_and_only_creates_missing_charact
         now=now,
     )
 
-    assert result["group_id"] == started["group_id"]
+    assert result["group_id"] != started["group_id"]
     assert result["status"] == "ACTIVE"
+    assert result["group"]["id"] == result["group_id"]
     assert result["group"]["status"] == "ACTIVE"
     assert result["group"]["member_ids"] == ["kurisu", "okabe", "mayuri"]
     assert created == ["okabe", "mayuri"]
     assert {item["id"] for item in profiles} == {"kurisu", "okabe", "mayuri"}
+    store.close()
+
+
+def test_failed_build_cannot_confirm_stale_drafts(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊", now=now)
+    service.research(started["group_id"], now=now)
+    repository.set_status(started["group_id"], "FAILED", now, error="forced")
+
+    try:
+        service.confirm(started["group_id"], [0, 1], now=now)
+        assert False, "FAILED build must not be confirmable"
+    except ValueError as exc:
+        assert "重新开始" in str(exc)
+
+    assert GroupRepository(store).list_groups() == []
+    store.close()
+
+
+def test_prepare_failure_leaves_no_real_group_or_build_record(tmp_path):
+    access, store, observer, _, _ = _access(tmp_path)
+    observer.observe = lambda *args, **kwargs: {
+        "query": "none",
+        "search_results": 0,
+        "errors": [{"error": "offline"}],
+        "observations": [],
+    }
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+
+    try:
+        service.prepare("复刻一个不存在的群聊", now=now)
+        assert False, "prepare should fail without observations"
+    except RuntimeError:
+        pass
+
+    assert GroupRepository(store).list_groups() == []
+    with store._lock:
+        count = store.conn.execute("SELECT COUNT(*) AS total FROM ensemble_builds").fetchone()["total"]
+    assert count == 0
+    store.close()
+
+
+def test_prepare_route_maps_research_value_error_to_502_and_cleans_build(tmp_path):
+    store = SQLiteStore(str(tmp_path / "ensemble-web.db"))
+    access = SimpleNamespace(
+        read_store=store,
+        store=lambda: store,
+        character_profiles=lambda: [],
+        soft_active_characters=10,
+        max_active_characters=20,
+    )
+    app = FastAPI()
+    app.state.character_memory = access
+    attach_ensemble_routes(app)
+
+    def fail_research(*args, **kwargs):
+        raise ValueError("media host could not be resolved: example.invalid")
+
+    access.ensemble_service.research = fail_research
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/ensembles/prepare",
+            json={"prompt": "复刻一个公开作品群聊"},
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "资料整理失败：media host could not be resolved: example.invalid"
+    )
+    with store._lock:
+        total = store.conn.execute(
+            "SELECT COUNT(*) AS total FROM ensemble_builds"
+        ).fetchone()["total"]
+    assert total == 0
     store.close()
 
 
@@ -242,8 +326,7 @@ def test_ensemble_web_assets_are_loaded():
     assert "/static/ensemble.js" in index
     assert "/static/ensemble.css" in index
     for token in [
-        "/v1/ensembles",
-        "/research",
+        "/v1/ensembles/prepare",
         "/confirm",
         "data-ensemble-member",
         "确认并开始群聊",

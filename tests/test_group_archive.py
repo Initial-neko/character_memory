@@ -122,6 +122,41 @@ def test_group_archive_api_hides_and_restores_without_loading_runtime(tmp_path: 
         assert client.get("/health").json()["runtime_loaded"] is False
 
 
+def test_group_list_hides_legacy_zero_member_ensemble_artifacts(tmp_path: Path):
+    root = Path(__file__).resolve().parents[1]
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                'api_key: ""',
+                'embedding_provider: "deterministic"',
+                f'db_path: "{(tmp_path / "legacy-empty-group.db").as_posix()}"',
+                f'persona_path: "{(root / "personas" / "rin" / "persona.yaml").as_posix()}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    app = create_api(str(config))
+    attach_group_routes(app, str(config))
+    now = datetime(2026, 9, 23, 7, 0, tzinfo=timezone.utc)
+    legacy = GroupRepository(app.state.character_memory.read_store).create_group(
+        "遗留 AI 构建",
+        [],
+        now,
+    )
+
+    with TestClient(app) as client:
+        assert client.get("/v1/groups").json()["groups"] == []
+        # The row still exists so a user upgrade is non-destructive; it is only
+        # removed from the normal chat surface.
+        stored = GroupRepository(app.state.character_memory.read_store).get_group(
+            legacy.id,
+            include_archived=True,
+        )
+        assert stored is not None
+        assert stored.member_ids == []
+
+
 def test_group_archive_frontend_contract_and_syntax():
     root = Path(__file__).resolve().parents[1]
     web = root / "src" / "character_memory" / "web"

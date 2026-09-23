@@ -20,7 +20,7 @@
       <div class="ensemble-builder">
         <div class="ensemble-intro">
           <strong>一句话创建一整组人物</strong>
-          <p>例如：“复刻命运石之门的 LAB MEM，并形成群聊”。系统会先创建群，再读取公开资料、生成成员草稿，最后只让你确认一次。</p>
+          <p>例如：“复刻命运石之门的 LAB MEM，并形成群聊”。系统先读取公开资料并准备成员草稿；只有你确认后，才真正创建角色和群聊。</p>
         </div>
         <label class="ensemble-prompt-field">
           <span>你想创建什么群？</span>
@@ -37,7 +37,7 @@
 
   function openBuilder() {
     currentBuild = null;
-    CM.openDrawer("AI 建群", "先建群，再查资料，最后只确认一次");
+    CM.openDrawer("AI 建群", "一句话整理资料和成员草稿，确认一次后再真正创建群聊");
     CM.dom.drawerBody.innerHTML = introHtml();
   }
 
@@ -128,7 +128,7 @@
             <h3>${CM.escapeHtml(build.group_name || build.group?.name || "新群聊")}</h3>
             <p>${CM.escapeHtml(build.overview || "资料已经整理完成。")}</p>
           </div>
-          <span class="ensemble-group-state">群已创建 · 待确认成员</span>
+          <span class="ensemble-group-state">草稿已准备 · 尚未创建群聊</span>
         </div>
         <div class="ensemble-capacity" data-ensemble-capacity></div>
         <div class="ensemble-selected-count" data-ensemble-selected-count></div>
@@ -138,7 +138,7 @@
         ${sourceHtml(build)}
         <div class="ensemble-error hidden" data-ensemble-error></div>
         <div class="ensemble-actions sticky">
-          <button type="button" data-ensemble-discard>取消这个群</button>
+          <button type="button" data-ensemble-discard>放弃这次构建</button>
           <button type="button" class="primary" data-ensemble-confirm>确认并开始群聊</button>
         </div>
       </div>
@@ -152,32 +152,29 @@
       showError("先写一句你想创建的群聊。");
       return;
     }
-    const start = CM.dom.drawerBody.querySelector("[data-ensemble-start]");
-    if (start) { start.disabled = true; start.textContent = "正在建群…"; }
+    currentBuild = null;
+    CM.openDrawer("正在整理 AI 群聊", "此时只准备资料和人物草稿，不会提前创建空群");
+    CM.dom.drawerBody.innerHTML = `
+      <div class="ensemble-loading">
+        <span class="ensemble-loading-mark">◎</span>
+        <strong>正在整理群成员…</strong>
+        <p>正在搜索公开资料、浏览页面并准备每位成员的 Persona 草稿。完成后只需要确认一次。</p>
+        <div class="ensemble-error hidden" data-ensemble-error></div>
+      </div>
+    `;
     try {
-      const created = await CM.api("/v1/ensembles", {
+      const prepared = await CM.api("/v1/ensembles/prepare", {
         method:"POST",
         body:JSON.stringify({prompt}),
       });
-      currentBuild = created.build;
-      await CM.features.groups?.loadGroups?.();
-      CM.openDrawer(currentBuild.group_name || "正在构建群聊", "群已经创建，正在读取公开资料和生成成员草稿");
-      CM.dom.drawerBody.innerHTML = `
-        <div class="ensemble-loading">
-          <span class="ensemble-loading-mark">◎</span>
-          <strong>正在整理群成员…</strong>
-          <p>正在搜索公开资料、浏览页面并生成各自独立的 Persona 草稿。群聊已经先创建好了。</p>
-          <button type="button" data-ensemble-discard>取消这个群</button>
-          <div class="ensemble-error hidden" data-ensemble-error></div>
-        </div>
-      `;
-      const researched = await CM.api(`/v1/ensembles/${encodeURIComponent(currentBuild.group_id)}/research`, {method:"POST"});
-      renderConfirmation(researched.build);
-      await CM.features.groups?.loadGroups?.();
+      renderConfirmation(prepared.build);
     } catch (error) {
+      currentBuild = null;
+      CM.openDrawer("AI 建群", "本次没有创建任何真实群聊，可以直接修改描述后重试");
+      CM.dom.drawerBody.innerHTML = introHtml();
+      const textarea = CM.dom.drawerBody.querySelector("[data-ensemble-prompt]");
+      if (textarea) textarea.value = prompt;
       showError(error.message);
-    } finally {
-      if (start) { start.disabled = false; start.textContent = "开始整理"; }
     }
   }
 
@@ -190,7 +187,6 @@
       await CM.api(`/v1/ensembles/${encodeURIComponent(currentBuild.group_id)}/cancel`, {method:"POST"});
     } finally {
       currentBuild = null;
-      await CM.features.groups?.loadGroups?.();
       CM.closeDrawer();
     }
   }

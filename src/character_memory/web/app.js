@@ -136,7 +136,7 @@
     const thought = message.role === "assistant" && message.has_trace && message.source_event_id
       ? `<button class="detail-button" type="button" data-thought="${message.source_event_id}" title="查看安全的思考摘要">想法</button>` : "";
     const trace = message.has_trace && message.source_event_id
-      ? `<button class="detail-button" type="button" data-trace="${message.source_event_id}" title="查看本轮开发详情">···</button>` : "";
+      ? `<button class="detail-button trace-button" type="button" data-trace="${message.source_event_id}" title="查看本轮 LLM 实际输入与原始响应">LLM</button>` : "";
     const contentHtml = CM.messageContentHtml(message);
     const proactive = message.proactive || message.action === "PROACTIVE_MESSAGE";
     row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${contentHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${proactive ? '<span class="proactive-badge">主动消息</span>' : ""}${thought}${trace}</div></div>`;
@@ -446,16 +446,96 @@
     } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
   };
 
+  CM.traceMessagesHtml = messages => {
+    const items = Array.isArray(messages) ? messages : [];
+    if (!items.length) return '<p class="muted">本轮没有记录模型 messages。</p>';
+    return items.map((message, index) => `
+      <article class="trace-message">
+        <div class="trace-message-role">${index + 1}. ${CM.escapeHtml(message.role || "unknown")}</div>
+        <pre>${CM.escapeHtml(message.content || "")}</pre>
+      </article>`).join("");
+  };
+
   CM.showTrace = async sourceEventId => {
-    CM.openDrawer(`${CM.currentProfile().name} · 本轮详情`, `source_event_id = ${sourceEventId}`);
-    CM.dom.drawerBody.innerHTML = "<p>正在加载…</p>";
+    CM.openDrawer(`${CM.currentProfile().name} · LLM 调试`, `source_event_id = ${sourceEventId} · 展示应用实际保存的模型 I/O，不展示隐藏推理过程`);
+    CM.dom.drawerBody.innerHTML = "<p>正在加载本轮 LLM 记录…</p>";
     try {
       const trace = await CM.api(`/v1/traces/${sourceEventId}`);
       const actions = Array.isArray(trace.actions) ? trace.actions : (trace.action ? [trace.action] : []);
-      const actionText = actions.length ? actions.map((action, index) => `${index + 1}. ${action.type}: ${action.message || action.sticker_id || action.image_id || action.reason || ""}`).join("\n") : "没有发送消息";
+      const actionText = actions.length
+        ? actions.map((action, index) => `${index + 1}. ${action.type}: ${action.message || action.sticker_id || action.image_id || action.reason || ""}`).join("\n")
+        : "没有发送消息";
       const firstAction = trace.action || actions[0] || {};
-      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>耗时</h3>${CM.timingHtml(trace.timings)}</section><section class="section"><h3>决策</h3><div class="kv"><div>Actions</div><div>${CM.escapeHtml(actions.map(a => a.type).join(" / ") || "NO_REPLY")}</div><div>Action Reason</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(firstAction.reason))}</div><div>Perception</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.perception))}</div><div>Reaction</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.reaction))}</div><div>Model Attempt</div><div>${CM.escapeHtml(trace.model_attempt || "—")}</div></div></section><section class="section"><h3>最终对外表达</h3><pre>${CM.escapeHtml(actionText)}</pre></section><section class="section"><h3>Sticker Retrieval</h3><details class="debug-output"><summary>原始 JSON（调试用）</summary><pre>${CM.escapeHtml(JSON.stringify(trace.sticker_retrieval || {}, null, 2))}</pre></details></section><section class="section"><h3>Mental State · Before</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_before))}</pre></section><section class="section"><h3>Mental State · After</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_after))}</pre></section><section class="section"><h3>Recall</h3><div class="card-list">${(trace.recalled_memories || []).map(m => `<div class="card"><strong>${CM.escapeHtml(m.memory_type)}</strong><span> · importance ${CM.escapeHtml(m.importance)}</span><div>${CM.escapeHtml(m.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div></section><section class="section"><h3>实际发送给模型的 messages</h3>${(trace.model_messages || []).map((m, i) => `<p><strong>${i + 1}. ${CM.escapeHtml(m.role)}</strong></p><pre>${CM.escapeHtml(m.content)}</pre>`).join("") || `<p>${CM.escapeHtml(hiddenText)}</p>`}</section><section class="section"><h3>Compiled Context</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.context))}</pre></section><section class="section"><h3>Memory Admission</h3><details class="debug-output"><summary>原始 JSON（调试用）</summary><pre>${CM.escapeHtml(JSON.stringify(trace.memory_decisions || [], null, 2))}</pre></details></section><section class="section"><h3>Memory Write</h3><details class="debug-output"><summary>原始 JSON（调试用）</summary><pre>${CM.escapeHtml(JSON.stringify({candidates:trace.memory_candidates || [], created_memory_ids:trace.created_memory_ids || []}, null, 2))}</pre></details></section><section class="section"><h3>Intent</h3><details class="debug-output"><summary>原始 JSON（调试用）</summary><pre>${CM.escapeHtml(JSON.stringify({candidates:trace.intent_candidates || [], created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre></details></section><section class="section"><h3>Raw Model Response</h3><details class="debug-output"><summary>原始 JSON（调试用）</summary><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.raw_model_response))}</pre></details></section>`;
-    } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
+      const recalled = Array.isArray(trace.recalled_memories) ? trace.recalled_memories : [];
+      const memoryCandidates = Array.isArray(trace.memory_candidates) ? trace.memory_candidates : [];
+      const intents = Array.isArray(trace.intent_candidates) ? trace.intent_candidates : [];
+      const totalMs = trace.timings?.runtime_total_ms ?? trace.timings?.model_ms ?? "—";
+      CM.dom.drawerBody.innerHTML = `
+        <section class="trace-summary-card">
+          <div><span>Model</span><strong>${CM.escapeHtml(trace.model_used || "—")}</strong></div>
+          <div><span>Attempt</span><strong>${CM.escapeHtml(trace.model_attempt || "—")}</strong></div>
+          <div><span>Actions</span><strong>${CM.escapeHtml(actions.map(item => item.type).join(" / ") || "NO_REPLY")}</strong></div>
+          <div><span>Total</span><strong>${CM.escapeHtml(CM.fmtMs(totalMs))}</strong></div>
+          <div class="trace-call-id"><span>Logical Call ID</span><code>${CM.escapeHtml(trace.llm_logical_call_id || "—")}</code></div>
+        </section>
+
+        <section class="section trace-output-section">
+          <h3>最终对外表达</h3>
+          <pre>${CM.escapeHtml(actionText)}</pre>
+        </section>
+
+        <details class="inspector-details trace-io" open>
+          <summary>模型真实输入 / 原始响应</summary>
+          <p class="memory-help">这里展示 Runtime 实际保存并发送给 Provider 的 messages，以及 Provider 返回的原始结构化文本。可用 Logical Call ID 与 Dev 的 LLM Usage 对照。</p>
+          <h4>发送给模型的 messages</h4>
+          <div class="trace-message-list">${CM.traceMessagesHtml(trace.model_messages)}</div>
+          <h4>Provider 原始响应</h4>
+          <pre class="trace-raw-response">${CM.escapeHtml(CM.hiddenIfEmpty(trace.raw_model_response))}</pre>
+          <details class="debug-output">
+            <summary>Compiled Context</summary>
+            <pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.context))}</pre>
+          </details>
+        </details>
+
+        <details class="inspector-details">
+          <summary>决策摘要 · ${CM.escapeHtml(actions.map(item => item.type).join(" / ") || "NO_REPLY")}</summary>
+          <div class="kv">
+            <div>Action Reason</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(firstAction.reason))}</div>
+            <div>Perception</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.perception))}</div>
+            <div>Reaction</div><div>${CM.escapeHtml(CM.hiddenIfEmpty(trace.reaction))}</div>
+          </div>
+        </details>
+
+        <details class="inspector-details">
+          <summary>Recall / Memory · ${recalled.length} recalled · ${memoryCandidates.length} candidates</summary>
+          <div class="card-list">${recalled.map(memory => `<div class="card"><strong>${CM.escapeHtml(memory.memory_type)}</strong><span> · importance ${CM.escapeHtml(memory.importance)}</span><div>${CM.escapeHtml(memory.content)}</div></div>`).join("") || "<p>本轮没有 Recall 到 Memory。</p>"}</div>
+          <details class="debug-output"><summary>Memory Admission / Write JSON</summary><pre>${CM.escapeHtml(JSON.stringify({
+            decisions: trace.memory_decisions || [],
+            candidates: memoryCandidates,
+            created_memory_ids: trace.created_memory_ids || [],
+          }, null, 2))}</pre></details>
+        </details>
+
+        <details class="inspector-details">
+          <summary>Intent / Task · ${intents.length} candidates</summary>
+          <pre>${CM.escapeHtml(JSON.stringify({candidates:intents, created_intent_ids:trace.created_intent_ids || []}, null, 2))}</pre>
+        </details>
+
+        <details class="inspector-details">
+          <summary>Mental State · Before / After</summary>
+          <h4>Before</h4><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_before))}</pre>
+          <h4>After</h4><pre>${CM.escapeHtml(CM.hiddenIfEmpty(trace.mental_state_after))}</pre>
+        </details>
+
+        <details class="inspector-details">
+          <summary>其他执行细节 · Timing / Sticker / Channel</summary>
+          <h4>耗时</h4>${CM.timingHtml(trace.timings)}
+          <details class="debug-output"><summary>Sticker Retrieval</summary><pre>${CM.escapeHtml(JSON.stringify(trace.sticker_retrieval || {}, null, 2))}</pre></details>
+          <details class="debug-output"><summary>Channel Decisions</summary><pre>${CM.escapeHtml(JSON.stringify(trace.channel_decisions || [], null, 2))}</pre></details>
+        </details>`;
+    } catch (error) {
+      CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
+    }
   };
 
   CM.memorySourceText = memory => {
@@ -512,7 +592,7 @@
   CM.showRuntime = async () => {
     if (CM.isGroupConversation()) return;
     const requested = CM.state.characterId;
-    CM.openDrawer(`${CM.currentProfile().name} · Runtime`, "人物状态与 Memory Inspector");
+    CM.openDrawer(`${CM.currentProfile().name} · Runtime`, "先看核心状态；Memory、Intent 与内部上下文按需展开");
     CM.dom.drawerBody.innerHTML = "<p>正在加载…</p>";
     try {
       const [data, memoryData] = await Promise.all([
@@ -521,9 +601,51 @@
       ]);
       if (CM.isGroupConversation() || requested !== CM.state.characterId) return;
       const p = data.provider || {};
+      const intents = Array.isArray(data.intents) ? data.intents : [];
       CM.state.runtimeMemories = memoryData.memories || [];
-      CM.dom.drawerBody.innerHTML = `<section class="section"><h3>Runtime 初始化耗时</h3>${CM.timingHtml(data.runtime_init_timings)}</section><section class="section"><h3>Provider</h3><div class="kv"><div>Chat Model</div><div>${CM.escapeHtml(p.chat_model)}</div><div>Embedding</div><div>${CM.escapeHtml(`${p.embedding_provider} / ${p.embedding_model}`)}</div><div>Runtime Loaded</div><div>${CM.escapeHtml(data.runtime_loaded)}</div></div></section><section class="section"><h3>Mental State</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.mental_state))}</pre></section><section class="section"><h3>Persona</h3><pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.persona))}</pre></section><section class="section"><h3>Memory Inspector · 最近 ${CM.state.runtimeMemories.length} 条</h3><p class="memory-help">固定会提高 Recall 优先级；忘记只停用派生 Memory，不删除原始经历；纠正会创建新版本并保留旧版本。</p><div class="memory-list">${CM.state.runtimeMemories.map(CM.memoryCardHtml).join("") || "<p>暂无 Memory。</p>"}</div></section><section class="section"><h3>Intent · 最近 ${data.intents.length} 条</h3><details class="debug-output"><summary>原始 JSON（调试用）</summary><pre>${CM.escapeHtml(JSON.stringify(data.intents, null, 2))}</pre></details></section>`;
-    } catch (error) { CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`; }
+      const activeMemories = CM.state.runtimeMemories.filter(item => item.active).length;
+      CM.dom.drawerBody.innerHTML = `
+        <section class="trace-summary-card runtime-summary-card">
+          <div><span>Runtime</span><strong>${CM.escapeHtml(data.runtime_loaded ? "Loaded" : "Idle")}</strong></div>
+          <div><span>Chat Model</span><strong>${CM.escapeHtml(p.chat_model || "—")}</strong></div>
+          <div><span>Memory</span><strong>${activeMemories} active / ${CM.state.runtimeMemories.length} shown</strong></div>
+          <div><span>Intent</span><strong>${intents.length}</strong></div>
+        </section>
+
+        <details class="inspector-details">
+          <summary>Memory Inspector · 最近 ${CM.state.runtimeMemories.length} 条</summary>
+          <p class="memory-help">固定会提高 Recall 优先级；忘记只停用派生 Memory，不删除原始经历；纠正会创建新版本并保留旧版本。</p>
+          <div class="memory-list">${CM.state.runtimeMemories.map(CM.memoryCardHtml).join("") || "<p>暂无 Memory。</p>"}</div>
+        </details>
+
+        <details class="inspector-details">
+          <summary>Intent / Task · 最近 ${intents.length} 条</summary>
+          <pre>${CM.escapeHtml(JSON.stringify(intents, null, 2))}</pre>
+        </details>
+
+        <details class="inspector-details">
+          <summary>Mental State</summary>
+          <pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.mental_state))}</pre>
+        </details>
+
+        <details class="inspector-details">
+          <summary>Persona 原文</summary>
+          <pre>${CM.escapeHtml(CM.hiddenIfEmpty(data.persona))}</pre>
+        </details>
+
+        <details class="inspector-details">
+          <summary>Provider / Runtime 初始化信息</summary>
+          <div class="kv">
+            <div>Chat Model</div><div>${CM.escapeHtml(p.chat_model || "—")}</div>
+            <div>Embedding</div><div>${CM.escapeHtml(`${p.embedding_provider || "—"} / ${p.embedding_model || "—"}`)}</div>
+            <div>Runtime Loaded</div><div>${CM.escapeHtml(data.runtime_loaded)}</div>
+          </div>
+          <h4>初始化耗时</h4>
+          ${CM.timingHtml(data.runtime_init_timings)}
+        </details>`;
+    } catch (error) {
+      CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;
+    }
   };
 
   CM.bootstrap = async () => {

@@ -19,6 +19,8 @@ config.yaml.bak.*
 # output. The character's voice.yaml is *not* ignored alongside it: it only ever
 # names a template now, which is configuration -- see the voices/ rule below.
 personas/*/voice/
+# Creation provenance may contain the user's original prompt and is runtime data.
+personas/*/creation.json
 # Characters created at runtime through the app are local data too.
 personas/character-*/
 # Voice templates own the reference clips; they are local assets, not source.

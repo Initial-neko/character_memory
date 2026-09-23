@@ -7,6 +7,8 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from character_memory.api import create_api
+from character_memory.api_character_service import ApiCharacterService
+from character_memory.persona_builder import PersonaDraft
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
 from character_memory.config import Settings, discover_character_profiles
@@ -96,10 +98,35 @@ def test_created_character_is_immediately_chat_ready(tmp_path):
     )
 
     client = TestClient(create_api(bundle=bundle))
-    created = client.post("/v1/characters", json={"draft": valid_draft()})
+    created = client.post(
+        "/v1/characters",
+        json={
+            "draft": valid_draft(),
+            "creation": {
+                "source": "PERSONA_BUILDER",
+                "prompt": "想认识一个脑洞很大的声音设计师",
+                "name_hint": "Nova",
+                "age_hint": 24,
+                "tags": [],
+            },
+        },
+    )
     assert created.status_code == 200
-    assert created.json()["character"]["id"] == "nova"
+    body = created.json()
+    assert body["character"]["id"] == "nova"
+    assert body["character"]["initialization"]["avatar"]["status"] == "ready"
+    assert body["character"]["initialization"]["voice"]["status"] in {"selected", "unavailable"}
     assert (persona_root / "nova" / "persona.yaml").exists()
+    assert (persona_root / "nova" / "creation.json").exists()
+    assert any((tmp_path / "avatars" / "nova").glob("avatar.*"))
+
+    inspected = client.get("/v1/characters/nova/persona")
+    assert inspected.status_code == 200
+    inspected_body = inspected.json()
+    assert inspected_body["read_only"] is True
+    assert inspected_body["persona"]["name"] == "Nova"
+    assert inspected_body["creation"]["source"] == "PERSONA_BUILDER"
+    assert inspected_body["creation"]["prompt"] == "想认识一个脑洞很大的声音设计师"
 
     ids = {item["id"] for item in client.get("/v1/characters").json()["characters"]}
     assert "nova" in ids
@@ -193,3 +220,48 @@ def test_character_creation_hard_stops_at_twenty_active_slots(tmp_path):
     assert detail["confirmation_required"] is False
     assert not (persona_root / "nova" / "persona.yaml").exists()
     store.close()
+
+
+
+def test_character_onboarding_runs_after_character_write_lock_is_released(tmp_path):
+    persona_root = tmp_path / "personas"
+    rin_dir = persona_root / "rin"
+    rin_dir.mkdir(parents=True)
+    rin_path = rin_dir / "persona.yaml"
+    rin_path.write_text("id: rin\nname: Rin\n", encoding="utf-8")
+    settings = Settings(
+        db_path=str(tmp_path / "lock.db"),
+        persona_path=str(rin_path),
+        embedding_provider="deterministic",
+    )
+
+    import threading
+
+    lock = threading.RLock()
+    service = ApiCharacterService(
+        settings=settings,
+        current_bundle=lambda: None,
+        character_write_lock=lock,
+        register_runtime_character=lambda profile: None,
+    )
+
+    class LockAwareOnboarding:
+        services = SimpleNamespace(
+            avatar_store=SimpleNamespace(root=tmp_path / "avatars")
+        )
+
+        def initialize(self, profile, draft, *, creation=None):
+            assert not lock._is_owned(), "network/media onboarding must not run while character_write_lock is held"
+            return {
+                "avatar": {"status": "ready", "source": "test"},
+                "voice": {"status": "unavailable"},
+            }
+
+    service.onboarding = LockAwareOnboarding()
+    created = service.create_from_draft(
+        PersonaDraft.model_validate(valid_draft()),
+        creation={"source": "TEST", "prompt": "lock contract"},
+    )
+
+    assert created["id"] == "nova"
+    assert created["initialization"]["avatar"]["status"] == "ready"

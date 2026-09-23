@@ -12,6 +12,7 @@ from character_memory.api_contracts import (
     MAX_ACTIVE_CHARACTERS,
     SOFT_ACTIVE_CHARACTERS,
 )
+from character_memory.character_onboarding import CharacterOnboardingService
 from character_memory.config import (
     discover_character_profiles,
     resolve_persona_path,
@@ -43,11 +44,21 @@ class ApiCharacterService:
         current_bundle: Callable[[], Any | None],
         character_write_lock: threading.RLock,
         register_runtime_character: Callable[[dict[str, Any]], None],
+        services: Any | None = None,
     ):
         self.settings = settings
         self.current_bundle = current_bundle
         self.character_write_lock = character_write_lock
         self.register_runtime_character = register_runtime_character
+        self.onboarding = (
+            CharacterOnboardingService(
+                settings=settings,
+                services=services,
+                current_bundle=current_bundle,
+            )
+            if services is not None
+            else None
+        )
 
     def profiles(self) -> list[dict[str, Any]]:
         current = self.current_bundle()
@@ -224,6 +235,43 @@ class ApiCharacterService:
             "warning": result_count > SOFT_ACTIVE_CHARACTERS,
         }
 
+    def _remove_runtime_character(self, character_id: str) -> None:
+        current = self.current_bundle()
+        if current is None:
+            return
+        if hasattr(current, "runtimes"):
+            current.runtimes.pop(character_id, None)
+        runtime_map = getattr(getattr(current, "chat", None), "runtime", None)
+        if isinstance(runtime_map, dict):
+            runtime_map.pop(character_id, None)
+
+    def _cleanup_created_character(self, character_id: str, persona_dir: Path) -> None:
+        self._remove_runtime_character(character_id)
+        try:
+            shutil.rmtree(persona_dir)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.exception(
+                "api.character rollback_persona failed character=%s dir=%s",
+                character_id,
+                persona_dir,
+            )
+
+        avatar_store = getattr(getattr(self.onboarding, "services", None), "avatar_store", None)
+        avatar_root = getattr(avatar_store, "root", None)
+        if avatar_root is not None:
+            try:
+                shutil.rmtree(Path(avatar_root) / character_id)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.exception(
+                    "api.character rollback_avatar failed character=%s",
+                    character_id,
+                )
+        self.refresh_cache()
+
     def create_from_draft(
         self,
         draft: PersonaDraft,
@@ -231,7 +279,11 @@ class ApiCharacterService:
         *,
         confirm_over_soft_limit: bool = False,
         skip_capacity_check: bool = False,
+        creation: dict[str, Any] | None = None,
     ) -> dict:
+        # Keep the registry mutation short. Network-backed avatar generation and
+        # search happen after this lock is released, so one slow provider cannot
+        # block unrelated archive/create operations.
         with self.character_write_lock:
             if not skip_capacity_check:
                 self.check_capacity(
@@ -256,23 +308,34 @@ class ApiCharacterService:
                 )
                 self.register_runtime_character(profile)
             except Exception:
-                try:
-                    path.unlink(missing_ok=True)
-                    path.parent.rmdir()
-                except OSError:
-                    logger.exception(
-                        "api.character rollback_file failed character=%s",
-                        character_id,
-                    )
+                self._cleanup_created_character(character_id, path.parent)
                 raise
 
-            logger.info(
-                "api.character created character=%s path=%s runtime_loaded=%s",
-                character_id,
-                path,
-                self.current_bundle() is not None,
+        try:
+            initialization = (
+                self.onboarding.initialize(
+                    profile,
+                    draft,
+                    creation=creation,
+                )
+                if self.onboarding is not None
+                else None
             )
-            return profile
+        except Exception:
+            with self.character_write_lock:
+                self._cleanup_created_character(character_id, path.parent)
+            raise
+
+        if initialization is not None:
+            profile = {**profile, "initialization": initialization}
+
+        logger.info(
+            "api.character created character=%s path=%s runtime_loaded=%s",
+            character_id,
+            path,
+            self.current_bundle() is not None,
+        )
+        return profile
 
     def rollback_created(self, character_id: str) -> None:
         """Best-effort rollback for a character created inside a batch build."""
@@ -288,22 +351,5 @@ class ApiCharacterService:
             )
             if profile is None:
                 return
-
-            current = self.current_bundle()
-            if current is not None:
-                if hasattr(current, "runtimes"):
-                    current.runtimes.pop(character_id, None)
-                runtime_map = getattr(
-                    getattr(current, "chat", None),
-                    "runtime",
-                    None,
-                )
-                if isinstance(runtime_map, dict):
-                    runtime_map.pop(character_id, None)
-
             persona_path = Path(profile["persona_path"])
-            try:
-                shutil.rmtree(persona_path.parent)
-            except FileNotFoundError:
-                pass
-            self.refresh_cache()
+            self._cleanup_created_character(character_id, persona_path.parent)

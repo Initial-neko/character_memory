@@ -1033,7 +1033,7 @@ class WorldActivityScheduler:
             "world_pulse_discussion_interval_minutes",
             360.0,
         )
-        browse_interval = self._interval("world_browse_interval_minutes", 90.0)
+        browse_interval = self._interval("world_browse_interval_minutes", 30.0)
 
         if bool(getattr(self.access.settings, "world_pulse_enabled", True)):
             self.repository.ensure_state(
@@ -1164,7 +1164,7 @@ class WorldActivityScheduler:
             ),
             "browse_interval_minutes": self._interval(
                 "world_browse_interval_minutes",
-                90.0,
+                30.0,
             ),
             "poll_seconds": self.poll_seconds,
             "sources": list(

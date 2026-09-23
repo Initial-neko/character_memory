@@ -54,13 +54,7 @@ class DevVisionRequest(DevLlmRequest):
     image_data_urls: list[str] = Field(min_length=1, max_length=5)
 
 
-class DevTtsRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
-    speaker_id: int = Field(default=0, ge=0, le=10000)
-    speed: float = Field(default=1.0, ge=0.5, le=2.0)
-
-
-class DevMediaSmokeRequest(DevTtsRequest):
+class DevMediaSmokeRequest(BaseModel):
     text: str = Field(default="你好，这是 Character Memory 的媒体自检。", min_length=1, max_length=4000)
 
 
@@ -193,9 +187,9 @@ def create_dev_app(
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=f"Character Runtime returned non-JSON response for {operation}") from exc
 
-    def request_tts(req: DevTtsRequest):
+    def request_tts(payload: dict):
         try:
-            response = client.post(f"{media_base}/v1/tts", json=req.model_dump(), timeout=120.0)
+            response = client.post(f"{media_base}/v1/tts", json=payload, timeout=120.0)
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
@@ -644,18 +638,6 @@ def create_dev_app(
             logger.exception("dev.vision failed error=%s", exc)
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    @app.post("/v1/dev/tts")
-    def tts(req: DevTtsRequest):
-        started = time.perf_counter()
-        response = request_tts(req)
-        headers = {
-            key: value
-            for key, value in response.headers.items()
-            if key.lower().startswith("x-media-")
-        }
-        headers["X-Dev-Total-Ms"] = str(_ms(started))
-        return Response(content=response.content, media_type="audio/wav", headers=headers)
-
     @app.post("/v1/dev/asr")
     async def asr(
         payload: bytes = Body(..., media_type="application/octet-stream"),
@@ -679,7 +661,7 @@ def create_dev_app(
     def media_smoke(req: DevMediaSmokeRequest):
         total_started = time.perf_counter()
         tts_started = time.perf_counter()
-        tts_response = request_tts(req)
+        tts_response = request_tts({"text": req.text})
         tts_total_ms = _ms(tts_started)
 
         asr_started = time.perf_counter()

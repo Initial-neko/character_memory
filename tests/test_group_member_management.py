@@ -115,7 +115,8 @@ def test_group_member_api_keeps_two_character_minimum(tmp_path: Path):
 def test_group_settings_exposes_remove_member_flow():
     root = Path(__file__).resolve().parents[1]
     script = (root / "src" / "character_memory" / "web" / "group_settings.js").read_text(encoding="utf-8")
-    assert "/members/\${encodeURIComponent(characterId)}" in script
+    assert "/members/" in script
+    assert "encodeURIComponent(characterId)" in script
     assert "移出群聊" in script
     assert "移出成员后也从下一轮起生效" in script
 

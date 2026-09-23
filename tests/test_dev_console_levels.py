@@ -51,8 +51,6 @@ FIRST_SCREEN = {
     "refreshAll",
     "llmPrompt",
     "runLlm",
-    "ttsText",
-    "runTts",
     "spaceEnabled",
     "spaceCharacter",
     "applySpaceConfig",
@@ -160,6 +158,11 @@ def test_the_first_screen_is_the_named_short_list():
     shown = [control for control in parsed.controls if control["declared"] == "common"]
 
     assert sorted(_label(control) for control in shown) == sorted(FIRST_SCREEN)
+    html = (WEB / "dev.html").read_text(encoding="utf-8")
+    script = (WEB / "dev.js").read_text(encoding="utf-8")
+    assert 'id="mediaSmokeInput"' in html
+    assert 'id="runTts"' not in html
+    assert 'fetch("/v1/dev/tts"' not in script
     low, high = FIRST_SCREEN_BAND
     assert low <= len(shown) <= high, f"{len(shown)} controls on the first screen"
 

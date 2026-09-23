@@ -24,6 +24,7 @@ Source code and tests are the final implementation authority. `docs/current/` is
 - [Person runtime](current/PERSON_RUNTIME.md)
 - [Conversation runtime](current/CONVERSATION_RUNTIME.md)
 - [Character Space](current/CHARACTER_SPACE.md)
+- [World Activity / Pulse](current/WORLD_ACTIVITY.md)
 - [Memory](current/MEMORY.md)
 - [Technical debt](current/TECH_DEBT.md)
 
@@ -67,7 +68,8 @@ Historical notes never override current code or `docs/current/`.
 - `CODEBASE_LAYOUT.md` — 文件/module ownership 与“改某能力先看哪里”；
 - `PERSON_RUNTIME.md` — 人物 cognition/action contract；
 - `CONVERSATION_RUNTIME.md` — Direct/Group delivery、SSE 与异步一致性；
-- `CHARACTER_SPACE.md` — Space / World social-channel contract；
+- `CHARACTER_SPACE.md` — Space social-channel contract；
+- `WORLD_ACTIVITY.md` — World Pulse、Personal Browse 与独立网络观察调度 contract；
 - `MEMORY.md` — Memory admission/recall/provenance 以及尚未决定的 memory policy；
 - `MEDIA_RUNTIME.md` — ASR/TTS transport/runtime；
 - `SETTINGS_CENTER.md` — 配置与 Secret persistence/apply semantics；

@@ -1,6 +1,6 @@
 # Current Architecture
 
-本文描述当前 `main` 的工程结构与运行边界。源码 HEAD 始终是最终事实源。
+本文描述当前 `main` 的工程结构与运行边界。源码 HEAD 始终是最终事实源。开放 PR、正在集成与下一步工作不在这里冒充当前架构，统一维护在 [PROJECT_STATUS.md](PROJECT_STATUS.md)。
 
 ## 1. Runtime topology
 
@@ -139,6 +139,39 @@ create_api()
 ```
 
 群聊成员保持顺序判断，是为了让后一个人物可以看到前一个人物刚刚公开表达的内容；不是为了追求表面吞吐量而并行所有成员。
+
+### Character creation and AI group assembly
+
+Character 创建不是只写一个 `persona.yaml` 的 route side effect。当前主链由 draft、character mutation 与 onboarding 组成：
+
+```text
+Persona description
+  -> PersonaBuilder
+  -> user-confirmed PersonaDraft
+  -> ApiCharacterService
+  -> save/register Character
+  -> CharacterOnboardingService
+     ├─ creation provenance
+     ├─ Persona inspection payload
+     ├─ initial avatar path
+     └─ voice-template state
+```
+
+一句话 AI 建群复用同一 Character 创建入口，不维护第二套角色初始化逻辑：
+
+```text
+one-line Ensemble prompt
+  -> invisible Ensemble build
+  -> World/public-web research
+  -> member Persona drafts
+  -> one user confirmation
+  -> create/reuse Characters
+  -> create real GroupConversation
+```
+
+确认之前不应制造一个可见的 0 人真实群；研究失败、取消或 FAILED 草稿都不能把半成品群暴露到正常 Group 列表。
+
+这一层当前仍在持续 hardening。已经合入 `main` 的 contract 写在本文件；正在集成的改进和后续优化（例如 LLM Usage 观测、批量 Persona 生成）写在 `PROJECT_STATUS.md`。
 
 ## 4. Person Runtime
 

@@ -79,7 +79,7 @@ Settings/TTS Lab 有自己的 health/status surface，不需要把所有配置�
 
 ### 原始 payload 的展示约定
 
-卡片在默认状态下只显示人读结论：badge、provider/device/latency、识别文本、模型回复。原始 JSON / 原始响应体一律放进折叠的 `<details class="debug-output">`，点开才出现——页面加载、卡片刷新和按钮点击都不会把 JSON 直接铺在页面上。执行类卡片（TTS / Vision / ImageGen / ASR / Media Smoke）在 `<details>` 之外留一行结论，失败时错误文本也写在这行，不藏在折叠块里。
+卡片在默认状态下只显示人读结论：badge、provider/device/latency、识别文本、模型回复。原始 JSON / 原始响应体一律放进折叠的 `<details class="debug-output">`，点开才出现——页面加载、卡片刷新和按钮点击都不会把 JSON 直接铺在页面上。执行类卡片（Vision / ImageGen / ASR / Media Smoke）在 `<details>` 之外留一行结论，失败时错误文本也写在这行，不藏在折叠块里。
 
 折叠样式定义在 `ui.css`（不是 `dev.css`）：Chat 页的「本轮详情 / Runtime」抽屉用同一套折叠块，而 `index.html` 不加载 `dev.css`。
 
@@ -104,7 +104,7 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 
 `data-title` 是组的名字，`data-hint` 说明为什么需要打开它，两者都由 `tests/test_dev_console_levels.py` 强制。
 
-当前首屏是 13 个控件（`common`），全部在 1440×900 的第一屏内：刷新状态、LLM 的 Prompt + Run LLM、TTS 的 Text + Generate、Space / Group 各自的开关 + 目标选择 + 应用测试配置 + 立即手动触发一次。`first_screen` 的名单同样由测试固定：把一个控件提上首屏必须同时改 markup 和测试。
+当前首屏是 11 个控件（`common`），全部在 1440×900 的第一屏内：刷新状态、LLM 的 Prompt + Run LLM、Space / Group 各自的开关 + 目标选择 + 应用测试配置 + 立即手动触发一次。`first_screen` 的名单同样由测试固定：把一个控件提上首屏必须同时改 markup 和测试。
 
 ### LLM
 
@@ -183,27 +183,19 @@ GET :8000/v1/llm/usage?hours=24&limit=80
 ```
 
 当前归因覆盖 Direct、Group、Space、Proactive、World、Persona、Ensemble、Encounter、Life、Avatar、Visual、Sticker 与 Dev probe。新增 LLM 能力时应在调用边界补 Feature / Purpose，而不是长期落到 `OTHER`。
-### TTS
+### TTS / Media Smoke
 
-调用正式 Media Runtime TTS：
+Dev Console 不再提供第二个独立的 TTS 试听卡片。横向试听 Provider、Voice、Speed 和 A/B 对比统一使用 `:9002/tts` 的 TTS Workbench。
 
-```text
-POST :8001/v1/tts
-```
-
-因此它验证的是当前正式配置后的路径：
+Dev Console 保留 **Media Live Smoke**：输入一段文本后，真实执行：
 
 ```text
-tts_provider: sherpa
-  -> :8001 local VITS
-
-tts_provider: kokoro
-  -> :8001 -> :9002 provider runtime
+正式 :8001/v1/tts
+  -> WAV
+  -> :8001/v1/asr
 ```
 
-卡片展示 WAV、provider/device、total timing；inference/audio/RTF 等原始 timing 在折叠的原始响应块里。
-
-如果目的是横向试听 Sherpa/Kokoro/CosyVoice，请使用 `:9002/tts` 的 TTS Lab，而不是把 Dev Console 变成第二个 provider picker。
+它使用 Settings Center 当前正式的 TTS Provider / Voice / Speed，不再暴露一套重复的 Speaker / Speed 控件。这样 Dev Console 负责“正式链路是否通”，Workbench 负责“Provider 横向试听/诊断”。
 
 ### ASR
 

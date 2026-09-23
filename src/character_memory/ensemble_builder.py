@@ -105,13 +105,13 @@ class EnsembleMemberResearch(BaseModel):
         if value is None:
             return []
         if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
+            return [str(item).strip() for item in value if str(item).strip()][:8]
         if isinstance(value, str):
             return [
                 item.strip()
                 for item in re.split(r"[、,，;；\n]+", value)
                 if item.strip()
-            ]
+            ][:8]
         return [str(value).strip()] if str(value).strip() else []
 
 

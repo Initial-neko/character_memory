@@ -669,3 +669,147 @@ body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-compact); }
   .composer-wrap { left: 0; padding: 12px 12px 14px; }
   .composer { border-radius: 17px; }
 }
+
+
+/* Character inspector + per-turn LLM observability ------------------------ */
+.persona-inspector-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.persona-inspector-summary span {
+  padding: 4px 8px;
+  border: 1px solid var(--ui-line);
+  border-radius: 999px;
+  background: var(--ui-surface-soft);
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+
+.inspector-details {
+  margin-top: 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+  overflow: hidden;
+}
+.inspector-details > summary {
+  padding: 11px 12px;
+  cursor: pointer;
+  color: var(--ui-text);
+  font-weight: 650;
+  font-size: 13px;
+  list-style-position: inside;
+  background: var(--ui-surface-soft);
+}
+.inspector-details[open] > summary {
+  border-bottom: 1px solid var(--ui-line);
+}
+.inspector-details > :not(summary) {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+.inspector-details > :last-child {
+  margin-bottom: 12px;
+}
+
+.trace-summary-card {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.trace-summary-card > div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface-soft);
+  display: grid;
+  gap: 3px;
+}
+.trace-summary-card span {
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.trace-summary-card strong,
+.trace-summary-card code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ui-text);
+  font-size: 12px;
+}
+.trace-summary-card .trace-call-id {
+  grid-column: 1 / -1;
+}
+
+.trace-output-section {
+  padding: 2px 0 8px;
+}
+.trace-output-section pre,
+.trace-raw-response,
+.trace-message pre,
+.inspector-details pre {
+  max-height: 42vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.debug-subheading {
+  margin: 12px 0 5px;
+  color: var(--ui-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+
+.trace-io {
+  border-color: var(--ui-line-strong);
+}
+.trace-io > summary::after {
+  content: " · 点击查看实际请求/响应";
+  color: var(--ui-muted);
+  font-weight: 400;
+  font-size: 10px;
+}
+
+.trace-message-list {
+  display: grid;
+  gap: 8px;
+}
+.trace-message {
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  overflow: hidden;
+  background: var(--ui-surface-sunken);
+}
+.trace-message-role {
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--ui-line);
+  color: var(--ui-muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+.trace-message pre {
+  margin: 0;
+  padding: 9px;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.detail-button.trace-button {
+  min-width: 30px;
+  padding-inline: 5px;
+  font-size: 9px;
+  letter-spacing: .02em;
+}
+
+@media (max-width: 680px) {
+  .trace-summary-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runtime-summary-card > div:nth-child(2) { grid-column: 1 / -1; }
+  .inspector-details > summary { padding: 10px; }
+}

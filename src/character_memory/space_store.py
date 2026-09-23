@@ -124,6 +124,7 @@ class SpaceRepository:
                     last_opportunity_at_epoch INTEGER,
                     next_opportunity_at TEXT NOT NULL,
                     next_opportunity_at_epoch INTEGER NOT NULL,
+                    configured_interval_minutes REAL NOT NULL DEFAULT 0,
                     last_status TEXT,
                     last_post_id INTEGER,
                     updated_at TEXT NOT NULL,
@@ -172,6 +173,15 @@ class SpaceRepository:
             if "details_json" not in columns:
                 self.store.conn.execute(
                     "ALTER TABLE space_opportunity_runs ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            state_columns = {
+                str(row["name"]) for row in self.store.conn.execute(
+                    "PRAGMA table_info(space_opportunity_state)"
+                ).fetchall()
+            }
+            if "configured_interval_minutes" not in state_columns:
+                self.store.conn.execute(
+                    "ALTER TABLE space_opportunity_state ADD COLUMN configured_interval_minutes REAL NOT NULL DEFAULT 0"
                 )
             comment_columns = {
                 str(row["name"])
@@ -594,21 +604,48 @@ class SpaceRepository:
         now: datetime,
         interval_minutes: float,
     ) -> dict[str, Any]:
-        interval_seconds = max(600.0, float(interval_minutes) * 60.0)
+        normalized_interval = max(10.0, float(interval_minutes))
+        interval_seconds = normalized_interval * 60.0
         next_at = datetime.fromtimestamp(now.timestamp() + interval_seconds, tz=now.tzinfo)
         with self.store._lock:
-            self.store.conn.execute(
-                "INSERT OR IGNORE INTO space_opportunity_state("
-                "character_id,next_opportunity_at,next_opportunity_at_epoch,updated_at,updated_at_epoch"
-                ") VALUES(?,?,?,?,?)",
-                (
-                    character_id,
-                    next_at.isoformat(),
-                    epoch_us(next_at),
-                    now.isoformat(),
-                    epoch_us(now),
-                ),
-            )
+            row = self.store.conn.execute(
+                "SELECT * FROM space_opportunity_state WHERE character_id=?",
+                (character_id,),
+            ).fetchone()
+            if row is None:
+                self.store.conn.execute(
+                    "INSERT INTO space_opportunity_state("
+                    "character_id,next_opportunity_at,next_opportunity_at_epoch,"
+                    "configured_interval_minutes,updated_at,updated_at_epoch"
+                    ") VALUES(?,?,?,?,?,?)",
+                    (
+                        character_id,
+                        next_at.isoformat(),
+                        epoch_us(next_at),
+                        normalized_interval,
+                        now.isoformat(),
+                        epoch_us(now),
+                    ),
+                )
+            elif abs(float(row["configured_interval_minutes"] or 0.0) - normalized_interval) > 1e-9:
+                # The durable cursor belonged to a different configured cadence.
+                # Re-arm once from "now"; later restarts with the same interval
+                # leave the cursor untouched, so frequent restarts cannot starve
+                # the scheduler indefinitely.
+                self.store.conn.execute(
+                    "UPDATE space_opportunity_state SET "
+                    "next_opportunity_at=?,next_opportunity_at_epoch=?,"
+                    "configured_interval_minutes=?,updated_at=?,updated_at_epoch=? "
+                    "WHERE character_id=?",
+                    (
+                        next_at.isoformat(),
+                        epoch_us(next_at),
+                        normalized_interval,
+                        now.isoformat(),
+                        epoch_us(now),
+                        character_id,
+                    ),
+                )
             self.store._maybe_commit()
             row = self.store.conn.execute(
                 "SELECT * FROM space_opportunity_state WHERE character_id=?",
@@ -621,20 +658,37 @@ class SpaceRepository:
         character_id: str,
         next_at: datetime,
         now: datetime,
+        *,
+        interval_minutes: float | None = None,
     ) -> dict[str, Any]:
+        normalized_interval = (
+            max(10.0, float(interval_minutes)) if interval_minutes is not None else None
+        )
         with self.store._lock:
+            existing = self.store.conn.execute(
+                "SELECT configured_interval_minutes FROM space_opportunity_state WHERE character_id=?",
+                (character_id,),
+            ).fetchone()
+            stored_interval = (
+                normalized_interval
+                if normalized_interval is not None
+                else float(existing["configured_interval_minutes"] or 0.0) if existing is not None else 0.0
+            )
             self.store.conn.execute(
                 "INSERT INTO space_opportunity_state("
-                "character_id,next_opportunity_at,next_opportunity_at_epoch,updated_at,updated_at_epoch"
-                ") VALUES(?,?,?,?,?) "
+                "character_id,next_opportunity_at,next_opportunity_at_epoch,"
+                "configured_interval_minutes,updated_at,updated_at_epoch"
+                ") VALUES(?,?,?,?,?,?) "
                 "ON CONFLICT(character_id) DO UPDATE SET "
                 "next_opportunity_at=excluded.next_opportunity_at,"
                 "next_opportunity_at_epoch=excluded.next_opportunity_at_epoch,"
+                "configured_interval_minutes=excluded.configured_interval_minutes,"
                 "updated_at=excluded.updated_at,updated_at_epoch=excluded.updated_at_epoch",
                 (
                     character_id,
                     next_at.isoformat(),
                     epoch_us(next_at),
+                    stored_interval,
                     now.isoformat(),
                     epoch_us(now),
                 ),
@@ -681,11 +735,12 @@ class SpaceRepository:
             )
             self.store.conn.execute(
                 "UPDATE space_opportunity_state SET "
-                "next_opportunity_at=?,next_opportunity_at_epoch=?,updated_at=?,updated_at_epoch=? "
-                "WHERE character_id=?",
+                "next_opportunity_at=?,next_opportunity_at_epoch=?,configured_interval_minutes=?,"
+                "updated_at=?,updated_at_epoch=? WHERE character_id=?",
                 (
                     next_at.isoformat(),
                     epoch_us(next_at),
+                    max(10.0, float(interval_minutes)),
                     now.isoformat(),
                     now_epoch,
                     character_id,

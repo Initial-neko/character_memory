@@ -630,6 +630,31 @@ def test_space_media_failure_does_not_block_text_post(tmp_path):
     store.close()
 
 
+def test_space_scheduler_rearms_persisted_cursor_only_when_interval_changes(tmp_path):
+    access, store, _ = _access(tmp_path, ids=("c00",))
+    access.settings.space_opportunity_interval_minutes = 1440
+    repository = SpaceRepository(store)
+    start = datetime(2026, 9, 21, 8, 0, tzinfo=timezone.utc)
+
+    first = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    initial = first.status(start)["characters"][0]
+    assert initial["next_opportunity_at"].startswith("2026-09-22T08:00")
+    assert initial["configured_interval_minutes"] == 1440
+
+    changed_at = datetime(2026, 9, 21, 8, 10, tzinfo=timezone.utc)
+    access.settings.space_opportunity_interval_minutes = 120
+    restarted = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    changed = restarted.status(changed_at)["characters"][0]
+    assert changed["next_opportunity_at"].startswith("2026-09-21T10:10")
+    assert changed["configured_interval_minutes"] == 120
+    assert changed["minutes_until_next"] == 120
+
+    preserved = repository.get_opportunity_state("c00")["next_opportunity_at_epoch"]
+    same_config = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    same_config.status(datetime(2026, 9, 21, 8, 20, tzinfo=timezone.utc))
+    assert repository.get_opportunity_state("c00")["next_opportunity_at_epoch"] == preserved
+    store.close()
+
 def test_interval_scheduler_runs_again_after_one_hour_and_manual_dev_does_not_consume_it(tmp_path):
     access, store, model = _access(tmp_path, ids=("c00",))
     access.settings.space_opportunity_interval_minutes = 60
@@ -777,6 +802,7 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="applySpaceConfig"',
         'id="forceSpaceDue"',
         'id="spaceStatusAge"',
+        'id="spaceScheduleSummary"',
         'id="spaceRunId"',
         'id="loadSpaceRunRaw"',
         'id="spaceRunResult"',
@@ -794,6 +820,7 @@ def test_dev_console_exposes_space_autonomy_controls():
     assert '.boot-warning' in (web / "dev.css").read_text(encoding="utf-8")
     assert 'value="VOICE"' in html
     assert "spaceMediaVoiceText" in script
+    assert "renderSpaceScheduleSummary" in script
 
     for token in [
         "/v1/dev/space/status",

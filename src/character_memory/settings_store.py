@@ -449,6 +449,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "max": 10080,
                 "step": 10,
                 "level": "advanced",
+                "help": "每个活跃角色独立的上网机会基准间隔；当前基线 30 分钟。实际执行会带少量抖动，不等于每 30 分钟必定浏览。",
             },
             {
                 "name": "world_pulse_source_max_chars",

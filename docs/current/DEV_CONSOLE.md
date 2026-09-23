@@ -234,7 +234,7 @@ Dev ImageGen 可以持久化测试 MediaAsset，方便继续做 avatar/media 检
 - archive / restore 会 best-effort 触发当前 GSV registry reload；
 - `voice.yaml` 不改写，因此 restore 后原 voice mapping 可以直接恢复。
 
-archive / restore 响应中的 `voice_registry` 报告这次 reload 结果。归档本身成功但 registry reload 失败时仍返回成功，同时浏览器用固定页级提示条显示失败；提示条不接收 pointer event，也不会为了展示错误而阻止归档抽屉关闭。
+archive / restore 响应中的 `voice_registry` 报告这次 reload 结果；成功结果会明确标记 `reloaded=true`。归档本身成功但 registry reload 失败时仍返回成功，同时浏览器用固定页级提示条显示失败；提示条不接收 pointer event，也不会为了展示错误而阻止归档抽屉关闭。
 
 ## 4. Settings boundary
 

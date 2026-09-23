@@ -68,7 +68,7 @@ docs/
 └─ archive/
 ```
 
-Use `docs/current/` for behavior that is true on the target branch. Historical milestone notes may live under `docs/archive/`, but implementation checklists, agent logs, and temporary planning documents should stay in the PR/issue or outside the tracked repository.
+Use `docs/current/` for behavior that is true on the target branch. `docs/current/PROJECT_STATUS.md` is the exception that explicitly tracks meaningful open integration work, accepted next work, and deferred work; do not copy those open-PR claims into current architecture/feature contracts before merge. Historical milestone notes may live under `docs/archive/`, but implementation checklists, agent logs, and temporary planning documents should stay in the PR/issue or outside the tracked repository.
 
 ## Configuration and secrets
 
@@ -87,4 +87,4 @@ Prefer the smallest architecture that preserves current invariants:
 - Cross-service schemas and on-disk formats require round-trip tests.
 - Avoid introducing queues, databases, frameworks, or compatibility layers without a demonstrated need.
 
-See `docs/README.md` for the documentation index and `docs/current/CODEBASE_LAYOUT.md` for source navigation.
+See `docs/README.md` for the documentation index, `docs/current/PROJECT_STATUS.md` for current/integration/next-work state, and `docs/current/CODEBASE_LAYOUT.md` for source navigation.

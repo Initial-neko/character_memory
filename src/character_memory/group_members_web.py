@@ -106,4 +106,31 @@ def attach_group_member_routes(app):
                 raise HTTPException(status_code=404, detail="group not found")
             return {"group": payload(updated, profiles), "added_member_ids": additions}
 
+    @app.delete("/v1/groups/{conversation_id}/members/{character_id}")
+    def remove_group_member(conversation_id: str, character_id: str):
+        repository = GroupRepository(access.store())
+        profiles = profiles_by_id()
+        character_id = str(character_id).strip()
+        if character_id not in profiles:
+            raise HTTPException(status_code=404, detail="character not found")
+
+        with turn_lock_for(conversation_id):
+            try:
+                updated = repository.remove_member(
+                    conversation_id,
+                    character_id,
+                    datetime.now().astimezone(),
+                )
+            except KeyError as exc:
+                if str(exc).strip('"') == "group not found":
+                    raise HTTPException(status_code=404, detail="group not found") from exc
+                raise HTTPException(status_code=404, detail="character is not a group member") from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            return {
+                "group": payload(updated, profiles),
+                "removed_member_id": character_id,
+            }
+
     return app

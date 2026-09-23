@@ -944,6 +944,39 @@ def test_settings_center_exposes_random_encounter_formal_configuration(tmp_path:
     assert loaded.encounter_max_pending == 2
 
 
+def test_settings_center_persists_world_activity_sources_as_a_real_list(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text("world_activity_enabled: true\n", encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    snapshot = store.snapshot()
+    section = next(item for item in snapshot["schema"] if item["id"] == "world-activity")
+    levels = {field["name"]: field["level"] for field in section["fields"]}
+    assert levels["world_pulse_sources"] == "advanced"
+    assert levels["world_activity_poll_seconds"] == "diagnostic"
+
+    result = store.save_values(
+        {
+            "world_pulse_sources": [
+                "https://example.com/trending",
+                "https://example.org/hot",
+            ],
+            "world_browse_interval_minutes": 120,
+        }
+    )
+    assert result["changed"] is True
+
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    assert raw["world_pulse_sources"] == [
+        "https://example.com/trending",
+        "https://example.org/hot",
+    ]
+    loaded = load_settings(str(config))
+    assert loaded.world_pulse_sources == raw["world_pulse_sources"]
+    assert loaded.world_browse_interval_minutes == 120
+
+
 def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypatch):
     """The page opens on eight fields, and every other field is behind a group.
 
@@ -971,7 +1004,7 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     ]
 
     levels = Counter(field["level"] for section in schema for field in section["fields"])
-    assert levels == {"common": 8, "advanced": 18, "diagnostic": 31}
+    assert levels == {"common": 8, "advanced": 27, "diagnostic": 34}
     # Both other levels ship as real groups, so nothing is merely hidden.
     assert {"advanced", "diagnostic"} <= set(levels)
 

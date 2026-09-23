@@ -124,8 +124,19 @@ def infer_usage_context(conversation_id: str | None) -> LlmUsageContext:
 
 
 def provider_label(base_url: str) -> str:
-    host = (urlparse(str(base_url or "")).hostname or "").strip().lower()
-    return host or "openai-compatible"
+    parsed = urlparse(str(base_url or ""))
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return "openai-compatible"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if port is None:
+        return host
+    if ":" in host:
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
 
 
 class LlmUsageStore:

@@ -351,7 +351,7 @@ captured_at_ms
 
 frame bytes 不作为长期聊天附件。
 
-详见 [`VISUAL_CAPTURE.md`](VISUAL_CAPTURE.md)。
+详见 [`VISUAL.md`](VISUAL.md)。
 
 ## 9. Voice transcript gate
 
@@ -452,3 +452,389 @@ SQLite 虽然 durable，但 pending reaction queue、SSE sequence 与 worker sta
 - shared pub/sub
 - idempotent reaction jobs
 - cross-process watermark ownership
+
+## Voice Messages
+
+Voice Message 属于 Direct / Group Conversation contract：它是 durable message expression，不是 live call transport。底层 ASR/TTS Provider 与 Workbench 由 [VOICE_AND_TTS.md](VOICE_AND_TTS.md) 统一维护。
+
+Status: **V1 is implemented on current `main` for Direct and Group chat.**
+
+Voice Message is a durable chat expression, not a live call transport. The text remains the canonical message body; synthesized audio is an attached MediaAsset that can fail without deleting the message.
+
+### Current flow
+
+```text
+PersonReaction VOICE_MESSAGE
+  -> persist CHARACTER_MESSAGE with text + voice_status=pending
+  -> publish pending event
+  -> VoiceMessageMaterializer
+  -> POST Media Runtime :8001/v1/tts with the complete message text
+  -> save WAV/MP3 through MediaStorage
+  -> update the same event id
+       ready  -> voice_media_id + optional duration
+       failed -> voice_error, text remains readable
+  -> republish the same Direct/Group event id over SSE
+  -> browser merges the update in place
+  -> compact voice bubble playback + always-visible text underneath
+```
+
+Canonical metadata is defined in `character_memory.voice_message_fields`:
+
+```text
+voice_status
+voice_media_id
+voice_duration_ms
+voice_error
+```
+
+The state transition is:
+
+```text
+pending
+  ├─ ready
+  └─ failed
+```
+
+A failed TTS provider never removes the message text. The failure reason carried by the provider chain is preserved in `voice_error` and surfaced by the browser bubble.
+
+### Direct and Group
+
+Direct events live in `events`; Group events live in `conversation_events`. Both use the same `VOICE_MESSAGE` action contract and formal TTS path.
+
+Direct `TIME_TICK` wakes and due `PROACTIVE_INTENT` turns may also choose `VOICE_MESSAGE`. They persist the same pending character event and reuse the same direct publication/materialization hook, so background speech is synthesized instead of remaining a text-only or permanently-pending voice action. Autonomous Group Chat already follows the Group materializer path.
+
+The scheduler/materializer updates the **original event id** instead of appending a second message. Browser Direct and Group history/SSE projections preserve the voice fields and merge by id.
+
+### Relationship to voice calls
+
+```text
+Voice call
+  microphone -> ASR -> normal Person reaction -> ephemeral playback pipeline
+
+Voice message
+  Person reaction -> durable text event -> synthesize once -> persisted audio -> replay later
+```
+
+They may use the same configured TTS provider, but a durable Voice Message does not depend on live-call UI state.
+
+Chat dictation (`web/dictation.js`) and a voice call exclude each other: only one microphone capture is open at a time. Dictation refuses to start while a call is live, and both starting a call and switching conversation retire a dictation start that is still waiting on the permission prompt — the late "Allow" is never adopted, its tracks are stopped on the spot and the button returns to idle. A recording that is already live is dropped on the same two events without being sent to ASR, because its transcript would otherwise land in the conversation the user has already left. The permission prompt may be answered at any point after the request, so *holding a stream* and *still wanting this capture* are two separate things, and the answer is judged against what was wanted when the request was made.
+
+### Boundaries
+
+- One `VOICE_MESSAGE` is one complete TTS request; no sentence/chunk splitting in V1.
+- Ordinary `MESSAGE` remains text-only and is not automatically materialized.
+- Audio is MediaAsset data, not Memory.
+- Every Voice Message shows its canonical text directly below the voice bubble. There is no WeChat-style “tap to convert/show text” step and no placeholder “翻译” button.
+- The always-visible line is the canonical spoken text/transcript, not a separate machine-translation backend contract.
+- Space Voice Post is implemented as a separate social-channel media intent: one complete `VOICE` intent synthesizes through the same formal `:8001/v1/tts` route and persists as a Space MediaAsset. Its stored transcript is also shown directly below the voice bubble. It does not reuse chat `VOICE_MESSAGE` event semantics.
+- Raw microphone audio remains a transport/input concern and is not persisted as character memory by default.
+
+### Main modules
+
+```text
+domain/models.py
+    VOICE_MESSAGE action contract
+
+voice_message_fields.py
+    canonical persisted metadata keys/defaults
+
+application/voice_message_materializer.py
+    formal TTS -> MediaAsset -> ready/failed
+
+application/voice_message_service.py
+    durable state transitions + SSE republish
+
+application/async_conversation.py
+    Direct/Group scheduling hook
+
+web/app.js
+web/groups.js
+    Direct/Group voice bubble projection/playback
+
+space_media_executor.py
+web/space.js
+    autonomous Space VOICE synthesis + durable media relation + native playback
+```
+
+Regression coverage lives in `test_voice_message_*.py`, including persistence, materialization, Direct/Group transition and browser contract tests.
+
+## Stickers
+
+Sticker 属于聊天/社交表达资源。当前 runtime catalog、global ownership 与 legacy compatibility contract 收敛在 Conversation Runtime 中；Space 使用同一资源语义，社会层行为见 [SOCIAL_WORLD.md](SOCIAL_WORLD.md)。
+
+Sticker 当前是 **application/global resource**，不是“每个 Character 独占一套资源”的新设计。
+
+运行时仍兼容历史 character-local pack，因此必须区分：
+
+```text
+current ownership   = global application resource
+legacy compatibility = persona-local manifests / old character-scoped routes
+```
+
+V1 保留兼容，不为了清理历史语义去破坏现有资源。
+
+### 1. Runtime catalog
+
+正式 runtime catalog 会合并：
+
+```text
+built-in default pack
++
+global user-imported pack(s)
++
+legacy character-local manifests
+```
+
+核心入口：
+
+```text
+load_global_sticker_catalog(...)
+```
+
+当前 source 描述为：
+
+```text
+default+global+legacy
+```
+
+同一个 global catalog 会刷新到 Direct / Group 使用的 PersonRuntime，不要求每个 Character 重新复制一份 imported sticker。
+
+### 2. Storage
+
+全局用户 Sticker 默认存放在配置的：
+
+```yaml
+sticker_dir: ""
+```
+
+为空时从 DB parent 推导默认目录。
+
+全局 manifest：
+
+```text
+<sticker_dir>/manifest.yaml
+```
+
+内置 default pack 位于 package Web assets；legacy persona pack 仍可能位于：
+
+```text
+<persona_dir>/stickers/manifest.yaml
+```
+
+这些 legacy manifests 只是兼容输入，不改变当前 global ownership。
+
+### 3. Public HTTP surface
+
+#### Catalog
+
+```text
+GET /v1/stickers
+```
+
+可选 `character_id` 仍被接受用于旧客户端兼容，但正式返回：
+
+```json
+{
+  "scope": "global",
+  "source": "default+global+legacy",
+  "stickers": []
+}
+```
+
+用户导入资源在 Direct / Group 中共享。
+
+#### Global asset
+
+```text
+GET /v1/stickers/{sticker_id}/asset
+```
+
+这是当前正式 asset route。
+
+#### Legacy asset route
+
+```text
+GET /v1/stickers/{character_id}/{sticker_id}/asset
+```
+
+仍保留给旧客户端，但读取的仍是当前 global catalog。不要据此重新把 Sticker ownership 解释成 character-owned。
+
+### 4. Web ZIP import
+
+正式 Web import：
+
+```text
+POST /v1/stickers/import
+Content-Type: application/zip
+```
+
+兼容参数：
+
+```text
+character_id
+filename
+auto_tag
+```
+
+其中 `character_id` 即使由旧客户端发送，也**不会决定 storage ownership**。后端只用它做兼容校验；导入仍写全局 user library。
+
+成功后 runtime 会重新加载 global catalog，并刷新已经加载的人物 Sticker resource。
+
+### 5. Import metadata
+
+导入 ZIP 优先读取：
+
+```text
+all_tags.json
+```
+
+或者一个/多个：
+
+```text
+tags.json
+```
+
+metadata row 可以提供：
+
+- id
+- filename/file
+- 中文/英文标签
+- aliases/tags
+- description
+- set/pack id
+- display/pack name
+
+如果 ZIP 没有 metadata：
+
+```text
+auto_tag=true + available AI tagger
+  -> 可以对图片自动生成 label/tags/description
+
+auto_tag=false
+  -> reject
+```
+
+即使已有 metadata，字段语义不完整时也可以按需用 AI tagger 补齐。
+
+AI tagging 是 import-time metadata enrichment，不是每次 Character 想发 Sticker 时再调用一个模型。
+
+### 6. Import safety
+
+导入器有明确限制：
+
+```text
+archive bytes       <= 64 MiB
+uncompressed bytes  <= 160 MiB
+files               <= 500
+supported assets    png/webp/gif/svg/jpg/jpeg
+```
+
+ZIP member 会做 path traversal 防护，不接受 absolute path 或 `..` escape。
+
+导入采用 validate-first + manifest-last publication：
+
+```text
+read/resolve/tag/validate all rows
+        ↓
+write immutable/content-addressed assets
+        ↓
+validate temporary manifest
+        ↓
+atomic replace manifest last
+```
+
+目标是避免中途失败后，runtime 看到“manifest 已更新但图片还没写完”的半导入状态。
+
+如果最终 commit 失败，新创建但未被正式 manifest 引用的资产会尽量回滚。
+
+### 7. Runtime selection
+
+PersonRuntime 不允许模型凭空发任意 Sticker ID。
+
+每轮：
+
+```text
+global catalog
+  ↓
+Sticker retrieval / available resources
+  ↓
+LLM may choose one real sticker_id
+  ↓
+resource validation
+  ↓
+STICKER action
+```
+
+未知、不存在或 asset file 丢失的 Sticker 不应该被当作合法 outward resource。
+
+模型看到的是有限的可用资源及其语义标签，而不是整个文件系统。
+
+### 8. Built-in vs imported vs legacy
+
+#### Built-in
+
+随项目提供的 default pack，作为所有人物的基础资源。
+
+每个内置 SVG 都带 `width`/`height`（与 `viewBox` 同为 160），因为它们只给 `viewBox` 时没有 intrinsic width：消息气泡里的 `img` 会先按 0×0 布局、再被 shrink-to-fit 的容器框住，贴纸于是渲染成时间戳的宽度而不是气泡的上限。CSS 侧另有显式尺寸盒（`--sticker-size`），两者合起来保证贴纸在私聊和群聊里是同一个大小。
+
+#### Global imported
+
+当前正式用户扩展资源。Web import 和 CLI import 都写到 `sticker_dir`，所有人物/群聊共享。
+
+#### Legacy character-local
+
+早期 persona-local manifest 仍会被 runtime 合并，避免已有资源突然消失。
+
+这是兼容层，不是新资源应该继续采用的 ownership 模式。
+
+### 9. CLI import compatibility
+
+`sticker_import_cli.py` 当前已经与 global ownership 对齐：
+
+```text
+archive ZIP
+  -> resolve_sticker_dir(settings)
+  -> global manifest/assets
+  -> load_global_sticker_catalog(...)
+```
+
+历史 `--character` 参数仍接受，避免已有本地脚本直接失效，但它只做 character id 兼容校验，并打印 deprecated 提示；**不会改变 storage ownership**。
+
+因此当前事实源保持一致：
+
+```text
+Web import  -> global
+CLI import  -> global
+Runtime     -> default + global + legacy read compatibility
+```
+
+legacy persona-local manifests 继续只读兼容，不再作为新 CLI 导入目标。
+
+### 10. Relationship to ImageGen
+
+Sticker 与 ImageGen 是不同资源路径：
+
+- `STICKER` action 选择已经存在的 Sticker resource；
+- `GENERATE_IMAGE` 触发新的图片生成；
+- `VisualPurpose.STICKER` 只是 provider contract 中保留的 purpose，不代表当前聊天会自动用 ImageGen 即时制造每个 Sticker。
+
+如果未来要做“AI 现场生成 Sticker”，需要单独定义生成、审核、入库和复用语义，不能直接混进现有 Sticker retrieval。
+
+### 11. Regression expectations
+
+至少持续覆盖：
+
+- built-in/global/legacy catalog merge；
+- `/v1/stickers` 返回 global scope；
+- legacy `character_id` 不改变 Web/CLI import ownership；
+- CLI `--character` compatibility 不写回 persona-local library；
+- asset path validation；
+- ZIP size/file-count/path traversal 限制；
+- metadata-present 和 AI-auto-tag 两类 import；
+- manifest-last atomic publication；
+- runtime catalog refresh；
+- unknown Sticker ID 不成为合法 outward action；
+- legacy asset route 继续兼容；
+- 贴纸在私聊和群聊中渲染为同一个显式尺寸盒（`--sticker-size`），不随容器 shrink-to-fit 缩水。
+
+相关回归清单见 [`EVALS.md`](EVALS.md)。

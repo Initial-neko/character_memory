@@ -163,7 +163,7 @@ World Observation is an optional cognition phase inside a Space Opportunity. It 
               -> optional PersonRuntime cognition
               -> final SpacePostPlan
 
-Search and browsing are separate trust boundaries. SearchAPI/Brave discover candidate URLs; HeadlessBrowserWebFetcher actually opens those pages. The browser only accepts public http(s) targets, rejects local/private/link-local/reserved destinations, re-checks redirect destinations and browser subrequests, blocks service workers, and skips image/media/font resources because this phase only needs rendered text.
+Search and browsing are separate trust boundaries. SearchAPI/Brave discover candidate URLs; HeadlessBrowserWebFetcher actually opens those pages. The browser only accepts public http(s) targets, rejects local/private/link-local/reserved destinations, re-checks redirect destinations and browser subrequests, blocks service workers, and skips image/media/font resources because this phase only needs rendered text. A candidate rejected by that target check — a host that does not resolve in this environment is the common case — is skipped before any page opens and reported in the batch's `errors`; the remaining candidates are still fetched.
 
 Playwright page objects are not shared across scheduler/FastAPI threads. One observation batch owns its Playwright/browser/context lifecycle, which is slower than keeping a global browser alive but avoids cross-thread Playwright state corruption and is acceptable at Space's low opportunity frequency.
 
@@ -178,7 +178,7 @@ The four dispositions mean:
 
 A WORLD_OBSERVATION event may update Mental State, Memory or Intent through the normal PersonRuntime admission path, but its outward action channel is empty. Even if a model tries to return MESSAGE / VOICE_MESSAGE / IMAGE / STICKER, those actions are dropped and can never become a private-chat message.
 
-Search failure, browser launch failure, one broken page, or appraisal failure are all fail-soft. The character still proceeds to the normal Space decision. Searching therefore means neither believe this nor remember this nor publish this.
+Search failure, browser launch failure, one rejected candidate, one broken page, or appraisal failure are all fail-soft. The character still proceeds to the normal Space decision. Searching therefore means neither believe this nor remember this nor publish this.
 
 Configuration:
 

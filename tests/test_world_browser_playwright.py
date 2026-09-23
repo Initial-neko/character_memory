@@ -52,6 +52,31 @@ def rendered_page_url():
         thread.join(timeout=2)
 
 
+def test_guard_rejected_candidates_are_skipped_not_fatal():
+    """One unresolvable host must not abort the whole candidate batch.
+
+    The public-target guard runs before sync_playwright() is imported, so this
+    path is testable without any browser.
+    """
+    fetcher = HeadlessBrowserWebFetcher()
+    missing = "http://character-memory-no-such-host.invalid/one"
+    also_missing = "http://character-memory-no-such-host-too.invalid/two"
+
+    pages, errors = fetcher.fetch_many([missing, also_missing])
+
+    assert pages == []
+    assert [item["url"] for item in errors] == [missing, also_missing]
+    assert all("could not be resolved" in item["error"] for item in errors)
+
+
+def test_single_fetch_still_rejects_an_unresolvable_target():
+    """The single-URL dev route keeps its ValueError contract for bad targets."""
+    fetcher = HeadlessBrowserWebFetcher()
+
+    with pytest.raises(ValueError):
+        fetcher.fetch("http://character-memory-no-such-host.invalid/one")
+
+
 def test_headless_world_browser_reads_javascript_rendered_text(rendered_page_url):
     if os.getenv("RUN_PLAYWRIGHT") != "1":
         pytest.skip("real browser smoke runs only in the dedicated Playwright job")

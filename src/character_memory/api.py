@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import threading
 
+import httpx
+
 from character_memory.app import AppBundle, build_app
 from character_memory.api_contracts import (
     CharacterCapacityConfirmationRequired,
@@ -57,6 +59,34 @@ def _package_version() -> str:
     except PackageNotFoundError:
         return "0.0.0+unknown"
 _PROACTIVE_POLL_SECONDS = 30.0
+
+# How long archive/restore waits for a GSV registry reload before giving up on
+# it. This is a *stall* bound, not a correctness one: a reload that does not
+# answer in time is reported as ``unreachable``, which nobody is warned about,
+# so waiting longer buys no extra truth -- it only holds the archive response
+# open. Measured on a machine whose TCP stack blackholes a closed loopback port,
+# the request costs about this much plus a second, which is what puts the upper
+# bound here rather than at the VoiceDesign freeze path's 10s.
+VOICE_REGISTRY_RELOAD_TIMEOUT_SECONDS = 2.0
+
+# The one status the reload route raises for a roster it could not accept:
+# ``VoiceProfileError`` is a ``ValueError`` and the handler turns it into this.
+# Every other status came from something else -- a sidecar too old to have the
+# route (404), a bug in the sidecar (500), or a gateway in front of a port with
+# nothing behind it (502).
+VOICE_REGISTRY_REFUSAL_STATUS = 400
+
+
+def _voice_registry_failure(status: str, exc: BaseException) -> dict[str, object]:
+    """``rejected``: the sidecar refused. ``unreachable``: it did not answer."""
+
+    return {
+        "ok": False,
+        "reloaded": False,
+        "status": status,
+        "reason": str(exc) or exc.__class__.__name__,
+    }
+
 
 def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = None):
     from fastapi import FastAPI, HTTPException
@@ -160,19 +190,64 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         Archiving is a lifecycle change, not data deletion. The voice.yaml stays
         on disk, while a running GSV sidecar should immediately stop resolving
         that character id until it is restored.
-        """
-        try:
-            from character_memory.tts_lab import GsvVoiceReloader
 
-            reloader = GsvVoiceReloader(timeout_seconds=1.5)
+        Three outcomes, and the caller needs them apart:
+
+        ``reloaded``     the sidecar answered and took the new roster.
+        ``rejected``     the sidecar's reload route refused it with the one
+                         status it defines for that. This is the outcome that is
+                         genuinely the user's problem: the sidecar is
+                         demonstrably running and demonstrably still holding the
+                         old roster, so a warning about it is actionable and
+                         true.
+        ``unreachable``  nothing refused. No sidecar at all -- most deployments,
+                         since ``dev_stack`` only starts one when
+                         ``.external/GSV-TTS-Lite/.venv`` exists and the usual
+                         ``tts_provider`` is not ``gsv`` -- or nothing answered
+                         in time, or something in front of the port answered
+                         that is not the reload route.
+
+        The two failures used to arrive as the same ``{"ok": false,
+        "reloaded": false}``, so the browser could not tell them apart and
+        pinned a permanent "a running GSV sidecar may still be synthesizing the
+        old roster" banner. On a machine with no sidecar that sentence was
+        false, and on one with a busy sidecar it was a coin flip. ``status``
+        names which of the three happened.
+
+        Note what the refusal is *not*: it is not "an HTTP response arrived". A
+        loopback port that nothing is listening on does not necessarily refuse
+        the connection -- a proxy in TUN mode will answer 502 for it -- so
+        anything other than the reload route's own status is sorted with the
+        sidecars that are not there, and the reason string keeps the details for
+        the log.
+        """
+        from character_memory.tts_lab import GsvVoiceReloadRejected, GsvVoiceReloader
+
+        try:
+            reloader = GsvVoiceReloader(timeout_seconds=VOICE_REGISTRY_RELOAD_TIMEOUT_SECONDS)
             try:
                 reloader.reload()
             finally:
                 reloader.close()
-            return {"ok": True, "reloaded": True}
+        except GsvVoiceReloadRejected as exc:
+            if exc.status_code == VOICE_REGISTRY_REFUSAL_STATUS:
+                logger.warning("api.voice_registry reload rejected error=%s", exc)
+                return _voice_registry_failure("rejected", exc)
+            logger.info("api.voice_registry reload answered by something else status=%s error=%s", exc.status_code, exc)
+            return _voice_registry_failure("unreachable", exc)
+        except httpx.TransportError as exc:
+            # No answer inside the timeout: the exchange never happened, so
+            # there is no refusal to act on. Info, not warning -- this is the
+            # ordinary state of a deployment without a sidecar, and it was
+            # filling the log with failures that were not failures.
+            logger.info("api.voice_registry sidecar unreachable error=%s", exc)
+            return _voice_registry_failure("unreachable", exc)
         except Exception as exc:
-            logger.warning("api.voice_registry reload skipped/failed error=%s", exc)
-            return {"ok": False, "reloaded": False, "reason": str(exc) or exc.__class__.__name__}
+            # Unexpected, so it is loud in the log -- but it is not a refusal,
+            # and the user is not asked to fix what nobody can name.
+            logger.warning("api.voice_registry reload failed unexpectedly error=%s", exc)
+            return _voice_registry_failure("unreachable", exc)
+        return {"ok": True, "reloaded": True, "status": "reloaded"}
 
     resources = ApiResourceService(
         settings=settings,

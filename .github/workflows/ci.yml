@@ -86,4 +86,4 @@ jobs:
       - name: Run browser smoke
         env:
           RUN_PLAYWRIGHT: "1"
-        run: uv run pytest -q tests/test_p0_17b_playwright.py tests/test_p0_17c_playwright.py tests/test_chat_ui_playwright.py tests/test_settings_playwright.py tests/test_world_browser_playwright.py --browser chromium
+        run: uv run pytest -q tests/test_p0_17b_playwright.py tests/test_p0_17c_playwright.py tests/test_chat_ui_playwright.py tests/test_settings_playwright.py tests/test_world_browser_playwright.py tests/test_character_archive_notice_playwright.py --browser chromium

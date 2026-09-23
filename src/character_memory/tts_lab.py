@@ -829,6 +829,26 @@ def _references_template(voice_path: Path, template_name: str) -> bool:
     return isinstance(document, dict) and str(document.get("template") or "").strip() == template_name
 
 
+class GsvVoiceReloadRejected(RuntimeError):
+    """The sidecar answered, and refused the roster it was handed.
+
+    ``status_code`` is carried separately because the *reason* a caller cares
+    about is not "did something answer" but "did the reload route answer": only
+    the 400 this route raises for an unparsable voice file means a live sidecar
+    is holding a roster the operator can fix. Anything else on that port -- a
+    404 from a sidecar too old to have the route, a 502 from whatever sits in
+    front of a port with nothing behind it -- is not that, and a caller that
+    treats every HTTP response as a refusal will warn about the wrong thing.
+
+    Still a ``RuntimeError``: callers that only care that the reload did not
+    happen are unchanged.
+    """
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class GsvVoiceReloader:
     """Asks a running GSV sidecar to re-read persona voice profiles.
 
@@ -862,9 +882,10 @@ class GsvVoiceReloader:
             # only one this process cannot reconstruct from a status code. The
             # bare "HTTP 400" shipped once and sent someone restarting a
             # sidecar that had already answered.
-            raise RuntimeError(
+            raise GsvVoiceReloadRejected(
                 f"GSV voice reload failed with HTTP {response.status_code} at {url}: "
-                f"{_response_detail(response)}"
+                f"{_response_detail(response)}",
+                response.status_code,
             )
 
 

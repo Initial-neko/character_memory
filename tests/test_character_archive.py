@@ -5,10 +5,16 @@ because the persona document is handed to the model verbatim -- these tests pin
 that the definition file comes out of an archive byte-identical.
 """
 
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 from pathlib import Path
 import re
 import shutil
+import socket
 import subprocess
+import threading
+import time
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -256,91 +262,87 @@ def test_every_hook_the_archive_module_reads_is_still_emitted_by_the_shell():
     assert missing == [], f"no web source emits these any more: {missing}"
 
 
-def test_archive_frontend_surfaces_a_failed_voice_registry_refresh():
-    """Both calls returned the reload result, and both threw it away.
+@contextmanager
+def _fake_sidecar(*, status: int = 200, detail: str | None = None, delay: float = 0.0):
+    """The reload route, on a real port, answered by a real socket.
 
-    ``voice_registry`` was in the archive and restore payloads the whole time,
-    but the module awaited them as bare statements: a 200 meaning "the sidecar
-    never picked this up" looked exactly like a clean archive. The responses are
-    held now, and a failed refresh reaches the user instead of the console.
-
-    Telling the user is a message, not a flow change, and the first attempt at
-    this conflated the two: it kept the drawer open so the failure had somewhere
-    to live. Every archive in a browser without a GSV sidecar then failed to
-    reload, so the drawer never closed, its backdrop covered the sidebar, and
-    the browser smoke test could no longer click ``.character-archive-entry``
-    (``Locator.click: Timeout 10000ms exceeded``). The pins below are the two
-    halves that have to stay separate.
+    These tests used to patch ``GsvVoiceReloader`` out and assert on the dict the
+    app built from what the patch raised. That pinned the app's own arithmetic
+    and nothing else: the distinction the route now has to make -- a dead port
+    versus an answered refusal -- is decided below that seam, by httpx, on the
+    wire. So the reloader is left alone and its peer is faked instead.
     """
 
-    web = Path(__file__).resolve().parents[1] / "src" / "character_memory" / "web"
-    script = (web / "character_archive.js").read_text(encoding="utf-8")
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 -- the stdlib's spelling, not ours
+            if delay:
+                time.sleep(delay)
+            body = json.dumps({"detail": detail, "loaded": status < 400, "voices": []}).encode("utf-8")
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                pass  # the client gave up and closed the connection first
 
-    for endpoint in ("/archive`", "/restore${query}`"):
-        call = "await CM.api(`/v1/characters/${encodeURIComponent(characterId)}" + endpoint
-        assert call in script, endpoint
-        assert f"= {call}" in script, f"the {endpoint} response is awaited but discarded"
-    assert "voice_registry" in script
-    assert "reloaded !== false" in script
+        def log_message(self, *args):  # a fake sidecar, not a chatty one
+            pass
 
-    # The message: a notice pinned to the page, which a failure can show without
-    # touching the drawer the flow already decided what to do with.
-    assert "showVoiceReloadWarning(result);" in script
-    assert "archive-voice-notice" in script
-    styles = (web / "styles.css").read_text(encoding="utf-8")
-    assert re.search(r"\.archive-voice-notice\s*\{", styles), "the notice is styled where the shell can load it"
-    assert re.search(r"\.archive-voice-notice\s*\{[^}]*pointer-events:\s*none", styles), (
-        "the notice must not stand between the user and a control underneath it"
-    )
-
-    # The flow: archiving closes the drawer on the failing path exactly as it
-    # does on a clean one. Presence alone is not enough -- the regressed version
-    # still closed the drawer, one early ``return`` further down -- so nothing
-    # may leave the function between showing the warning and closing the drawer.
-    archive_body = script.split("async function archiveCharacter", 1)[1].split("function renderArchivedDrawer", 1)[0]
-    assert "CM.closeDrawer();" in archive_body, "a failed refresh must not hold the drawer open"
-    assert "return" not in archive_body.split("showVoiceReloadWarning(result);", 1)[1], (
-        "the warning must not be an early exit out of archiving"
-    )
-    assert "drawerBody" not in archive_body, "the drawer is not the warning's channel any more"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
-def test_archive_keeps_voice_reference_and_refreshes_live_gsv_registry(tmp_path: Path, monkeypatch):
+def _dead_sidecar_url() -> str:
+    """A port that was bound and released, so nothing is listening on it."""
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+    return f"http://127.0.0.1:{port}"
+
+
+def _voice_registry_after_archive(tmp_path: Path, monkeypatch, base_url: str, log=None) -> dict:
+    """Archive a character for real, against ``base_url``, and report what the
+    route said about the registry.
+
+    The archive itself has to succeed on every path -- that is the whole reason
+    the reload result is a field and not an error code -- so it is asserted here
+    once rather than repeated per outcome.
+    """
+
     config = _config(tmp_path)
     settings = load_settings(str(config))
     momo_dir = Path(settings.persona_path).parent.parent / "momo"
     (momo_dir / "voice.yaml").write_text("template: murasame\n", encoding="utf-8")
-    calls = []
+    monkeypatch.setenv("GSV_TTS_BASE_URL", base_url)
+    if log is not None:
+        monkeypatch.setattr("character_memory.api.logger", log)
 
-    class FakeReloader:
-        def __init__(self, *args, **kwargs):
-            calls.append(("init", kwargs.get("timeout_seconds")))
-
-        def reload(self):
-            calls.append(("reload", None))
-
-        def close(self):
-            calls.append(("close", None))
-
-    monkeypatch.setattr("character_memory.tts_lab.GsvVoiceReloader", FakeReloader)
-    app = create_api(str(config))
-
-    with TestClient(app) as client:
+    with TestClient(create_api(str(config))) as client:
         archived = client.post("/v1/characters/momo/archive")
-        assert archived.status_code == 200
-        assert archived.json()["voice_registry"] == {"ok": True, "reloaded": True}
-        assert (momo_dir / "voice.yaml").read_text(encoding="utf-8") == "template: murasame\n"
 
-        restored = client.post("/v1/characters/momo/restore")
-        assert restored.status_code == 200
-        assert restored.json()["voice_registry"] == {"ok": True, "reloaded": True}
-        assert (momo_dir / "voice.yaml").is_file()
-
-    assert [item[0] for item in calls].count("reload") == 2
-    assert ("init", 1.5) in calls
+    assert archived.status_code == 200, archived.text
+    assert (momo_dir / "voice.yaml").read_text(encoding="utf-8") == "template: murasame\n"
+    return archived.json()["voice_registry"]
 
 
-def test_archive_says_so_when_it_could_not_refresh_the_voice_registry(tmp_path: Path, monkeypatch):
+def test_archive_reports_a_sidecar_that_took_the_new_roster(tmp_path: Path, monkeypatch):
+    with _fake_sidecar(status=200) as url:
+        registry = _voice_registry_after_archive(tmp_path, monkeypatch, url)
+
+    assert registry == {"ok": True, "reloaded": True, "status": "reloaded"}
+
+
+def test_archive_reports_a_sidecar_that_refused_the_reload(tmp_path: Path, monkeypatch):
     """A stale GSV registry is the archive's real failure, and it returned 200.
 
     ``_rebuild_voices`` keeps the previous ``_archived_character_ids`` whenever
@@ -349,41 +351,103 @@ def test_archive_says_so_when_it_could_not_refresh_the_voice_registry(tmp_path: 
     the row, so the character stayed synthesizable through a sidecar that had
     never heard about it, and the only trace was an ``info`` line. The response
     now carries the failure to the client, and the log says so at a level an
-    operator would actually see.
+    operator would actually see. The sidecar's own sentence comes through with
+    it: it names the file that would not parse, which is the one fact this
+    process cannot reconstruct from a status code.
 
     The module logger is spied on rather than read through ``caplog``: the
     application installs its own handlers and does not propagate, so a record's
     level is only observable where it is emitted.
     """
 
-    config = _config(tmp_path)
-    settings = load_settings(str(config))
-    momo_dir = Path(settings.persona_path).parent.parent / "momo"
-    (momo_dir / "voice.yaml").write_text("template: murasame\n", encoding="utf-8")
+    spy = MagicMock()
+    with _fake_sidecar(status=400, detail="voices/momo.yaml: template 'murasame' is not registered") as url:
+        registry = _voice_registry_after_archive(tmp_path, monkeypatch, url, log=spy)
 
-    class FailingReloader:
-        def __init__(self, *args, **kwargs):
-            pass
+    assert registry["ok"] is False
+    assert registry["reloaded"] is False
+    assert registry.get("status") == "rejected", registry
+    assert "HTTP 400" in registry["reason"]
+    assert "murasame" in registry["reason"]
+    assert spy.warning.called, "a registry the sidecar did not pick up is not an info-level event"
+    assert "murasame" in str(spy.warning.call_args)
+    assert "unreachable" not in str(spy.info.call_args_list), "a refusal answered; nothing was unreachable"
 
-        def reload(self):
-            raise RuntimeError("voices tree has an unresolvable template")
 
-        def close(self):
-            pass
+def test_archive_does_not_invent_a_sidecar_that_is_not_running(tmp_path: Path, monkeypatch):
+    """The common deployment, and the one that was being lied about.
+
+    ``dev_stack`` only starts a GSV sidecar when ``.external/GSV-TTS-Lite/.venv``
+    exists, and the usual ``tts_provider`` is not ``gsv``. This arrives at the
+    browser as the same ``reloaded: false`` a real refusal gets, so it hung a
+    permanent "a running GSV sidecar may still be synthesizing the old roster"
+    banner over a machine that had no sidecar to synthesize with.
+    """
 
     spy = MagicMock()
-    monkeypatch.setattr("character_memory.tts_lab.GsvVoiceReloader", FailingReloader)
-    monkeypatch.setattr("character_memory.api.logger", spy)
-    app = create_api(str(config))
+    registry = _voice_registry_after_archive(tmp_path, monkeypatch, _dead_sidecar_url(), log=spy)
 
-    with TestClient(app) as client:
-        archived = client.post("/v1/characters/momo/archive")
+    assert registry["ok"] is False
+    assert registry["reloaded"] is False
+    assert registry.get("status") == "unreachable", registry
+    assert registry["reason"], "the reason still says what was tried"
+    assert "api.voice_registry" in str(spy.info.call_args_list), "it is worth a line in the log"
+    assert not spy.warning.called, "it is not a failure the user is asked to fix"
 
-    assert archived.status_code == 200
-    assert archived.json()["voice_registry"] == {
-        "ok": False,
-        "reloaded": False,
-        "reason": "voices tree has an unresolvable template",
-    }
-    assert spy.warning.called, "a registry the sidecar did not pick up is not an info-level event"
-    assert "voices tree has an unresolvable template" in str(spy.warning.call_args)
+
+def test_archive_does_not_mistake_a_gateway_for_the_sidecar(tmp_path: Path, monkeypatch):
+    """A closed loopback port does not reliably refuse the connection.
+
+    On a machine running a proxy in TUN mode, a connect to a port with nothing
+    behind it is answered by the proxy -- measured here as an empty-bodied
+    ``502`` -- so "an HTTP response arrived" is not evidence that a sidecar is
+    running. Only the status the reload route raises for a bad roster is.
+    Classifying by response rather than by protocol puts the standing warning
+    back on every deployment without a sidecar, which is the bug being fixed.
+    """
+
+    spy = MagicMock()
+    with _fake_sidecar(status=502) as url:
+        registry = _voice_registry_after_archive(tmp_path, monkeypatch, url, log=spy)
+
+    assert registry.get("status") == "unreachable", registry
+    assert "HTTP 502" in registry["reason"], "the log still says what answered"
+    assert not spy.warning.called
+
+
+def test_archive_calls_a_slow_reload_unreachable_rather_than_refused(tmp_path: Path, monkeypatch):
+    """The path that bites a deployment that has nothing wrong with it.
+
+    ``GsvEngine.reload_voices`` takes the engine lock, so a reload queued behind
+    an in-flight synthesis answers late with no sidecar down and no template
+    broken. Timing out is not a refusal, and reporting it as one made the
+    standing warning a lottery on installs that work.
+    """
+
+    spy = MagicMock()
+    monkeypatch.setattr("character_memory.api.VOICE_REGISTRY_RELOAD_TIMEOUT_SECONDS", 0.3)
+    with _fake_sidecar(status=200, delay=1.5) as url:
+        registry = _voice_registry_after_archive(tmp_path, monkeypatch, url, log=spy)
+
+    assert registry["status"] == "unreachable"
+    assert "api.voice_registry" in str(spy.info.call_args_list)
+    assert not spy.warning.called
+
+
+def test_the_reload_timeout_stays_a_stall_bound_not_a_wait():
+    """The number is a decision, and it has a floor *and* a ceiling.
+
+    The floor is the engine lock: the sidecar holds it across the reload, so the
+    refusal worth reporting comes back only once whatever synthesis is in flight
+    is done. 1.5s lost that race often enough to be the reported bug.
+
+    The ceiling is the archive button. Nothing about a missed reload is dangerous
+    -- the roster is on disk and GSV reads it at its next start -- while this
+    timeout is spent on every archive in the deployments that have no sidecar at
+    all, measured here at roughly the timeout plus a second before the connect
+    gives up. Waiting longer buys no extra truth, only a longer stall.
+    """
+
+    from character_memory.api import VOICE_REGISTRY_RELOAD_TIMEOUT_SECONDS
+
+    assert 1.5 <= VOICE_REGISTRY_RELOAD_TIMEOUT_SECONDS <= 5.0

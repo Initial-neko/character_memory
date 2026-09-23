@@ -756,6 +756,16 @@ body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-compact); }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.trace-io {
+  border-color: var(--ui-line-strong);
+}
+.trace-io > summary::after {
+  content: " · 点击查看实际请求/响应";
+  color: var(--ui-muted);
+  font-weight: 400;
+  font-size: 10px;
+}
+
 .trace-message-list {
   display: grid;
   gap: 8px;

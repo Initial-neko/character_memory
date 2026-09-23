@@ -113,18 +113,26 @@
         <div class="persona-card persona-inspector">
           <div class="persona-card-head"><div class="persona-avatar-large">${CM.escapeHtml((persona.name || profile.name || "AI").slice(0,1))}</div><div><h3>${CM.escapeHtml(persona.name || profile.name || profile.id)}</h3><p>${CM.escapeHtml([persona.identity, persona.tagline].filter(Boolean).join(" · "))}</p></div></div>
           ${persona.description ? `<p class="persona-description">${CM.escapeHtml(persona.description)}</p>` : ""}
-          <div class="persona-section"><h4>性格</h4>${listHtml(persona.personality)}</div>
-          <div class="persona-section"><h4>交流方式</h4><dl class="kv">
-            <dt>聊天</dt><dd>${CM.escapeHtml(behavior.conversation || "—")}</dd>
-            <dt>表达</dt><dd>${CM.escapeHtml(behavior.expression || "—")}</dd>
-            <dt>追问</dt><dd>${CM.escapeHtml(behavior.questions || "—")}</dd>
-            <dt>沉默</dt><dd>${CM.escapeHtml(behavior.silence || "—")}</dd>
-            <dt>主动</dt><dd>${CM.escapeHtml(behavior.initiative || "—")}</dd>
-            <dt>分歧</dt><dd>${CM.escapeHtml(behavior.disagreement || "—")}</dd>
-            <dt>关心</dt><dd>${CM.escapeHtml(behavior.care || "—")}</dd>
-          </dl></div>
-          <div class="persona-section"><h4>边界</h4>${listHtml(persona.boundaries)}</div>
-          <details class="advanced-persona"><summary>创建来源</summary>
+          <div class="persona-inspector-summary">
+            <span>${Array.isArray(persona.personality) ? persona.personality.length : 0} 条性格</span>
+            <span>${Array.isArray(persona.boundaries) ? persona.boundaries.length : 0} 条边界</span>
+            <span>基础设定只读</span>
+          </div>
+          <details class="inspector-details">
+            <summary>性格与交流方式</summary>
+            <div class="persona-section"><h4>性格</h4>${listHtml(persona.personality)}</div>
+            <div class="persona-section"><h4>交流方式</h4><dl class="kv">
+              <dt>聊天</dt><dd>${CM.escapeHtml(behavior.conversation || "—")}</dd>
+              <dt>表达</dt><dd>${CM.escapeHtml(behavior.expression || "—")}</dd>
+              <dt>追问</dt><dd>${CM.escapeHtml(behavior.questions || "—")}</dd>
+              <dt>沉默</dt><dd>${CM.escapeHtml(behavior.silence || "—")}</dd>
+              <dt>主动</dt><dd>${CM.escapeHtml(behavior.initiative || "—")}</dd>
+              <dt>分歧</dt><dd>${CM.escapeHtml(behavior.disagreement || "—")}</dd>
+              <dt>关心</dt><dd>${CM.escapeHtml(behavior.care || "—")}</dd>
+            </dl></div>
+          </details>
+          <details class="inspector-details"><summary>边界 · ${Array.isArray(persona.boundaries) ? persona.boundaries.length : 0} 条</summary><div class="persona-section">${listHtml(persona.boundaries)}</div></details>
+          <details class="inspector-details"><summary>创建来源与初始化</summary>
             <div class="kv">
               <div>来源</div><div>${CM.escapeHtml(creation.source || "LEGACY")}</div>
               <div>创建时间</div><div>${CM.escapeHtml(creation.created_at || "旧人物未记录")}</div>
@@ -133,7 +141,7 @@
             </div>
             <label class="builder-field"><span>最初创建描述</span><textarea rows="7" readonly>${CM.escapeHtml(creation.prompt || "这个人物创建于来源记录功能之前，没有保存原始描述。")}</textarea></label>
           </details>
-          <p class="ui-hint">人物创建后基础 Persona 不直接编辑。需要另一版设定时，后续应通过“复制为新人物”创建新角色，而不是重写当前角色的人格历史。</p>
+          <p class="ui-hint">基础 Persona 只描述“这个人原本是谁”；后续变化来自 Memory、关系和经历。</p>
         </div>`;
     } catch (error) {
       CM.dom.drawerBody.innerHTML = `<div class="error">${CM.escapeHtml(error.message)}</div>`;

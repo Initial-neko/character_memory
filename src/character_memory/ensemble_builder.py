@@ -832,8 +832,12 @@ Content:
         if use_voice_design and voice_design_items:
             # Explicit opt-in only. The :9015 VoiceDesign sidecar is still a
             # manually-started feature; if it is absent or fails, the group and
-            # default/fallback voices remain valid.
-            self._start_voice_design(voice_design_items)
+            # default/fallback voices remain valid. Even thread scheduling is
+            # outside the core commit boundary.
+            try:
+                self._start_voice_design(voice_design_items)
+            except Exception as exc:
+                logger.warning("ensemble.voice_design schedule_failed error=%s", exc)
 
         logger.info(
             "ensemble.confirm build=%s group=%s members=%d new_characters=%d",

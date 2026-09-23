@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
+import time
+from typing import Any
 
 import httpx
 import pytest
@@ -320,3 +324,101 @@ def test_usage_context_inference_covers_non_runtime_feature_sessions():
     for session_id, expected in cases.items():
         context = infer_usage_context(session_id)
         assert (context.feature, context.purpose) == expected
+
+
+def _usage_row(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "provider": "example.test",
+        "model": "demo-model",
+        "feature": "GROUP",
+        "purpose": "GROUP_REACTION",
+        "session_id": "session-lock",
+        "conversation_id": "group:lab",
+        "character_id": "kurisu",
+        "logical_call_id": "logical-lock",
+        "attempt": 1,
+        "status": "SUCCESS",
+        "input_chars": 10,
+        "output_chars": 5,
+        "duration_ms": 12.0,
+        "usage_source": "PROVIDER",
+    }
+    row.update(overrides)
+    return row
+
+
+def _hold_write_lock(db_path) -> sqlite3.Connection:
+    """Take the same lock a concurrent writer (dev server, other process) takes."""
+
+    blocker = sqlite3.connect(str(db_path), isolation_level=None)
+    blocker.execute("BEGIN EXCLUSIVE")
+    return blocker
+
+
+def test_record_gives_up_instead_of_waiting_when_the_database_is_locked(tmp_path, caplog):
+    """Telemetry sits on the user's chat path: a busy database must cost it ~0."""
+
+    db_path = tmp_path / "usage.db"
+    recorder = LlmUsageRecorder(db_path)
+    blocker = _hold_write_lock(db_path)
+    try:
+        started = time.perf_counter()
+        with caplog.at_level(logging.WARNING, logger="character_memory.llm.usage"):
+            row_id = recorder.record(_usage_row())
+        elapsed = time.perf_counter() - started
+    finally:
+        blocker.rollback()
+        blocker.close()
+        recorder.close()
+
+    assert row_id is None
+    assert elapsed < 1.0, f"record() waited {elapsed:.2f}s behind a locked database"
+
+    dropped = [item for item in caplog.records if item.levelno >= logging.WARNING]
+    assert dropped, "a dropped telemetry row must leave a warning behind"
+    assert dropped[-1].name == "character_memory.llm.usage"
+    assert dropped[-1].exc_info is not None
+
+
+def test_store_construction_gives_up_instead_of_waiting_when_the_database_is_locked(tmp_path):
+    """The recorder is built during app startup; it must not hang there either."""
+
+    db_path = tmp_path / "usage.db"
+    sqlite3.connect(str(db_path)).close()
+    blocker = _hold_write_lock(db_path)
+    try:
+        started = time.perf_counter()
+        with pytest.raises(sqlite3.OperationalError):
+            LlmUsageStore(db_path)
+        elapsed = time.perf_counter() - started
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    assert elapsed < 1.0, f"LlmUsageStore() waited {elapsed:.2f}s behind a locked database"
+
+
+def test_record_still_writes_a_usable_row_when_the_database_is_free(tmp_path):
+    db_path = tmp_path / "usage.db"
+    recorder = LlmUsageRecorder(db_path)
+    try:
+        row_id = recorder.record(_usage_row(logical_call_id="logical-free"))
+    finally:
+        recorder.close()
+
+    assert row_id is not None
+    assert row_id > 0
+
+    store = LlmUsageStore(db_path)
+    try:
+        usage = store.usage(hours=24, limit=10)
+    finally:
+        store.close()
+
+    assert usage["summary"]["requests"] == 1
+    assert usage["summary"]["logical_calls"] == 1
+    row = usage["recent"][0]
+    assert row["logical_call_id"] == "logical-free"
+    assert (row["feature"], row["purpose"]) == ("GROUP", "GROUP_REACTION")
+    assert row["character_id"] == "kurisu"
+    assert row["status"] == "SUCCESS"

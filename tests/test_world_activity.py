@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 from character_memory.config import Settings
@@ -145,6 +146,13 @@ def make_access(tmp_path, *, count=3):
     )
     return store, access, model
 
+
+def test_world_browse_default_and_dev_summary_are_explicitly_30_minutes():
+    assert Settings().world_browse_interval_minutes == 30
+    html = Path("src/character_memory/web/dev.html").read_text(encoding="utf-8")
+    script = Path("src/character_memory/web/dev.js").read_text(encoding="utf-8")
+    assert 'id="worldScheduleSummary"' in html
+    assert "renderWorldScheduleSummary" in script
 
 def test_world_pulse_repository_deduplicates_topics_and_character_comments(tmp_path):
     store = SQLiteStore(tmp_path / "pulse.db")

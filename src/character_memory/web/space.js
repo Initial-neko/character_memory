@@ -78,6 +78,7 @@
   let autoPrefetchTimer = null;
   const AUTO_PREFETCH_PAGES = 2;
   const AUTO_PREFETCH_AHEAD_PX = 1600;
+  const expandedCommentPanels = new Set();
   const expandedComments = new Set();
   const expandedThreads = new Set();
   const replyTargets = new Map();
@@ -270,6 +271,21 @@
     }
 
     const postId = String(post.id);
+    const panelExpanded = expandedCommentPanels.has(postId);
+    if (!panelExpanded) {
+      const latest = roots[0] || allComments[0] || null;
+      const preview = latest
+        ? `<span class="space-comment-preview"><strong>${CM.escapeHtml(commentName(latest))}</strong> ${CM.escapeHtml(String(latest.content || "").trim() || "发送了一个表情")}</span>`
+        : '<span class="space-comment-preview">还没有评论</span>';
+      return `<div class="space-comments space-comments-collapsed">
+        <button class="space-comments-summary" type="button" data-space-comments-panel-toggle="${CM.escapeHtml(postId)}">
+          <span>评论 ${allComments.length}</span>
+          ${preview}
+          <span class="space-comments-summary-action">${allComments.length ? "查看评论" : "写评论"}</span>
+        </button>
+      </div>`;
+    }
+
     const expandedRoots = expandedComments.has(postId);
     const visibleRoots = expandedRoots ? roots : roots.slice(0, 3);
     const body = visibleRoots.map(root => {
@@ -294,13 +310,14 @@
       : "";
     const target = replyTargets.get(postId);
     const replyBanner = target
-      ? `<div class="space-comment-replying">回复 <strong>${CM.escapeHtml(target.name)}</strong><button type="button" data-space-reply-cancel="${CM.escapeHtml(post.id)}">取消</button></div>`
+      ? `<div class="space-comment-replying">回复 <strong>${CM.escapeHtml(target.name)}</strong><button type="button" data-space-reply-cancel="${CM.escapeHtml(postId)}">取消</button></div>`
       : "";
     const placeholder = target ? `回复 ${target.name}…` : "评论这条动态…";
     return `<div class="space-comments">
+      <button class="space-comments-collapse" type="button" data-space-comments-panel-toggle="${CM.escapeHtml(postId)}">收起评论</button>
       <div class="space-comments-list">${body || '<div class="space-comments-empty">还没有评论</div>'}</div>
       ${rootToggle}
-      <form class="space-comment-form" data-space-comment-form="${CM.escapeHtml(post.id)}">
+      <form class="space-comment-form" data-space-comment-form="${CM.escapeHtml(postId)}">
         ${replyBanner}
         <textarea class="space-comment-input" name="content" rows="1" maxlength="1000" placeholder="${CM.escapeHtml(placeholder)}" aria-label="${CM.escapeHtml(placeholder)}"></textarea>
         <button class="space-comment-submit" type="submit">发送</button>
@@ -494,6 +511,24 @@
       return;
     }
 
+    const commentsPanelToggle = event.target.closest("[data-space-comments-panel-toggle]");
+    if (commentsPanelToggle) {
+      const postId = String(commentsPanelToggle.dataset.spaceCommentsPanelToggle || "");
+      if (expandedCommentPanels.has(postId)) {
+        expandedCommentPanels.delete(postId);
+        replyTargets.delete(postId);
+      } else {
+        expandedCommentPanels.add(postId);
+      }
+      replacePost(postsById.get(postId));
+      if (expandedCommentPanels.has(postId)) {
+        const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
+          .find(node => node.dataset.spacePost === postId);
+        updated?.querySelector(".space-comment-input")?.focus();
+      }
+      return;
+    }
+
     const commentsToggle = event.target.closest("[data-space-comments-toggle]");
     if (commentsToggle) {
       const postId = String(commentsToggle.dataset.spaceCommentsToggle || "");
@@ -519,6 +554,7 @@
       const commentId = String(replyButton.dataset.spaceReplyComment || "");
       const name = String(replyButton.dataset.spaceReplyName || "评论");
       replyTargets.set(postId, {commentId, name});
+      expandedCommentPanels.add(postId);
       const post = postsById.get(postId);
       if (post) {
         const rootId = threadRootId(post, commentId);

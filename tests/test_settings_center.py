@@ -1005,7 +1005,7 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     ]
 
     levels = Counter(field["level"] for section in schema for field in section["fields"])
-    assert levels == {"common": 8, "advanced": 27, "diagnostic": 34}
+    assert levels == {"common": 8, "advanced": 28, "diagnostic": 33}
     # Both other levels ship as real groups, so nothing is merely hidden.
     assert {"advanced", "diagnostic"} <= set(levels)
 

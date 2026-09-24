@@ -115,9 +115,20 @@
 
       const buckets = bucketsByLevel(section.fields || []);
       if (buckets.common.length) card.appendChild(fieldGrid(buckets.common, snapshot.values));
-      for (const {level, details} of collapsedGroups(buckets, fields => fields.map(field => field.label || field.name))) {
-        details.appendChild(fieldGrid(buckets[level], snapshot.values));
-        card.appendChild(details);
+
+      // Persistent backend plumbing belongs to backend defaults, not the normal
+      // Settings surface. Detailed Dev is the explicit troubleshooting surface
+      // for low-level runtime knobs. Keep only user-facing "advanced" choices
+      // here; diagnostic fields remain part of the server schema for API
+      // compatibility but are deliberately not rendered as controls.
+      if (buckets.advanced.length) {
+        const advanced = levelGroup(
+          "advanced",
+          buckets.advanced.map(field => field.label || field.name),
+          "需要明确调整时再改；其余参数使用后端默认值",
+        );
+        advanced.appendChild(fieldGrid(buckets.advanced, snapshot.values));
+        card.appendChild(advanced);
       }
       sections.appendChild(card);
     }

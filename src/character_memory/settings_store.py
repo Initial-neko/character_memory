@@ -174,10 +174,11 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "tts_device",
                 "label": "TTS Device (where supported)",
                 "type": "select",
-                # Which CPU/GPU a local model runs on is machine plumbing, and
-                # the hot-apply story differs per provider. The Voice card's
-                # own health line reports the runtime device anyway.
-                "level": "diagnostic",
+                # CPU/GPU selection is machine-specific, but it is still a
+                # deliberate user choice for local TTS and is used by the existing
+                # Voice settings workflow. Keep it in Advanced rather than hiding
+                # it with backend transport/plumbing defaults.
+                "level": "advanced",
                 "options": [
                     {"value": "cpu", "label": "CPU"},
                     {"value": "cuda", "label": "CUDA"},

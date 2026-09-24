@@ -119,6 +119,12 @@ group_autonomy_max_messages: 3             # hard range 1..4 visible character m
 group_autonomy_user_quiet_minutes: 30      # skip/rearm when the user spoke too recently; 0 disables this guard
 group_autonomy_poll_seconds: 60            # check latency only; does not change interval
 
+# Group user-turn speaker cap. One user message asks at most this many distinct
+# members to react. @-mentioned members always participate; unmentioned members
+# are truncated from the tail of the rotating order, so the audience still
+# rotates across turns. Set to 12 to restore the every-member-is-asked behavior.
+group_max_speakers_per_turn: 5
+
 # Random Encounter. Candidates live outside the formal chat list until the user
 # explicitly keeps one. Formal characters warn after 10 active entries and hard-stop at 20;
 # a full list does not stop discovery or temporary encounter chat.

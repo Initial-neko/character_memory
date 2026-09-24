@@ -529,6 +529,23 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "group-conversation",
+        "title": "Group Conversation",
+        "description": "用户消息触发的一轮群聊最多让多少位成员接话。被 @ 的成员始终参与；未点名的成员从滚动顺序尾部截断，因此每轮听到的人仍然轮换。",
+        "fields": [
+            {
+                "name": "group_max_speakers_per_turn",
+                "label": "Max Speakers / Turn",
+                "type": "number",
+                "min": 1,
+                "max": 12,
+                "step": 1,
+                "level": "advanced",
+                "help": "默认 5。这是后端成本与噪音的形状旋钮，不改变持久化语义；设为 12 恢复“每个成员都被问到”的旧行为。",
+            },
+        ],
+    },
+    {
         "id": "encounter",
         "title": "Random Encounter",
         "description": "随机邂逅的正式调度配置。这里保存重启后仍生效的值；手动触发和临时验收留在 Dev Console。",

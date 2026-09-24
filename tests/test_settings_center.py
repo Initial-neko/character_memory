@@ -1005,7 +1005,15 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     ]
 
     levels = Counter(field["level"] for section in schema for field in section["fields"])
-    assert levels == {"common": 8, "advanced": 27, "diagnostic": 34}
+    # group_max_speakers_per_turn is a backend shape knob and deliberately does
+    # not buy its way onto the first screen; it lives in the advanced group.
+    assert levels == {"common": 8, "advanced": 28, "diagnostic": 34}
+    assert "group_max_speakers_per_turn" in {
+        field["name"]
+        for section in schema
+        for field in section["fields"]
+        if field["level"] == "advanced"
+    }
     # Both other levels ship as real groups, so nothing is merely hidden.
     assert {"advanced", "diagnostic"} <= set(levels)
 

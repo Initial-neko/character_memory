@@ -652,6 +652,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         commit_guard: Callable[[], bool] | None = None,
         on_member: Callable[[dict], None] | None = None,
         mention_order: list[str] | None = None,
+        max_speakers: int | None = None,
     ) -> dict:
         group = self.repo.get_group(source_event.conversation_id)
         if group is None:
@@ -668,12 +669,29 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             explicit_mentions = [value for value in mentions if value in members]
             explicit_mentions = list(dict.fromkeys(explicit_mentions))
             ordered = explicit_mentions + [value for value in base_order if value not in explicit_mentions]
+        # One user turn asks up to `max_speakers` members to decide. Mentioned
+        # members always participate: being named and then silenced is a
+        # different bug from a crowded room answering at once. Only unmentioned
+        # members are cut, and only from the tail of the rotating order, so the
+        # user-turn offset keeps the deferred audience rotating across turns.
+        # `None` keeps the every-member-is-asked behavior for direct callers.
+        deferred_speaker_ids: list[str] = []
+        if max_speakers is not None and len(ordered) > max(1, int(max_speakers)):
+            cap = max(1, int(max_speakers))
+            mentioned_set = set(explicit_mentions)
+            unmentioned = [value for value in ordered if value not in mentioned_set]
+            allowance = max(0, cap - len(explicit_mentions))
+            keep_unmentioned = unmentioned[:allowance]
+            deferred_speaker_ids = unmentioned[allowance:]
+            ordered = list(explicit_mentions) + keep_unmentioned
         logger.info(
-            "group.reaction start conversation=%s source_event=%s order=%s mentions=%s",
+            "group.reaction start conversation=%s source_event=%s order=%s mentions=%s deferred=%s max_speakers=%s",
             group.id,
             source_event.id,
             ordered,
             mentions,
+            deferred_speaker_ids,
+            max_speakers,
         )
         decisions = []
         for character_id in ordered:
@@ -735,6 +753,8 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             "source_event_id": source_event.id,
             "speaker_order": ordered,
             "mentions": mentions,
+            "max_speakers": max_speakers,
+            "deferred_speaker_ids": deferred_speaker_ids,
             "decisions": decisions,
             "events": self.repo.list_turn_events(group.id, source_event.turn_id),
         }

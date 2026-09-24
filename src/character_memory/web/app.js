@@ -565,13 +565,20 @@
       : inactive
         ? `<button type="button" data-memory-action="restore" data-memory-id="${memory.id}">恢复</button>`
         : `<button type="button" data-memory-action="pin" data-memory-id="${memory.id}">${memory.pinned ? "取消固定" : "📌 固定"}</button><button type="button" data-memory-action="correct" data-memory-id="${memory.id}">纠正</button><button type="button" data-memory-action="forget" data-memory-id="${memory.id}">忘记</button>`;
-    return `<article class="memory-card ${inactive ? "inactive" : ""}">
-      <div class="memory-card-head"><div><strong>${CM.escapeHtml(memory.memory_type)}</strong><span class="memory-status">${CM.escapeHtml(status)}</span></div><span>#${memory.id} · importance ${Number(memory.importance || 0).toFixed(2)}</span></div>
-      <div class="memory-content">${CM.escapeHtml(memory.content)}</div>
-      <div class="memory-source"><span>${CM.escapeHtml(CM.memorySourceText(memory))}</span><span>${CM.escapeHtml(CM.fmtDate(memory.event_time))} ${CM.escapeHtml(CM.fmtTime(memory.event_time))}</span></div>
-      ${sourceContent}
-      <div class="memory-actions">${actions}</div>
-    </article>`;
+    const preview = String(memory.content || "").trim().replace(/\s+/g, " ");
+    const shortPreview = preview.length > 96 ? `${preview.slice(0, 96)}…` : preview;
+    return `<details class="memory-card ${inactive ? "inactive" : ""}">
+      <summary class="memory-card-summary">
+        <span class="memory-card-head"><span><strong>${CM.escapeHtml(memory.memory_type)}</strong><span class="memory-status">${CM.escapeHtml(status)}</span></span><span>#${memory.id} · importance ${Number(memory.importance || 0).toFixed(2)}</span></span>
+        <span class="memory-card-preview">${CM.escapeHtml(shortPreview || "无内容")}</span>
+      </summary>
+      <div class="memory-card-body">
+        <div class="memory-content">${CM.escapeHtml(memory.content)}</div>
+        <div class="memory-source"><span>${CM.escapeHtml(CM.memorySourceText(memory))}</span><span>${CM.escapeHtml(CM.fmtDate(memory.event_time))} ${CM.escapeHtml(CM.fmtTime(memory.event_time))}</span></div>
+        ${sourceContent}
+        <div class="memory-actions">${actions}</div>
+      </div>
+    </details>`;
   };
 
   CM.handleMemoryAction = async button => {

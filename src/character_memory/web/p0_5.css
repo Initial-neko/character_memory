@@ -62,7 +62,7 @@
   background: var(--ui-surface-sunken);
   font-weight: 700;
 }
-.persona-description { line-height: 1.75; margin: 16px 0; white-space: pre-wrap; }
+.persona-description { line-height: 1.75; margin: 16px 0; white-space: pre-wrap; }.persona-description-compact{margin:10px 0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.persona-quick-facts{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}.persona-quick-facts span{padding:4px 8px;border:1px solid var(--ui-line);border-radius:var(--ui-r-pill);background:var(--ui-surface);color:var(--ui-muted);font-size:11px;line-height:1.35}
 .persona-section { margin-top: 14px; }
 .persona-section h4 { margin: 0 0 7px; font-size: 13px; }
 .persona-section ul { margin: 0; padding-left: 20px; line-height: 1.7; }

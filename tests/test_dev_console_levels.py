@@ -59,6 +59,10 @@ FIRST_SCREEN = {
     "groupAutonomyGroup",
     "applyGroupAutonomyConfig",
     "runGroupAutonomyOpportunity",
+    "devModeToggle",
+    "spaceIntervalMinutes",
+    "spaceMaxPostsPerDay",
+    "groupAutonomyInterval",
 }
 # The band is the point of the exercise: the page it replaced exposed 87
 # controls, every one of them a live field, with nothing saying where to start.
@@ -169,7 +173,8 @@ def test_the_first_screen_is_the_named_short_list():
     assert sorted(_label(control) for control in shown) == sorted(FIRST_SCREEN)
     html = (WEB / "dev.html").read_text(encoding="utf-8")
     script = (WEB / "dev.js").read_text(encoding="utf-8")
-    assert 'id="mediaSmokeInput"' in html
+    assert 'id="mediaLiveSmokeCard"' in html
+    assert 'id="runMediaSmoke"' in html
     assert 'id="runTts"' not in html
     assert 'fetch("/v1/dev/tts"' not in script
     low, high = FIRST_SCREEN_BAND

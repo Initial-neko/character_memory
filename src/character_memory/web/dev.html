@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/static/dev_visual.css" />
   <link rel="stylesheet" href="/static/visual_capture.css" />
 </head>
-<body class="dev-console">
+<body class="dev-console" data-dev-mode="simple">
   <div id="bootWarning" class="boot-warning" hidden>
     页面脚本没有加载成功，下面的控件不会响应。按 F5 刷新；如果一直失败，确认 Dev Console :8002 是否在运行。
   </div>
@@ -32,9 +32,11 @@
       </div>
       <div class="service-links" data-level="common">
         <a class="secondary-link" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">打开 Chat :8000</a>
-        <a class="secondary-link" href="http://127.0.0.1:8001/health" target="_blank" rel="noreferrer">Media :8001</a>
+        <a class="secondary-link" data-dev-surface="detailed" href="http://127.0.0.1:8001/health" target="_blank" rel="noreferrer">Media :8001</a>
         <a class="secondary-link" href="http://127.0.0.1:9002/tts" target="_blank" rel="noreferrer">TTS Workbench :9002</a>
         <button id="refreshAll" class="secondary">刷新状态</button>
+        <button id="devModeToggle" class="secondary dev-mode-toggle" type="button" aria-pressed="false">Detailed Dev</button>
+        <span id="devModeHint" class="dev-mode-hint">简洁模式：只显示日常观察与高频调节。</span>
       </div>
     </header>
 
@@ -63,7 +65,7 @@
     </section>
 
     <section class="grid feature-grid">
-      <article class="card">
+      <article class="card" id="llmSmokeCard" data-dev-surface="detailed">
         <div class="card-title-row"><h2>LLM</h2><span class="pill">cloud</span></div>
         <div data-level="common">
           <label for="llmPrompt">Prompt</label>
@@ -92,9 +94,19 @@
           <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked /> Autonomous Space</label>
           <label>Character<select id="spaceCharacter"><option value="rin">rin</option></select></label>
         </div>
+        <div class="dev-key-controls" data-level="common">
+          <label>发动态机会间隔
+            <input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="120" />
+            <small>到点只是让人物判断一次，不代表一定发动态。</small>
+          </label>
+          <label>每天最多动态
+            <input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="3" />
+            <small>每个人物每天的发布上限；0 = 不限，不会强制发满。</small>
+          </label>
+        </div>
         <div class="actions" data-level="common">
-          <button class="secondary" id="applySpaceConfig" type="button">应用测试配置</button>
-          <button class="primary" id="runSpaceOpportunity" type="button">立即手动触发一次</button>
+          <button class="secondary" id="applySpaceConfig" type="button" title="只热应用到当前运行中的 Character Runtime；不会写入 config.yaml">临时应用</button>
+          <button class="primary" id="runSpaceOpportunity" type="button" title="立即跑一次判断，不改变正式 Scheduler 的下一次时间">手动测试一次</button>
           <span class="subtle" id="spaceStatusAge">尚未读取调度状态。</span>
         </div>
         <p id="spaceScheduleSummary" class="schedule-summary" data-level="common">正在读取实际下一次执行时间…</p>
@@ -104,10 +116,8 @@
           <div class="field-group">
             <span class="field-group-label">调度</span>
             <div class="visual-provider-row">
-              <label>Opportunity Interval (min)<input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="1440" /></label>
-              <label>Max Posts / Day<input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="0" /></label>
-              <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
-              <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /></label>
+              <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /><small>只影响“多久检查一次是否到期”，不会增加 Opportunity。</small></label>
+              <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /><small>一条自主动态最多让多少个其他人物看到并判断是否互动。</small></label>
             </div>
           </div>
 
@@ -255,8 +265,12 @@
         </div>
 
         <div class="level-row" data-level="common">
-          <label class="visual-check"><input id="groupAutonomyEnabled" type="checkbox" checked /> Autonomous Group</label>
-          <label>Group<select id="groupAutonomyGroup"><option value="">暂无群聊</option></select></label>
+          <label class="visual-check"><input id="groupAutonomyEnabled" type="checkbox" checked /> 自主群聊</label>
+          <label>群聊<select id="groupAutonomyGroup"><option value="">暂无群聊</option></select></label>
+          <label>交流机会间隔
+            <input id="groupAutonomyInterval" type="number" min="10" max="10080" step="10" value="360" />
+            <small>同一群两次正式自主交流机会之间的间隔。</small>
+          </label>
         </div>
         <div class="actions" data-level="common">
           <button class="secondary" id="applyGroupAutonomyConfig" type="button">应用测试配置</button>
@@ -269,7 +283,6 @@
           <div class="field-group">
             <span class="field-group-label">调度</span>
             <div class="visual-provider-row">
-              <label>Opportunity Interval (min)<input id="groupAutonomyInterval" type="number" min="10" max="10080" step="10" value="360" /></label>
               <label>Max Messages<input id="groupAutonomyMaxMessages" type="number" min="1" max="4" step="1" value="3" /></label>
               <label>User Quiet Guard (min)<input id="groupAutonomyQuietMinutes" type="number" min="0" max="1440" step="5" value="30" /></label>
               <label>Scheduler Poll (s)<input id="groupAutonomyPollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
@@ -300,7 +313,7 @@
         </details>
       </article>
 
-      <article class="card wide" id="encounterDiagnosticsCard">
+      <article class="card wide" id="encounterDiagnosticsCard" data-dev-surface="detailed">
         <div class="card-title-row">
           <div><h2>Random Encounter</h2><p class="subtle">正式 Interval / Web Probability / Pending 上限由 Settings Center 保存；这里仅观察状态和手动触发。</p></div>
           <span class="pill">discovery</span>
@@ -331,7 +344,7 @@
         </details>
       </article>
 
-      <article class="card wide" id="visualCaptureCard">
+      <article class="card wide" id="visualCaptureCard" data-dev-surface="detailed">
         <div class="card-title-row">
           <div><h2>Visual Capture + Vision</h2><p class="subtle">摄像头/屏幕原始视频只留在浏览器；仅选中的少量关键帧发送给 Vision LLM。</p></div>
           <div class="actions"><span id="visualCandidateCount" class="metric-inline">0 candidates</span><span class="pill">real vision</span></div>
@@ -372,7 +385,7 @@
         </details>
       </article>
 
-      <article class="card wide" id="imageGenCard">
+      <article class="card wide" id="imageGenCard" data-dev-surface="detailed">
         <div class="card-title-row">
           <div><h2>ImageGen</h2><p class="subtle">真实执行 AI Prompt Rewrite → Provider；Dev 结果额外持久化，便于预览和设为头像。</p></div>
           <span class="pill">real provider</span>
@@ -413,7 +426,7 @@
         </details>
       </article>
 
-      <article class="card">
+      <article class="card" id="asrSmokeCard" data-dev-surface="detailed">
         <div class="card-title-row"><h2>ASR</h2><span class="pill">media</span></div>
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 上传、录音与转写" data-hint="上传 WAV 或用浏览器麦克风">
           <summary>诊断 · 上传、录音与转写</summary>
@@ -437,13 +450,11 @@
         </details>
       </article>
 
-      <article class="card">
+      <article class="card" id="mediaLiveSmokeCard" data-dev-surface="detailed">
         <div class="card-title-row"><h2>Media Live Smoke</h2><span class="pill">real inference</span></div>
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 运行 Media Smoke" data-hint="真实 TTS → ASR 往返">
           <summary>诊断 · 运行 Media Smoke</summary>
-          <p class="subtle">真实执行正式 TTS → WAV → ASR 往返，使用 Settings Center 当前配置的 Provider / Voice / Speed。它不是 mock。</p>
-          <label for="mediaSmokeInput">Text</label>
-          <textarea id="mediaSmokeInput" rows="2">你好，这是 Character Memory 的媒体自检。</textarea>
+          <p class="subtle">真实执行 TTS → WAV → ASR。它不是 mock；失败时会显示 Media Runtime 的原始状态码与 detail。</p>
           <div class="actions">
             <button class="primary" id="runMediaSmoke">Run Media Smoke</button>
             <span id="mediaSmokeLatency" class="metric-inline">-</span>
@@ -464,9 +475,10 @@
           </div>
           <span id="llmUsageWindowBadge" class="pill">24H</span>
         </div>
-        <details class="level-group" data-level="diagnostic" data-title="诊断 · LLM 用量与请求" data-hint="按需查看 Token、重试、错误和功能归因">
-          <summary>诊断 · LLM 用量与请求</summary>
-          <div class="actions">
+        <div class="llm-usage-common" data-level="common">
+          <details class="level-group" data-level="advanced" data-title="高级 · 统计窗口" data-hint="只改变统计范围，不改变运行配置">
+            <summary>高级 · 统计窗口</summary>
+            <div class="actions">
             <label>统计窗口
               <select id="llmUsageWindow">
                 <option value="1">1 小时</option>
@@ -477,14 +489,19 @@
             </label>
             <button id="refreshLlmUsage" class="secondary compact" type="button">刷新用量</button>
           </div>
+            </div>
+          </details>
           <div class="usage-summary" aria-label="LLM usage summary">
-            <div class="usage-stat"><span>Requests</span><strong id="usageRequests">0</strong><small id="usageLogicalCalls">0 logical</small></div>
-            <div class="usage-stat"><span>Total Tokens</span><strong id="usageTotalTokens">0</strong><small id="usageCoverage">coverage 100%</small></div>
-            <div class="usage-stat"><span>Input</span><strong id="usageInputTokens">0</strong><small>tokens</small></div>
-            <div class="usage-stat"><span>Output</span><strong id="usageOutputTokens">0</strong><small>tokens</small></div>
-            <div class="usage-stat"><span>Retry</span><strong id="usageRetryRate">0%</strong><small id="usageRetryCalls">0 logical calls</small></div>
-            <div class="usage-stat"><span>Errors</span><strong id="usageErrorRate">0%</strong><small id="usageLatency">avg 0 ms</small></div>
+            <div class="usage-stat"><span>请求</span><strong id="usageRequests">0</strong><small id="usageLogicalCalls">0 logical</small></div>
+            <div class="usage-stat"><span>总 Token</span><strong id="usageTotalTokens">0</strong><small id="usageCoverage">coverage 100%</small></div>
+            <div class="usage-stat"><span>输入</span><strong id="usageInputTokens">0</strong><small>tokens</small></div>
+            <div class="usage-stat"><span>输出</span><strong id="usageOutputTokens">0</strong><small>tokens</small></div>
+            <div class="usage-stat"><span>重试率</span><strong id="usageRetryRate">0%</strong><small id="usageRetryCalls">0 logical calls</small></div>
+            <div class="usage-stat"><span>错误率</span><strong id="usageErrorRate">0%</strong><small id="usageLatency">avg 0 ms</small></div>
           </div>
+        </div>
+        <details class="level-group" data-level="diagnostic" data-title="详细 · LLM 请求归因与历史" data-hint="按功能、模型和最近真实请求展开">
+          <summary>详细 · LLM 请求归因与历史</summary>
           <h3 class="usage-section-title">按功能归因</h3>
           <div class="table-wrap usage-table-wrap">
             <table class="usage-table">
@@ -510,7 +527,7 @@
         </details>
       </article>
 
-      <article class="card">
+      <article class="card" id="resourceMonitorCard" data-dev-surface="detailed">
         <div class="card-title-row"><h2>Resource Monitor</h2></div>
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 采样与进程表" data-hint="默认 60 秒采样一次">
           <summary>诊断 · 采样与进程表</summary>
@@ -542,7 +559,7 @@
         </details>
       </article>
 
-      <article class="card">
+      <article class="card" id="mediaMetricsCard" data-dev-surface="detailed">
         <div class="card-title-row"><h2>Media Metrics</h2></div>
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 最近 30 条延迟" data-hint="Media Runtime bounded latency buffer">
           <summary>诊断 · 最近 30 条延迟</summary>
@@ -557,7 +574,7 @@
       </article>
     </section>
 
-    <section class="card future">
+    <section class="card future" data-dev-surface="detailed">
       <div class="card-title-row"><h2>Extension Slots</h2><span class="pill">future</span></div>
       <details class="level-group" data-level="diagnostic" data-title="诊断 · 预留扩展位" data-hint="尚未实现，仅记录边界">
         <summary>诊断 · 预留扩展位</summary>
@@ -566,6 +583,7 @@
     </section>
   </main>
   <script src="/static/visual_capture.js"></script>
+  <script src="/static/dev_mode.js"></script>
   <script src="/static/dev_levels.js"></script>
   <script src="/static/dev.js"></script>
   <script src="/static/dev_visual.js"></script>

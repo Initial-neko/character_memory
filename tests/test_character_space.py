@@ -567,6 +567,9 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "data-space-voice-play",
         "data-space-voice-transcript",
         "new Audio(",
+        "data-space-comments-panel-toggle",
+        "space-comments-summary",
+        "space-comments-collapse",
         "data-space-comments-toggle",
         "data-space-thread-toggle",
         "data-space-reply-comment",
@@ -695,3 +698,19 @@ def test_space_dev_status_summarizes_the_ledger_and_one_run_still_returns_the_ra
         assert record["validation_error"] == "SEARCH_IMAGE requires query"
 
         assert client.get("/v1/space/dev/opportunity/run/999999").status_code == 404
+
+
+
+def test_space_frontend_collapses_comment_panels_by_default():
+    root = Path(__file__).resolve().parents[1]
+    web = root / "src" / "character_memory" / "web"
+    script = (web / "space.js").read_text(encoding="utf-8")
+    css = (web / "space.css").read_text(encoding="utf-8")
+
+    assert "expandedCommentPanels" in script
+    assert "space-comments-collapsed" in script
+    assert "data-space-comments-panel-toggle" in script
+    assert "expandedCommentPanels.add(postId)" in script
+    assert ".space-comments-collapsed" in css
+    assert ".space-comments-summary" in css
+    assert ".space-comment-preview" in css

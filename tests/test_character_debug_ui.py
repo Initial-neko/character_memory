@@ -59,3 +59,20 @@ def test_character_debug_scripts_have_valid_javascript():
             text=True,
         )
         assert checked.returncode == 0, checked.stderr
+
+
+
+def test_memory_entries_are_collapsed_inside_the_runtime_inspector():
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    block = script.split("CM.memoryCardHtml = memory => {", 1)[1].split("CM.handleMemoryAction", 1)[0]
+    assert '<details class="memory-card' in block
+    assert 'class="memory-card-summary"' in block
+    assert 'class="memory-card-preview"' in block
+    assert 'class="memory-card-body"' in block
+
+
+def test_persona_inspector_has_a_compact_quick_facts_row():
+    script = (WEB / "persona.js").read_text(encoding="utf-8")
+    assert 'class="persona-quick-facts"' in script
+    assert '.slice(0, 3)' in script
+    assert 'persona-description-compact' in script

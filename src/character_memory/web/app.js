@@ -477,10 +477,10 @@
       const contextText = String(trace.context || "");
       const rawResponse = String(trace.raw_model_response || "");
       const conversationId = String(trace.conversation_id || "—");
-      const sourceEventId = String(trace.source_event_id || sourceEventId);
+      const traceEventId = String(trace.source_event_id || sourceEventId);
       CM.dom.drawerBody.innerHTML = `
         <section class="trace-summary-card">
-          <div><span>Source Event</span><strong>#${CM.escapeHtml(sourceEventId)}</strong></div>
+          <div><span>Source Event</span><strong>#${CM.escapeHtml(traceEventId)}</strong></div>
           <div><span>Conversation</span><strong title="${CM.escapeHtml(conversationId)}">${CM.escapeHtml(conversationId)}</strong></div>
           <div><span>Messages</span><strong>${modelMessages.length}</strong></div>
           <div><span>Context</span><strong>${contextText.length} chars</strong></div>

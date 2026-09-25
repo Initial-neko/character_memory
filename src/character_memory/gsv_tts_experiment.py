@@ -37,7 +37,7 @@ DEFAULT_SAMPLE_RATE = 32000
 # GSV-TTS-Lite takes no generator= argument and draws every random number --
 # token sampling and decoder noise -- from PyTorch's global RNG. Seeding it makes
 # a voice reproducible; without a seed the same line varies by up to ~88% in
-# duration between turns. See docs/current/GSV_TTS_EXPERIMENT.md.
+# duration between turns. See docs/current/VOICE_AND_TTS.md.
 DEFAULT_SEED = 1234
 
 #: Values that switch GSV_TTS_SEED back to the old unseeded behaviour.

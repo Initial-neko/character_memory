@@ -8,7 +8,7 @@ Visual Generation = 画（ImageGen）
 Avatar = 人物当前视觉身份资产
 ```
 
-原先的 `VISUAL_CAPTURE.md`、`VISUAL_GENERATION.md` 与 `AVATAR_SEARCH.md` 已合并到本文件。
+三个方向都收敛在本文件维护，避免同一视觉域能力分散。
 
 ## Visual Capture
 
@@ -309,7 +309,7 @@ Instruction / Character intent
   -> new image
 ```
 
-不要把 Vision model routing、Camera/Screen Capture 和 ImageGen provider 混成一个概念。实时视觉输入见 [`VISUAL_CAPTURE.md`](VISUAL.md)。
+不要把 Vision model routing、Camera/Screen Capture 和 ImageGen provider 混成一个概念。实时视觉输入见 [`VISUAL.md`](VISUAL.md)。
 
 ### 2. Visual purposes
 
@@ -749,7 +749,7 @@ If Provider supports reference images, current avatar may be supplied as an iden
 
 Generated results are candidates, never an automatic current avatar. The user explicitly chooses one generated/chat asset and copies it into avatar storage via `avatar/from-chat`.
 
-ImageGen provider/config details are documented in [`VISUAL_GENERATION.md`](VISUAL.md).
+ImageGen provider/config details are documented in [`VISUAL.md`](VISUAL.md).
 
 ### 7. Local ownership
 

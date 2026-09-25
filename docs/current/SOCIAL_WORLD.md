@@ -10,7 +10,7 @@ Character Space = 人物选择公开表达
 Internet observation != Space post
 ```
 
-二者共享同一个 Persistent Person，但拥有独立机会时钟、持久化事实和行为 contract。原先的 `CHARACTER_SPACE.md` 与 `WORLD_ACTIVITY.md` 已合并到本文件，避免同一社会层能力分散维护。
+二者共享同一个 Persistent Person，但拥有独立机会时钟、持久化事实和行为 contract；两者都收敛在本文件维护，避免同一社会层能力分散。
 
 ## Character Space
 

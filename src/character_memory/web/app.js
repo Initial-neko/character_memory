@@ -449,11 +449,14 @@
   CM.traceMessagesHtml = messages => {
     const items = Array.isArray(messages) ? messages : [];
     if (!items.length) return '<p class="muted">本轮没有记录模型 messages。</p>';
-    return items.map((message, index) => `
+    return items.map((message, index) => {
+      const content = String(message.content || "");
+      return `
       <article class="trace-message">
-        <div class="trace-message-role">${index + 1}. ${CM.escapeHtml(message.role || "unknown")}</div>
-        <pre>${CM.escapeHtml(message.content || "")}</pre>
-      </article>`).join("");
+        <div class="trace-message-head"><span class="trace-message-role">${index + 1}. ${CM.escapeHtml(message.role || "unknown")}</span><span class="trace-message-size">${content.length} chars</span></div>
+        <pre>${CM.escapeHtml(content)}</pre>
+      </article>`;
+    }).join("");
   };
 
   CM.showTrace = async sourceEventId => {
@@ -470,8 +473,18 @@
       const memoryCandidates = Array.isArray(trace.memory_candidates) ? trace.memory_candidates : [];
       const intents = Array.isArray(trace.intent_candidates) ? trace.intent_candidates : [];
       const totalMs = trace.timings?.runtime_total_ms ?? trace.timings?.model_ms ?? "—";
+      const modelMessages = Array.isArray(trace.model_messages) ? trace.model_messages : [];
+      const contextText = String(trace.context || "");
+      const rawResponse = String(trace.raw_model_response || "");
+      const conversationId = String(trace.conversation_id || "—");
+      const traceEventId = String(trace.source_event_id || sourceEventId);
       CM.dom.drawerBody.innerHTML = `
         <section class="trace-summary-card">
+          <div><span>Source Event</span><strong>#${CM.escapeHtml(traceEventId)}</strong></div>
+          <div><span>Conversation</span><strong title="${CM.escapeHtml(conversationId)}">${CM.escapeHtml(conversationId)}</strong></div>
+          <div><span>Messages</span><strong>${modelMessages.length}</strong></div>
+          <div><span>Context</span><strong>${contextText.length} chars</strong></div>
+          <div><span>Raw Response</span><strong>${rawResponse.length} chars</strong></div>
           <div><span>Model</span><strong>${CM.escapeHtml(trace.model_used || "—")}</strong></div>
           <div><span>Attempt</span><strong>${CM.escapeHtml(trace.model_attempt || "—")}</strong></div>
           <div><span>Actions</span><strong>${CM.escapeHtml(actions.map(item => item.type).join(" / ") || "NO_REPLY")}</strong></div>

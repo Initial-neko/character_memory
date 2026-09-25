@@ -76,3 +76,20 @@ def test_persona_inspector_has_a_compact_quick_facts_row():
     assert 'class="persona-quick-facts"' in script
     assert '.slice(0, 3)' in script
     assert 'persona-description-compact' in script
+
+
+
+def test_llm_trace_summary_exposes_real_io_dimensions_without_hidden_reasoning():
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    css = (WEB / "chat_refine.css").read_text(encoding="utf-8")
+    trace = script.split("CM.showTrace = async sourceEventId => {", 1)[1].split(
+        "CM.memorySourceText =", 1
+    )[0]
+    assert "Source Event" in trace
+    assert "Conversation" in trace
+    assert "modelMessages.length" in trace
+    assert "contextText.length" in trace
+    assert "rawResponse.length" in trace
+    assert "trace-message-size" in script
+    assert ".trace-message-head" in css
+    assert "不展示隐藏推理过程" in trace

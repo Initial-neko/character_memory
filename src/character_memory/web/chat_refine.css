@@ -813,3 +813,5 @@ body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-compact); }
   .runtime-summary-card > div:nth-child(2) { grid-column: 1 / -1; }
   .inspector-details > summary { padding: 10px; }
 }
+
+.trace-message-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.trace-message-size{color:var(--ui-faint);font-size:10px}.trace-summary-card strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

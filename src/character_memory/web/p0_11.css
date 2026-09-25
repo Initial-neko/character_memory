@@ -235,6 +235,13 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
   font-weight: 650;
 }
 
+/* ChatTurn: one character utterance renders as ONE row. Consecutive character
+ * events sharing (turn_id, actor_id) fold into a single bubble-wrap; text
+ * lines share one bubble, sticker/image/voice blocks live inside the row, and
+ * the speaker name appears exactly once no matter how many actions the
+ * reaction carried. */
+.group-turn .bubble-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.group-turn .message-meta { margin-top: 2px; }
 .group-message-image {
   max-width: min(320px, 62vw);
   border-radius: 12px;

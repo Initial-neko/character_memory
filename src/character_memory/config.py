@@ -155,6 +155,16 @@ class Settings(BaseModel):
     group_autonomy_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
     group_autonomy_user_quiet_minutes: float = Field(default=30.0, ge=0.0, le=1440.0)
 
+    # Group user-turn speaker cap. One user turn asks up to this many distinct
+    # members to react. Mentioned members always participate -- being named and
+    # then silenced is a different bug from a crowded room answering at once.
+    # Unmentioned members are truncated from the tail of the rotating order, so
+    # the existing user-turn offset keeps the audience rotating across turns.
+    # Set to MAX_GROUP_CHARACTERS (12) to restore the every-member-is-asked
+    # behavior. This only constrains cost and noise; it does not make the
+    # deferred members "observe" the turn.
+    group_max_speakers_per_turn: int = Field(default=5, ge=1, le=12)
+
     # Random Encounter: a lightweight discovery pool separate from the formal
     # character list. Candidates may be explored even when the active chat list
     # is full; accepting one consumes a formal slot (warn after 10, hard-stop at 20).

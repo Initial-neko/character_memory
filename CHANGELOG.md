@@ -4,7 +4,10 @@ This file records user-visible and architecture-significant release changes. His
 
 ## Unreleased
 
-No queued release changes yet.
+### Group Conversation
+
+- Group chat now renders by **turn**, not by persisted event. Consecutive character events sharing `(turn_id, actor_id)` fold into a single ChatTurn: one bubble, one speaker name, text lines merged, and sticker/image/voice rendered inside that same row. Different characters never merge. Direct chat keeps its finer-grained continuous messages unchanged.
+- Added `group_max_speakers_per_turn` (default **5**, range 1–12, Settings Center → Group Conversation). One user turn asks at most this many distinct members to react; explicitly @-mentioned members always participate, and unmentioned members are truncated from the tail of the rotating order so the audience still rotates across turns. Set it to 12 to restore the every-member-is-asked behavior. `reaction_complete` events now report `deferred_speaker_ids` and `max_speakers`. Persistence, event ids, `turn_id`, traces and Memory structure are unchanged.
 
 ## 0.5.0-rc.1 - 2026-09-22
 

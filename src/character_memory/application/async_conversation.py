@@ -459,6 +459,13 @@ class ReactionScheduler:
                     profiles=self.character_profiles(),
                     turn_lock=self.group_lock_for(conversation_id),
                 )
+                # Backend shape knob, read once per turn from the bundle's
+                # settings snapshot, so it is restart_required like the rest of
+                # the config surface (HOT_APPLY_FIELDS only covers TTS).
+                # Mentioned members always participate regardless.
+                max_speakers = int(
+                    getattr(bundle.settings, "group_max_speakers_per_turn", 5)
+                )
 
                 def current() -> bool:
                     return self._latest_group_user_id(service, conversation_id) == watermark
@@ -487,6 +494,7 @@ class ReactionScheduler:
                         commit_guard=current,
                         on_member=member_done,
                         mention_order=mentions,
+                        max_speakers=max_speakers,
                     )
                 self.hub.publish(
                     channel,
@@ -496,6 +504,8 @@ class ReactionScheduler:
                         "turn_id": event.turn_id,
                         "mentions": mentions,
                         "speaker_order": result.get("speaker_order") or [],
+                        "deferred_speaker_ids": result.get("deferred_speaker_ids") or [],
+                        "max_speakers": result.get("max_speakers"),
                         "decisions": [
                             {
                                 "character_id": item.get("character_id"),

@@ -124,14 +124,93 @@
     return `<button class="group-turn-debug" type="button" data-group-turn="${CM.escapeHtml(message.turn_id)}">${CM.escapeHtml(label)}</button>`;
   }
 
-  function addMessage(message) {
+  // One character utterance = one bubble, not one persisted event = one row.
+  // A single PersonReaction can carry several actions, so the store legitimately
+  // keeps one Group Event per action; folding them back into a ChatTurn is a
+  // pure rendering concern. Consecutive events sharing (turn_id, actor_id)
+  // become one turn; a different speaker, a user message, or a different turn
+  // always breaks the run. The data shape is deliberately HTML-free so tests
+  // can execute this function directly in Node.
+  function foldMessages(messages) {
+    const entries = [];
+    let turn = null;
+    const flush = () => {
+      if (turn) entries.push(turn);
+      turn = null;
+    };
+    for (const message of messages || []) {
+      if (!message) continue;
+      if (message.role !== "assistant") {
+        flush();
+        entries.push({kind: "message", timestamp: message.event_time, message});
+        continue;
+      }
+      const key = String(message.turn_id || "") + "\u0000" + String(message.actor_id || "");
+      if (!turn || turn.key !== key) {
+        flush();
+        turn = {
+          kind: "turn",
+          key,
+          turn_id: message.turn_id || null,
+          actor_id: message.actor_id,
+          actor_name: message.actor_name || message.actor_id,
+          timestamp: message.event_time,
+          items: [],
+        };
+      }
+      turn.items.push(message);
+    }
+    flush();
+    return entries;
+  }
+
+  // Split a turn into renderable segments. Text lines accumulate into one
+  // bubble; sticker/image/voice render as media blocks inside the same row,
+  // so none of them ever becomes an independent message.
+  function turnSegments(turn) {
+    const segments = [];
+    let lines = [];
+    const flushText = () => {
+      if (lines.length) segments.push({type: "text", lines});
+      lines = [];
+    };
+    for (const item of turn.items) {
+      if (item.sticker || item.image || item.action === "VOICE_MESSAGE") {
+        flushText();
+        segments.push({type: "media", html: CM.messageContentHtml(item, {variant: "group"})});
+        continue;
+      }
+      const line = String(item.content || "").trim();
+      if (line) lines.push(line);
+    }
+    flushText();
+    return segments;
+  }
+
+  function addMessage(entry) {
+    if (entry.kind === "message") {
+      const message = entry.message;
+      const row = document.createElement("article");
+      row.className = `message-row ${message.role}`;
+      row.dataset.messageId = message.id ?? "";
+      const contentHtml = CM.messageContentHtml(message, {variant: "group"});
+      row.innerHTML = `<div class="avatar"></div><div class="bubble-wrap">${contentHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${turnButton(message)}</div></div>`;
+      CM.bindMessageContent(row);
+      CM.dom.chat.appendChild(row);
+      return;
+    }
     const row = document.createElement("article");
-    row.className = `message-row ${message.role}${message.role === "assistant" ? " group-assistant" : ""}`;
-    row.dataset.messageId = message.id ?? "";
-    const speaker = message.role === "assistant" ? `<div class="group-speaker-name">${CM.escapeHtml(message.actor_name || message.actor_id)}</div>` : "";
-    const avatar = groupMessageAvatar(message);
-    const contentHtml = CM.messageContentHtml(message, {variant: "group"});
-    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${speaker}${contentHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${turnButton(message)}</div></div>`;
+    row.className = "message-row assistant group-assistant group-turn";
+    row.dataset.messageId = entry.items[0].id ?? "";
+    row.dataset.turnId = entry.turn_id ?? "";
+    const speaker = `<div class="group-speaker-name">${CM.escapeHtml(entry.actor_name || entry.actor_id)}</div>`;
+    const avatar = String(entry.actor_name || entry.actor_id || "AI").trim().slice(0,1).toUpperCase();
+    const body = turnSegments(entry).map(segment => segment.type === "text"
+      ? `<div class="bubble">${segment.lines.map(line => CM.escapeHtml(line)).join("<br>")}</div>`
+      : segment.html
+    ).join("");
+    const last = entry.items[entry.items.length - 1];
+    row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${speaker}${body}<div class="message-meta"><span>${CM.fmtTime(last.event_time || entry.timestamp)}</span></div></div>`;
     CM.bindMessageContent(row);
     CM.dom.chat.appendChild(row);
   }
@@ -155,8 +234,8 @@
       CM.dom.chat.appendChild(older);
     }
     let lastDate = null;
-    for (const message of messages) {
-      const date = CM.fmtDate(message.event_time);
+    for (const entry of foldMessages(messages)) {
+      const date = CM.fmtDate(entry.timestamp);
       if (date !== lastDate) {
         const sep = document.createElement("div");
         sep.className = "date-separator";
@@ -164,7 +243,7 @@
         CM.dom.chat.appendChild(sep);
         lastDate = date;
       }
-      addMessage(message);
+      addMessage(entry);
     }
     if (pending.has(activeId())) appendPending("群成员正在输入…");
     if (preserveScroll) {

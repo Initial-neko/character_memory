@@ -150,7 +150,9 @@ member C -> ...
 
 这保留角色之间的公开因果关系，因此不直接并行所有成员。
 
-**成本形状**：一条 user message 会让**每个成员各产生一次模型调用**（`group_conversation_service.py` 的 user-turn 循环没有提前 break），而自主机会有硬上限（`cap = 1..4`）。群成员上限是 `MAX_GROUP_CHARACTERS = 12`，所以满员群里一句用户消息最坏是 12 次模型调用 + 12 条回复；这不是 bug，但改动群上限或给群加人时要按这个数量级算成本。
+**成本形状**：一条 user message 最多让 `group_max_speakers_per_turn`（默认 5，范围 1..12）位成员各产生一次模型调用；被 @ 的成员一定进入本轮，未点名成员从滚动顺序尾部截断（`deferred_speaker_ids`），因此每轮听到的人仍然轮换。设为 12 即恢复到"每个成员都被问到"的旧行为（对应旧的 12 次模型调用上限）。自主机会另有独立硬上限（`cap = 1..4`）。群成员上限是 `MAX_GROUP_CHARACTERS = 12`，所以满员群里一句用户消息默认最多 5 次模型调用、把 `group_max_speakers_per_turn` 调到 12 时最坏 12 次；这不是 bug，但改动上限或给群加人时要按这个数量级算成本。该项是后端形状旋钮，不在 `HOT_APPLY_FIELDS` 内，因此保存后按 `restart_required` 处理。
+
+**展示粒度**：群聊以 **Turn** 为单位渲染，而不是以持久化 Event 为单位。一个 `PersonReaction` 可以携带多个 action，`_react_member` 按 action 逐条持久化 Group Event（这是有意的，保留），但前端 `web/groups.js` 的 `foldMessages()` 会把 `(turn_id, actor_id)` 相同的连续角色事件折回一个 `ChatTurn`：文本行合并进同一个气泡，表情/图片/语音成为该气泡内部的内容，说话人名字每个 turn 只出现一次。不同角色**永不合并**；同一角色不同 turn 也各自成块，否则会篡改真实的发言顺序。单聊不受此影响，仍然允许更细粒度的连续消息。
 
 `group_character_event` 在每个成员提交后立刻 SSE 推送，不需要等整个群组结束才展示第一条回复。
 

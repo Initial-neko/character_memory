@@ -279,6 +279,57 @@ class GroupRepository:
             raise KeyError("group not found")
         return group
 
+    def remove_member(
+        self,
+        conversation_id: str,
+        character_id: str,
+        now: datetime,
+    ) -> GroupConversation:
+        character_id = str(character_id).strip()
+        if not character_id:
+            raise ValueError("character id must not be empty")
+
+        existing = self.get_group(conversation_id)
+        if existing is None:
+            raise KeyError("group not found")
+        if character_id not in existing.member_ids:
+            raise KeyError("character is not a group member")
+        if len(existing.member_ids) <= 2:
+            raise ValueError("group must retain at least 2 characters")
+
+        stamp = epoch_us(now)
+        with self.store.transaction():
+            cur = self.store.conn.execute(
+                "DELETE FROM conversation_members "
+                "WHERE conversation_id=? AND actor_type='CHARACTER' AND actor_id=?",
+                (conversation_id, character_id),
+            )
+            if cur.rowcount <= 0:
+                raise KeyError("character is not a group member")
+
+            remaining = self.store.conn.execute(
+                "SELECT actor_id FROM conversation_members "
+                "WHERE conversation_id=? AND actor_type='CHARACTER' "
+                "ORDER BY position",
+                (conversation_id,),
+            ).fetchall()
+            for position, row in enumerate(remaining, start=1):
+                self.store.conn.execute(
+                    "UPDATE conversation_members SET position=? "
+                    "WHERE conversation_id=? AND actor_type='CHARACTER' AND actor_id=?",
+                    (position, conversation_id, row["actor_id"]),
+                )
+            self.store.conn.execute(
+                "UPDATE conversations SET updated_at=?,updated_at_epoch=? "
+                "WHERE id=? AND type='GROUP' AND archived_at IS NULL",
+                (now.isoformat(), stamp, conversation_id),
+            )
+
+        group = self.get_group(conversation_id)
+        if group is None:
+            raise KeyError("group not found")
+        return group
+
     def delete_empty_group(self, conversation_id: str) -> bool:
         with self.store.transaction():
             row = self.store.conn.execute(

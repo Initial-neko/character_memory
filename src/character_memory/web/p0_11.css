@@ -180,6 +180,10 @@ body.group-mode #characterName.group-name-editable:hover { opacity: .72; }
 /* The create form and the rename/add-members form each wrap the same rows. */
 .group-member-picker,
 .group-member-options { display: grid; gap: 8px; }
+.group-member-option-joined { justify-content: space-between; }
+.group-member-option-joined > span { min-width: 0; display: grid; gap: 2px; }
+.group-member-option-joined > button { flex: 0 0 auto; }
+
 .group-member-option {
   display: flex !important;
   grid-template-columns: none !important;

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+import logging
 import sqlite3
 import threading
 import time
@@ -11,6 +12,19 @@ import uuid
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
+
+# Recording one call is a single-row INSERT that finishes in ~6ms on a free
+# database, and `record` runs on the user's chat path (right after the model
+# answers). Waiting seconds for a lock there costs a real reply; dropping the
+# row costs one row of telemetry. 100ms is >15x a normal insert, so ordinary
+# contention between the app, the dev server and the usage explorer still
+# succeeds, while a database that is genuinely locked abandons the row.
+# SQLite re-arms this budget at every lock step, so a user waiting behind a
+# held lock sees ~0.44s (measured on Windows) instead of the old 14.4s.
+_TELEMETRY_BUSY_TIMEOUT_MS = 100
+_TELEMETRY_BUSY_TIMEOUT_S = _TELEMETRY_BUSY_TIMEOUT_MS / 1000
 
 
 @dataclass(frozen=True)
@@ -148,12 +162,15 @@ class LlmUsageStore:
         self._lock = threading.RLock()
         self.conn = sqlite3.connect(
             self.db_path,
-            timeout=10.0,
+            timeout=_TELEMETRY_BUSY_TIMEOUT_S,
             check_same_thread=False,
         )
         self.conn.row_factory = sqlite3.Row
         with self._lock:
-            self.conn.execute("PRAGMA busy_timeout=10000")
+            # connect(timeout=) already installs this busy handler; restating it
+            # keeps the bound visible next to the schema setup and out of reach
+            # of a stale default.
+            self.conn.execute(f"PRAGMA busy_timeout={_TELEMETRY_BUSY_TIMEOUT_MS}")
             self.conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS llm_calls(
@@ -333,5 +350,15 @@ class LlmUsageRecorder:
         try:
             return self.store.add(item)
         except Exception:
-            # Usage telemetry must never break a real chat/model call.
+            # Usage telemetry must never break a real chat/model call, and it
+            # must never make one wait either: the store abandons a locked
+            # database after _TELEMETRY_BUSY_TIMEOUT_MS. Losing a row is
+            # acceptable; losing it without a trace is not.
+            logger.warning(
+                "llm.usage.record dropped feature=%s purpose=%s model=%s",
+                item.get("feature"),
+                item.get("purpose"),
+                item.get("model"),
+                exc_info=True,
+            )
             return None

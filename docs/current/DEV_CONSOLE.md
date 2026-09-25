@@ -177,6 +177,8 @@ Dev 页面可查看 1H / 24H / 7D / 30D：
 
 Usage 只保存调用元数据和用量，不复制 Prompt / Response 正文；具体上下文继续由 Runtime Trace 承担，并通过 `llm_logical_call_id` 关联。
 
+计量写入发生在用户等待回复的路径上，因此它让路于聊天：`llm_calls` 被别的连接锁住时，这一次记录在一百毫秒的预算内放弃（不排队、不重试），并记一条带堆栈的 warning；Explorer 因此可能少算个别请求，但绝不拖慢回复，也不会无声地少算。
+
 ```text
 GET /v1/dev/llm-usage?hours=24&limit=80
 GET :8000/v1/llm/usage?hours=24&limit=80

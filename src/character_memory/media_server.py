@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from character_memory.web_lifecycle import on_app_event
+from character_memory.asr_capture import AsrCaptureStore
 from character_memory.config import DEFAULT_VOICE_SILENCE_MS, load_settings
 from character_memory.media_runtime import MediaRuntime, build_media_runtime_from_env
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_SET, provider_spec
@@ -18,6 +19,18 @@ class TtsRequest(BaseModel):
     speaker_id: int | None = Field(default=None, ge=0, le=10000)
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
     voice: str | None = Field(default=None, max_length=128)
+
+
+class AsrCaptureModeRequest(BaseModel):
+    """Test-mode switch for the ASR capture instrument.
+
+    `clear` is its own intent rather than a consequence of `enabled=false`, so
+    emptying the directory can never happen as a side effect of switching the
+    recording off.
+    """
+
+    enabled: bool | None = None
+    clear: bool = False
 
 
 def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_client=None):
@@ -38,6 +51,10 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
     tts_lab_base = os.getenv("CHARACTER_TTS_LAB_BASE", "http://127.0.0.1:9002").rstrip("/")
     owns_provider_client = provider_http_client is None
     provider_client = provider_http_client or httpx.Client(timeout=180.0)
+    # Off until a test run switches it on, and it records only here -- this is the
+    # process that receives the upload, so the browser keeps no capture logic of
+    # its own and the transcribe path stays what a real conversation goes through.
+    capture = AsrCaptureStore(os.getenv("CHARACTER_MEDIA_ASR_CAPTURE_DIR", "data/asr-capture"))
 
     app = FastAPI(title="Character Memory Media Runtime", version="0.2")
     app.state.media_runtime = media
@@ -163,6 +180,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
     def transcribe(
         payload: bytes = Body(..., media_type="application/octet-stream"),
         content_type: str | None = Header(default=None, alias="Content-Type"),
+        asr_source: str | None = Header(default=None, alias="X-ASR-Source"),
     ):
         # Keep provider inference in FastAPI's worker threadpool. An async handler
         # that calls the blocking local recognizer directly would stall the event
@@ -180,6 +198,9 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         except (RuntimeError, ValueError) as exc:
             code = 503 if isinstance(exc, RuntimeError) else 400
             raise HTTPException(status_code=code, detail=str(exc)) from exc
+        # Label only; the capture itself is the server's business, so a client that
+        # sends no header still gets recorded and simply reads as "unknown".
+        capture.record(wav=payload, result=result, source=asr_source or "unknown")
         return result.to_dict()
 
     def _local_sherpa_response(req: TtsRequest, *, speaker_id: int, speed: float):
@@ -278,6 +299,27 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
     @app.get("/v1/metrics/recent")
     def recent_metrics(limit: int = Query(default=50, ge=1, le=200)):
         return {"metrics": media.recent_metrics(limit)}
+
+    @app.get("/v1/dev/asr-capture")
+    def dev_asr_capture(limit: int = Query(default=100, ge=1, le=500)):
+        return {
+            "enabled": capture.enabled,
+            "directory": str(capture.directory),
+            "items": capture.list(limit),
+        }
+
+    @app.get("/v1/dev/asr-capture/{item_id}/audio")
+    def dev_asr_capture_audio(item_id: str):
+        path = capture.audio_path(item_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="capture not found")
+        return Response(content=path.read_bytes(), media_type="audio/wav")
+
+    @app.post("/v1/dev/asr-capture/test-mode")
+    def dev_asr_capture_test_mode(req: AsrCaptureModeRequest):
+        cleared = capture.clear() if req.clear else 0
+        enabled = capture.enabled if req.enabled is None else capture.set_enabled(req.enabled)
+        return {"enabled": enabled, "cleared": cleared}
 
     return app
 

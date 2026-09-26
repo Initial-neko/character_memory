@@ -210,6 +210,20 @@ Dev Console 保留 **Media Live Smoke**：输入一段文本后，真实执行�
 
 正式 Voice UI 还会在发送前执行 ASR transcript validity gate；Dev ASR 卡片主要用于观察原始识别结果与延迟。
 
+### ASR Capture Review
+
+采集回看：测试态打开后，**Media Runtime**（不是浏览器）把每次上传的 WAV 与它产生的文本逐条存下来，面板按时间倒序列出，每条可直接播放并对照识别结果。
+
+关键约束：
+
+- 存的是 Media Runtime 实际收到的那段音频，也就是模型的输入，不是重编码副本；
+- 因此记录来自真实通话/听写路径，浏览器侧不存在第二条测试用采集链路；
+- **默认关闭**，且关闭时不写入任何文件；开关只存在于 Media Runtime 进程内存中，重启即回到关闭；
+- 「清空」是独立意图，不会因为关闭录制而被连带触发；
+- 目录默认 `data/asr-capture`（`CHARACTER_MEDIA_ASR_CAPTURE_DIR` 可覆盖），按条数与总字节数自裁剪，且已被 `.gitignore` 排除——它是关于使用者本人的运行时数据。
+
+用途是让 ASR 的改动可判定：音频里有而文本里没有 = 解码丢失；音频里就没有 = 采集丢失。两者需要相反的修法，没有这份配对数据就只能靠猜。
+
 ### Media Live Smoke
 
 执行真实：

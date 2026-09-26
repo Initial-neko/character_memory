@@ -290,6 +290,14 @@ export CHARACTER_MEDIA_ASR_LANGUAGE=auto
 
 ASR 默认语言保持 `auto`。只有明确 benchmark/识别质量证明固定语言更优时，再本地 override。
 
+采集回看（诊断用，默认关闭）：
+
+```bash
+export CHARACTER_MEDIA_ASR_CAPTURE_DIR="$PWD/data/asr-capture"
+```
+
+设置该变量只改变存储位置；**是否录制由测试态开关决定，默认关闭**，关闭时不写入任何文件。详见 `DEV_CONSOLE.md` → ASR Capture Review。
+
 ### 7. Windows native runtime safety
 
 Windows 上最重要的约束不是“ONNX 能 import 就行”，而是必须加载**当前 venv 与 sherpa wheel 匹配的 native runtime**。
@@ -313,6 +321,9 @@ POST /v1/asr
 POST /v1/tts
 POST /v1/providers/sherpa/tts
 GET  /v1/metrics/recent
+GET  /v1/dev/asr-capture
+GET  /v1/dev/asr-capture/{id}/audio
+POST /v1/dev/asr-capture/test-mode
 ```
 
 TTS Provider Runtime + Lab：
@@ -327,6 +338,8 @@ POST /v1/tts
 Character chat 仍通过普通 async conversation path 和 SSE。Voice 前端不绕过 PersonRuntime。
 
 `/v1/asr` 是同步 FastAPI route，因为本地 SenseVoice inference 本身是阻塞调用。这样 FastAPI 会把 ASR inference 放入 worker threadpool，而不是占住 event loop；因此 TTS request 可以与 ASR request 重叠进行。
+
+`/v1/asr` 接受可选的 `X-ASR-Source` 请求头（`call` / `dictation`），仅用于给采集回看记录加来源标签。不发送该头不影响识别，记录里只是标为 `unknown`。
 
 ### 9. Voice interaction model — Pipeline V1.1
 

@@ -25,6 +25,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         from fastapi import Body, FastAPI, Header, HTTPException, Query
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import Response
+        from starlette.websockets import WebSocket, WebSocketDisconnect
     except ImportError as exc:
         raise RuntimeError("Media Runtime requires the api extra: pip install -e '.[api]'") from exc
 
@@ -158,6 +159,115 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
             ),
         }
         return {"ok": True, **status}
+
+    @app.websocket("/v1/asr/stream")
+    async def stream_asr(websocket: WebSocket):
+        """Binary PCM16 streaming endpoint.
+
+        Client protocol:
+        - first text frame: {"op":"start","source":"call|dictation"}
+        - binary frames: mono PCM16, 16 kHz
+        - optional text frame: {"op":"flush","reason":"user_stop"}
+        - optional text frame: {"op":"cancel"}
+        - server text frames: partial/final/error JSON events
+
+        Only FINAL is suitable for Character Runtime submission.
+        """
+        await websocket.accept()
+        asr = media.asr
+        create_session = getattr(asr, "create_session", None)
+        if create_session is None:
+            await websocket.send_json({"kind": "error", "code": "streaming_unavailable"})
+            await websocket.close(code=1011)
+            return
+
+        session = None
+        session_id = None
+        segment_id = 1
+        try:
+            first = await websocket.receive_json()
+            if first.get("op") != "start":
+                raise ValueError("first frame must be start")
+            session = create_session()
+            session_id = f"media-{id(session)}"
+            await websocket.send_json({
+                "kind": "ready",
+                "session_id": session_id,
+                "segment_id": segment_id,
+                "provider": asr.status().get("provider"),
+            })
+
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                if message.get("bytes") is not None:
+                    payload = message["bytes"]
+                    if len(payload) % 2:
+                        raise ValueError("PCM16 frame has odd byte length")
+                    samples = np.frombuffer(payload, dtype="<i2").astype(np.float32) / 32768.0
+                    text = session.push_audio(samples, sample_rate=16000)
+                    if text:
+                        await websocket.send_json({
+                            "kind": "partial",
+                            "session_id": session_id,
+                            "segment_id": segment_id,
+                            "revision": 0,
+                            "text": text,
+                        })
+                    if session.is_endpoint():
+                        result = session.finish()
+                        if result.text:
+                            await websocket.send_json({
+                                "kind": "final",
+                                "session_id": session_id,
+                                "segment_id": segment_id,
+                                "revision": 1,
+                                "text": result.text,
+                                "endpoint_reason": "model_endpoint",
+                            })
+                        segment_id += 1
+                        session = create_session()
+                    continue
+
+                text_message = message.get("text")
+                if text_message is None:
+                    continue
+                command = __import__("json").loads(text_message)
+                op = command.get("op")
+                if op in {"flush", "finish", "stop"}:
+                    reason = str(command.get("reason") or "user_stop")
+                    result = session.finish()
+                    if result.text:
+                        await websocket.send_json({
+                            "kind": "final",
+                            "session_id": session_id,
+                            "segment_id": segment_id,
+                            "revision": 1,
+                            "text": result.text,
+                            "endpoint_reason": reason,
+                        })
+                    segment_id += 1
+                    session = create_session()
+                    continue
+                if op == "cancel":
+                    break
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:
+            await websocket.send_json({
+                "kind": "error",
+                "session_id": session_id,
+                "segment_id": segment_id,
+                "code": "stream_failed",
+                "detail": str(exc),
+            })
+        finally:
+            if session is not None:
+                try:
+                    session.finish()
+                except Exception:
+                    pass
 
     @app.post("/v1/asr")
     def transcribe(

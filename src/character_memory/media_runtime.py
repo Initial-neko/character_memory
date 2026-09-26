@@ -537,20 +537,41 @@ class MediaRuntime:
 
 
 def build_media_runtime_from_env() -> MediaRuntime:
-    asr_model = os.getenv("CHARACTER_MEDIA_ASR_MODEL", "").strip()
-    asr_tokens = os.getenv("CHARACTER_MEDIA_ASR_TOKENS", "").strip()
-    if asr_model and asr_tokens:
-        asr: SpeechRecognitionProvider = SherpaSenseVoiceProvider(
-            model=asr_model,
-            tokens=asr_tokens,
-            device=os.getenv("CHARACTER_MEDIA_ASR_DEVICE", "cpu"),
-            language=os.getenv("CHARACTER_MEDIA_ASR_LANGUAGE", "zh"),
-            num_threads=int(os.getenv("CHARACTER_MEDIA_ASR_THREADS", "2")),
-        )
+    asr_provider = os.getenv("CHARACTER_MEDIA_ASR_PROVIDER", "sensevoice").strip().lower()
+    if asr_provider in {"paraformer", "paraformer-streaming", "sherpa-paraformer-streaming"}:
+        encoder = os.getenv("CHARACTER_MEDIA_ASR_ENCODER", "").strip()
+        decoder = os.getenv("CHARACTER_MEDIA_ASR_DECODER", "").strip()
+        tokens = os.getenv("CHARACTER_MEDIA_ASR_TOKENS", "").strip()
+        if encoder and decoder and tokens:
+            asr: SpeechRecognitionProvider = SherpaParaformerStreamingProvider(
+                encoder=encoder,
+                decoder=decoder,
+                tokens=tokens,
+                device=os.getenv("CHARACTER_MEDIA_ASR_DEVICE", "cpu"),
+                num_threads=int(os.getenv("CHARACTER_MEDIA_ASR_THREADS", "2")),
+                endpoint_silence_ms=int(os.getenv("CHARACTER_MEDIA_ASR_ENDPOINT_SILENCE_MS", "1200")),
+                endpoint_short_silence_ms=int(os.getenv("CHARACTER_MEDIA_ASR_ENDPOINT_SHORT_SILENCE_MS", "800")),
+            )
+        else:
+            asr = UnavailableSpeechRecognitionProvider(
+                "Paraformer ASR 未配置：设置 CHARACTER_MEDIA_ASR_ENCODER / "
+                "CHARACTER_MEDIA_ASR_DECODER / CHARACTER_MEDIA_ASR_TOKENS"
+            )
     else:
-        asr = UnavailableSpeechRecognitionProvider(
-            "ASR 未配置：设置 CHARACTER_MEDIA_ASR_MODEL / CHARACTER_MEDIA_ASR_TOKENS"
-        )
+        asr_model = os.getenv("CHARACTER_MEDIA_ASR_MODEL", "").strip()
+        asr_tokens = os.getenv("CHARACTER_MEDIA_ASR_TOKENS", "").strip()
+        if asr_model and asr_tokens:
+            asr = SherpaSenseVoiceProvider(
+                model=asr_model,
+                tokens=asr_tokens,
+                device=os.getenv("CHARACTER_MEDIA_ASR_DEVICE", "cpu"),
+                language=os.getenv("CHARACTER_MEDIA_ASR_LANGUAGE", "zh"),
+                num_threads=int(os.getenv("CHARACTER_MEDIA_ASR_THREADS", "2")),
+            )
+        else:
+            asr = UnavailableSpeechRecognitionProvider(
+                "ASR 未配置：设置 CHARACTER_MEDIA_ASR_MODEL / CHARACTER_MEDIA_ASR_TOKENS"
+            )
 
     tts_model = os.getenv("CHARACTER_MEDIA_TTS_MODEL", "").strip()
     tts_tokens = os.getenv("CHARACTER_MEDIA_TTS_TOKENS", "").strip()

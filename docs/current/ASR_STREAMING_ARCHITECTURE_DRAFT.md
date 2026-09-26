@@ -1013,3 +1013,54 @@ The architecture is now substantially implemented, but three things still requir
 Only after those checks should the provider become the unconditional default.
 
 The next implementation step is therefore integration + benchmark, not another architecture rewrite.
+
+
+## 25. Concrete model artifact
+
+The first deployment should use the Sherpa-ONNX streaming Paraformer bilingual
+Chinese/English artifact:
+
+`sherpa-onnx-streaming-paraformer-bilingual-zh-en`
+
+Sherpa-ONNX publishes both FP32 and INT8 encoder/decoder files. The published
+INT8 files are approximately:
+
+- encoder.int8.onnx: 158 MB
+- decoder.int8.onnx: 68 MB
+- combined model files: approximately 226 MB
+
+The FP32 files are approximately 607 MB encoder + 218 MB decoder.
+
+For Character Memory, **INT8 is the first deployment candidate** because the
+project values low resident resource usage and predictable long-running local
+operation. The 226 MB number is model-file size only; it must not be described
+as VRAM consumption.
+
+The model is bilingual Chinese + English and the upstream documentation notes
+support for Mandarin plus several Chinese dialects. It is therefore a better
+fit for the current project than a large multilingual ASR model.
+
+The exact model package and current published sizes are documented by
+Sherpa-ONNX's online Paraformer model documentation. citeturn2search1turn2search5
+
+### Final candidate hierarchy
+
+```text
+PRIMARY
+  sherpa-onnx
+    + Paraformer streaming zh-en
+    + INT8 encoder/decoder
+
+FALLBACK
+  current SenseVoice
+
+OPTIONAL FINAL PASS
+  Fun-ASR-Nano
+
+HIGH-RESOURCE BENCHMARK ONLY
+  Qwen3-ASR
+```
+
+Qwen3-ASR is not being removed from research; it is simply not worth making
+the always-resident default until the project corpus demonstrates a clear
+accuracy gain large enough to justify its resource cost.

@@ -505,6 +505,21 @@ class WorldPulseRepository:
             result.append(item)
         return result
 
+    def count_runs_since(self, kind: str, subject_id: str, since: datetime) -> int:
+        """How many runs of one kind one subject started at or after ``since``.
+
+        The run ledger is the only durable record of *attempts*, which is what a
+        daily browse ceiling has to count: a run whose search failed still spent
+        the character's opportunity even though it spent no provider quota.
+        """
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) AS total FROM world_activity_runs "
+                "WHERE kind=? AND subject_id=? AND started_at_epoch>=?",
+                (kind, subject_id, epoch_us(since)),
+            ).fetchone()
+        return int(row["total"] or 0)
+
 
 class WorldActivityService:
     """Internet observation that is independent from Space posting cadence."""
@@ -962,6 +977,17 @@ class WorldActivityScheduler:
             min(10080.0, float(getattr(self.access.settings, field, default))),
         )
 
+    def browse_daily_max(self) -> int:
+        """Browse ceiling for one character per local day; 0 means none."""
+        return max(
+            0,
+            min(200, int(getattr(self.access.settings, "world_browse_daily_max", 10))),
+        )
+
+    def _browses_today(self, character_id: str, now: datetime) -> int:
+        midnight = now.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        return self.repository.count_runs_since("BROWSE", character_id, midnight)
+
     @staticmethod
     def _browse_delay(character_id: str, base_minutes: float) -> float:
         digest = hashlib.sha256(character_id.encode("utf-8")).digest()
@@ -1107,6 +1133,7 @@ class WorldActivityScheduler:
                     )
 
         if bool(getattr(self.access.settings, "world_browse_enabled", True)):
+            browse_daily_max = self.browse_daily_max()
             for profile in self.service._active_profiles():
                 character_id = profile["id"]
                 self.repository.ensure_state(
@@ -1119,19 +1146,27 @@ class WorldActivityScheduler:
                     ),
                     interval_minutes=browse_interval,
                 )
-                if self.repository.due("BROWSE", character_id, now):
-                    outcomes.append(
-                        self._run_kind(
-                            "BROWSE",
-                            character_id,
-                            now,
-                            lambda cid=character_id: self.service.browse_character(
-                                cid,
-                                now=now,
-                            ),
-                            browse_interval,
-                        )
+                if not self.repository.due("BROWSE", character_id, now):
+                    continue
+                # A due browse is still refused once the character has spent its
+                # day. The state is deliberately left due rather than re-armed to
+                # tomorrow: raising the ceiling then takes effect on the next
+                # poll instead of at the next midnight, and the ceiling is a
+                # Settings value an operator is expected to tune.
+                if browse_daily_max and self._browses_today(character_id, now) >= browse_daily_max:
+                    continue
+                outcomes.append(
+                    self._run_kind(
+                        "BROWSE",
+                        character_id,
+                        now,
+                        lambda cid=character_id: self.service.browse_character(
+                            cid,
+                            now=now,
+                        ),
+                        browse_interval,
                     )
+                )
         return outcomes
 
     def status(self) -> dict:
@@ -1166,6 +1201,7 @@ class WorldActivityScheduler:
                 "world_browse_interval_minutes",
                 30.0,
             ),
+            "browse_daily_max": self.browse_daily_max(),
             "poll_seconds": self.poll_seconds,
             "sources": list(
                 getattr(self.access.settings, "world_pulse_sources", [])

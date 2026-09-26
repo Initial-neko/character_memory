@@ -108,6 +108,10 @@ world_pulse_commenter_count: 4
 world_browse_enabled: true
 world_browse_interval_minutes: 30  # 30m current baseline; each active character has an independent clock
 world_browse_max_pages: 2
+# Per active character, per local day. Every browse spends one paid web search
+# from the quota every character shares, so the interval above is not a bound by
+# itself: 30 minutes authorises 48 a day. 0 means no ceiling.
+world_browse_daily_max: 10
 world_activity_poll_seconds: 60
 
 # Autonomous Group Chat. One due opportunity chooses one rotating seed member;

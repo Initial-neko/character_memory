@@ -453,6 +453,16 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "help": "每个活跃角色独立的上网机会基准间隔；当前基线 30 分钟。实际执行会带少量抖动，不等于每 30 分钟必定浏览。",
             },
             {
+                "name": "world_browse_daily_max",
+                "label": "Max Browses / Day",
+                "type": "number",
+                "min": 0,
+                "max": 200,
+                "step": 1,
+                "level": "advanced",
+                "help": "每个活跃角色每天最多浏览几次。每次浏览都要花掉一次付费搜索额度，而所有角色共用同一个 key，所以间隔本身不构成上限（30 分钟 = 48 次/天）。0 = 不限。它只是上限，不会强制浏览；未到期的角色不消耗额度。",
+            },
+            {
                 "name": "world_pulse_source_max_chars",
                 "label": "Pulse Text / Source",
                 "type": "number",

@@ -155,10 +155,13 @@ world_browse_enabled: true
 world_browse_interval_minutes: 30
 world_pulse_source_max_chars: 8000
 world_browse_max_pages: 2
+world_browse_daily_max: 10
 world_activity_poll_seconds: 60
 ```
 
 Behavior switches, source pages and user-visible cadences are advanced; text/page/poll ceilings stay diagnostic. `Pulse Sources` is edited one public URL per line and persists as a real YAML list. Dev Console has no World Activity save controls: it only refreshes, discusses, browses and runs due work against the Settings-owned values.
+
+`Max Browses / Day` is advanced rather than diagnostic because it is the only bound on what browsing *costs*. Every browse spends one paid search from a quota all characters share, and the interval does not bound that on its own: 30 minutes is 48 browses a day. See `SOCIAL_WORLD.md` → Personal Browse.
 
 ## 4. Search / World Browser
 

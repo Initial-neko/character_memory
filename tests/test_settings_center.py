@@ -1010,7 +1010,7 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     # it is counted in `advanced` here -- the assertion below is what keeps it
     # out of `common`. The previous count added the field's +1 to `diagnostic`
     # instead, which contradicted its own `"level": "advanced"`.
-    assert levels == {"common": 8, "advanced": 29, "diagnostic": 33}
+    assert levels == {"common": 8, "advanced": 30, "diagnostic": 33}
     assert "group_max_speakers_per_turn" in {
         field["name"]
         for section in schema

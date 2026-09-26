@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
+
+import numpy as np
 
 import httpx
 from pydantic import BaseModel, Field
@@ -233,7 +236,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 text_message = message.get("text")
                 if text_message is None:
                     continue
-                command = __import__("json").loads(text_message)
+                command = json.loads(text_message)
                 op = command.get("op")
                 if op in {"flush", "finish", "stop"}:
                     reason = str(command.get("reason") or "user_stop")

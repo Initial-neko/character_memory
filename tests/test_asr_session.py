@@ -44,6 +44,10 @@ def test_session_preserves_chunk_order_and_finalizes_once():
     assert provider.calls[0][1] == 16000
     assert session.active_segment_id() is None
     assert session.state is AsrSessionState.ACTIVE
+    traces = session.recent_traces()
+    assert traces[0]["segment_id"] == 1
+    assert traces[0]["endpoint_reason"] == "user_stop"
+    assert traces[0]["audio_samples"] == 2400
 
 
 def test_session_rejects_duplicate_or_reordered_audio():

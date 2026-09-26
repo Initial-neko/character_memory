@@ -901,3 +901,115 @@ The intended implementation sequence is deliberately small:
 No phase should be skipped merely because a model appears to recognize a demo sentence correctly.
 
 The acceptance target is reliable speech-to-text behavior in the actual Character Memory voice flows.
+
+
+## 22. Current model decision
+
+### Production target: Paraformer-zh-streaming
+
+The current project should converge on:
+
+```text
+sherpa-onnx
+    +
+Paraformer-zh-streaming (220M-class)
+    +
+server-side endpoint policy
+    +
+future FSMN-VAD integration
+```
+
+This choice is based on the actual requirements of Character Memory:
+
+- Chinese-first conversation;
+- local deployment;
+- streaming recognition;
+- low and predictable resource consumption;
+- Windows-friendly existing media runtime;
+- no need for a 1B+ language model just to transcribe ordinary speech.
+
+FunASR's current model catalogue lists Paraformer-zh-streaming at 220M parameters and SenseVoiceSmall at 234M; Qwen3-ASR is listed at 1.7B. The official FunASR documentation also explicitly uses Paraformer-zh-streaming for streaming ASR. The current implementation uses sherpa-onnx, whose OnlineRecognizer exposes a Paraformer streaming constructor and endpoint detection configuration. This means we can keep the existing native media runtime instead of adding a separate heavyweight inference stack.
+
+### Why Qwen3-ASR is not the default
+
+Qwen3-ASR remains a useful benchmark/final-pass candidate, but it is not the default production recognizer for this project.
+
+The reason is not that a larger model cannot improve recognition. The problem is system economics:
+
+- the model is 1.7B-class;
+- local VRAM/RAM requirements are materially higher;
+- the project needs always-available interactive voice input rather than an occasional offline transcription job;
+- running a large ASR model beside the Character LLM and TTS stack creates unnecessary memory pressure;
+- a final-pass model can be introduced later if the real corpus proves that 220M-class streaming recognition leaves unacceptable deletion/substitution errors.
+
+Therefore:
+
+```text
+Default:
+  Paraformer streaming
+
+Optional benchmark/final pass:
+  Fun-ASR-Nano
+
+High-resource benchmark only:
+  Qwen3-ASR
+```
+
+### Resource principle
+
+Do not compare parameter count with VRAM as if they were the same metric.
+
+The actual acceptance measurement must record:
+
+1. cold-start process memory;
+2. warm idle VRAM/RAM;
+3. peak memory during continuous speech;
+4. peak memory after 10/50/100 sessions;
+5. CPU utilization;
+6. first partial latency;
+7. finalization latency;
+8. model load time;
+9. repeated-session stability.
+
+The current repository's Sherpa-based media runtime is intentionally reused because it already has lazy model loading and Windows native-runtime protection.
+
+## 23. Current implementation status
+
+This Draft PR now contains a usable first implementation rather than only a design:
+
+- `AsrSession` defines stable session/segment semantics.
+- `TranscriptReconciler` defines partial/final reconciliation.
+- Segment ledger traces are recorded.
+- `SherpaParaformerStreamingProvider` provides a real OnlineRecognizer-backed streaming provider.
+- `/v1/asr/stream` accepts binary PCM16/16 kHz frames and emits `ready / partial / final / error` events.
+- Existing `/v1/asr` batch behavior remains available for compatibility.
+- Existing SenseVoice remains available as the fallback provider.
+- Provider selection is controlled through `CHARACTER_MEDIA_ASR_PROVIDER`.
+- Paraformer requires `CHARACTER_MEDIA_ASR_ENCODER`, `CHARACTER_MEDIA_ASR_DECODER`, and `CHARACTER_MEDIA_ASR_TOKENS`.
+
+### Example runtime configuration
+
+```text
+CHARACTER_MEDIA_ASR_PROVIDER=paraformer-streaming
+CHARACTER_MEDIA_ASR_ENCODER=<paraformer encoder.onnx>
+CHARACTER_MEDIA_ASR_DECODER=<paraformer decoder.onnx>
+CHARACTER_MEDIA_ASR_TOKENS=<tokens.txt>
+CHARACTER_MEDIA_ASR_DEVICE=cpu
+CHARACTER_MEDIA_ASR_THREADS=2
+CHARACTER_MEDIA_ASR_ENDPOINT_SILENCE_MS=1200
+CHARACTER_MEDIA_ASR_ENDPOINT_SHORT_SILENCE_MS=800
+```
+
+The browser is not switched to this endpoint automatically in this PR. That is deliberate: first prove the server-side streaming contract with a real local model, then migrate browser capture to it.
+
+## 24. Remaining work before calling ASR P0 complete
+
+The architecture is now substantially implemented, but three things still require real-machine validation:
+
+1. download/prepare the exact Paraformer streaming ONNX artifact;
+2. run the real microphone/Chromium path against `/v1/asr/stream`;
+3. benchmark Paraformer against current SenseVoice using the project's real Chinese/technical speech corpus.
+
+Only after those checks should the provider become the unconditional default.
+
+The next implementation step is therefore integration + benchmark, not another architecture rewrite.

@@ -126,8 +126,12 @@ def test_group_settings_exposes_add_member_flow():
     script = (root / "src" / "character_memory" / "web" / "group_settings.js").read_text(encoding="utf-8")
     assert "/members`" in script
     assert "添加选中成员" in script
-    assert "checked disabled" in script
-    assert "新成员从加入后的下一轮消息开始参与" in script
+    # A member who is already in the group no longer renders a checkbox at all:
+    # it renders the remove control instead, which
+    # test_group_settings_exposes_remove_member_flow covers. The add flow is
+    # therefore the list of profiles the group does *not* have yet.
+    assert "checked disabled" not in script
+    assert "新成员从下一轮消息开始参与" in script
 
 
 def test_core_launchers_start_only_character_runtime():

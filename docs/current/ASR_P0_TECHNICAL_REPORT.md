@@ -311,6 +311,65 @@ model can remain resident OR unload
 
 The choice should be based on measured latency/VRAM, not intuition.
 
+
+---
+
+## 5A. Resource evidence matrix (expanded)
+
+The resource numbers below intentionally distinguish **weight/file size**, **observed process memory**, and **recommended/required GPU capacity**. These are not interchangeable. A parameter-count calculation is only a planning estimate.
+
+| Candidate | Params | Published / observed artifact size | Published / observed runtime memory | GPU planning | CPU-only |
+|---|---:|---:|---:|---|---|
+| **FSMN-VAD** | ~0.4M | very small | negligible relative to ASR model | effectively negligible; measure co-resident overhead | Yes |
+| **Paraformer-zh-streaming** | ~220M | Paraformer benchmark reports **880 MB FP32**, **237 MB INT8** for the 220M Paraformer family | Public official benchmark evidence is stronger for CPU/ONNX throughput than isolated inference VRAM; do **not** infer 880 MB = VRAM | Plan for a low-VRAM model; exact CUDA peak must be measured with the chosen runtime | **Yes**, ONNX is a practical deployment path |
+| **SenseVoiceSmall** | ~234M | FunASR model listing identifies 234M; official GGUF artifacts provide substantially smaller quantized files | Public deployment reports put the complete lightweight pipeline well below multi-GB scale, but exact CUDA peak is runtime-dependent | Low-VRAM candidate; retain as baseline and measure | **Yes** |
+| **Fun-ASR-Nano-2512** | ~830M / 800M-class | Published Q4_K_M artifact: **0.52 GiB**; BF16 artifact about **1.55 GiB** in one public artifact index | A public CUDA inference issue observed **1.99 GB allocated / 2.01 GB reserved** immediately after model load; this is implementation-specific, not a universal peak | Native/vLLM guidance says **GPU >=8 GB**, **16 GB+ recommended**; actual single-stream peak must be measured | Possible in some builds, but not the preferred production path |
+| **Qwen3-ASR 1.7B** | ~1.7B active | OpenASR artifacts: **4.70 GB FP16**, **2.51 GB Q8_0**, **1.33 GB Q4_K**; RAM peaks 4.43/4.14/4.04 GB respectively in isolated OpenASR packs | A separate HF deployment reports roughly **4 GB** for BF16 ASR weights plus ~2 GB if the aligner is loaded; another service implementation recommends **>=12 GB VRAM**. These are deployment-specific. | Treat **12 GB as the practical floor for a comfortable CUDA service target**, not as a model-theoretical minimum. 16 GB gives more headroom. | OpenASR provides CPU builds, but for interactive Character Memory use, CPU latency must be benchmarked rather than assumed acceptable |
+
+### Evidence and interpretation
+
+**Paraformer / FunASR:** the official FunASR ONNX benchmark lists the 220M Paraformer family at 880 MB storage in FP32 and 237 MB after INT8 quantization. That benchmark is primarily a CPU/ONNX benchmark, so these numbers must not be mislabeled as peak GPU VRAM. citeturn0search0
+
+The official model zoo currently lists Paraformer-zh-streaming at 220M, SenseVoiceSmall at 234M, Fun-ASR-Nano at 800M, Qwen3-ASR at 1.7B, and FSMN-VAD at 0.4M. citeturn0search1turn0search13
+
+**Fun-ASR-Nano:** a public CUDA inference report observed 1.99 GB allocated / 2.01 GB reserved immediately after loading the model. This is useful as a real deployment datapoint, but it is not a vendor minimum or universal peak. citeturn1search0 The current Fun-ASR vLLM guide specifies GPU >=8 GB and recommends 16 GB+. citeturn1search9
+
+For artifact-level planning, a public model index reports Fun-ASR-Nano-2512 Q4_K_M at 0.52 GiB and BF16 at about 1.55 GiB before runtime/cache overhead. citeturn1search2
+
+**Qwen3-ASR 1.7B:** the OpenASR distribution currently publishes FP16/Q8/Q4 builds at 4.70/2.51/1.33 GB, with isolated RAM peaks of 4.43/4.14/4.04 GB. Its benchmark is useful for quantization footprint, but it is not a direct GPU-VRAM benchmark for the PyTorch/vLLM runtime we would deploy. citeturn0search10turn0search14 A separate deployment reports >=12 GB VRAM as its supported target, with roughly 4 GB for BF16 ASR weights and another ~2 GB if a timestamp aligner is loaded. citeturn0search15
+
+### Resource-selection rule
+
+We should not select a candidate from parameter count or model-file size alone.
+
+For each candidate that survives the accuracy benchmark, measure on the **actual Character Memory target machine**:
+
+1. cold-start VRAM;
+2. warm idle VRAM;
+3. peak VRAM during a 60 s continuous utterance;
+4. peak VRAM during repeated 10-minute sessions;
+5. CPU utilization during streaming;
+6. system RAM;
+7. model load time;
+8. first-partial latency;
+9. finalization latency;
+10. whether the runtime silently falls back from CUDA to CPU;
+11. VRAM after 10/50/100 repeated sessions;
+12. concurrent-session behavior at 1, 2, and 4 sessions.
+
+### Important deployment implication
+
+For our expected workload, **one resident streaming model plus one optional final-pass model** is preferable to loading multiple heavyweight ASR models permanently.
+
+A concrete starting resource budget is therefore:
+
+- **Low-VRAM path:** FSMN-VAD + Paraformer-zh-streaming.
+- **Mid-VRAM path:** FSMN-VAD + Paraformer streaming + Fun-ASR-Nano final pass.
+- **Higher-VRAM path:** FSMN-VAD + Paraformer streaming + Qwen3-ASR 1.7B final pass.
+- Do not co-resident-load both Fun-ASR-Nano and Qwen3-ASR merely for redundancy before measurement proves that this is necessary.
+
+The final decision remains empirical because VRAM depends on framework, precision, CUDA kernels, KV/cache policy, context length, and number of concurrent sessions.
+
 ---
 
 ## 6. Recommended target architecture

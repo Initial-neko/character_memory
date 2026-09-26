@@ -51,6 +51,10 @@ If your change affects browser behavior, also run the relevant browser smoke che
 
 Use short-lived feature/fix/refactor/chore branches and merge them into a CI-green `main`. Do not maintain a permanent `develop` or moving `stable` branch.
 
+Work is finished when it is a pushed branch with an open PR, not when it runs on your machine. Do not leave uncommitted work sitting on `main`. A change that exists only in a working tree cannot be reviewed, cannot be seen by CI, and cannot be merged, so it is invisible to every other contributor and quietly drifts from `main` as the branch moves on. Finish by committing to a branch and opening the PR, even when the change feels too small to be worth one.
+
+Stage the paths your change owns — `git add <path>`, or `git add -u` for already-tracked files — rather than `git add -A`. Generated media, local databases, model assets and runtime character data live in the working tree untracked, so a blanket add sweeps them into the commit.
+
 Release baselines use immutable tags and GitHub Releases. See `docs/current/RELEASES.md` for the 0.x version rules, RC promotion flow, and when a temporary `release/X.Y` maintenance branch is appropriate.
 
 ## Documentation rules

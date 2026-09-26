@@ -11,9 +11,9 @@ set -euo pipefail
 # Keep one stable target instead: the project's `all` extra contains the
 # complete local development/runtime stack (API, embeddings, Media Runtime,
 # ImageGen, UI and pytest). Re-running this command is incremental; uv only
-# changes packages when the declared dependency graph changes. Once the project
-# commits a verified uv.lock, this script should be tightened to a frozen/locked
-# sync so transitive dependencies cannot drift.
+# changes packages when the declared dependency graph changes. The project now
+# commits a verified uv.lock, so the sync below runs locked and transitive
+# dependencies cannot drift.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

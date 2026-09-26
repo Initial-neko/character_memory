@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from character_memory.config import Settings
 from character_memory.domain.models import WorldObservation
+from character_memory.llm.usage import current_llm_usage_context
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.time_utils import epoch_us
 from character_memory.world_activity import (
@@ -42,9 +43,13 @@ class FakeRuntime:
 class FakeModel:
     def __init__(self):
         self.calls = []
+        # The usage scope is a ContextVar, so recording it here is what proves a
+        # call site actually set it -- reading the session id back later cannot.
+        self.scopes = []
 
     def structured_for_session(self, prompt, schema, session_id):
         self.calls.append((schema.__name__, session_id, prompt))
+        self.scopes.append(current_llm_usage_context())
         if schema is WorldPulseDigest:
             return WorldPulseDigest(
                 topics=[
@@ -232,6 +237,33 @@ def test_world_pulse_discussion_is_character_specific_and_persists_recent_fact(t
         assert len(pulse) == 1
         assert pulse[0].metadata["topic_id"] == topic["id"]
         assert "公开评论" in pulse[0].content
+    store.close()
+
+
+def test_every_world_activity_model_call_carries_a_world_scope(tmp_path):
+    """Attribution is set at the call site, not inferred from the session id.
+
+    A call site that forgets `llm_usage_scope` still reaches the inference
+    fallback, but only because the prefix is registered there -- so this asserts
+    the explicit scope, which is the real contract.
+    """
+    store, access, model = make_access(tmp_path, count=1)
+    repo = WorldPulseRepository(store)
+    service = WorldActivityService(access, repo)
+
+    service.refresh_pulse(now=NOW)
+    topic = repo.list_topics()[0]
+    service.discuss_topic(topic["id"], now=NOW)
+    service.browse_character("c00", now=NOW)
+
+    assert model.scopes
+    assert {scope.feature for scope in model.scopes} == {"WORLD"}
+    assert {scope.purpose for scope in model.scopes} == {
+        "WORLD_PULSE_SUMMARY",
+        "WORLD_PULSE_TAKE",
+        "WORLD_BROWSE_PLAN",
+        "WORLD_BROWSE_APPRAISAL",
+    }
     store.close()
 
 

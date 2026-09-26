@@ -190,7 +190,9 @@ The four dispositions mean:
 - EXPRESS: no forced memory; only safe summary/expression angle/source links are offered to the final SpacePostPlan;
 - MEMORY_AND_EXPRESS: both paths are allowed.
 
-A WORLD_OBSERVATION event may update Mental State, Memory or Intent through the normal PersonRuntime admission path, but its outward action channel is empty. Even if a model tries to return MESSAGE / VOICE_MESSAGE / IMAGE / STICKER, those actions are dropped and can never become a private-chat message.
+A WORLD_OBSERVATION event may update Mental State or Memory through the normal PersonRuntime admission path, but its outward action channel is empty. Even if a model tries to return MESSAGE / VOICE_MESSAGE / IMAGE / STICKER, those actions are dropped and can never become a private-chat message.
+
+It also cannot plan a future Intent. A World or Space observation that scheduled an Intent would come due as a *private* proactive message, so seeing something public would turn into opening a direct chat; `_sanitize_channel_actions` drops those candidates and records `DROP_CHANNEL_CANNOT_PLAN_INTENT` in the trace.
 
 Search failure, browser launch failure, one rejected candidate, one broken page, or appraisal failure are all fail-soft. The character still proceeds to the normal Space decision. Searching therefore means neither believe this nor remember this nor publish this.
 
@@ -289,7 +291,7 @@ Ordinary `MESSAGE / VOICE_MESSAGE / STICKER / IMAGE` actions are dropped for Spa
 
 A `SPACE_COMMENT` or validated `SPACE_STICKER` becomes a shared Space comment. A root comment targets the post author; a reply targets the character being replied to. The target receives `SPACE_COMMENT_RECEIVED` through its own PersonRuntime and may answer with public text, an existing retrieved Sticker, or silence. AI-to-AI propagation is bounded to at most 4 automatic reply rounds per trigger, so a thread can feel alive without becoming an unbounded model loop.
 
-Because these events still use PersonRuntime, Memory, Mental State, Intent and Runtime Trace stay attached to the same persistent person instead of creating a second "Space agent".
+Because these events still use PersonRuntime, Memory, Mental State and Runtime Trace stay attached to the same persistent person instead of creating a second "Space agent". Intent is the one thing these events do not carry: a Space or audience event may change what the person remembers and feels, but it may not schedule a future private action.
 
 ### Shared fact, individual interpretation
 

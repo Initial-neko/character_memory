@@ -247,6 +247,40 @@ otherwise -> write
 
 到时间后，已有 Intent 仍会回到同一个 Person Runtime 重新判断是否表达、延期、压制或过期。
 
+### Intent Admission
+
+与 Memory Candidate 对称，Intent 也要先过服务端准入：
+
+```text
+low value? -> skip
+exact / near duplicate? -> skip
+pending ceiling reached? -> skip
+otherwise -> write, with earliest_at >= server floor
+```
+
+模型在这一层不是可信输入源：`earliest_hours` 曾经完全没有出现在说明里，于是每个 candidate 都带着字段默认值 0 —— 语义等于“下一次轮询就到期”。准入规则因此写在写入路径上，而不是靠说明文字请求：
+
+- **最小延迟地板**（`proactive_intent_min_delay_minutes`）：`earliest_at = event_time + min(max(earliest_hours, floor), expires_hours)`。地板由服务端给，天花板是 Intent 自己的有效期，所以 clamp 不会把 Intent 排到它已经失效之后。
+- **PENDING 上限**（`proactive_max_pending_intents`，0 表示不限）：在 derived transaction 内判定，SQLite 写锁保证两个 reaction 不会各自认为还有空位。
+- **近重复丢弃**（`proactive_intent_dedup_enabled` / `proactive_intent_duplicate_similarity` / `proactive_intent_dedup_window_hours`）：先做 `casefold` 全等比较，再比同角色近窗口内所有 Intent 的 embedding。比较集**按 status 不过滤**——已经被压制过的同义 Intent 正是不能再造一条的那个。embedding 失败时仍然写入（Intent 是人物真的想做的事，与 Memory 的处理不同），只把错误记进决策。
+- 每个 candidate 的判定（`WRITE` / `SKIP_DUPLICATE` / `SKIP_LOW_VALUE` / `SKIP_PENDING_LIMIT`，含 `requested_earliest_hours` / `effective_earliest_hours` / `clamped` / `duplicate_intent_id` / `similarity`）写进 Runtime Trace 的 `intent_decisions`。
+
+### 谁不能产生 Intent
+
+`PROACTIVE_INTENT`、`SPACE_POST_SEEN`、`SPACE_COMMENT_RECEIVED`、`WORLD_OBSERVATION` 四类事件会被 `_sanitize_channel_actions` 强制清空 `intent_candidates`，并记录为 `DROP_PROACTIVE_SELF_LOOP` / `DROP_CHANNEL_CANNOT_PLAN_INTENT`。
+
+- `PROACTIVE_INTENT` 是自环的那条边：一轮“到期重判”如果又能留下新 Intent，而新 Intent 的 `earliest_at` 落在同一轮或下一轮，就形成永不停止的 LLM 循环。Memory / Mental State 仍照常接受，只切断 Intent 这一条回流边。
+- Space / World 被排除是另一回事：它们的 Intent 到期后会走成**私聊**主动消息（`dispatch_proactive_intent` 用该人物最近的会话 ID），也就是“在朋友圈看到评论”变成“私聊找用户说话”，属于跨渠道串味。这与 WORLD_OBSERVATION 只更新认知、不对外表达的既有边界一致。
+
+`DEFER` 目前只写 `status='DEFERRED'` 而**不重排 `earliest_at`**，而 `due_intents` 只查 `PENDING`，所以被延后的 Intent 不会再被取到。也就是说“延后到明早”这条路径当前并不存在，`earliest_hours` 才是唯一的时机表达方式。补全 `DEFER` 是独立工作，不在准入层。
+
+### 派发节奏
+
+到期 Intent 由后台循环派发，并且受每角色冷却约束：
+
+- `proactive_dispatch_enabled` / `proactive_poll_seconds` 控制循环本身；轮询只决定多快发现一个到期 Intent，不改变派发节奏。
+- `proactive_min_dispatch_interval_minutes` 是同一角色两次派发之间的最小间隔，**任何派发都会消耗它，包括模型选择沉默的那一轮**——那次 LLM 调用已经花掉了。冷却游标持久化在 `proactive_dispatch_state`，重启不会重置；`has_due()` 也会查它，避免为一个正在冷却的角色白白加载 Runtime。
+
 当前还存在 process-local Character Wake：
 
 - `proactive_wake_enabled`
@@ -286,6 +320,8 @@ Source Event 已经是事实后，Derived state 应尽量原子提交。
 - Runtime Trace / ACTION bookkeeping
 
 可选慢工具（例如 ImageGen）应在主事务之外运行，并通过正常 Media/Event 协议追加结果。
+
+Memory 与 Intent 的 embedding 都在这个事务**之外**计算（可能是远端调用，不应占着 SQLite 写锁）；Intent 的 PENDING 配额判定在事务**之内**，靠写锁保证不会超发。
 
 ## 13. Safe Thought / Trace
 

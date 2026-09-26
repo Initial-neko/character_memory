@@ -12,19 +12,46 @@ data/qwen3-tts-benchmark/
 models/
 config.yaml
 config.yaml.bak.*
+# An ad-hoc copy of config.yaml made outside the .bak.* convention.
+config_bak.yaml
 .env
+
+# Local tooling and runtime output. None of this is source, and `.claude/` in
+# particular carries nested worktree checkouts: committing it would drag whole
+# copies of the repository into the repository.
+.coverage
+.idea/
+.workbuddy/
+.claude/
+# Runtime state for the running stack (databases, generated media, caches).
+# Nothing under it is tracked today; the narrower rules above stay for clarity.
+data/
 
 # Frozen voice assets are local data. A VoiceDesign clip cannot be regenerated
 # from its prompt (the sidecar is unseeded), so the WAV is an asset, not build
-# output. The character's voice.yaml is *not* ignored alongside it: it only ever
-# names a template now, which is configuration -- see the voices/ rule below.
+# output.
 personas/*/voice/
+# A character's voice.yaml is a pointer and nothing more, and the template it
+# names lives in the local voices/ tree below. Publishing the pointer without its
+# clip would make resolve_voice_registry raise on a fresh clone, whereas a
+# character with *no* voice.yaml degrades to the default template -- so an absent
+# file is the only state that is safe to publish.
+personas/*/voice.yaml
+# Voice templates own the reference clips; they are local assets, not source.
+voices/
 # Creation provenance may contain the user's original prompt and is runtime data.
 personas/*/creation.json
-# Characters created at runtime through the app are local data too.
+# Archiving is a runtime lifecycle change, not source.
+personas/*/archived.yaml
+# Imported sticker sets are local image assets.
+personas/*/stickers/
+# Characters created at runtime through the app are local data. The app names its
+# own character-<hash>; one created through the app but given a hand-picked id
+# does not match that prefix and is listed on its own.
 personas/character-*/
-# Voice templates own the reference clips; they are local assets, not source.
-# personas/<id>/voice.yaml stays tracked -- that is configuration, not audio.
-# A runtime-created character-* directory above is local data wholesale, so a
-# voice.yaml inside one of those stays ignored along with the rest of it.
-voices/
+personas/cute/
+
+# A proposal for work that has not been implemented. Research notes are otherwise
+# tracked; this one is a plan for a change rather than a finding about the current
+# project, and should be promoted to docs/current/ when its work lands.
+docs/research/GSV_TTS_INTEGRATION.md

@@ -108,6 +108,58 @@ def test_unanswered_proactive_message_blocks_another_proactive_turn(tmp_path):
     store.close()
 
 
+def test_cooldown_blocks_the_next_dispatch_and_survives_a_new_service_object(tmp_path):
+    """The cursor is durable: a restart must not hand back a fresh cooldown."""
+    now = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
+    store = SQLiteStore(tmp_path / "x.db")
+    _intent(store, "momo", now)
+    _intent(store, "momo", now, earliest_delta=-2)
+
+    first = ProactiveService(store, FakeChat(), min_dispatch_interval_minutes=30)
+    assert len(first.dispatch_due(["momo"], now)) == 1
+
+    # A brand-new service object stands in for a process restart.
+    second = ProactiveService(store, FakeChat(), min_dispatch_interval_minutes=30)
+    assert second.has_due(["momo"], now + timedelta(minutes=1)) is False
+    assert second.dispatch_due(["momo"], now + timedelta(minutes=1)) == []
+
+    later = now + timedelta(minutes=31)
+    assert second.has_due(["momo"], later) is True
+    assert len(second.dispatch_due(["momo"], later)) == 1
+    store.close()
+
+
+def test_silence_still_consumes_the_cooldown(tmp_path):
+    """A suppressed round already paid for the reaction, so it must count."""
+    now = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
+    store = SQLiteStore(tmp_path / "x.db")
+    _intent(store, "rei", now)
+    chat = FakeChat(PersonReaction(actions=[]))
+    service = ProactiveService(store, chat, min_dispatch_interval_minutes=60)
+
+    outcomes = service.dispatch_due(["rei"], now)
+
+    assert outcomes[0]["status"] == "SUPPRESSED"
+    assert len(chat.calls) == 1
+    assert service.has_due(["rei"], now + timedelta(minutes=5)) is False
+    store.close()
+
+
+def test_cooldown_is_per_character(tmp_path):
+    now = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
+    store = SQLiteStore(tmp_path / "x.db")
+    _intent(store, "momo", now)
+    _intent(store, "rei", now)
+    service = ProactiveService(store, FakeChat(), min_dispatch_interval_minutes=60)
+
+    assert [item["character_id"] for item in service.dispatch_due(["momo"], now)] == ["momo"]
+
+    later = now + timedelta(minutes=1)
+    assert service.has_due(["rei"], later) is True
+    assert [item["character_id"] for item in service.dispatch_due(["rei"], later)] == ["rei"]
+    store.close()
+
+
 def test_background_proactive_dispatch_reuses_direct_voice_publisher():
     root = Path(__file__).resolve().parents[1]
     source = (root / "src" / "character_memory" / "api.py").read_text(encoding="utf-8")

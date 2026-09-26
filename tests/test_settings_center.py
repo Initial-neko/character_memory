@@ -1006,8 +1006,11 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
 
     levels = Counter(field["level"] for section in schema for field in section["fields"])
     # group_max_speakers_per_turn is a backend shape knob and deliberately does
-    # not buy its way onto the first screen; it lives in the advanced group.
-    assert levels == {"common": 8, "advanced": 28, "diagnostic": 34}
+    # not buy its way onto the first screen; it lives in the advanced group, so
+    # it is counted in `advanced` here -- the assertion below is what keeps it
+    # out of `common`. The previous count added the field's +1 to `diagnostic`
+    # instead, which contradicted its own `"level": "advanced"`.
+    assert levels == {"common": 8, "advanced": 29, "diagnostic": 33}
     assert "group_max_speakers_per_turn" in {
         field["name"]
         for section in schema

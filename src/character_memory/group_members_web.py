@@ -9,6 +9,15 @@ from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.time_utils import epoch_us
 
 
+# The repository speaks English identifiers; this module is the HTTP boundary the
+# user actually reads, and the rest of the group UI is Chinese. An unmapped
+# message falls through unchanged rather than being swallowed, so a new store
+# error stays legible on the wire instead of turning into a generic failure.
+_REMOVE_MEMBER_ERROR_DETAILS = {
+    "group must retain at least 2 characters": "群聊需保留至少 2 个 Character，无法移出。",
+}
+
+
 class AddGroupMembersRequest(BaseModel):
     member_ids: list[str] = Field(min_length=1, max_length=MAX_GROUP_CHARACTERS)
 
@@ -126,7 +135,11 @@ def attach_group_member_routes(app):
                     raise HTTPException(status_code=404, detail="group not found") from exc
                 raise HTTPException(status_code=404, detail="character is not a group member") from exc
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                message = str(exc)
+                raise HTTPException(
+                    status_code=400,
+                    detail=_REMOVE_MEMBER_ERROR_DETAILS.get(message, message),
+                ) from exc
 
             return {
                 "group": payload(updated, profiles),

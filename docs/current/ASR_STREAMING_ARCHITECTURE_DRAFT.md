@@ -1064,3 +1064,12 @@ HIGH-RESOURCE BENCHMARK ONLY
 Qwen3-ASR is not being removed from research; it is simply not worth making
 the always-resident default until the project corpus demonstrates a clear
 accuracy gain large enough to justify its resource cost.
+
+
+### Finalization safety
+
+The streaming provider adds approximately 600 ms of server-side tail padding
+before `input_finished()`. This is intentional: the browser should not have
+to know the model's look-ahead requirements, and final syllables must not be
+lost merely because the user stopped speaking exactly at an inference window
+boundary.

@@ -422,15 +422,19 @@
     voice.silenceMs = Number.isFinite(configured) && configured >= 200 ? configured : DEFAULT_SILENCE_MS;
   }
 
+  // A transcript with no Han character at all is the shape the recognizer's
+  // hallucination takes on non-speech: a fan, a cough or a keyboard gets answered
+  // with "Yeah." or "The.". The rule used to admit anything with two Latin
+  // characters, which is exactly what those answers look like, so a Chinese-first
+  // voice path now requires a Han character. A genuine purely non-Chinese utterance
+  // is refused by this on purpose -- admitting one has to be a deliberate change.
   function validateAsrTranscript(raw) {
     const text = String(raw || "").trim();
     if (!text) return {valid:false, text:"", reason:"empty"};
     const meaningful = text.replace(/[\s\p{P}\p{S}]/gu, "");
     if (!meaningful) return {valid:false, text, reason:"punctuation_only"};
     if (/\p{Script=Han}/u.test(text)) return {valid:true, text, reason:"valid"};
-    const latinOrDigitCount = (text.match(/[A-Za-z0-9]/g) || []).length;
-    if (latinOrDigitCount >= 2) return {valid:true, text, reason:"valid"};
-    return {valid:false, text, reason:"too_short"};
+    return {valid:false, text, reason:"no_han"};
   }
 
   function handleCharacterEvent(data, characterId) {

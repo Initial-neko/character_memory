@@ -125,10 +125,11 @@ def test_voice_asr_gate_rejects_empty_punctuation_and_low_information_before_que
     assert 'reason:"empty"' in script
     assert 'text.replace(/[\\s\\p{P}\\p{S}]/gu, "")' in script
     assert '/\\p{Script=Han}/u.test(text)' in script
-    assert 'text.match(/[A-Za-z0-9]/g)' in script
-    assert 'latinOrDigitCount >= 2' in script
     assert 'reason:"punctuation_only"' in script
-    assert 'reason:"too_short"' in script
+    # A Latin-only answer is the hallucination shape on non-speech, so the gate no
+    # longer admits one: `no_han` replaced the `>= 2 Latin characters` rule.
+    assert 'reason:"no_han"' in script
+    assert 'latinOrDigitCount' not in script
 
     finish_speech = script.split('async function finishSpeech()', 1)[1].split('async function synthesize', 1)[0]
     assert 'const validation = validateAsrTranscript(result.text);' in finish_speech

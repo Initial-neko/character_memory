@@ -354,3 +354,71 @@ def test_world_activity_scheduler_keeps_independent_clocks(tmp_path):
     outcomes = scheduler.run_once(now=NOW)
     assert any(item["kind"] == "BROWSE" for item in outcomes)
     store.close()
+
+
+def _browsed(outcomes):
+    return [item for item in outcomes if item["kind"] == "BROWSE"]
+
+
+def test_browse_daily_ceiling_refuses_a_character_that_spent_its_day(tmp_path):
+    """The interval paces a browse; it is not a bound on the day's spending.
+
+    Every browse spends one paid web search from a quota all characters share,
+    and a 30-minute interval would authorise 48 of them a day.
+    """
+
+    store, access, _ = make_access(tmp_path, count=1)
+    access.settings.world_browse_daily_max = 2
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+
+    scheduler.run_once(now=NOW)  # establish the character's BROWSE clock
+    for _ in range(2):
+        scheduler.force_due("BROWSE", "c00", now=NOW)
+        allowed = _browsed(scheduler.run_once(now=NOW))
+        assert len(allowed) == 1
+        assert allowed[0]["status"] == "OK"
+
+    # Still due, and the ceiling is the only thing refusing it.
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    assert _browsed(scheduler.run_once(now=NOW)) == []
+
+    # A failed browse still spent the opportunity: the ceiling counts attempts,
+    # and the ledger is what records them.
+    assert repo.count_runs_since("BROWSE", "c00", NOW - timedelta(hours=1)) == 2
+    assert scheduler.status()["browse_daily_max"] == 2
+    store.close()
+
+
+def test_browse_daily_ceiling_is_per_character_and_clears_next_local_day(tmp_path):
+    store, access, _ = make_access(tmp_path, count=2)
+    access.settings.world_browse_daily_max = 1
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+    scheduler.run_once(now=NOW)
+
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    assert [item["subject_id"] for item in _browsed(scheduler.run_once(now=NOW))] == ["c00"]
+
+    # c00 is spent for the day; c01 still has its own ceiling, not a shared one.
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    scheduler.force_due("BROWSE", "c01", now=NOW)
+    assert [item["subject_id"] for item in _browsed(scheduler.run_once(now=NOW))] == ["c01"]
+
+    tomorrow = NOW + timedelta(days=1)
+    scheduler.force_due("BROWSE", "c00", now=tomorrow)
+    assert "c00" in [item["subject_id"] for item in _browsed(scheduler.run_once(now=tomorrow))]
+    store.close()
+
+
+def test_browse_daily_ceiling_of_zero_means_unlimited(tmp_path):
+    store, access, _ = make_access(tmp_path, count=1)
+    access.settings.world_browse_daily_max = 0
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+    scheduler.run_once(now=NOW)
+
+    for _ in range(3):
+        scheduler.force_due("BROWSE", "c00", now=NOW)
+        assert len(_browsed(scheduler.run_once(now=NOW))) == 1
+    store.close()

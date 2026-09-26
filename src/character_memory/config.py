@@ -165,6 +165,12 @@ class Settings(BaseModel):
     world_browse_enabled: bool = True
     world_browse_interval_minutes: float = Field(default=30.0, ge=10.0, le=10080.0)
     world_browse_max_pages: int = Field(default=2, ge=1, le=4)
+    # Browse ceiling for one character per local day. Every browse spends one
+    # paid web search from the provider quota that every character shares, and
+    # the 30-minute interval alone would authorise 48 of them a day, so the
+    # interval is not a sufficient bound on its own. 0 means no ceiling. It
+    # never forces a browse -- a character that is not due does not consume it.
+    world_browse_daily_max: int = Field(default=10, ge=0, le=200)
     world_activity_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 
     # Autonomous Group Chat is intentionally sparse: an opportunity only asks

@@ -1014,7 +1014,7 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     # The proactive dispatch and Intent-admission fields are counted the same
     # way: the switches and cadences are `advanced`, and only the tuning knobs
     # (poll latency, similarity threshold, dedup window) are `diagnostic`.
-    assert levels == {"common": 8, "advanced": 34, "diagnostic": 36}
+    assert levels == {"common": 8, "advanced": 35, "diagnostic": 36}
     assert "group_max_speakers_per_turn" in {
         field["name"]
         for section in schema

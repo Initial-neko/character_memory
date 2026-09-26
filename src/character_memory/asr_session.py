@@ -72,6 +72,39 @@ class BatchSpeechRecognitionProvider(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class AsrSegmentTrace:
+    session_id: str
+    segment_id: int
+    source: str
+    sample_rate: int
+    audio_start_ms: float
+    audio_end_ms: float
+    audio_samples: int
+    endpoint_reason: str
+    final_text: str
+    provider: str
+    inference_ms: float
+
+    def to_dict(self) -> dict:
+        return {
+            "session_id": self.session_id,
+            "segment_id": self.segment_id,
+            "source": self.source,
+            "sample_rate": self.sample_rate,
+            "audio_start_ms": self.audio_start_ms,
+            "audio_end_ms": self.audio_end_ms,
+            "audio_samples": self.audio_samples,
+            "audio_duration_ms": round(
+                max(0.0, self.audio_end_ms - self.audio_start_ms), 1
+            ),
+            "endpoint_reason": self.endpoint_reason,
+            "final_text": self.final_text,
+            "provider": self.provider,
+            "inference_ms": self.inference_ms,
+        }
+
+
 class TranscriptReconciler:
     """Keeps one authoritative transcript for one segment.
 
@@ -179,6 +212,7 @@ class AsrSession:
         self._segment_start_ms = 0.0
         self._last_audio_ms = 0.0
         self._reconciler: Optional[TranscriptReconciler] = None
+        self._traces: List[AsrSegmentTrace] = []
         self._lock = threading.RLock()
 
     def start(self) -> str:
@@ -271,6 +305,21 @@ class AsrSession:
                     event.provider,
                     elapsed_ms,
                 )
+            self._traces.append(
+                AsrSegmentTrace(
+                    session_id=event.session_id,
+                    segment_id=event.segment_id,
+                    source=self.source,
+                    sample_rate=self.sample_rate,
+                    audio_start_ms=event.start_ms,
+                    audio_end_ms=event.end_ms,
+                    audio_samples=int(samples.size),
+                    endpoint_reason=reason.value if isinstance(reason, EndpointReason) else str(reason),
+                    final_text=event.text,
+                    provider=event.provider,
+                    inference_ms=event.inference_ms,
+                )
+            )
             self._reset_segment()
             self.state = AsrSessionState.ACTIVE
             return event
@@ -289,6 +338,11 @@ class AsrSession:
     def active_segment_id(self) -> Optional[int]:
         with self._lock:
             return self._active_segment
+
+    def recent_traces(self, limit: int = 50) -> list[dict]:
+        with self._lock:
+            count = max(1, min(int(limit), 200))
+            return [item.to_dict() for item in self._traces[-count:]]
 
     def diagnostic_snapshot(self) -> dict:
         with self._lock:

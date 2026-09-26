@@ -18,6 +18,10 @@ transcript at synthesis time (``cache_prompt_audio`` raises on empty prompt
 text), so a half-configured voice is a load-time error instead of a surprise at
 the first request.
 
+Neither tree is committed. A template carries a local reference clip, and a
+character reference would dangle without one, so a fresh clone has no configured
+voices at all: that is the "not configured" case above, not a broken install.
+
 :func:`discover_templates` and :func:`discover_character_voices` read the two
 trees; :func:`resolve_voice_registry` merges them into the single
 ``{name: profile}`` registry a request is answered from, where a character id

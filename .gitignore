@@ -9,6 +9,11 @@ __pycache__/
 .external/
 data/*.db
 data/qwen3-tts-benchmark/
+# Kept alongside the broad `data/` rule below for the same reason as the narrower
+# rules above: capture review writes the user's own voice to disk while a test run
+# has it switched on, and that is worth naming explicitly rather than leaving it
+# to be inferred from a directory-wide rule.
+data/asr-capture/
 models/
 config.yaml
 config.yaml.bak.*

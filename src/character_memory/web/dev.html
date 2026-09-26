@@ -450,6 +450,21 @@
         </details>
       </article>
 
+      <article class="card wide" id="asrCaptureCard" data-dev-surface="detailed">
+        <div class="card-title-row"><h2>ASR Capture Review</h2><span class="pill">test only</span></div>
+        <details class="level-group" data-level="diagnostic" data-title="诊断 · 采集回看" data-hint="测试态下保存每次上传的音频与识别结果">
+          <summary>诊断 · 采集回看</summary>
+          <p class="subtle">保存的是媒体运行时实际收到的那段音频，也就是模型的输入。因此它记录的就是真实的通话与听写路径，不存在第二条测试用采集链路。默认关闭；关闭时不写入任何文件。</p>
+          <div class="asr-controls">
+            <button id="asrCaptureToggle" class="secondary" type="button" aria-pressed="false">测试态：关</button>
+            <button id="asrCaptureRefresh" class="secondary" type="button">刷新</button>
+            <button id="asrCaptureClear" class="secondary" type="button">清空</button>
+            <span id="asrCaptureStatus" class="metric-inline">-</span>
+          </div>
+          <div id="asrCaptureList" class="asr-capture-list"><div class="subtle">尚无记录</div></div>
+        </details>
+      </article>
+
       <article class="card" id="mediaLiveSmokeCard" data-dev-surface="detailed">
         <div class="card-title-row"><h2>Media Live Smoke</h2><span class="pill">real inference</span></div>
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 运行 Media Smoke" data-hint="真实 TTS → ASR 往返">
@@ -588,5 +603,6 @@
   <script src="/static/dev.js"></script>
   <script src="/static/dev_visual.js"></script>
   <script src="/static/dev_capture.js"></script>
+  <script src="/static/dev_asr_capture.js"></script>
 </body>
 </html>

@@ -117,6 +117,13 @@ class DevWorldSearchRequest(BaseModel):
     max_chars_per_page: int = Field(default=6000, ge=500, le=16000)
 
 
+class DevAsrCaptureModeRequest(BaseModel):
+    """Test-mode switch, forwarded to the Media Runtime that owns the captures."""
+
+    enabled: bool | None = None
+    clear: bool = False
+
+
 def create_dev_app(
     config_path: str = "config.yaml",
     *,
@@ -712,6 +719,38 @@ def create_dev_app(
             raise HTTPException(status_code=502, detail=f"Media Runtime request failed: {exc}") from exc
         if response.is_error:
             raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "metrics"))
+        return response.json()
+
+    # The captures live in the Media Runtime because that is where a WAV arrives.
+    # These three routes only carry them across so the panel has one origin.
+    @app.get("/v1/dev/asr-capture")
+    def asr_capture(limit: int = Query(default=100, ge=1, le=500)):
+        try:
+            response = client.get(f"{media_base}/v1/dev/asr-capture", params={"limit": limit}, timeout=10.0)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Media Runtime request failed: {exc}") from exc
+        if response.is_error:
+            raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "asr-capture"))
+        return response.json()
+
+    @app.get("/v1/dev/asr-capture/{item_id}/audio")
+    def asr_capture_audio(item_id: str):
+        try:
+            response = client.get(f"{media_base}/v1/dev/asr-capture/{quote(item_id, safe='')}/audio", timeout=30.0)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Media Runtime request failed: {exc}") from exc
+        if response.is_error:
+            raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "asr-capture-audio"))
+        return Response(content=response.content, media_type="audio/wav")
+
+    @app.post("/v1/dev/asr-capture/test-mode")
+    def asr_capture_test_mode(req: DevAsrCaptureModeRequest):
+        try:
+            response = client.post(f"{media_base}/v1/dev/asr-capture/test-mode", json=req.model_dump(), timeout=10.0)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Media Runtime request failed: {exc}") from exc
+        if response.is_error:
+            raise HTTPException(status_code=response.status_code, detail=_upstream_detail(response, "asr-capture-test-mode"))
         return response.json()
 
     return app

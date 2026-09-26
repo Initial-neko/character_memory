@@ -110,6 +110,32 @@ def infer_usage_context(conversation_id: str | None) -> LlmUsageContext:
         return LlmUsageContext("SPACE", "SPACE_WORLD_EXPLORE", conversation_id=value)
     if lower.startswith("space-world-appraise:"):
         return LlmUsageContext("SPACE", "SPACE_WORLD_APPRAISAL", conversation_id=value)
+    # World Activity calls set an explicit llm_usage_scope; these entries are the
+    # fallback so a call that misses the scope is still attributed to WORLD
+    # instead of degrading into the anonymous OTHER bucket.
+    # world-pulse-comment: must stay ahead of world-pulse: or the shorter prefix
+    # would swallow it.
+    if lower.startswith("world-pulse-comment:"):
+        parts = value.split(":", 2)
+        character_id = parts[2] if len(parts) > 2 else ""
+        return LlmUsageContext("WORLD", "WORLD_PULSE_TAKE", character_id=character_id, conversation_id=value)
+    if lower.startswith("world-pulse:"):
+        return LlmUsageContext("WORLD", "WORLD_PULSE_SUMMARY", conversation_id=value)
+    if lower.startswith("personal-browse-plan:"):
+        parts = value.split(":", 2)
+        character_id = parts[1] if len(parts) > 1 else ""
+        return LlmUsageContext("WORLD", "WORLD_BROWSE_PLAN", character_id=character_id, conversation_id=value)
+    if lower.startswith("personal-browse-appraise:"):
+        parts = value.split(":", 2)
+        character_id = parts[1] if len(parts) > 1 else ""
+        return LlmUsageContext("WORLD", "WORLD_BROWSE_APPRAISAL", character_id=character_id, conversation_id=value)
+    # Must follow the two more specific personal-browse prefixes above. This one
+    # is the observation Event's own conversation id: its reaction carries an
+    # explicit scope, and this keeps the fallback consistent with it.
+    if lower.startswith("personal-browse:"):
+        parts = value.split(":", 2)
+        character_id = parts[1] if len(parts) > 1 else ""
+        return LlmUsageContext("WORLD", "WORLD_REACTION", character_id=character_id, conversation_id=value)
     if lower.startswith("avatar-intent:"):
         character_id = value.split(":", 1)[1] if ":" in value else ""
         return LlmUsageContext("AVATAR", "AVATAR_SEARCH_INTENT", character_id=character_id, conversation_id=value)

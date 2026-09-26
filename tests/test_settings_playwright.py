@@ -132,7 +132,7 @@ def test_first_screen_shows_only_the_common_level(page, settings_server):
         "space_media_enabled",
         "group_autonomy_enabled",
     ]
-    # The other 44 fields are in real groups, closed, and each says what it holds.
+    # Every other field is in a real group, closed, and each says what it holds.
     assert page.locator("#settingsSections details[open]").count() == 0
     assert page.locator("#settingsSections details.level-group").count() > 0
     summaries = page.locator("#settingsSections summary").all_inner_texts()

@@ -58,7 +58,6 @@ def _package_version() -> str:
         return package_version("character-memory")
     except PackageNotFoundError:
         return "0.0.0+unknown"
-_PROACTIVE_POLL_SECONDS = 30.0
 
 # How long archive/restore waits for a GSV registry reload before giving up on
 # it. This is a *stall* bound, not a correctness one: a reload that does not
@@ -153,14 +152,23 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             raise RuntimeError("loaded runtime bundle does not support dynamic character registration")
 
         from character_memory.memory.recall import VectorRecall
-        from character_memory.runtime.person_runtime import PersonRuntime
+        from character_memory.runtime.person_runtime import IntentPolicy, PersonRuntime
 
         character_id = profile["id"]
         persona = load_persona(profile["persona_path"])
         stickers = global_sticker_catalog()
         images = load_image_catalog(profile["persona_path"])
         recall = VectorRecall(current.store, current.embeddings, limit=getattr(settings, "recall_limit", 8))
-        runtime = PersonRuntime(current.store, recall, current.embeddings, current.model, persona, stickers, images)
+        runtime = PersonRuntime(
+            current.store,
+            recall,
+            current.embeddings,
+            current.model,
+            persona,
+            stickers,
+            images,
+            intent_policy=IntentPolicy.from_settings(settings),
+        )
         current.runtimes[character_id] = runtime
         if isinstance(getattr(current.chat, "runtime", None), dict):
             current.chat.runtime[character_id] = runtime
@@ -295,19 +303,24 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         }
 
     def dispatch_proactive_once() -> list[dict]:
+        # The switch is read here rather than at thread start so a settings change
+        # takes effect on the next tick instead of the next restart.
+        if not getattr(settings, "proactive_dispatch_enabled", True):
+            return []
         if not getattr(settings, "api_key", ""):
             return []
+        cooldown_minutes = float(getattr(settings, "proactive_min_dispatch_interval_minutes", 60.0))
         now = datetime.now().astimezone()
         character_ids = [
             profile["id"]
             for profile in character_profiles()
             if "archived_at" not in profile
         ]
-        gate = ProactiveService(read_store)
+        gate = ProactiveService(read_store, min_dispatch_interval_minutes=cooldown_minutes)
         if not character_ids or not gate.has_due(character_ids, now):
             return []
         current = get_bundle()
-        service = ProactiveService(current.store, current.chat)
+        service = ProactiveService(current.store, current.chat, min_dispatch_interval_minutes=cooldown_minutes)
         outcomes = service.dispatch_due(character_ids, now)
 
         # Proactive intents bypass ReactionScheduler generation, but their
@@ -340,13 +353,18 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         return outcomes
 
     def proactive_loop() -> None:
-        logger.info("api.proactive loop_start poll_seconds=%.0f", _PROACTIVE_POLL_SECONDS)
+        poll_seconds = float(getattr(settings, "proactive_poll_seconds", 30.0))
+        logger.info(
+            "api.proactive loop_start poll_seconds=%.0f enabled=%s",
+            poll_seconds,
+            bool(getattr(settings, "proactive_dispatch_enabled", True)),
+        )
         while not proactive_stop.is_set():
             try:
                 dispatch_proactive_once()
             except Exception:
                 logger.exception("api.proactive loop_error")
-            proactive_stop.wait(_PROACTIVE_POLL_SECONDS)
+            proactive_stop.wait(poll_seconds)
         logger.info("api.proactive loop_stop")
 
     app = FastAPI(title="character-memory", version=_package_version())
@@ -442,7 +460,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         current_bundle=current_bundle,
         require_bundle=require_bundle,
         runtime_status=runtime_status,
-        proactive_poll_seconds=_PROACTIVE_POLL_SECONDS,
+        proactive_poll_seconds=float(getattr(settings, "proactive_poll_seconds", 30.0)),
         character_profiles=character_profiles,
         public_profile=public_profile,
         set_archived=_set_archived,

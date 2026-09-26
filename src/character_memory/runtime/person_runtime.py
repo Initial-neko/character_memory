@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta, timezone
 import logging
 import time
@@ -19,6 +20,57 @@ logger = logging.getLogger("character_memory.runtime")
 
 _MEMORY_MIN_IMPORTANCE = 0.35
 _MEMORY_DUPLICATE_SIMILARITY = 0.93
+
+# Events that may update Memory / Mental State through the same PersonRuntime but
+# must never plan a new future Intent of their own.
+#
+# PROACTIVE_INTENT is the loop edge: a due intent is re-evaluated, the model
+# answers with another intent, and with earliest_hours defaulting to 0 that new
+# intent is due on the very next poll. Space/World events are excluded for a
+# different reason: their intents came due as *private* proactive messages, which
+# is cross-channel leakage (seeing a comment on Space should not open a direct
+# chat). See docs/current/PERSON_RUNTIME.md.
+_NO_SELF_INTENT_EVENTS = frozenset({
+    EventType.PROACTIVE_INTENT,
+    EventType.SPACE_POST_SEEN,
+    EventType.SPACE_COMMENT_RECEIVED,
+    EventType.WORLD_OBSERVATION,
+})
+
+
+@dataclass(frozen=True)
+class IntentPolicy:
+    """Server-side admission boundary for future Intent.
+
+    The model is not a trusted input source here: `earliest_hours` was never
+    described in the prompt, so every candidate arrived with the field's default
+    of 0, which means "due on the next poll". Every value below is a floor the
+    server enforces regardless of what the model returned.
+    """
+
+    min_delay_minutes: float = 10.0
+    max_pending: int = 20
+    dedup_enabled: bool = True
+    duplicate_similarity: float = 0.90
+    dedup_window_hours: float = 72.0
+
+    @classmethod
+    def from_settings(cls, settings) -> "IntentPolicy":
+        """Build from Settings, tolerating partial/stand-in settings objects."""
+
+        def number(name, default: float) -> float:
+            try:
+                return float(getattr(settings, name, default))
+            except (TypeError, ValueError):
+                return float(default)
+
+        return cls(
+            min_delay_minutes=max(0.0, number("proactive_intent_min_delay_minutes", 10.0)),
+            max_pending=max(0, int(number("proactive_max_pending_intents", 20))),
+            dedup_enabled=bool(getattr(settings, "proactive_intent_dedup_enabled", True)),
+            duplicate_similarity=number("proactive_intent_duplicate_similarity", 0.90),
+            dedup_window_hours=max(1.0, number("proactive_intent_dedup_window_hours", 72.0)),
+        )
 
 
 class SupersededReaction(RuntimeError):
@@ -42,7 +94,7 @@ def _cosine(left: list[float], right: list[float]) -> float | None:
 
 
 class PersonRuntime:
-    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None, image_catalog=None):
+    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None, image_catalog=None, *, intent_policy: IntentPolicy | None = None):
         self.store = store
         self.recall = recall
         self.embeddings = embeddings
@@ -50,6 +102,7 @@ class PersonRuntime:
         self.persona = persona
         self.sticker_catalog = sticker_catalog
         self.image_catalog = image_catalog
+        self.intent_policy = intent_policy or IntentPolicy()
         self.sticker_retriever = StickerRetriever(embeddings)
         self.context_builder = PersonContextBuilder(store, recall, persona)
 
@@ -160,6 +213,99 @@ class PersonRuntime:
 
         return accepted, decisions
 
+    def _prepare_intent_writes(self, character_id: str, event_time, candidates):
+        """Intent admission: clamp the earliest delay, then drop duplicates.
+
+        Deliberately runs outside the derived-state transaction: embedding may be
+        a remote call and must not hold the SQLite write lock. The PENDING quota
+        is enforced later, inside the transaction, where the write lock makes it
+        race-free.
+        """
+        if not candidates:
+            return [], []
+        policy = self.intent_policy
+        floor_hours = max(0.0, policy.min_delay_minutes) / 60.0
+        comparison = []
+        loader = getattr(self.store, "intent_candidates_since", None)
+        if callable(loader):
+            since = _aware(event_time) - timedelta(hours=policy.dedup_window_hours)
+            for row in loader(character_id, since):
+                comparison.append(
+                    (
+                        int(row["id"]),
+                        str(row["content"] or "").strip().casefold(),
+                        self.store._unpack(row["embedding"]),
+                    )
+                )
+
+        accepted = []
+        decisions = []
+        for candidate in candidates:
+            content = (candidate.content or "").strip()
+            requested = float(candidate.earliest_hours or 0.0)
+            expires = float(candidate.expires_hours or 0.0)
+            # The floor is the server's, not the model's. The ceiling stays the
+            # intent's own expiry so a clamp can never schedule work past the
+            # moment the intent is considered dead.
+            effective = min(max(requested, floor_hours), expires)
+            decision = {
+                "candidate": candidate.model_dump(mode="json"),
+                "decision": "WRITE",
+                "requested_earliest_hours": requested,
+                "effective_earliest_hours": effective,
+                "clamped": effective > requested,
+                "duplicate_intent_id": None,
+                "similarity": None,
+            }
+            if not content or expires <= 0:
+                decision["decision"] = "SKIP_LOW_VALUE"
+                decisions.append(decision)
+                continue
+
+            normalized = content.casefold()
+            if policy.dedup_enabled:
+                exact = next((item_id for item_id, text, _ in comparison if text == normalized), None)
+                if exact is not None:
+                    decision["decision"] = "SKIP_DUPLICATE"
+                    decision["duplicate_intent_id"] = exact
+                    decision["similarity"] = 1.0
+                    decisions.append(decision)
+                    continue
+
+            try:
+                embedding = self.embeddings.embed(content)
+            except Exception as exc:
+                # Unlike Memory, a failed embedding must not discard the intent:
+                # it is something the person actually meant to do later, and the
+                # delay floor already prevents the self-loop on its own.
+                decision["error"] = str(exc)
+                decisions.append(decision)
+                accepted.append((candidate, None, effective, decision))
+                continue
+
+            if policy.dedup_enabled:
+                duplicate_id = None
+                duplicate_similarity = None
+                for intent_id, _text, other in comparison:
+                    if other:
+                        similarity = _cosine(embedding, other)
+                        if similarity is not None and similarity >= policy.duplicate_similarity:
+                            duplicate_id = intent_id
+                            duplicate_similarity = round(similarity, 4)
+                            break
+                if duplicate_similarity is not None:
+                    decision["decision"] = "SKIP_DUPLICATE"
+                    decision["duplicate_intent_id"] = duplicate_id
+                    decision["similarity"] = duplicate_similarity
+                    decisions.append(decision)
+                    continue
+
+            accepted.append((candidate, embedding, effective, decision))
+            comparison.append((None, normalized, embedding))
+            decisions.append(decision)
+
+        return accepted, decisions
+
     def _sanitize_resource_actions(self, reaction, *, allowed_sticker_ids: set[str] | None = None):
         sticker_decisions = []
         image_decisions = []
@@ -214,7 +360,33 @@ class PersonRuntime:
         Space reactions still go through PersonRuntime so Memory/Mental State/
         Intent are shared with the same person. Only the outward action surface
         changes: a Space event may never create a private CHARACTER_MESSAGE.
+
+        This is also the hard edge that stops Intent from feeding itself. The
+        prompt asks the model not to plan intent on these events, but the model
+        has never been told `earliest_hours` exists, so a prompt-level rule alone
+        cannot bound the loop; dropping the candidates here runs after the model
+        and before persistence, and the drop is recorded in the trace instead of
+        happening silently.
         """
+        dropped: list[dict] = []
+        if reaction.intent_candidates and event.event_type in _NO_SELF_INTENT_EVENTS:
+            self_loop = event.event_type == EventType.PROACTIVE_INTENT
+            dropped.extend(
+                {
+                    "type": "INTENT_CANDIDATE",
+                    "decision": "DROP_PROACTIVE_SELF_LOOP" if self_loop else "DROP_CHANNEL_CANNOT_PLAN_INTENT",
+                    "content_chars": len(candidate.content or ""),
+                }
+                for candidate in reaction.intent_candidates
+            )
+            logger.info(
+                "runtime.intent dropped event_type=%s candidates=%d reason=%s",
+                event.event_type.value,
+                len(reaction.intent_candidates),
+                "self_loop" if self_loop else "channel",
+            )
+            reaction = reaction.model_copy(update={"intent_candidates": []})
+
         if event.event_type == EventType.SPACE_POST_SEEN:
             allowed = {ActionType.SPACE_LIKE, ActionType.SPACE_COMMENT, ActionType.SPACE_STICKER}
         elif event.event_type == EventType.SPACE_COMMENT_RECEIVED:
@@ -224,14 +396,14 @@ class PersonRuntime:
             # PersonRuntime, but they are never themselves a chat channel.
             allowed = set()
         else:
-            return reaction, []
+            return reaction, dropped
 
         kept = [action for action in reaction.actions if action.type in allowed]
-        dropped = [
+        dropped.extend(
             {"type": action.type.value, "decision": "DROP_WRONG_CHANNEL"}
             for action in reaction.actions
             if action.type not in allowed
-        ]
+        )
         normalized_action = kept[0] if kept else ActionDecision(type=ActionType.NO_REPLY)
         return reaction.model_copy(update={"actions": kept, "action": normalized_action}), dropped
 
@@ -328,6 +500,17 @@ class PersonRuntime:
         stage = time.perf_counter()
         candidate_embeddings, memory_decisions = self._prepare_memory_writes(event.character_id, event.event_time, reaction.memory_candidates)
         timings["memory_embedding_ms"] = _ms(stage)
+
+        stage = time.perf_counter()
+        prepared_intents, intent_decisions = self._prepare_intent_writes(event.character_id, event.event_time, reaction.intent_candidates)
+        timings["intent_embedding_ms"] = _ms(stage)
+        logger.info(
+            "runtime.intent admission candidates=%d accepted=%d clamped=%d skipped=%d",
+            len(intent_decisions),
+            len(prepared_intents),
+            sum(1 for item in intent_decisions if item.get("clamped")),
+            sum(1 for item in intent_decisions if str(item.get("decision", "")).startswith("SKIP")),
+        )
         created_memory_ids: list[int] = []
         created_intent_ids: list[int] = []
 
@@ -350,18 +533,32 @@ class PersonRuntime:
                         created_memory_ids.append(saved.id)
 
                 reason = reaction.action.reason if reaction.action is not None else ""
-                for intent in reaction.intent_candidates:
+                # The quota is checked inside the transaction on purpose: the
+                # SQLite write lock is what stops two reactions from each
+                # deciding there is room for one more intent.
+                pending_intents = self.store.pending_intent_count(event.character_id)
+                limit = self.intent_policy.max_pending
+                for intent, embedding, effective_hours, decision in prepared_intents:
+                    if limit and pending_intents >= limit:
+                        # Rewrite the candidate's own decision rather than adding a
+                        # second one, so the trace holds exactly one verdict per
+                        # candidate.
+                        decision["decision"] = "SKIP_PENDING_LIMIT"
+                        decision["effective_earliest_hours"] = None
+                        continue
                     intent_id = self.store.add_intent(
                         event.character_id,
                         intent.content,
                         intent.preferred_action.value,
                         event.event_time,
-                        event.event_time + timedelta(hours=intent.earliest_hours),
+                        event.event_time + timedelta(hours=effective_hours),
                         event.event_time + timedelta(hours=intent.expires_hours),
                         reason,
                         source_event_id=event.id,
+                        embedding=embedding,
                     )
                     created_intent_ids.append(intent_id)
+                    pending_intents += 1
 
                 for index, action in enumerate(reaction.actions):
                     materialized = materialize_expressive_action(
@@ -420,6 +617,7 @@ class PersonRuntime:
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,
                     "intent_candidates": [candidate.model_dump(mode="json") for candidate in reaction.intent_candidates],
+                    "intent_decisions": intent_decisions,
                     "created_intent_ids": created_intent_ids,
                     "timings": timings,
                 }

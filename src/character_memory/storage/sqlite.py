@@ -118,6 +118,34 @@ class SQLiteStore:
     def _migrate_intent_source_event_locked(self) -> bool:
         return self._ensure_column_locked("intents", "source_event_id", "INTEGER")
 
+    def _migrate_intent_embedding_locked(self) -> bool:
+        return self._ensure_column_locked("intents", "embedding", "BLOB")
+
+    def _migrate_proactive_dispatch_state_locked(self) -> None:
+        """Durable cooldown cursor for proactive intent dispatch.
+
+        Deliberately a table rather than a process-local dict: a restart must not
+        reset the cooldown, or the loop resumes spending a reaction per poll.
+        Same shape as world_activity_state / space_opportunity_state.
+        """
+        self.conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS proactive_dispatch_state(
+                character_id TEXT PRIMARY KEY,
+                last_dispatch_at TEXT,
+                last_dispatch_at_epoch INTEGER,
+                next_allowed_at TEXT NOT NULL,
+                next_allowed_at_epoch INTEGER NOT NULL,
+                configured_interval_minutes REAL NOT NULL DEFAULT 0,
+                last_status TEXT NOT NULL DEFAULT 'READY',
+                last_intent_id INTEGER,
+                last_error TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_proactive_dispatch_next
+            ON proactive_dispatch_state(next_allowed_at_epoch,character_id);
+            """
+        )
+
     def _migrate_time_keys_locked(self) -> tuple[int, int]:
         specs = [
             ("events", "event_time", "event_time_epoch"),
@@ -276,10 +304,14 @@ class SQLiteStore:
             self._run_migration_locked("core/005-indexes", self._create_core_indexes_locked)
             self._run_migration_locked("core/006-memory-candidate-indexes", self._create_memory_candidate_indexes_locked)
             self._run_migration_locked("core/007-memory-governance", self._migrate_memory_governance_locked)
+            embedding_added = self._run_migration_locked("core/008-intent-embedding", self._migrate_intent_embedding_locked)
+            self._run_migration_locked("core/009-proactive-dispatch-state", self._migrate_proactive_dispatch_state_locked)
             compat_migrated = self._migrate_legacy_action_traces_incremental_locked()
             self.conn.commit()
             if intent_added:
                 logger.info("storage.intent_migration added=source_event_id")
+            if embedding_added:
+                logger.info("storage.intent_migration added=embedding")
             if time_result is not None:
                 time_rows, invalid_time_rows = time_result
                 if time_rows:
@@ -690,11 +722,105 @@ class SQLiteStore:
             self._maybe_commit()
             return True
 
-    def add_intent(self, character_id, content, preferred_action, created_at, earliest_at, expires_at, reason="", *, source_event_id=None):
+    def add_intent(self, character_id, content, preferred_action, created_at, earliest_at, expires_at, reason="", *, source_event_id=None, embedding=None):
         with self._lock:
-            cur = self.conn.execute("INSERT INTO intents(character_id,content,preferred_action,created_at,created_at_epoch,earliest_at,earliest_at_epoch,expires_at,expires_at_epoch,status,reason,source_event_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (character_id, content, preferred_action, created_at.isoformat(), epoch_us(created_at), earliest_at.isoformat(), epoch_us(earliest_at), expires_at.isoformat(), epoch_us(expires_at), "PENDING", reason, source_event_id))
+            cur = self.conn.execute("INSERT INTO intents(character_id,content,preferred_action,created_at,created_at_epoch,earliest_at,earliest_at_epoch,expires_at,expires_at_epoch,status,reason,source_event_id,embedding) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (character_id, content, preferred_action, created_at.isoformat(), epoch_us(created_at), earliest_at.isoformat(), epoch_us(earliest_at), expires_at.isoformat(), epoch_us(expires_at), "PENDING", reason, source_event_id, self._pack(embedding)))
             self._maybe_commit()
             return cur.lastrowid
+
+    def set_intent_earliest(self, intent_id, earliest_at):
+        with self._lock:
+            self.conn.execute("UPDATE intents SET earliest_at=?,earliest_at_epoch=? WHERE id=?", (earliest_at.isoformat(), epoch_us(earliest_at), intent_id))
+            self._maybe_commit()
+
+    def pending_intent_count(self, character_id: str) -> int:
+        """PENDING + PROCESSING: an intent being dispatched still occupies a slot."""
+        with self._lock:
+            row = self.conn.execute("SELECT COUNT(*) AS c FROM intents WHERE character_id=? AND status IN ('PENDING','PROCESSING')", (character_id,)).fetchone()
+            return int(row["c"])
+
+    def intent_candidates_since(self, character_id: str, since: datetime, limit: int = 64):
+        """Recent intents used for duplicate admission.
+
+        Deliberately not filtered by status: an intent the model already
+        suppressed is exactly the one it must not be allowed to re-create.
+        """
+        with self._lock:
+            return self.conn.execute("SELECT id,content,embedding,status,created_at FROM intents WHERE character_id=? AND created_at_epoch>=? ORDER BY created_at_epoch DESC,id DESC LIMIT ?", (character_id, epoch_us(since), limit)).fetchall()
+
+    def expire_due_backlog_intents(self, now, *, character_id=None, due_before=None, all_pending=False, dry_run=True) -> dict:
+        """Mark already-due PENDING intents EXPIRED. Only status changes.
+
+        Idempotent: rows are selected by status='PENDING', so a second run
+        reports zero. Rows, content, source_event_id and the whole time history
+        stay readable for trace inspection.
+        """
+        stamp = epoch_us(due_before or now)
+        where = ["status='PENDING'"]
+        args: list = []
+        if character_id:
+            where.append("character_id=?")
+            args.append(character_id)
+        if not all_pending:
+            where.append("earliest_at_epoch IS NOT NULL AND earliest_at_epoch<=?")
+            args.append(stamp)
+        clause = " AND ".join(where)
+        with self._lock:
+            rows = self.conn.execute(f"SELECT id,character_id,status,content,earliest_at FROM intents WHERE {clause} ORDER BY id", args).fetchall()
+            by_character: dict[str, int] = {}
+            for row in rows:
+                key = str(row["character_id"])
+                by_character[key] = by_character.get(key, 0) + 1
+            report = {
+                "dry_run": True,
+                "candidates": len(rows),
+                "expired": 0,
+                "by_character": by_character,
+                "sample": [{"id": row["id"], "character_id": row["character_id"], "earliest_at": row["earliest_at"], "content": str(row["content"])[:80]} for row in rows[:5]],
+            }
+            if dry_run or not rows:
+                return report
+            self.conn.execute(f"UPDATE intents SET status='EXPIRED' WHERE {clause}", args)
+            self._maybe_commit()
+            report["dry_run"] = False
+            report["expired"] = len(rows)
+            return report
+
+    def proactive_dispatch_state(self, character_id: str):
+        with self._lock:
+            return self.conn.execute("SELECT * FROM proactive_dispatch_state WHERE character_id=?", (character_id,)).fetchone()
+
+    def mark_proactive_dispatch(self, character_id: str, now: datetime, next_at: datetime, *, status: str, intent_id=None, error: str = "", interval_minutes: float = 0.0):
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO proactive_dispatch_state(character_id,last_dispatch_at,last_dispatch_at_epoch,next_allowed_at,next_allowed_at_epoch,configured_interval_minutes,last_status,last_intent_id,last_error) "
+                "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(character_id) DO UPDATE SET "
+                "last_dispatch_at=excluded.last_dispatch_at,last_dispatch_at_epoch=excluded.last_dispatch_at_epoch,"
+                "next_allowed_at=excluded.next_allowed_at,next_allowed_at_epoch=excluded.next_allowed_at_epoch,"
+                "configured_interval_minutes=excluded.configured_interval_minutes,last_status=excluded.last_status,"
+                "last_intent_id=excluded.last_intent_id,last_error=excluded.last_error",
+                (character_id, now.isoformat(), epoch_us(now), next_at.isoformat(), epoch_us(next_at), float(interval_minutes), str(status), intent_id, str(error or "")[:1200]),
+            )
+            self._maybe_commit()
+
+    def rearm_proactive_dispatch(self, character_id: str, next_at: datetime, interval_minutes: float):
+        """Move the cooldown cursor only when the configured interval changed.
+
+        Mirrors world_activity.ensure_state: a restart with unchanged settings
+        must not push the cursor forward, or the loop can be starved forever by
+        frequent restarts.
+        """
+        with self._lock:
+            row = self.conn.execute("SELECT configured_interval_minutes FROM proactive_dispatch_state WHERE character_id=?", (character_id,)).fetchone()
+            if row is not None and abs(float(row["configured_interval_minutes"]) - float(interval_minutes)) < 1e-6:
+                return False
+            self.conn.execute(
+                "INSERT INTO proactive_dispatch_state(character_id,next_allowed_at,next_allowed_at_epoch,configured_interval_minutes,last_status) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(character_id) DO UPDATE SET next_allowed_at=excluded.next_allowed_at,next_allowed_at_epoch=excluded.next_allowed_at_epoch,configured_interval_minutes=excluded.configured_interval_minutes",
+                (character_id, next_at.isoformat(), epoch_us(next_at), float(interval_minutes), "REARMED"),
+            )
+            self._maybe_commit()
+            return True
 
     def expire_intents(self, character_id: str, now: datetime):
         with self._lock:

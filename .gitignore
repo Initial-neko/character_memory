@@ -12,7 +12,20 @@ data/qwen3-tts-benchmark/
 models/
 config.yaml
 config.yaml.bak.*
+# An ad-hoc copy of config.yaml made outside the .bak.* convention.
+config_bak.yaml
 .env
+
+# Local tooling and runtime output. None of this is source, and `.claude/` in
+# particular carries nested worktree checkouts: committing it would drag whole
+# copies of the repository into the repository.
+.coverage
+.idea/
+.workbuddy/
+.claude/
+# Runtime state for the running stack (databases, generated media, caches).
+# Nothing under it is tracked today; the narrower rules above stay for clarity.
+data/
 
 # Frozen voice assets are local data. A VoiceDesign clip cannot be regenerated
 # from its prompt (the sidecar is unseeded), so the WAV is an asset, not build

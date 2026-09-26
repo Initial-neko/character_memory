@@ -95,6 +95,27 @@ class Settings(BaseModel):
     proactive_wake_enabled: bool = True
     proactive_wake_minutes: float = Field(default=60.0, ge=1.0, le=1440.0)
 
+    # Proactive Intent dispatch. This used to be a module constant in api.py, so a
+    # 30-second poll with no cooldown could spend a whole reaction every round.
+    proactive_dispatch_enabled: bool = True
+    # Check latency only. It does not change how often a character actually acts;
+    # that is paced by the interval below and by each intent's own earliest_at.
+    proactive_poll_seconds: float = Field(default=30.0, ge=10.0, le=3600.0)
+    # Minimum wait between two proactive dispatches for one character. Consumed by
+    # any dispatch, including one the model answers with silence: the LLM call is
+    # already paid for, so silence must start the cooldown too.
+    proactive_min_dispatch_interval_minutes: float = Field(default=60.0, ge=1.0, le=1440.0)
+    # Server-side floor for a new intent's earliest_at. The model was never told
+    # this field exists, so its default of 0 used to mean "due on the next poll".
+    proactive_intent_min_delay_minutes: float = Field(default=10.0, ge=0.0, le=1440.0)
+    # Hard ceiling on PENDING intents per character. 0 disables the ceiling.
+    proactive_max_pending_intents: int = Field(default=20, ge=0, le=200)
+    # A new intent that repeats one from the recent window is dropped instead of
+    # being scheduled again.
+    proactive_intent_dedup_enabled: bool = True
+    proactive_intent_duplicate_similarity: float = Field(default=0.90, ge=0.5, le=1.0)
+    proactive_intent_dedup_window_hours: float = Field(default=72.0, ge=1.0, le=720.0)
+
     # Character Space autonomous social life. These are deliberately ordinary
     # persisted settings so the test-stage behavior can be tuned from Settings
     # Center without editing source code.

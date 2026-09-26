@@ -160,6 +160,27 @@ world_activity_poll_seconds: 60
 
 Behavior switches, source pages and user-visible cadences are advanced; text/page/poll ceilings stay diagnostic. `Pulse Sources` is edited one public URL per line and persists as a real YAML list. Dev Console has no World Activity save controls: it only refreshes, discusses, browses and runs due work against the Settings-owned values.
 
+### 3.4 Proactive Intent
+
+Due Intents get their own section because the dispatch cadence used to be a module constant with no cooldown, which let a 30-second poll spend a whole reaction every round:
+
+```yaml
+proactive_dispatch_enabled: true
+proactive_poll_seconds: 30
+proactive_min_dispatch_interval_minutes: 60
+proactive_intent_min_delay_minutes: 10
+proactive_max_pending_intents: 20
+proactive_intent_dedup_enabled: true
+proactive_intent_duplicate_similarity: 0.90
+proactive_intent_dedup_window_hours: 72
+```
+
+`proactive_dispatch_enabled` defaults to `true`, so the shipped behavior is unchanged — the switch exists so the loop can be stopped without editing source. `proactive_poll_seconds` is check latency only, the same distinction `space_scheduler_poll_seconds` makes.
+
+The rest are not suggestions the model may exceed. The cooldown, the delay floor and the pending ceiling are enforced on the write and dispatch paths and are documented in `PERSON_RUNTIME.md` §10; the similarity threshold and the dedup window are the tuning knobs for the duplicate rule. Dispatch switches and the interval are advanced; the poll, the similarity threshold and the dedup window are diagnostic.
+
+None of these fields are hot-applied: like the Space and World scheduling values, they take effect after a restart. The dispatch loop reads `proactive_dispatch_enabled` on every tick, so turning it off is immediate even though turning it back on is not.
+
 ## 4. Search / World Browser
 
 The Search / ImageGen card also owns the headless World Browser transport settings:

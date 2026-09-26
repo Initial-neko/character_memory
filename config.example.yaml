@@ -74,6 +74,19 @@ recall_limit: 8
 proactive_wake_enabled: true
 proactive_wake_minutes: 60
 
+# Due-Intent dispatch. A character's due Intent is re-evaluated by the model, and
+# that round may itself leave another Intent. The cooldown, the delay floor and the
+# pending ceiling below are the server-side bounds that keep that from becoming a
+# self-sustaining loop; the model cannot raise them.
+proactive_dispatch_enabled: true
+proactive_poll_seconds: 30                    # check latency only; does not change the dispatch interval
+proactive_min_dispatch_interval_minutes: 60   # per character; silence consumes it too (the call was already paid for)
+proactive_intent_min_delay_minutes: 10        # floor for a new intent's earliest_at; 0 disables the floor
+proactive_max_pending_intents: 20             # per character; 0 = unlimited
+proactive_intent_dedup_enabled: true          # drop an intent that repeats a recent one
+proactive_intent_duplicate_similarity: 0.90   # cosine threshold for "repeats"
+proactive_intent_dedup_window_hours: 72       # how far back duplicate detection looks
+
 # Character Space autonomous social life. The model may decide not to post on
 # any opportunity, and a character may publish several posts in one day when the
 # interval is short. Production default is one opportunity every 24H; test soak

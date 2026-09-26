@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field, model_validator
 
 from character_memory.domain.models import Event, EventType
+from character_memory.llm.usage import llm_usage_scope
 from character_memory.time_utils import epoch_us
 
 
@@ -611,11 +612,18 @@ Rendered text:
 {chr(10).join(blocks)}
 """
         bundle = self.access.require_bundle()
-        digest = bundle.model.structured_for_session(
-            prompt,
-            WorldPulseDigest,
-            f"world-pulse:{now.isoformat(timespec='hours')}",
-        )
+        session_id = f"world-pulse:{now.isoformat(timespec='hours')}"
+        with llm_usage_scope(
+            feature="WORLD",
+            purpose="WORLD_PULSE_SUMMARY",
+            conversation_id=session_id,
+            override=True,
+        ):
+            digest = bundle.model.structured_for_session(
+                prompt,
+                WorldPulseDigest,
+                session_id,
+            )
 
         topics = []
         for draft in list(digest.topics)[:max_topics]:
@@ -718,11 +726,19 @@ Summary: {topic["summary"]}
                 at=now,
                 recent_limit=10,
             )
-            take = bundle.model.structured_for_session(
-                self._take_prompt(runtime, context, topic),
-                WorldPulseCharacterTake,
-                f"world-pulse-comment:{topic_id}:{character_id}",
-            )
+            take_session = f"world-pulse-comment:{topic_id}:{character_id}"
+            with llm_usage_scope(
+                feature="WORLD",
+                purpose="WORLD_PULSE_TAKE",
+                character_id=character_id,
+                conversation_id=take_session,
+                override=True,
+            ):
+                take = bundle.model.structured_for_session(
+                    self._take_prompt(runtime, context, topic),
+                    WorldPulseCharacterTake,
+                    take_session,
+                )
             comment = None
             event_id = None
             if take.interested and take.comment:
@@ -802,11 +818,19 @@ Summary: {topic["summary"]}
 如果 browse=true，query 必须是简短公开搜索词，绝不能包含用户隐私、私聊原句、住址、账号、联系方式或秘密。
 选择人物自己会感兴趣的内容，不要为了系统有数据而硬搜。
 """
-        plan = bundle.model.structured_for_session(
-            plan_prompt,
-            PersonalBrowsePlan,
-            f"personal-browse-plan:{character_id}:{now.isoformat(timespec='minutes')}",
-        )
+        plan_session = f"personal-browse-plan:{character_id}:{now.isoformat(timespec='minutes')}"
+        with llm_usage_scope(
+            feature="WORLD",
+            purpose="WORLD_BROWSE_PLAN",
+            character_id=character_id,
+            conversation_id=plan_session,
+            override=True,
+        ):
+            plan = bundle.model.structured_for_session(
+                plan_prompt,
+                PersonalBrowsePlan,
+                plan_session,
+            )
         if not plan.browse:
             return {
                 "character_id": character_id,
@@ -875,11 +899,19 @@ summary 只安全概括看到的内容。
 personal_note 写“这次浏览对我有什么意义”，不是复制新闻标题或参数。
 这一步不会自动发 Space，也不会直接创建长期 Memory。
 """
-        appraisal = bundle.model.structured_for_session(
-            appraisal_prompt,
-            PersonalBrowseAppraisal,
-            f"personal-browse-appraise:{character_id}:{now.isoformat(timespec='minutes')}",
-        )
+        appraisal_session = f"personal-browse-appraise:{character_id}:{now.isoformat(timespec='minutes')}"
+        with llm_usage_scope(
+            feature="WORLD",
+            purpose="WORLD_BROWSE_APPRAISAL",
+            character_id=character_id,
+            conversation_id=appraisal_session,
+            override=True,
+        ):
+            appraisal = bundle.model.structured_for_session(
+                appraisal_prompt,
+                PersonalBrowseAppraisal,
+                appraisal_session,
+            )
 
         event_id = None
         if appraisal.keep:

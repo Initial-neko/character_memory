@@ -4,6 +4,12 @@ This register records only debt that still exists on current `main`. A possible 
 
 ## Recently resolved
 
+### Unbounded Proactive Intent loop
+
+A due Intent was re-evaluated by the model, the model answered with another Intent, and that new Intent's `earliest_at` equalled its creation time — so it was due on the very next 30-second poll. The root cause was that `earliest_hours` had never appeared in the model contract, leaving every candidate on the field's default of 0. With no cooldown anywhere, a single character spent a full reaction every ~30 seconds indefinitely.
+
+Intent admission now clamps a server-side delay floor, caps PENDING intents per character and drops near-duplicates; `PROACTIVE_INTENT`, Space and World events can no longer plan an Intent of their own; and dispatch is paced by a durable per-character cooldown that silence also consumes. See `PERSON_RUNTIME.md` §10.
+
 ### Bounded Autonomous Group Chat
 
 Existing groups can now receive restart-safe sparse opportunities without fabricating a User message. A hidden GROUP_OPPORTUNITY fact provides provenance, a rotating seed may stay silent, follow-up members each judge once, visible messages are hard-capped, and newer User facts supersede stale autonomous work. The feature reuses normal conversation_events, Person context, Group SSE and VoiceMessage materialization.
@@ -107,7 +113,9 @@ A developer-generated, verified local lockfile can therefore be added later with
 
 ### Background worker ownership
 
-Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent polling, Character Wake, Space Autonomy, Group Autonomy and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
+Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent dispatch, Character Wake, Space Autonomy, Group Autonomy and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
+
+Proactive intent dispatch is no longer a purely process-local concern: it has a Settings switch, a durable cooldown cursor (`proactive_dispatch_state`) and per-character admission quotas, so its cadence survives a restart. What remains debt is the start/stop ordering itself, not the scheduling state.
 
 Before adding many more autonomous schedulers, introduce one typed background-service/lifespan owner with start/stop/health semantics. This does not require Redis/Celery or a distributed queue.
 

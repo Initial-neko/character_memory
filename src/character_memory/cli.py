@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,38 @@ def _reembed(config_path: str, character: str):
         store.close()
 
 
+def _expire_intents(config_path: str, *, character: str | None, due_before: str | None, all_pending: bool, apply: bool, backup: bool):
+    """Retire the already-due Intent backlog without deleting anything.
+
+    Dry-run by default: this touches a live product database, and the operator
+    should read the per-character distribution before committing.
+    """
+    settings = load_settings(config_path)
+    store = SQLiteStore(settings.db_path)
+    try:
+        if apply and backup:
+            # sqlite3's online backup API, not a file copy: the store runs in
+            # rollback-journal mode, so copying the file under a live service can
+            # capture half-committed pages.
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            target = f"{settings.db_path}.bak.{stamp}"
+            with sqlite3.connect(target) as destination:
+                store.conn.backup(destination)
+            print(f"backup: {target}")
+        plan = store.expire_due_backlog_intents(
+            datetime.now().astimezone(),
+            character_id=character,
+            due_before=datetime.fromisoformat(due_before) if due_before else None,
+            all_pending=all_pending,
+            dry_run=not apply,
+        )
+        _print_json(plan)
+        if not apply:
+            print("dry-run: nothing written. Re-run with --apply to expire these intents.")
+    finally:
+        store.close()
+
+
 def _run_eval(config_path: str, path: str):
     settings = load_settings(config_path)
     with tempfile.TemporaryDirectory(prefix="character-memory-eval-") as tmp:
@@ -150,6 +183,12 @@ def main():
     doctor.add_argument("--remote", action="store_true")
     reembed = sub.add_parser("reembed")
     reembed.add_argument("--character", default="rin")
+    expire = sub.add_parser("expire-intents", help="retire already-due PENDING intents (dry-run by default)")
+    expire.add_argument("--character", default=None)
+    expire.add_argument("--due-before", default=None, help="ISO datetime; defaults to now")
+    expire.add_argument("--all-pending", action="store_true", help="expire every PENDING intent, not only the due ones")
+    expire.add_argument("--apply", action="store_true", help="actually write; without it this is a dry run")
+    expire.add_argument("--backup", action="store_true", help="take an online SQLite backup before writing")
     evaluate = sub.add_parser("eval")
     evaluate.add_argument("path", nargs="?", default="evals/smoke.jsonl")
 
@@ -177,6 +216,16 @@ def main():
         return
     if args.cmd == "reembed":
         _reembed(args.config, args.character)
+        return
+    if args.cmd == "expire-intents":
+        _expire_intents(
+            args.config,
+            character=args.character,
+            due_before=args.due_before,
+            all_pending=args.all_pending,
+            apply=args.apply,
+            backup=args.backup,
+        )
         return
     if args.cmd == "eval":
         _run_eval(args.config, args.path)

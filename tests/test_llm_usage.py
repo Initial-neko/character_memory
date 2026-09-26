@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -320,6 +322,12 @@ def test_usage_context_inference_covers_non_runtime_feature_sessions():
         "sticker-tag:global:happy.png": ("STICKER", "STICKER_AUTO_TAG"),
         "encounter-chat:7": ("ENCOUNTER", "ENCOUNTER_CHAT"),
         "dev-console-vision": ("DEV", "DEV_VISION_PROBE"),
+        # World Activity sets an explicit scope; these prefixes keep a call that
+        # misses the scope out of the anonymous OTHER bucket.
+        "world-pulse:2026-09-24T20": ("WORLD", "WORLD_PULSE_SUMMARY"),
+        "world-pulse-comment:37:rei": ("WORLD", "WORLD_PULSE_TAKE"),
+        "personal-browse-plan:rei:2026-09-24T19:54": ("WORLD", "WORLD_BROWSE_PLAN"),
+        "personal-browse-appraise:rei:2026-09-24T19:54": ("WORLD", "WORLD_BROWSE_APPRAISAL"),
     }
     for session_id, expected in cases.items():
         context = infer_usage_context(session_id)
@@ -422,3 +430,29 @@ def test_record_still_writes_a_usable_row_when_the_database_is_free(tmp_path):
     assert (row["feature"], row["purpose"]) == ("GROUP", "GROUP_REACTION")
     assert row["character_id"] == "kurisu"
     assert row["status"] == "SUCCESS"
+
+
+def test_world_pulse_comment_prefix_is_matched_before_world_pulse():
+    """`world-pulse-comment:` starts with `world-pulse:`; order decides."""
+    comment = infer_usage_context("world-pulse-comment:37:rei")
+    summary = infer_usage_context("world-pulse:2026-09-24T20")
+
+    assert comment.purpose == "WORLD_PULSE_TAKE"
+    assert comment.character_id == "rei"
+    assert summary.purpose == "WORLD_PULSE_SUMMARY"
+
+
+def test_every_world_activity_session_prefix_stays_out_of_other():
+    """The inference table is the fallback behind the explicit scope.
+
+    A prefix this module emits must be attributable on its own, so a future call
+    site that forgets `llm_usage_scope` still cannot land in the OTHER bucket.
+    """
+    source = (Path(__file__).resolve().parents[1] / "src" / "character_memory" / "world_activity.py").read_text(encoding="utf-8")
+    prefixes = set(re.findall(r'f"((?:world-pulse|personal-browse)[a-z-]*):', source))
+
+    assert prefixes, "no World Activity session prefixes found; did the naming change?"
+    for prefix in sorted(prefixes):
+        context = infer_usage_context(f"{prefix}:x")
+        assert context.feature == "WORLD", prefix
+        assert context.purpose != "OTHER", prefix

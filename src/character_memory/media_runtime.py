@@ -363,6 +363,13 @@ class SherpaParaformerStreamingSession:
     def finish(self):
         if self.closed:
             return type("Result", (), {"text": self._last_text})()
+        # Paraformer streaming needs tail audio to flush the last look-ahead
+        # window. Keep this server-side so browser endpoint timing cannot drop
+        # the final syllables of an utterance.
+        self.stream.accept_waveform(
+            16000,
+            np.zeros(int(0.6 * 16000), dtype=np.float32),
+        )
         self.stream.input_finished()
         self._decode_ready(force=True)
         text = str(self.recognizer.get_result(self.stream) or "").strip()

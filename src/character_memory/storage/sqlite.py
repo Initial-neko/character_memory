@@ -834,7 +834,13 @@ class SQLiteStore:
 
     def list_intents(self, character_id: str, limit: int = 30):
         with self._lock:
-            return self.conn.execute("SELECT * FROM intents WHERE character_id=? ORDER BY created_at_epoch DESC,id DESC LIMIT ?", (character_id, limit)).fetchall()
+            rows = self.conn.execute("SELECT * FROM intents WHERE character_id=? ORDER BY created_at_epoch DESC,id DESC LIMIT ?", (character_id, limit)).fetchall()
+        # `embedding` is a BLOB owned by the near-duplicate rule, and no listing reads
+        # it. Every caller here turns a row into JSON, and FastAPI encodes bytes with
+        # `.decode()` -- so one embedded intent failed the whole response with a
+        # UnicodeDecodeError. Keep the BLOB out of the listing rather than asking each
+        # caller to remember.
+        return [{key: value for key, value in dict(row).items() if key != "embedding"} for row in rows]
 
     def set_intent_status(self, intent_id, status):
         with self._lock:

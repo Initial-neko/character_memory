@@ -80,6 +80,12 @@ Settings no longer swallows every GSV unload exception. Runtime application fail
 
 The throwaway harness directory is ignored.
 
+### Background worker lifecycle ownership
+
+Character Runtime's long-lived workers register with one `BackgroundServices` owner during composition instead of each module choosing a position among the app's lifecycle handlers. The two `app.router.on_shutdown.insert(0, ...)` calls and the core name list that probed worker attributes for a `.stop` are gone, and the core's shutdown handler is the only one left.
+
+That removes what the name list got wrong: `WorldActivityScheduler` had no shutdown hook of its own, `SpaceAutonomyScheduler` and `GroupAutonomyScheduler` were stopped twice, and `EncounterScheduler` was stopped only after the core had already closed the shared store. Workers now stop newest-first, so a producer goes down before the worker it feeds, and every stop runs before `services.close()`.
+
 ## High priority / semantic architecture
 
 ### Channel-specific cognition still exists above shared Person context
@@ -113,19 +119,15 @@ Committing a lock generated on this machine is not a neutral change. `uv` resolv
 
 ## Medium priority / runtime lifecycle
 
-### Background worker ownership
+### A worker blocked in network I/O outlives shutdown
 
-Character Runtime owns seven long-lived process-local loops: `ReactionScheduler`/SSE, `EncounterScheduler`, `SpaceAutonomyScheduler`, `GroupAutonomyScheduler` and `WorldActivityScheduler`, plus proactive intent dispatch and Character Wake, which are bare polling threads rather than classes. Asynchronous visual work and voice-message materialization run as per-event one-shot threads driven by those loops, not as loops of their own.
+`BackgroundServices` guarantees that every worker's stop is requested before the core closes the shared store and model bundle, but not that the worker has exited: each scheduler joins its thread with a one-second timeout. `WorldActivityScheduler` can exceed that by a wide margin, because a browse already in flight blocks inside the headless-browser fetch, whose route guard resolves the target host through `remote_media.ensure_public_http_url` and a `socket.getaddrinfo` call that carries no timeout.
 
-They are correct enough as single-process components, but lifecycle ownership is spread across three registration mechanisms — `on_app_event(app, "shutdown")`, `app.router.on_shutdown.insert(0, ...)` and a name list inside the core `_shutdown` — and that third mechanism is both redundant and incomplete:
+Measured against a host that does not resolve, the thread was still alive forty seconds after shutdown — on `main` and after the lifecycle consolidation alike, so this is not a regression from that change. Shutdown completes, and the shared store closes, while the worker is still inside its browse.
 
-- `space_scheduler` and `group_autonomy_scheduler` are stopped twice, because their own route modules already stop them;
-- `world_activity_scheduler` can only be stopped by the core name list, because its route module registers no shutdown hook;
-- `ReactionScheduler` terminates through `close()`, so a name list that probes for `.stop` cannot reach it at all.
+The lifecycle owner does not help here: the stop is delivered, and the worker cannot act on it. A fix belongs in the fetch path — bound the address lookup so a browse cannot outlive its shutdown budget.
 
-Proactive intent dispatch is no longer a purely process-local concern: it has a Settings switch, a durable cooldown cursor (`proactive_dispatch_state`) and per-character admission quotas, so its cadence survives a restart. What remains debt is the lifecycle ownership itself, not the scheduling state.
-
-Before adding more autonomous schedulers, introduce one typed background-service/lifespan owner with start/stop/health semantics, and give every worker its own lifecycle hook instead of a name list. This does not require Redis/Celery or a distributed queue.
+Proactive intent dispatch is no longer a purely process-local concern: it has a Settings switch, a durable cooldown cursor (`proactive_dispatch_state`) and per-character admission quotas, so its cadence survives a restart.
 
 ## Medium priority / observe before refactoring
 

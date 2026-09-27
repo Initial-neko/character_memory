@@ -5,7 +5,7 @@ import logging
 
 from pydantic import BaseModel, Field, model_validator
 
-from character_memory.web_lifecycle import on_app_event
+from character_memory.web_lifecycle import background_services
 from character_memory.domain.models import SpaceMediaIntent, SpaceMediaIntentType
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
@@ -109,17 +109,22 @@ def attach_space_routes(app):
     )
     scheduler_capable = bool(getattr(access.settings, "api_key", ""))
 
-    if scheduler_capable:
-        @on_app_event(app, "startup")
-        def _start_space_autonomy():
-            # Keep the scheduler thread alive even while autonomy is disabled so
-            # Dev/Settings can hot-enable it without restarting Character Runtime.
+    def _start_space_autonomy():
+        # Keep the scheduler thread alive even while autonomy is disabled so
+        # Dev/Settings can hot-enable it without restarting Character Runtime.
+        if scheduler_capable:
             scheduler.start()
 
-    @on_app_event(app, "shutdown")
     def _stop_space_autonomy():
+        # SpaceAutonomyScheduler.stop() closes the media executor itself, so it
+        # must not be closed a second time here.
         scheduler.stop()
-        autonomy.media_executor.close()
+
+    background_services(app).register(
+        "space_autonomy",
+        start=_start_space_autonomy,
+        stop=_stop_space_autonomy,
+    )
 
     # Expose the feature runtime for tests/diagnostics without initializing LLM.
     access.space_repository = repository

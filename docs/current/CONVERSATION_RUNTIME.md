@@ -531,6 +531,7 @@ Chat dictation (`web/dictation.js`) and a voice call exclude each other: only on
 
 ### Boundaries
 
+- `VOICE_MESSAGE` is a normal way to speak, sitting beside `MESSAGE`, not a rare action kept for special occasions. The prompt carries no frequency prohibition, and one must not be added back: over the whole trace archive (5958 reactions) the model chose `VOICE_MESSAGE` **3 times**, while `STICKER` — which has a candidate list and an explicit "you may use these" line — was chosen 81 times. What the contract has to supply is a concrete occasion (too much to type, tone is the point, one stretch of speech beats several messages), not a discouragement.
 - One `VOICE_MESSAGE` is one complete TTS request; no sentence/chunk splitting in V1.
 - Ordinary `MESSAGE` remains text-only and is not automatically materialized.
 - Audio is MediaAsset data, not Memory.

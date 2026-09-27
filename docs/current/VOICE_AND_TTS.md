@@ -384,18 +384,26 @@ autoGainControl=true
 
 TTS playback 期间，VAD / microphone capture / ASR 仍可继续运行。
 
-如果用户在 AI 正在说话时讲话：
+这个窗口比 playback 更长：从 user turn 提交、Character Runtime 开始处理，一直到这一轮回应结束（说了话，或者合法地沉默），capture 都保持 `listening`。判定只有一处，`replyInFlight()`：
 
 ```text
-AI TTS continues playing
+voice.playing || voice.queue.length > 0 || voice.phase === "waiting"
+```
+
+`waiting` 这一项就是"已提交、还没有任何音频在播"的那段。缺了它，麦克风会在整个 LLM 生成期关掉——生成要几秒到几十秒，用户在这期间说的每一句都收不到。
+
+如果用户在这整段期间讲话：
+
+```text
+AI keeps working on the current reply
   +
 user speech -> VAD -> ASR -> transcript validity gate
   -> pending user turn
 ```
 
-**用户说话不会停止或打断当前 TTS。**
+**用户说话不会停止或打断当前回应，也不会在旧 reaction 还在跑时并发起一轮新的。**
 
-有效 transcript 在播放期间只进入 `pendingTurns`；等当前 TTS playback queue 完全清空后，才通过正常 chat API 提交给同一个 PersonRuntime。连续捕获到多个 pending utterance 时，当前 V1.1 会把文本按顺序合并为下一次 user turn，并把 transient Visual Capture frames 去重后最多保留 4 帧。
+有效 transcript 在回应期间只进入 `pendingTurns`；等这一轮结束（`reaction_complete`，或 TTS playback queue 清空）后，才通过正常 chat API 提交给同一个 PersonRuntime。连续捕获到多个 pending utterance 时，当前 V1.1 会把文本按顺序合并为下一次 user turn，并把 transient Visual Capture frames 去重后最多保留 4 帧。
 
 因此逻辑顺序保持：
 
@@ -422,12 +430,14 @@ phase
 
 capturePhase
   = microphone VAD state
-  idle | listening | recording | transcribing | paused
+  idle | listening | recording | transcribing
 ```
 
 这样 `phase=speaking` 时仍可保持 `capturePhase=listening`，避免旧实现因为进入 `speaking` 就丢弃 microphone frames。
 
-在 transcript 已正式提交、Character Runtime 正在处理下一轮时，capture 会暂时 `paused`；当前 V1.1 的目标是“AI 播放时仍听得到用户”，不是允许无限并发用户 turn。
+`phase` 是 UI 状态，会被用户自己说话覆盖（`recording`），所以它**不能**拿来判断"这一轮还在跑"；那个判断由 `replyInFlight()` 做，并且所有会写 `phase` 的路径在回应期间都必须让位，否则状态被冲掉后 `finishSpeech` 会走成直接提交，变成并发用户 turn。
+
+当前 V1.1 的目标是"AI 回应期间仍听得到用户"，不是允许无限并发用户 turn——听到的和提交的是两件事，前者始终开着，后者等这一轮结束。
 
 #### 9.4 Transcript validity gate
 

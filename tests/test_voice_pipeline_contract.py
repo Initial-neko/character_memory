@@ -29,8 +29,13 @@ def test_voice_pipeline_keeps_capture_independent_from_playback_phase():
     assert 'pendingTurns: []' in source
     assert '!["listening", "recording"].includes(voice.capturePhase)' in source
     assert 'setCapturePhase("listening");' in source
-    assert 'if (voice.playing || voice.queue.length)' in source
-    assert '已听到，等待对方说完' in source
+    # What "the reply is still running" means, and the one place that decides it. The
+    # behaviour is pinned by test_voice_v0_web.py; this pins that the predicate still
+    # covers the window where the model is thinking but nothing is playing yet.
+    assert 'function replyInFlight()' in source
+    assert 'return voice.playing || voice.queue.length > 0 || voice.phase === "waiting";' in source
+    assert 'if (replyInFlight())' in source
+    assert '已听到' in source
     assert 'async function flushPendingTurns()' in source
     assert 'echoCancellation:true' in source
     assert 'noiseSuppression:true' in source

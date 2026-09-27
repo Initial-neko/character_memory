@@ -6,7 +6,7 @@ import threading
 
 from pydantic import BaseModel, Field
 
-from character_memory.web_lifecycle import on_app_event
+from character_memory.web_lifecycle import background_services
 from character_memory.application.async_conversation import direct_channel
 from character_memory.application.wake_service import CharacterWakeService, WakeOutcome
 from character_memory.domain.models import EventType
@@ -141,7 +141,6 @@ def attach_wake_routes(app):
             "created_intent_ids": list(outcome.result.created_intent_ids),
         }
 
-    @on_app_event(app, "startup")
     def _start_wake_loop():
         nonlocal thread
         if thread is None or not thread.is_alive():
@@ -154,8 +153,9 @@ def attach_wake_routes(app):
         if thread is not None and thread.is_alive():
             thread.join(timeout=1.0)
 
-    # attach_wake_routes runs after async routes. Insert at the front so this
-    # producer stops before the SSE hub/scheduler are closed by async shutdown.
-    app.router.on_shutdown.insert(0, _stop_wake_loop)
+    # This producer feeds the async SSE hub, so it has to go down before the hub
+    # closes. Workers stop in reverse registration order, and async_web registers
+    # before this module attaches.
+    background_services(app).register("wake_loop", start=_start_wake_loop, stop=_stop_wake_loop)
 
     return app

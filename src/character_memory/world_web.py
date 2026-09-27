@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 from pydantic import BaseModel, Field
 
-from character_memory.web_lifecycle import on_app_event
+from character_memory.web_lifecycle import background_services
 from character_memory.world_activity import WorldActivityScheduler, WorldPulseRepository
 
 
@@ -143,6 +143,14 @@ def attach_world_routes(app) -> None:
         activity_scheduler.force_due(normalized, subject_id)
         return {"ok": True, "kind": normalized, "subject_id": subject_id}
 
-    @on_app_event(app, "startup")
     def _start_world_activity():
         activity_scheduler.start()
+
+    def _stop_world_activity():
+        activity_scheduler.stop()
+
+    background_services(app).register(
+        "world_activity",
+        start=_start_world_activity,
+        stop=_stop_world_activity,
+    )

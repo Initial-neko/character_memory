@@ -19,6 +19,7 @@ from character_memory.application.group_conversation_service import build_group_
 from character_memory.group_store import GroupRepository
 from character_memory.group_web import GroupChatRequest
 from character_memory.message_projection import upload_caption
+from character_memory.web_lifecycle import background_services
 
 
 logger = logging.getLogger("character_memory.async_web")
@@ -343,6 +344,9 @@ def attach_async_routes(app):
         scheduler.close()
         hub.close()
 
-    app.router.on_shutdown.insert(0, _shutdown_async_runtime)
+    # ReactionScheduler has no start: it brings up per-key threads lazily, so it
+    # only has an end. Registering here, before wake_web attaches, is what puts
+    # the wake producer ahead of this hub in the stop order.
+    background_services(app).register("async_reactions", stop=_shutdown_async_runtime)
 
     return app

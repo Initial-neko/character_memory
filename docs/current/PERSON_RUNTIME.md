@@ -305,7 +305,7 @@ ASR transcript --------┘
 
 Visual Capture 的 frame bytes 只作为当前 Vision context，不变成长期人物状态。Event 只保存必要的 capture metadata。
 
-Voice ASR 在浏览器端有 transcript validity gate：空白、纯标点/符号、过短的单个 ASCII 字符不会创建聊天事实；汉字或至少两个 ASCII 字母/数字才被接受。
+Voice ASR 在浏览器端有 transcript validity gate：空白、纯标点/符号、以及不含汉字的 transcript 都不会创建聊天事实。识别器在非语音上的幻觉形状就是「拉丁字母加句点」（`The.` / `Yeah.`），旧规则「至少两个 ASCII 字母/数字」恰好放行它，所以门槛改为必须含一个汉字（`no_han`）。代价是纯英文、纯假名、纯谚文、纯数字的语音会被拒绝——这是 Chinese-first 语音路径的有意取舍，放开需要同时改门槛与本节。
 
 ## 12. Transaction / failure boundary
 

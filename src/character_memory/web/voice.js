@@ -630,7 +630,10 @@
       if (!validation.valid) {
         if (voice.micActive) setCapturePhase("listening");
         else setCapturePhase("idle");
-        if (dom.transcript && !voice.playing) dom.transcript.textContent = "没有识别到有效内容";
+        // Reported even while the character is speaking. A refusal that shows
+        // nothing reads as "it did not hear me", so the user repeats themselves
+        // into a path that will refuse them again.
+        if (dom.transcript) dom.transcript.textContent = "没有识别到有效内容";
         if (!voice.playing) {
           if (voice.micActive) setPhase("listening", "正在听…");
           else resumeInputState();
@@ -655,6 +658,9 @@
         setPhase("error", `语音失败：${error.message}`);
         setTimeout(() => voice.active && resumeInputState(), 1200);
       } else {
+        // Same reason as the invalid branch: an invisible failure during
+        // playback is indistinguishable from being ignored.
+        if (dom.transcript) dom.transcript.textContent = `语音失败：${error.message}`;
         console.warn("[voice] ASR failed during playback", error);
       }
     }

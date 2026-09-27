@@ -366,7 +366,14 @@ function boot() {
     for (let i = 0; i < turns; i += 1) await new Promise(resolve => setImmediate(resolve));
   }
 
-  return {click, releaseHealth, releaseMic, releaseAllMic, snapshot, flush};
+  // The ASR validity gate is a pure function, so a scenario can call it directly
+  // rather than drive a whole microphone session to reach it.
+  function validate(text) {
+    const verdict = CM.features.voice.validateAsrTranscript(text);
+    return {valid: verdict.valid, reason: verdict.reason, text: verdict.text};
+  }
+
+  return {click, releaseHealth, releaseMic, releaseAllMic, snapshot, flush, validate};
 }
 
 // Control: a call nobody interferes with still adopts its microphone, asks for exactly one
@@ -435,12 +442,34 @@ async function muteThenStartTwice() {
   return h.snapshot();
 }
 
+// The gate decides whether a recognised transcript becomes a chat fact. Whether
+// the source mentions "no_han" says nothing about which inputs are admitted, so
+// run the shipped function over the shapes that matter: the recogniser's
+// non-speech hallucinations, real Chinese, and the non-Chinese speech the gate
+// refuses on purpose.
+async function gateVerdicts() {
+  const h = boot();
+  const inputs = [
+    "", "   ", ".", "...", "👍",
+    "Yeah.", "The.", "OK", "hello there",
+    "1984", "3.14",
+    "你好", "今天出去外面玩啦。", "yeah 好",
+    "日本語", "こんにちは", "안녕하세요",
+  ];
+  const verdicts = {};
+  inputs.forEach((input, index) => {
+    verdicts["case" + index] = Object.assign({input}, h.validate(input));
+  });
+  return verdicts;
+}
+
 async function main() {
   process.stdout.write(JSON.stringify({
     callAlone: await callAlone(),
     hangupDuringPrompt: await hangupDuringPrompt(),
     hangupDuringRuntimeCheck: await hangupDuringRuntimeCheck(),
     muteThenStartTwice: await muteThenStartTwice(),
+    gate: await gateVerdicts(),
   }));
 }
 
@@ -521,3 +550,45 @@ def test_late_microphone_permission_cannot_leave_the_call_microphone_on(tmp_path
     assert twice["voiceActive"] is True
     assert twice["micActive"] is True
     assert twice["alerts"] == []
+
+
+def test_the_asr_gate_decides_on_the_transcript_it_is_given(tmp_path):
+    """Which transcripts are admitted, decided by running the shipped function.
+
+    The sibling gate test asserts on the source text, and strings survive the
+    logic being inverted: a gate rewritten to admit only the transcripts it
+    should refuse keeps every one of those assertions passing. These cases are
+    the shapes that actually arrive -- the recogniser's non-speech
+    hallucinations, real Chinese, and the non-Chinese speech that is refused on
+    purpose -- so a flip in the rule fails here.
+    """
+
+    gate = _run_voice_harness(tmp_path)["gate"]
+    verdict = {case["input"]: (case["valid"], case["reason"]) for case in gate.values()}
+
+    # Nothing to answer: refused before any language question is asked.
+    assert verdict[""] == (False, "empty")
+    assert verdict["   "] == (False, "empty")
+    assert verdict["."] == (False, "punctuation_only")
+    assert verdict["..."] == (False, "punctuation_only")
+    assert verdict["👍"] == (False, "punctuation_only")
+
+    # What the recogniser answers non-speech with, and the reason the gate exists.
+    assert verdict["Yeah."] == (False, "no_han")
+    assert verdict["The."] == (False, "no_han")
+
+    # Deliberate: the gate is Chinese-first, so a purely non-Chinese utterance is
+    # refused even when it was recognised correctly. PERSON_RUNTIME.md says so.
+    assert verdict["OK"] == (False, "no_han")
+    assert verdict["hello there"] == (False, "no_han")
+    assert verdict["1984"] == (False, "no_han")
+    assert verdict["3.14"] == (False, "no_han")
+    assert verdict["こんにちは"] == (False, "no_han")
+    assert verdict["안녕하세요"] == (False, "no_han")
+
+    # Han is the only thing that admits, and one character is enough.
+    assert verdict["你好"] == (True, "valid")
+    assert verdict["今天出去外面玩啦。"] == (True, "valid")
+    assert verdict["yeah 好"] == (True, "valid")
+    # Han script, not Chinese: Japanese kanji satisfies the same test.
+    assert verdict["日本語"] == (True, "valid")

@@ -145,7 +145,11 @@ Some launcher tests still assert source substrings. Behavioral probe tests exist
 
 ### Large edge modules
 
-Several modules are large (`api.py`, group service, SQLite store, visual routes, and major web JS files). Size alone is not a reason to move code. Split only where ownership/testing conflicts become concrete.
+Several modules are large (`api.py`, group service, SQLite store, visual routes, and major web JS files). Size alone is not a reason to move code, and neither is layer mixing on its own. Split only where ownership/testing conflicts become concrete — meaning the split would shorten the reading that an ordinary change requires.
+
+That takes two conditions together: the module mixes responsibilities that change for different reasons, and ordinary changes actually land in it. Rank candidates by how often they are edited, not by length. `runtime/person_runtime.py` is among the most-edited sources in the tree and stays whole because it is one domain.
+
+Measured over the sixty days to 2026-09-27, the most-edited sources are the web shell (`web/index.html`, `web/dev.html`, `web/app.js`), `config.py`, `api.py`, `runtime/person_runtime.py` and `settings_store.py`. Of the largest modules, `world_activity.py` and `ensemble_builder.py` are the least edited.
 
 ### TTS Workbench / Provider Runtime coupling
 

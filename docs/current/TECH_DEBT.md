@@ -98,26 +98,34 @@ Still deferred: bulk policies by source/type, confidence/freshness models, autom
 
 ### Dependency lock
 
-The repository does not currently publish a verified `uv.lock` from this branch. Do not hand-write one.
+The repository does not publish a `uv.lock`, so CI re-resolves the declared dependency graph on every run while any machine holding an untracked lock syncs against a locked one. Do not hand-write a lockfile.
 
-`scripts/sync-all.sh` now behaves safely in both cases:
+`scripts/sync-all.sh` behaves safely in both cases, but decides on file existence alone:
 
 ```text
 uv.lock present  -> uv sync --extra all --locked
 no uv.lock       -> uv sync --extra all
 ```
 
-A developer-generated, verified local lockfile can therefore be added later without changing the setup contract. Once it is intentionally committed, CI should also be tightened to require the lock rather than merely support it.
+Because the test is `[[ -f uv.lock ]]` and does not check whether the file is tracked, a machine holding an untracked lock reports "verified uv.lock found" and locks against a file that is not in version control.
+
+Committing a lock generated on this machine is not a neutral change. `uv` resolves through the configured index, so a locally generated lock records the local registry for every package, and a lock whose registry differs from the index is not reused consistently — `uv sync` re-resolves instead of taking the pinned graph. `uv sync` also honours a present `uv.lock` without `--locked`, so committing such a lock would change the dependency source of every CI job rather than merely pin versions. A lock has to be generated from a neutral index before it can be committed, and only then can CI be tightened to require it.
 
 ## Medium priority / runtime lifecycle
 
 ### Background worker ownership
 
-Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent dispatch, Character Wake, Space Autonomy, Group Autonomy and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
+Character Runtime owns seven long-lived process-local loops: `ReactionScheduler`/SSE, `EncounterScheduler`, `SpaceAutonomyScheduler`, `GroupAutonomyScheduler` and `WorldActivityScheduler`, plus proactive intent dispatch and Character Wake, which are bare polling threads rather than classes. Asynchronous visual work and voice-message materialization run as per-event one-shot threads driven by those loops, not as loops of their own.
 
-Proactive intent dispatch is no longer a purely process-local concern: it has a Settings switch, a durable cooldown cursor (`proactive_dispatch_state`) and per-character admission quotas, so its cadence survives a restart. What remains debt is the start/stop ordering itself, not the scheduling state.
+They are correct enough as single-process components, but lifecycle ownership is spread across three registration mechanisms — `on_app_event(app, "shutdown")`, `app.router.on_shutdown.insert(0, ...)` and a name list inside the core `_shutdown` — and that third mechanism is both redundant and incomplete:
 
-Before adding many more autonomous schedulers, introduce one typed background-service/lifespan owner with start/stop/health semantics. This does not require Redis/Celery or a distributed queue.
+- `space_scheduler` and `group_autonomy_scheduler` are stopped twice, because their own route modules already stop them;
+- `world_activity_scheduler` can only be stopped by the core name list, because its route module registers no shutdown hook;
+- `ReactionScheduler` terminates through `close()`, so a name list that probes for `.stop` cannot reach it at all.
+
+Proactive intent dispatch is no longer a purely process-local concern: it has a Settings switch, a durable cooldown cursor (`proactive_dispatch_state`) and per-character admission quotas, so its cadence survives a restart. What remains debt is the lifecycle ownership itself, not the scheduling state.
+
+Before adding more autonomous schedulers, introduce one typed background-service/lifespan owner with start/stop/health semantics, and give every worker its own lifecycle hook instead of a name list. This does not require Redis/Celery or a distributed queue.
 
 ## Medium priority / observe before refactoring
 

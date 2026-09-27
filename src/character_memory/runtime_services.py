@@ -79,9 +79,12 @@ class RuntimeServices:
 class CharacterRuntimeAccess:
     """Typed core access object exposed through app.state.character_memory.
 
-    Feature modules may still attach their process-local runtime handles
-    (scheduler, stream hub, etc.) while the stable infrastructure contract stays
-    explicit and type-readable here.
+    The core contract is declared here. Feature modules additionally attach
+    process-local runtime handles after construction, and those are declared
+    below so the whole surface of app.state.character_memory is readable from
+    this file alone. Each feature field names the module that attaches it and
+    stays None until that module's attach_* function has run; consumers keep
+    probing with getattr(access, name, None).
     """
 
     settings: Any
@@ -94,6 +97,33 @@ class CharacterRuntimeAccess:
     character_profiles: Callable[[], list[dict[str, str]]]
     global_sticker_catalog: Callable[[], Any]
     refresh_runtime_sticker_catalog: Callable[[Any], None]
+
+    # Encounter is a candidate layer, not a second character registry. It uses
+    # these callbacks only when the user explicitly keeps a candidate.
+    create_character_from_draft: Callable[..., Any]
+    rollback_created_character: Callable[..., Any]
+    check_character_capacity: Callable[..., Any]
+    soft_active_characters: int
+    max_active_characters: int
+
+    # Attached by feature route modules during Server composition.
+    stream_hub: Any | None = None  # async_web
+    reaction_scheduler: Any | None = None  # async_web
+    encounter_repository: Any | None = None  # encounter_web
+    encounter_service: Any | None = None  # encounter_web
+    encounter_scheduler: Any | None = None  # encounter_web
+    ensemble_repository: Any | None = None  # ensemble_web
+    ensemble_service: Any | None = None  # ensemble_web
+    group_autonomy_repository: Any | None = None  # group_autonomy_web
+    group_autonomy: Any | None = None  # group_autonomy_web
+    group_autonomy_scheduler: Any | None = None  # group_autonomy_web
+    space_repository: Any | None = None  # space_web
+    space_media_repository: Any | None = None  # space_web
+    space_autonomy: Any | None = None  # space_web
+    space_scheduler: Any | None = None  # space_web
+    visual_runtime: Any | None = None  # visual_runtime
+    world_activity_scheduler: Any | None = None  # world_web
+    wake_service: Any | None = None  # wake_web
 
     @property
     def avatar_store(self):

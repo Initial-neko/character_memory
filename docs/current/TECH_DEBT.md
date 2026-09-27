@@ -80,6 +80,12 @@ Settings no longer swallows every GSV unload exception. Runtime application fail
 
 The throwaway harness directory is ignored.
 
+### Background worker lifecycle ownership
+
+Character Runtime's long-lived workers register with one `BackgroundServices` owner during composition instead of each module choosing a position among the app's lifecycle handlers. The two `app.router.on_shutdown.insert(0, ...)` calls and the core name list that probed worker attributes for a `.stop` are gone, and the core's shutdown handler is the only one left.
+
+That removes what the name list got wrong: `WorldActivityScheduler` had no shutdown hook of its own, `SpaceAutonomyScheduler` and `GroupAutonomyScheduler` were stopped twice, and `EncounterScheduler` was stopped only after the core had already closed the shared store. Workers now stop newest-first, so a producer goes down before the worker it feeds, and every stop runs before `services.close()`.
+
 ## High priority / semantic architecture
 
 ### Channel-specific cognition still exists above shared Person context
@@ -98,26 +104,30 @@ Still deferred: bulk policies by source/type, confidence/freshness models, autom
 
 ### Dependency lock
 
-The repository does not currently publish a verified `uv.lock` from this branch. Do not hand-write one.
+The repository does not publish a `uv.lock`, so CI re-resolves the declared dependency graph on every run while any machine holding an untracked lock syncs against a locked one. Do not hand-write a lockfile.
 
-`scripts/sync-all.sh` now behaves safely in both cases:
+`scripts/sync-all.sh` behaves safely in both cases, but decides on file existence alone:
 
 ```text
 uv.lock present  -> uv sync --extra all --locked
 no uv.lock       -> uv sync --extra all
 ```
 
-A developer-generated, verified local lockfile can therefore be added later without changing the setup contract. Once it is intentionally committed, CI should also be tightened to require the lock rather than merely support it.
+Because the test is `[[ -f uv.lock ]]` and does not check whether the file is tracked, a machine holding an untracked lock reports "verified uv.lock found" and locks against a file that is not in version control.
+
+Committing a lock generated on this machine is not a neutral change. `uv` resolves through the configured index, so a locally generated lock records the local registry for every package, and a lock whose registry differs from the index is not reused consistently — `uv sync` re-resolves instead of taking the pinned graph. `uv sync` also honours a present `uv.lock` without `--locked`, so committing such a lock would change the dependency source of every CI job rather than merely pin versions. A lock has to be generated from a neutral index before it can be committed, and only then can CI be tightened to require it.
 
 ## Medium priority / runtime lifecycle
 
-### Background worker ownership
+### A worker blocked in network I/O outlives shutdown
 
-Character Runtime currently owns several independent process-local loops/workers: ReactionScheduler/SSE, proactive intent dispatch, Character Wake, Space Autonomy, Group Autonomy and asynchronous visual/voice work. They are correct enough as single-process components, but start/stop ordering is spread across API and route modules; some shutdown hooks explicitly manipulate ordering.
+`BackgroundServices` guarantees that every worker's stop is requested before the core closes the shared store and model bundle, but not that the worker has exited: each scheduler joins its thread with a one-second timeout. `WorldActivityScheduler` can exceed that by a wide margin, because a browse already in flight blocks inside the headless-browser fetch, whose route guard resolves the target host through `remote_media.ensure_public_http_url` and a `socket.getaddrinfo` call that carries no timeout.
 
-Proactive intent dispatch is no longer a purely process-local concern: it has a Settings switch, a durable cooldown cursor (`proactive_dispatch_state`) and per-character admission quotas, so its cadence survives a restart. What remains debt is the start/stop ordering itself, not the scheduling state.
+Measured against a host that does not resolve, the thread was still alive forty seconds after shutdown — on `main` and after the lifecycle consolidation alike, so this is not a regression from that change. Shutdown completes, and the shared store closes, while the worker is still inside its browse.
 
-Before adding many more autonomous schedulers, introduce one typed background-service/lifespan owner with start/stop/health semantics. This does not require Redis/Celery or a distributed queue.
+The lifecycle owner does not help here: the stop is delivered, and the worker cannot act on it. A fix belongs in the fetch path — bound the address lookup so a browse cannot outlive its shutdown budget.
+
+Proactive intent dispatch is no longer a purely process-local concern: it has a Settings switch, a durable cooldown cursor (`proactive_dispatch_state`) and per-character admission quotas, so its cadence survives a restart.
 
 ## Medium priority / observe before refactoring
 
@@ -137,7 +147,11 @@ Some launcher tests still assert source substrings. Behavioral probe tests exist
 
 ### Large edge modules
 
-Several modules are large (`api.py`, group service, SQLite store, visual routes, and major web JS files). Size alone is not a reason to move code. Split only where ownership/testing conflicts become concrete.
+Several modules are large (`api.py`, group service, SQLite store, visual routes, and major web JS files). Size alone is not a reason to move code, and neither is layer mixing on its own. Split only where ownership/testing conflicts become concrete — meaning the split would shorten the reading that an ordinary change requires.
+
+That takes two conditions together: the module mixes responsibilities that change for different reasons, and ordinary changes actually land in it. Rank candidates by how often they are edited, not by length. `runtime/person_runtime.py` is among the most-edited sources in the tree and stays whole because it is one domain.
+
+Measured over the sixty days to 2026-09-27, the most-edited sources are the web shell (`web/index.html`, `web/dev.html`, `web/app.js`), `config.py`, `api.py`, `runtime/person_runtime.py` and `settings_store.py`. Of the largest modules, `world_activity.py` and `ensemble_builder.py` are the least edited.
 
 ### TTS Workbench / Provider Runtime coupling
 

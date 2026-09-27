@@ -20,24 +20,36 @@ from character_memory.wake_web import attach_wake_routes
 from character_memory.world_web import attach_world_routes
 
 
+def create_server_app(config_path: str):
+    """Compose Character Runtime: the core API plus every feature route.
+
+    A function rather than module-level statements so the composition can be
+    built against a temporary config, which is how the background-worker
+    lifecycle is verified.
+    """
+
+    app = create_api(config_path)
+    attach_history_routes(app)
+    attach_memory_routes(app)
+    # RuntimeServices are composed before any feature route attaches. World no
+    # longer depends on Avatar route initialization order.
+    attach_world_routes(app)
+    attach_avatar_routes(app)
+    attach_voice_routes(app)
+    attach_visual_routes(app)
+    attach_group_routes(app, config_path)
+    attach_group_member_routes(app)
+    attach_ensemble_routes(app)
+    attach_search_routes(app)
+    attach_space_routes(app)
+    attach_encounter_routes(app)
+    attach_async_routes(app)
+    attach_group_autonomy_routes(app)
+    install_group_autonomous_visual(app)
+    attach_visual_capture_routes(app)
+    attach_wake_routes(app)
+    return app
+
+
 config_path = os.getenv("CHARACTER_MEMORY_CONFIG", "config.yaml")
-app = create_api(config_path)
-attach_history_routes(app)
-attach_memory_routes(app)
-# RuntimeServices are composed before any feature route attaches. World no
-# longer depends on Avatar route initialization order.
-attach_world_routes(app)
-attach_avatar_routes(app)
-attach_voice_routes(app)
-attach_visual_routes(app)
-attach_group_routes(app, config_path)
-attach_group_member_routes(app)
-attach_ensemble_routes(app)
-attach_search_routes(app)
-attach_space_routes(app)
-attach_encounter_routes(app)
-attach_async_routes(app)
-attach_group_autonomy_routes(app)
-install_group_autonomous_visual(app)
-attach_visual_capture_routes(app)
-attach_wake_routes(app)
+app = create_server_app(config_path)

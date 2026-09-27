@@ -25,6 +25,7 @@ from character_memory.api_character_service import ApiCharacterService
 from character_memory.api_resource_service import ApiResourceService
 from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.application.proactive_service import ProactiveService
+from character_memory.background_services import BackgroundServices
 from character_memory.config import (
     load_persona,
     load_settings,
@@ -100,6 +101,11 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         max_bytes=int(getattr(settings, "media_max_bytes", 8 * 1024 * 1024)),
     )
     services = build_runtime_services(settings)
+    # Every long-lived worker registers here, so one list owns the start and
+    # stop order instead of each module picking a position among the app's
+    # shutdown handlers. Feature modules reach it through
+    # web_lifecycle.background_services(app).
+    background = BackgroundServices()
     runtime_error: str | None = None
     runtime_loading = False
     init_lock = threading.Lock()
@@ -378,8 +384,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             "runtime_error": runtime_error,
         }
 
+    app.state.background_services = background
+
     # One application runtime access point. Feature route modules (group chat,
     # future media tools) reuse this instead of creating their own model/store.
+    # Encounter is a candidate layer, not a second character registry: it uses
+    # the character callbacks below only when the user explicitly keeps a
+    # candidate.
     app.state.character_memory = CharacterRuntimeAccess(
         settings=settings,
         get_bundle=get_bundle,
@@ -391,14 +402,12 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         character_profiles=character_profiles,
         global_sticker_catalog=global_sticker_catalog,
         refresh_runtime_sticker_catalog=refresh_runtime_sticker_catalog,
+        create_character_from_draft=create_character_from_draft,
+        rollback_created_character=rollback_created_character,
+        check_character_capacity=check_character_capacity,
+        soft_active_characters=SOFT_ACTIVE_CHARACTERS,
+        max_active_characters=MAX_ACTIVE_CHARACTERS,
     )
-    # Encounter is a candidate layer, not a second character registry. It uses
-    # these callbacks only when the user explicitly keeps a candidate.
-    app.state.character_memory.create_character_from_draft = create_character_from_draft
-    app.state.character_memory.rollback_created_character = rollback_created_character
-    app.state.character_memory.check_character_capacity = check_character_capacity
-    app.state.character_memory.soft_active_characters = SOFT_ACTIVE_CHARACTERS
-    app.state.character_memory.max_active_characters = MAX_ACTIVE_CHARACTERS
 
     def warm_runtime() -> None:
         try:
@@ -409,9 +418,30 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             # remote model download (local embeddings are strict-offline).
             logger.exception("api.runtime warmup_failed")
 
+    def start_proactive() -> None:
+        nonlocal proactive_thread
+        if not own_bundle:
+            return
+        if proactive_thread is not None and proactive_thread.is_alive():
+            return
+        proactive_stop.clear()
+        proactive_thread = threading.Thread(
+            target=proactive_loop,
+            name="character-memory-proactive",
+            daemon=True,
+        )
+        proactive_thread.start()
+
+    def stop_proactive() -> None:
+        proactive_stop.set()
+        if proactive_thread is not None and proactive_thread.is_alive():
+            proactive_thread.join(timeout=1.0)
+
+    background.register("proactive_dispatch", start=start_proactive, stop=stop_proactive)
+
     @on_app_event(app, "startup")
     def _startup():
-        nonlocal proactive_thread, warmup_thread
+        nonlocal warmup_thread
         eager_warmup = os.getenv("CHARACTER_MEMORY_EAGER_WARMUP", "0").strip().lower() in {"1", "true", "yes", "on"}
         if own_bundle and eager_warmup and (warmup_thread is None or not warmup_thread.is_alive()) and app_bundle is None:
             warmup_thread = threading.Thread(
@@ -420,32 +450,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
                 daemon=True,
             )
             warmup_thread.start()
-        if own_bundle and (proactive_thread is None or not proactive_thread.is_alive()):
-            proactive_thread = threading.Thread(
-                target=proactive_loop,
-                name="character-memory-proactive",
-                daemon=True,
-            )
-            proactive_thread.start()
+        background.start_all()
 
     @on_app_event(app, "shutdown")
     def _shutdown():
-        proactive_stop.set()
-        if proactive_thread is not None and proactive_thread.is_alive():
-            proactive_thread.join(timeout=1.0)
-        # Feature modules may own background workers that still use the shared
-        # SQLite/model bundle. Stop them before the core closes those resources.
-        feature_state = getattr(app.state, "character_memory", None)
-        for scheduler_name in (
-            "space_scheduler",
-            "group_autonomy_scheduler",
-            "world_activity_scheduler",
-        ):
-            scheduler = getattr(feature_state, scheduler_name, None) if feature_state is not None else None
-            if scheduler is not None:
-                stop_scheduler = getattr(scheduler, "stop", None)
-                if callable(stop_scheduler):
-                    stop_scheduler()
+        # Workers stop before the shared SQLite/model bundle is closed. They stop
+        # newest-first, so a producer goes down before the worker it feeds.
+        background.stop_all()
         services.close()
         if own_bundle:
             if app_bundle is not None:

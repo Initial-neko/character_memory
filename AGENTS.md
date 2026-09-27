@@ -8,6 +8,7 @@ Keep it short and stable. Detailed architecture, feature behavior, task state, a
 
 - `main` is the integration source of truth.
 - Extend the existing Person runtime, durable event model, Memory model, and shared services instead of creating parallel systems.
+- Check `docs/current/TECH_DEBT.md` before proposing a refactor. A recorded entry means the trade-off was already decided.
 - Prefer focused branches, focused PRs, and focused tests.
 - Prefer extending an existing stable-domain document. Add a new `docs/current/*.md` only for an independent runtime boundary, lifecycle, or durable ownership reason.
 - Do not commit agent transcripts, generated task ledgers, review scratchpads, temporary implementation plans, secrets, model assets, or machine-specific paths.
@@ -44,6 +45,7 @@ Use these routers only when needed:
 - cannot find the code owner → `docs/current/CODEBASE_LAYOUT.md`
 - cannot find the owning document → `docs/README.md`
 - need project-wide implementation status → `docs/current/STATUS.md`
+- need to know whether a problem or a refactor is already recorded → `docs/current/TECH_DEBT.md`
 - change crosses subsystem/runtime boundaries → `docs/current/ARCHITECTURE.md`
 - need development, testing, PR, or validation rules → `CONTRIBUTING.md`
 - release/version/tag work → `docs/current/RELEASES.md`

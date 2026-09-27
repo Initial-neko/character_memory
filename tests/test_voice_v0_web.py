@@ -146,9 +146,9 @@ def test_voice_buffers_valid_asr_during_tts_and_submits_after_queue_drain():
     finish_speech = script.split('async function finishSpeech()', 1)[1].split('async function synthesize', 1)[0]
     play_queue = script.split('async function playQueue()', 1)[1].split('function audioFrame', 1)[0]
 
-    assert 'if (voice.playing || voice.queue.length)' in finish_speech
+    assert 'if (replyInFlight())' in finish_speech
     assert 'voice.pendingTurns.push(turn)' in finish_speech
-    assert '已听到，等待对方说完' in finish_speech
+    assert '已听到' in finish_speech
     assert 'await flushPendingTurns();' in play_queue
     assert 'await playAudio(url);' in play_queue
 
@@ -184,6 +184,13 @@ let alerts = [];
 let healthWaiters = [];
 let contextsOpened = 0;
 let elements = new Map();
+// The microphone scenarios below have to advance time by hand: endpointing is measured in
+// milliseconds and a synchronous frame loop finishes in none of them.
+let clock = 1700000000000;
+let processors = [];
+let sources = [];
+let asrCalls = 0;
+let chatSends = 0;
 
 const VOICE_ELEMENT_IDS = [
   "voiceCallButton", "voiceCallOverlay", "voiceCallAvatar", "voiceCallName", "voiceCallContext",
@@ -264,14 +271,22 @@ function boot() {
     // The error paths schedule a status reset 1.2s out; the scenarios below never wait for it.
     setTimeout: () => 0,
     clearTimeout() {},
-    performance: {now: () => Date.now()},
+    performance: {now: () => clock},
     URLSearchParams,
+    Blob,
     fetch: async url => {
       if (String(url).endsWith("/health")) {
         return new Promise(resolve => healthWaiters.push(() => resolve({
           ok: true, status: 200, json: async () => ({asr: {ready: true}, tts: {ready: true}, voice_capture: {silence_ms: 900}}),
         })));
       }
+      // A recogniser that answers with real Chinese, so the microphone scenarios reach the
+      // dispatch and queueing paths instead of stopping at the validity gate.
+      if (String(url).includes("/v1/asr")) {
+        asrCalls += 1;
+        return {ok: true, status: 200, json: async () => ({text: "你好"}), text: async () => ""};
+      }
+      if (String(url).includes("/messages")) chatSends += 1;
       return {ok: true, status: 200, json: async () => ({}), text: async () => ""};
     },
     navigator: {
@@ -290,12 +305,16 @@ function boot() {
   sandbox.AudioContext = class AudioContext {
     constructor() { contextsOpened += 1; this.sampleRate = 48000; }
     createMediaStreamSource() { return {connect() {}, disconnect() {}}; }
-    createScriptProcessor() { return {connect() {}, disconnect() {}, onaudioprocess: null}; }
+    createScriptProcessor() {
+      const processor = {connect() {}, disconnect() {}, onaudioprocess: null};
+      processors.push(processor);
+      return processor;
+    }
     close() { return Promise.resolve(); }
   };
   sandbox.EventSource = class EventSource {
-    constructor(url) { this.url = url; }
-    addEventListener() {}
+    constructor(url) { this.url = url; this.listeners = {}; sources.push(this); }
+    addEventListener(name, handler) { (this.listeners[name] = this.listeners[name] || []).push(handler); }
     close() {}
   };
   sandbox.CM = CM;
@@ -350,6 +369,8 @@ function boot() {
       voiceActive: voice.active,
       micActive: voice.micActive,
       capturePhase: voice.capturePhase,
+      phase: voice.phase,
+      pendingTurns: voice.pendingTurns.length,
       status: elementFor("voiceCallStatus").textContent,
       transcript: elementFor("voiceCallTranscript").textContent,
       overlayHidden: elementFor("voiceCallOverlay").classList.contains("hidden"),
@@ -366,6 +387,32 @@ function boot() {
     for (let i = 0; i < turns; i += 1) await new Promise(resolve => setImmediate(resolve));
   }
 
+  // Endpointing is measured in milliseconds, and a synchronous frame loop takes none of them, so
+  // the microphone scenarios move the clock as they feed. One block is 128 frames at 48kHz
+  // (~2.67ms) and one block is one audioFrame call.
+  function feed(ms, level) {
+    const processor = processors[processors.length - 1];
+    if (!processor || !processor.onaudioprocess) return;
+    const block = new Float32Array(128);
+    for (let i = 0; i < Math.ceil(ms / 2.67); i += 1) {
+      block.fill(level);
+      clock += 2.67;
+      processor.onaudioprocess({inputBuffer: {getChannelData: () => block}});
+    }
+  }
+
+  // Loud enough to trip the threshold, then long enough silence to make the VAD endpoint.
+  function say() {
+    feed(400, 0.5);
+    feed(1000, 0);
+  }
+
+  function emit(name, data) {
+    for (const source of sources) {
+      for (const handler of (source.listeners[name] || [])) handler({data: JSON.stringify(data || {})});
+    }
+  }
+
   // The ASR validity gate is a pure function, so a scenario can call it directly
   // rather than drive a whole microphone session to reach it.
   function validate(text) {
@@ -373,7 +420,7 @@ function boot() {
     return {valid: verdict.valid, reason: verdict.reason, text: verdict.text};
   }
 
-  return {click, releaseHealth, releaseMic, releaseAllMic, snapshot, flush, validate};
+  return {click, releaseHealth, releaseMic, releaseAllMic, snapshot, flush, validate, say, emit};
 }
 
 // Control: a call nobody interferes with still adopts its microphone, asks for exactly one
@@ -442,6 +489,53 @@ async function muteThenStartTwice() {
   return h.snapshot();
 }
 
+// A person keeps talking while the character is still thinking. The reply takes as long as the
+// model takes, and the microphone used to be parked for all of it: nothing was collected, so the
+// second sentence never reached the recogniser and the character never learned it was said.
+async function speakWhileReplyInFlight() {
+  const h = boot();
+  h.click("voiceCallButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.releaseMic(0);
+  await h.flush(2);
+
+  const captureBeforeSpeaking = h.snapshot().capturePhase;
+  h.say();
+  await h.flush(20);
+  const first = {
+    asr: asrCalls,
+    sent: chatSends,
+    capture: h.snapshot().capturePhase,
+    phase: h.snapshot().phase,
+    transcript: h.snapshot().transcript,
+  };
+
+  // The reply is in flight here -- no audio is playing yet, the model is still working.
+  h.say();
+  await h.flush(20);
+  const second = {
+    asr: asrCalls,
+    sent: chatSends,
+    capture: h.snapshot().capturePhase,
+    pending: h.snapshot().pendingTurns,
+    transcript: h.snapshot().transcript,
+  };
+
+  // The reply ends: the utterance held back has to go out now, not sit there.
+  h.emit("reaction_complete");
+  await h.flush(20);
+  const afterReply = {
+    sent: chatSends,
+    pending: h.snapshot().pendingTurns,
+    capture: h.snapshot().capturePhase,
+    phase: h.snapshot().phase,
+    transcript: h.snapshot().transcript,
+  };
+  return {captureBeforeSpeaking, first, second, afterReply};
+}
+
 // The gate decides whether a recognised transcript becomes a chat fact. Whether
 // the source mentions "no_han" says nothing about which inputs are admitted, so
 // run the shipped function over the shapes that matter: the recogniser's
@@ -470,6 +564,7 @@ async function main() {
     hangupDuringRuntimeCheck: await hangupDuringRuntimeCheck(),
     muteThenStartTwice: await muteThenStartTwice(),
     gate: await gateVerdicts(),
+    speakWhileReplyInFlight: await speakWhileReplyInFlight(),
   }));
 }
 
@@ -496,6 +591,41 @@ def _run_voice_harness(tmp_path):
     )
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout)
+
+
+def test_a_turn_spoken_during_a_reply_is_heard_then_queued_not_sent_into_it(tmp_path):
+    """What happens to a sentence said while the reply is still being worked out.
+
+    The reply takes as long as the model takes -- seconds, every turn. Capture used to be
+    parked for all of it, so the second sentence was never collected: the recogniser was
+    never asked, and the character never learned it had been said. The fix has to do two
+    things at once, and either one alone is wrong: keep the microphone open so the
+    sentence is heard, and hold the turn back so it does not become a second message
+    inside a reaction that is still running.
+    """
+
+    turns = _run_voice_harness(tmp_path)["speakWhileReplyInFlight"]
+    assert turns["captureBeforeSpeaking"] == "listening"
+
+    # The first sentence goes out normally, and the reply it starts is now in flight.
+    first = turns["first"]
+    assert (first["asr"], first["sent"]) == (1, 1)
+    assert first["phase"] == "waiting"
+    assert first["capture"] == "listening", "the microphone was shut for the length of the reply"
+
+    # The second sentence reaches the recogniser and stops there: heard, held, not sent.
+    second = turns["second"]
+    assert second["asr"] == 2, "the sentence said during the reply never reached the recogniser"
+    assert second["sent"] == 1, "a second message was sent into a reaction that was still running"
+    assert second["pending"] == 1
+    assert second["capture"] == "listening"
+    assert "已听到" in second["transcript"], second["transcript"]
+
+    # When the reply ends the held turn goes out, so nothing said is lost.
+    after = turns["afterReply"]
+    assert after["sent"] == 2
+    assert after["pending"] == 0
+    assert after["capture"] == "listening"
 
 
 def test_late_microphone_permission_cannot_leave_the_call_microphone_on(tmp_path):

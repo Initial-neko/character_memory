@@ -551,7 +551,11 @@
     if (!voice.active) return;
     const text = String(turn.text || "").trim();
     if (!text) return;
-    setCapturePhase("paused");
+    // Capture stays open while the reply is in flight. Parking it here is what made the
+    // generation window deaf: the microphone collected nothing until the reaction completed,
+    // and a reaction takes as long as the model takes. A turn recognised in the meantime is
+    // queued by finishSpeech and sent when this one ends.
+    setCapturePhase(voice.micActive ? "listening" : "idle");
     voice.turnStartedAt = performance.now();
     voice.lastMetrics = {asr:Number(turn.asrMs || 0)};
     formatMetrics();
@@ -589,6 +593,17 @@
     };
   }
 
+  // True from the moment a turn is dispatched until its reply is over. A turn recognised while
+  // this holds is queued rather than sent: a second message sent into a reaction that is still
+  // running is a message the person did not get to finish saying. `waiting` means exactly this
+  // window -- dispatched, no audio playing yet -- so the status writers below must not overwrite
+  // it while it holds, or a refused transcript mid-reply would re-open direct dispatch.
+  function replyInFlight() {
+    return voice.playing || voice.queue.length > 0 || voice.phase === "waiting";
+  }
+
+  // Deliberately not replyInFlight(): this is the call that ends that window, so asking whether
+  // the window is still open would make it refuse its own flush.
   async function flushPendingTurns() {
     if (!voice.active || voice.playing || voice.queue.length || !voice.pendingTurns.length) return;
     const turn = mergedPendingTurn();
@@ -608,7 +623,7 @@
     voice.preRoll = [];
     voice.hotFrames = 0;
     setCapturePhase("transcribing");
-    if (!voice.playing) setPhase("transcribing", "识别中…");
+    if (!replyInFlight()) setPhase("transcribing", "识别中…");
     const sourceRate = voice.audioContext.sampleRate;
     const raw = concatChunks(chunks);
     const pcm = downsample(raw, sourceRate, 16000);
@@ -634,7 +649,7 @@
         // nothing reads as "it did not hear me", so the user repeats themselves
         // into a path that will refuse them again.
         if (dom.transcript) dom.transcript.textContent = "没有识别到有效内容";
-        if (!voice.playing) {
+        if (!replyInFlight()) {
           if (voice.micActive) setPhase("listening", "正在听…");
           else resumeInputState();
         }
@@ -643,25 +658,27 @@
       }
 
       const turn = {text:validation.text, visualFrames, asrMs};
-      if (voice.playing || voice.queue.length) {
+      if (replyInFlight()) {
         voice.pendingTurns.push(turn);
         if (voice.micActive) setCapturePhase("listening");
         else setCapturePhase("idle");
-        if (dom.transcript) dom.transcript.textContent = `你：${validation.text} · 已听到，等待对方说完…`;
+        // The character is not always mid-sentence when this shows -- the reply may still be
+        // being thought about -- so the wording says what is true in both windows.
+        if (dom.transcript) dom.transcript.textContent = `你：${validation.text} · 已听到，等这轮回应结束后发送…`;
         return;
       }
       await dispatchRecognizedTurn(turn);
     } catch (error) {
       if (voice.micActive) setCapturePhase("listening");
       else setCapturePhase("idle");
-      if (!voice.playing) {
+      if (!replyInFlight()) {
         setPhase("error", `语音失败：${error.message}`);
         setTimeout(() => voice.active && resumeInputState(), 1200);
       } else {
-        // Same reason as the invalid branch: an invisible failure during
-        // playback is indistinguishable from being ignored.
+        // Same reason as the invalid branch: an invisible failure during the reply is
+        // indistinguishable from being ignored.
         if (dom.transcript) dom.transcript.textContent = `语音失败：${error.message}`;
-        console.warn("[voice] ASR failed during playback", error);
+        console.warn("[voice] ASR failed while a reply was in flight", error);
       }
     }
   }
@@ -786,7 +803,9 @@
         voice.speechStartedAt = now;
         voice.lastVoiceAt = now;
         setCapturePhase("recording");
-        if (!voice.playing) setPhase("recording", "正在听你说…");
+        // Speaking over a reply must not erase the fact that a reply is still coming: that is
+        // the state finishSpeech reads to decide between queueing and sending.
+        if (!replyInFlight()) setPhase("recording", "正在听你说…");
       }
       return;
     }

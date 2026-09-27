@@ -191,6 +191,10 @@ let processors = [];
 let sources = [];
 let asrCalls = 0;
 let chatSends = 0;
+let audios = [];
+// What was actually handed to the recogniser, in bytes. The microphone scenarios measure this:
+// a turn that lost its first half still gets transcribed, so only the audio shows the loss.
+let asrBytes = [];
 
 const VOICE_ELEMENT_IDS = [
   "voiceCallButton", "voiceCallOverlay", "voiceCallAvatar", "voiceCallName", "voiceCallContext",
@@ -274,7 +278,15 @@ function boot() {
     performance: {now: () => clock},
     URLSearchParams,
     Blob,
-    fetch: async url => {
+    URL: {createObjectURL: () => "blob:fake", revokeObjectURL() {}},
+    // Playback ends when the element says so; the scenarios fire onended by hand so a queue
+    // item's boundaries land exactly where the interleaving under test needs them.
+    Audio: class Audio {
+      constructor(url) { this.url = url; this.onended = null; this.onerror = null; audios.push(this); }
+      play() { return Promise.resolve(); }
+      pause() {}
+    },
+    fetch: async (url, options) => {
       if (String(url).endsWith("/health")) {
         return new Promise(resolve => healthWaiters.push(() => resolve({
           ok: true, status: 200, json: async () => ({asr: {ready: true}, tts: {ready: true}, voice_capture: {silence_ms: 900}}),
@@ -284,10 +296,11 @@ function boot() {
       // dispatch and queueing paths instead of stopping at the validity gate.
       if (String(url).includes("/v1/asr")) {
         asrCalls += 1;
+        asrBytes.push(options && options.body ? options.body.size : 0);
         return {ok: true, status: 200, json: async () => ({text: "你好"}), text: async () => ""};
       }
       if (String(url).includes("/messages")) chatSends += 1;
-      return {ok: true, status: 200, json: async () => ({}), text: async () => ""};
+      return {ok: true, status: 200, json: async () => ({}), blob: async () => new Blob([]), text: async () => ""};
     },
     navigator: {
       mediaDevices: {
@@ -413,6 +426,7 @@ function boot() {
     }
   }
 
+
   // The ASR validity gate is a pure function, so a scenario can call it directly
   // rather than drive a whole microphone session to reach it.
   function validate(text) {
@@ -420,7 +434,7 @@ function boot() {
     return {valid: verdict.valid, reason: verdict.reason, text: verdict.text};
   }
 
-  return {click, releaseHealth, releaseMic, releaseAllMic, snapshot, flush, validate, say, emit};
+  return {click, releaseHealth, releaseMic, releaseAllMic, snapshot, flush, validate, say, feed, emit};
 }
 
 // Control: a call nobody interferes with still adopts its microphone, asks for exactly one
@@ -489,6 +503,11 @@ async function muteThenStartTwice() {
   return h.snapshot();
 }
 
+// What the SSE stream delivers when the character has something to say.
+function characterMessage(text, id) {
+  return {id, content: text, metadata: {action: "MESSAGE"}};
+}
+
 // A person keeps talking while the character is still thinking. The reply takes as long as the
 // model takes, and the microphone used to be parked for all of it: nothing was collected, so the
 // second sentence never reached the recogniser and the character never learned it was said.
@@ -501,12 +520,16 @@ async function speakWhileReplyInFlight() {
   h.releaseMic(0);
   await h.flush(2);
 
+  // Counted per scenario: the harness runs every scenario in one process.
+  const asrBase = asrCalls;
+  const sentBase = chatSends;
+
   const captureBeforeSpeaking = h.snapshot().capturePhase;
   h.say();
   await h.flush(20);
   const first = {
-    asr: asrCalls,
-    sent: chatSends,
+    asr: asrCalls - asrBase,
+    sent: chatSends - sentBase,
     capture: h.snapshot().capturePhase,
     phase: h.snapshot().phase,
     transcript: h.snapshot().transcript,
@@ -516,8 +539,8 @@ async function speakWhileReplyInFlight() {
   h.say();
   await h.flush(20);
   const second = {
-    asr: asrCalls,
-    sent: chatSends,
+    asr: asrCalls - asrBase,
+    sent: chatSends - sentBase,
     capture: h.snapshot().capturePhase,
     pending: h.snapshot().pendingTurns,
     transcript: h.snapshot().transcript,
@@ -527,13 +550,50 @@ async function speakWhileReplyInFlight() {
   h.emit("reaction_complete");
   await h.flush(20);
   const afterReply = {
-    sent: chatSends,
+    sent: chatSends - sentBase,
     pending: h.snapshot().pendingTurns,
     capture: h.snapshot().capturePhase,
     phase: h.snapshot().phase,
     transcript: h.snapshot().transcript,
   };
   return {captureBeforeSpeaking, first, second, afterReply};
+}
+
+// The reply arrives when the model is done, not when the person is done talking. A reset of
+// capture lands mid-sentence, and the listening branch of audioFrame re-seeds voice.chunks from
+// a fresh preRoll -- so the words already said are dropped and the tail is what gets transcribed.
+// Nothing in the resulting turn looks wrong, which is why this is measured in submitted audio.
+async function sentenceInterruptedByReply() {
+  const h = boot();
+  h.click("voiceCallButton");
+  await h.flush(2);
+  h.releaseHealth();
+  await h.flush(2);
+  h.releaseMic(0);
+  await h.flush(2);
+
+  const asrBase = asrCalls;
+  h.say();
+  await h.flush(20);
+  h.emit("character_event", characterMessage("第一句。", 9001));
+  await h.flush(30);
+
+  h.feed(2000, 0.5);
+  const midUtterance = h.snapshot().capturePhase;
+  h.emit("character_event", characterMessage("第二句。", 9002));
+  await h.flush(30);
+  const afterInterrupt = h.snapshot().capturePhase;
+  h.feed(2000, 0.5);
+  h.feed(1000, 0);
+  await h.flush(40);
+
+  // 16-bit mono at 16kHz, less the 44-byte WAV header.
+  return {
+    midUtterance,
+    afterInterrupt,
+    asrCalls: asrCalls - asrBase,
+    lastSubmittedMs: Math.round((asrBytes[asrBytes.length - 1] - 44) / 32),
+  };
 }
 
 // The gate decides whether a recognised transcript becomes a chat fact. Whether
@@ -565,6 +625,7 @@ async function main() {
     muteThenStartTwice: await muteThenStartTwice(),
     gate: await gateVerdicts(),
     speakWhileReplyInFlight: await speakWhileReplyInFlight(),
+    sentenceInterruptedByReply: await sentenceInterruptedByReply(),
   }));
 }
 
@@ -626,6 +687,27 @@ def test_a_turn_spoken_during_a_reply_is_heard_then_queued_not_sent_into_it(tmp_
     assert after["sent"] == 2
     assert after["pending"] == 0
     assert after["capture"] == "listening"
+
+
+def test_a_reply_arriving_mid_sentence_does_not_drop_the_words_already_said(tmp_path):
+    """A four-second sentence, interrupted halfway by the character's reply.
+
+    Resetting capture while the person is still talking does not just relabel a state: the
+    listening branch of audioFrame replaces voice.chunks with a fresh preRoll, so everything
+    buffered before the reply arrived is discarded. The turn still gets sent, which is why
+    this asserts on the audio handed to the recogniser rather than on the turn existing.
+    """
+
+    turn = _run_voice_harness(tmp_path)["sentenceInterruptedByReply"]
+    assert turn["midUtterance"] == "recording", "the scenario never got into an utterance"
+    assert turn["afterInterrupt"] == "recording", "the reply reset capture out from under a sentence"
+
+    # Two seconds said, the reply, two more said, then a second of silence to endpoint. Losing
+    # the first half shows up here as ~2s of audio that was never handed to the recogniser.
+    assert turn["asrCalls"] == 2, turn
+    assert turn["lastSubmittedMs"] >= 4800, (
+        f"only {turn['lastSubmittedMs']}ms of a ~5s utterance reached the recogniser"
+    )
 
 
 def test_late_microphone_permission_cannot_leave_the_call_microphone_on(tmp_path):

@@ -201,10 +201,31 @@
     dom.mic.disabled = !voice.active;
   }
 
+  // Hands capture back to the VAD, unless it is already busy with the person's own speech.
+  //
+  // A reset that lands mid-utterance does not merely change a label: capturePhase decides which
+  // branch of audioFrame runs, and the listening branch starts a fresh preRoll and then
+  // *overwrites* voice.chunks with it. Everything buffered before the reset -- the words already
+  // said -- is gone, and what gets transcribed is the tail of the sentence. A reset that lands
+  // mid-transcription stacks a second turn on the first.
+  //
+  // The character's reply arrives on its own schedule and does not wait for the person to finish
+  // a sentence, so every writer that means "go back to listening" has to come through here.
+  // finishSpeech is what actually ends an utterance, and it always restores capture itself.
+  function resumeCapture() {
+    if (voice.capturePhase === "recording" || voice.capturePhase === "transcribing") return;
+    setCapturePhase(voice.micActive ? "listening" : "idle");
+  }
+
   function resumeInputState() {
     if (!voice.active) return;
     if (voice.micActive) {
-      setCapturePhase("listening");
+      // Still mid-sentence: the status belongs to the utterance, not to the idle call.
+      if (voice.capturePhase === "recording") {
+        setPhase("recording", "正在听你说…");
+        return;
+      }
+      resumeCapture();
       setPhase("listening", "正在听…");
       return;
     }
@@ -453,7 +474,7 @@
       formatMetrics();
     }
     voice.queue.push({text, characterId, messageId:data.id, audioPromise:null, audioUrl:null});
-    setCapturePhase("listening");
+    resumeCapture();
     if (voice.playing) prefetchNext();
     playQueue();
   }
@@ -504,8 +525,7 @@
       if (!voice.active) return;
       let message = "角色响应失败";
       try { message = JSON.parse(event.data || "{}").message || message; } catch (_) {}
-      if (voice.micActive) setCapturePhase("listening");
-      else setCapturePhase("idle");
+      resumeCapture();
       setPhase("error", message);
       setTimeout(() => voice.active && resumeInputState(), 1200);
     });
@@ -741,8 +761,9 @@
         const item = voice.queue.shift();
         voice.currentSpeakerId = item.characterId;
         renderCallIdentity();
-        if (voice.micActive) setCapturePhase("listening");
-        else setCapturePhase("idle");
+        // Each queued item lands here, so a three-action reply used to reset capture three
+        // times -- three chances to drop the sentence the person was in the middle of.
+        resumeCapture();
         setPhase("speaking", `${speakerName(item.characterId)} 正在说…`);
         const url = await scheduleSynthesis(item);
         prefetchNext();
@@ -761,8 +782,7 @@
       if (voice.active) {
         voice.currentSpeakerId = null;
         renderCallIdentity();
-        if (voice.micActive) setCapturePhase("listening");
-        else setCapturePhase("idle");
+        resumeCapture();
         setPhase("error", `TTS 失败：${error.message}`);
       }
     } finally {

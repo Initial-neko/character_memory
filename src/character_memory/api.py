@@ -380,6 +380,9 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
 
     # One application runtime access point. Feature route modules (group chat,
     # future media tools) reuse this instead of creating their own model/store.
+    # Encounter is a candidate layer, not a second character registry: it uses
+    # the character callbacks below only when the user explicitly keeps a
+    # candidate.
     app.state.character_memory = CharacterRuntimeAccess(
         settings=settings,
         get_bundle=get_bundle,
@@ -391,14 +394,12 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         character_profiles=character_profiles,
         global_sticker_catalog=global_sticker_catalog,
         refresh_runtime_sticker_catalog=refresh_runtime_sticker_catalog,
+        create_character_from_draft=create_character_from_draft,
+        rollback_created_character=rollback_created_character,
+        check_character_capacity=check_character_capacity,
+        soft_active_characters=SOFT_ACTIVE_CHARACTERS,
+        max_active_characters=MAX_ACTIVE_CHARACTERS,
     )
-    # Encounter is a candidate layer, not a second character registry. It uses
-    # these callbacks only when the user explicitly keeps a candidate.
-    app.state.character_memory.create_character_from_draft = create_character_from_draft
-    app.state.character_memory.rollback_created_character = rollback_created_character
-    app.state.character_memory.check_character_capacity = check_character_capacity
-    app.state.character_memory.soft_active_characters = SOFT_ACTIVE_CHARACTERS
-    app.state.character_memory.max_active_characters = MAX_ACTIVE_CHARACTERS
 
     def warm_runtime() -> None:
         try:

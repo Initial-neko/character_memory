@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timedelta
 import hashlib
 import json
@@ -15,6 +16,14 @@ from character_memory.persona_builder import PersonaBuilder, PersonaDraft
 
 
 logger = logging.getLogger("character_memory.encounter")
+
+# A chat reply is a follow-up to a message that is already durable, so it is
+# queued for the scheduler thread instead of running inside the POST that stored
+# the message. The queue is bounded so a burst of messages cannot grow it without
+# limit; a reply replayed long after its message is worth less than the message,
+# so dropping the newest request keeps the backlog inside the useful window.
+MAX_PENDING_CHAT_REPLIES = 50
+REPLIES_PER_DRAIN = 4
 
 
 _GENERATED_THEMES = (
@@ -235,7 +244,17 @@ Excerpt:
             return self.repository.set_status(candidate_id, "SEEN", now)
         return candidate
 
-    def chat(self, candidate_id: int, message: str, *, now: datetime | None = None) -> dict:
+    def post_message(
+        self, candidate_id: int, message: str, *, now: datetime | None = None
+    ) -> dict:
+        """Store the person's message and open the conversation.
+
+        The reply is generated separately, so the HTTP call that stores a message
+        does not also wait on the model: the person sees their own message land
+        immediately and the character answers once it has decided to. Deciding
+        not to answer stays possible, because nothing here forces a reply.
+        """
+
         now = now or datetime.now().astimezone()
         candidate = self.repository.get_candidate(candidate_id)
         if candidate is None:
@@ -245,7 +264,29 @@ Excerpt:
         clean = str(message or "").strip()
         if not clean:
             raise ValueError("message must not be empty")
-        self.repository.append_message(candidate_id, "USER", clean, now)
+        message_row = self.repository.append_message(candidate_id, "USER", clean, now)
+        # CHATTING is set here rather than with the reply: the panel is rendered
+        # open from the status, and the browser refreshes right after sending.
+        candidate = self.repository.set_status(candidate_id, "CHATTING", now)
+        return {
+            "candidate": candidate,
+            "message": message_row,
+            "messages": self.repository.list_messages(candidate_id, limit=50),
+        }
+
+    def reply(self, candidate_id: int, *, now: datetime | None = None) -> dict | None:
+        """Generate and store the character's next line, if it still wants to talk.
+
+        Returns None when the encounter closed in the meantime, which is the
+        normal outcome for a reply whose person has already moved on.
+        """
+
+        now = now or datetime.now().astimezone()
+        candidate = self.repository.get_candidate(candidate_id)
+        if candidate is None:
+            raise KeyError("encounter candidate not found")
+        if candidate["status"] in {"ACCEPTED", "DISMISSED", "EXPIRED", "FAILED"}:
+            return None
         transcript = self.repository.list_messages(candidate_id, limit=24)
         transcript_text = "\n".join(
             f"{'用户' if item['role'] == 'USER' else '角色'}: {item['content']}"
@@ -278,6 +319,17 @@ Excerpt:
             "message": message_row,
             "messages": self.repository.list_messages(candidate_id, limit=50),
         }
+
+    def chat(self, candidate_id: int, message: str, *, now: datetime | None = None) -> dict:
+        """Store a message and answer it in one call.
+
+        Kept for callers that can afford to wait for both halves; the HTTP layer
+        posts and lets the scheduler generate the reply instead.
+        """
+
+        now = now or datetime.now().astimezone()
+        posted = self.post_message(candidate_id, message, now=now)
+        return self.reply(candidate_id, now=now) or posted
 
     def accept(
         self,
@@ -350,6 +402,8 @@ Excerpt:
 
 
 class EncounterScheduler:
+    """Restart-safe interval scheduler for encounters and their replies."""
+
     def __init__(self, access, repository: EncounterRepository):
         self.access = access
         self.repository = repository
@@ -357,6 +411,8 @@ class EncounterScheduler:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
+        self._pending_lock = threading.Lock()
+        self._pending_replies: deque[tuple[int, datetime]] = deque()
 
     def interval_minutes(self) -> float:
         return max(
@@ -443,6 +499,47 @@ class EncounterScheduler:
             logger.exception("encounter.opportunity failed run_id=%s error=%s", run_id, exc)
             return [{"run_id": run_id, "status": "FAILED", "error": str(exc)}]
 
+    def enqueue_reply(self, candidate_id: int, *, now: datetime | None = None) -> bool:
+        """Queue one chat reply after its person's message is durable.
+
+        Returns False when the backlog is full, so the caller can record a
+        dropped follow-up instead of losing it without a trace.
+        """
+
+        item = (int(candidate_id), now or datetime.now().astimezone())
+        with self._pending_lock:
+            if len(self._pending_replies) >= MAX_PENDING_CHAT_REPLIES:
+                return False
+            self._pending_replies.append(item)
+        # The loop is usually parked in ``_wake.wait(...)``; the reply answers a
+        # message the person just typed, so wake the worker now.
+        self._wake.set()
+        return True
+
+    def pending_reply_count(self) -> int:
+        with self._pending_lock:
+            return len(self._pending_replies)
+
+    def drain_pending_replies(self, *, limit: int = REPLIES_PER_DRAIN) -> list[dict]:
+        """Answer queued messages. Safe to call from any thread."""
+
+        answered: list[dict] = []
+        for _ in range(max(1, int(limit))):
+            with self._pending_lock:
+                if not self._pending_replies:
+                    break
+                candidate_id, queued_at = self._pending_replies.popleft()
+            try:
+                result = self.service.reply(candidate_id, now=queued_at)
+            except Exception:
+                # The person's message is already durable, so a failed reply must
+                # not travel back to them as an error; the log keeps the reason.
+                logger.exception("encounter.reply_failed candidate=%s", candidate_id)
+                continue
+            if result is not None:
+                answered.append(result)
+        return answered
+
     def _loop(self) -> None:
         logger.info(
             "encounter.scheduler start poll_seconds=%.0f interval_minutes=%.1f",
@@ -451,9 +548,16 @@ class EncounterScheduler:
         )
         while not self._stop.is_set():
             try:
+                # Queued replies drain first: they answer a message the person
+                # just typed, so they should not wait behind an encounter scan.
+                self.drain_pending_replies()
                 self.run_once()
             except Exception:
                 logger.exception("encounter.scheduler loop_error")
+            if self.pending_reply_count():
+                # A backlog larger than one drain keeps the worker awake rather
+                # than waiting out the full polling interval.
+                self._wake.set()
             self._wake.wait(self.poll_seconds())
             self._wake.clear()
         logger.info("encounter.scheduler stop")

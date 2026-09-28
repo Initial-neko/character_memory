@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 
 from pydantic import BaseModel, Field
 
 from character_memory.web_lifecycle import background_services
 from character_memory.encounter import EncounterScheduler, EncounterService
 from character_memory.encounter_store import EncounterRepository
+
+
+logger = logging.getLogger("character_memory.encounter_web")
 
 
 class EncounterCreateRequest(BaseModel):
@@ -119,10 +123,16 @@ def attach_encounter_routes(app):
     @app.post("/v1/encounters/{candidate_id}/messages")
     def chat_encounter(candidate_id: int, req: EncounterMessageRequest):
         try:
-            result = service.chat(candidate_id, req.message)
+            # The message is stored now and answered by the scheduler thread, so
+            # a slow or failing model reply can neither hold up the send nor turn
+            # a message that was stored into an error the person would resend.
+            result = service.post_message(candidate_id, req.message)
+            if not scheduler.enqueue_reply(candidate_id):
+                logger.warning("encounter.reply_queue_full candidate=%s", candidate_id)
             return {
                 **result,
                 "candidate": payload(result["candidate"]),
+                "reply_pending": True,
             }
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

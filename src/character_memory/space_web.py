@@ -402,30 +402,28 @@ def attach_space_routes(app):
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409 if "at most" in str(exc) else 400, detail=str(exc)) from exc
-        # The comment is already durable at this point. Whether the characters
-        # answer it is a follow-up, so a provider or model failure must not turn
-        # a comment the user successfully wrote into an error they will retry --
-        # retrying would post the same comment twice.
-        try:
-            thread_replies = autonomy.process_comment_thread(
-                post_id,
-                comment.id,
-                now=now,
+        # The comment is durable now. Whether the characters answer it is a
+        # follow-up, so it is queued for the Space scheduler thread instead of
+        # running inside this request: the user gets their own comment back
+        # immediately, and the characters then see it and decide for themselves
+        # whether to answer -- including deciding to stay quiet. A failure in
+        # that follow-up must still never turn a comment the user successfully
+        # wrote into an error they would retry, because retrying would post the
+        # same comment twice.
+        if not scheduler.enqueue_comment_thread(post_id, comment.id, now=now):
+            logger.warning(
+                "space.thread_queue_full post=%s comment=%s", post_id, comment.id
             )
-        except Exception:
-            logger.exception(
-                "space.thread_failed post=%s comment=%s",
-                post_id,
-                comment.id,
-            )
-            thread_replies = []
         return {
             "comment": {
                 **comment.model_dump(mode="json"),
                 "author": comment_author_payload(comment),
                 "sticker": comment_sticker_payload(comment.sticker_id),
             },
-            "thread_replies": thread_replies,
+            # Replies are produced by the scheduler thread, so this response no
+            # longer carries them. The field stays as an empty list so a client
+            # that still reads it does not break.
+            "thread_replies": [],
             "post": post_payload(repository, repository.get_post(post_id)),
         }
 

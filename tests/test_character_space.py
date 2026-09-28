@@ -459,18 +459,23 @@ def test_browser_user_can_comment_and_reload_the_same_space_fact(tmp_path: Path)
         assert nested["actor_type"] == "USER"
 
 
-def test_a_failed_thread_reply_does_not_report_a_written_comment_as_an_error(tmp_path: Path, monkeypatch):
+def test_a_failed_follow_up_never_unsends_a_stored_comment(tmp_path: Path, monkeypatch):
     """A comment that was stored stays stored, whatever the characters do next.
 
-    The automatic replies run after the comment is already durable. A model or
-    provider failure there used to escape as a 500, so the client showed
-    "comment failed" and the user retried -- storing the same comment twice.
+    The automatic replies used to run inside the POST, and a model failure there
+    used to escape as a 500, so the client showed "comment failed" and the user
+    retried -- storing the same comment twice. They now run on the Space
+    scheduler thread, so the same guarantee has two halves: the POST never waits
+    on the model, and the worker contains a failure instead of dying on it.
     """
     config = _config(tmp_path, count=2)
     app = create_api(str(config))
     attach_space_routes(app)
 
+    calls = []
+
     def explode(self, post_id, comment_id, *, now=None, max_rounds=None):
+        calls.append((post_id, comment_id))
         raise RuntimeError("provider exploded")
 
     monkeypatch.setattr(SpaceAutonomyService, "process_comment_thread", explode)
@@ -487,6 +492,16 @@ def test_a_failed_thread_reply_does_not_report_a_written_comment_as_an_error(tmp
         )
         assert response.status_code == 200
         assert response.json()["thread_replies"] == []
+        # The request answered without touching the model at all.
+        assert calls == []
+
+        scheduler = app.state.character_memory.space_scheduler
+        assert scheduler.pending_thread_count() == 1
+
+        # The worker runs the follow-up, and the failure stays inside it.
+        assert scheduler.drain_pending_threads() == []
+        assert calls and calls[0][0] == post_id
+        assert scheduler.pending_thread_count() == 0
 
         comments = client.get(f"/v1/space/posts/{post_id}").json()["post"]["comments"]
         assert [item["content"] for item in comments] == ["我这边也是。"]
@@ -714,3 +729,22 @@ def test_space_frontend_collapses_comment_panels_by_default():
     assert ".space-comments-collapsed" in css
     assert ".space-comments-summary" in css
     assert ".space-comment-preview" in css
+
+
+def test_space_comment_box_sends_on_enter_but_keeps_shift_enter():
+    """Enter sends the comment; Shift+Enter still inserts a newline.
+
+    A composing input method reports the Enter that confirms a candidate too, so
+    the handler has to leave a keystroke that is still being composed alone --
+    otherwise a Chinese IME would send a half-typed word.
+    """
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "src" / "character_memory" / "web" / "space.js").read_text(encoding="utf-8")
+
+    assert 'feed.addEventListener("keydown"' in script
+    assert '".space-comment-input"' in script
+    assert 'event.key !== "Enter"' in script
+    assert "event.shiftKey" in script
+    assert "event.isComposing" in script
+    assert "event.keyCode === 229" in script
+    assert "requestSubmit()" in script

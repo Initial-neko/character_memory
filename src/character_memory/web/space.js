@@ -605,6 +605,20 @@
     }
   });
 
+  feed.addEventListener("keydown", event => {
+    const input = event.target?.closest?.(".space-comment-input");
+    if (!input) return;
+    // Enter sends and Shift+Enter keeps the newline. A composing IME reports the
+    // confirming Enter as well (keyCode 229 outside the standard isComposing
+    // flag), so a Chinese input method must not be cut off mid-word.
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+    const form = input.closest("[data-space-comment-form]");
+    if (!form) return;
+    event.preventDefault();
+    if (typeof form.requestSubmit === "function") form.requestSubmit();
+    else form.dispatchEvent(new Event("submit", {cancelable:true, bubbles:true}));
+  });
+
   feed.addEventListener("submit", async event => {
     const form = event.target.closest("[data-space-comment-form]");
     if (!form) return;

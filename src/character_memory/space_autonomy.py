@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timedelta
 import hashlib
 import json
@@ -27,6 +28,17 @@ logger = logging.getLogger("character_memory.space_autonomy")
 
 MAX_AUTONOMOUS_AUDIENCE = 10
 MAX_AUTOMATIC_REPLY_ROUNDS = 4
+
+# A reply to a Space comment is a follow-up to a comment that is already
+# durable, so it is queued for the scheduler thread instead of running inside
+# the POST that stored the comment. The queue is bounded because one comment
+# can already fan out to MAX_AUTOMATIC_REPLY_ROUNDS model calls: a burst that
+# outruns the worker would otherwise grow without limit, and a reply replayed
+# much later is worth less than the comment it belongs to. Dropping the newest
+# request keeps the backlog inside the window where the reply still reads as a
+# reaction to what the user just wrote.
+MAX_PENDING_COMMENT_THREADS = 200
+THREADS_PER_DRAIN = 8
 
 # The opportunity ledger keeps the raw structured output of each autonomous
 # model call so a prompt experiment can read why a plan came back empty
@@ -839,6 +851,8 @@ class SpaceAutonomyScheduler:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
+        self._pending_lock = threading.Lock()
+        self._pending_threads: deque[tuple[int, int, datetime]] = deque()
 
     def interval_minutes(self) -> float:
         return max(
@@ -1083,6 +1097,55 @@ class SpaceAutonomyScheduler:
         self._wake.set()
         return state
 
+    def enqueue_comment_thread(
+        self, post_id: int, comment_id: int, *, now: datetime | None = None
+    ) -> bool:
+        """Queue one Space discussion to advance after its comment is durable.
+
+        Returns False when the backlog is full, so the caller can record a
+        dropped follow-up instead of losing it without a trace.
+        """
+
+        item = (int(post_id), int(comment_id), now or datetime.now().astimezone())
+        with self._pending_lock:
+            if len(self._pending_threads) >= MAX_PENDING_COMMENT_THREADS:
+                return False
+            self._pending_threads.append(item)
+        # The loop is usually parked in ``_wake.wait(poll_seconds)``. A reply is
+        # a reaction to something the user just did, so wake the worker now
+        # rather than making the user wait out the polling interval.
+        self._wake.set()
+        return True
+
+    def pending_thread_count(self) -> int:
+        with self._pending_lock:
+            return len(self._pending_threads)
+
+    def drain_pending_threads(self, *, limit: int = THREADS_PER_DRAIN) -> list[dict]:
+        """Advance queued discussions. Safe to call from any thread."""
+
+        advanced: list[dict] = []
+        for _ in range(max(1, int(limit))):
+            with self._pending_lock:
+                if not self._pending_threads:
+                    break
+                post_id, comment_id, queued_at = self._pending_threads.popleft()
+            try:
+                replies = self.service.process_comment_thread(
+                    post_id, comment_id, now=queued_at
+                )
+            except Exception:
+                # The comment is already durable, so a failed follow-up must not
+                # travel back to the user as an error they would retry; the log
+                # keeps the reason, the queue moves on.
+                logger.exception(
+                    "space.thread_failed post=%s comment=%s", post_id, comment_id
+                )
+                continue
+            if replies:
+                advanced.extend(replies)
+        return advanced
+
     def run_once(self, now: datetime | None = None) -> list[dict]:
         now = now or datetime.now().astimezone()
         if not autonomy_enabled(self.access):
@@ -1166,9 +1229,17 @@ class SpaceAutonomyScheduler:
         )
         while not self._stop.is_set():
             try:
+                # Comment follow-ups drain first and are deliberately not gated
+                # on Space autonomy: answering a comment is a reaction to what
+                # the user did, not an autonomous post of the character's own.
+                self.drain_pending_threads()
                 self.run_once()
             except Exception:
                 logger.exception("space.scheduler loop_error")
+            if self.pending_thread_count():
+                # A backlog larger than one drain keeps the worker awake rather
+                # than waiting out the full polling interval.
+                self._wake.set()
             self._wake.wait(self.poll_seconds)
             self._wake.clear()
         logger.info("space.scheduler stop")

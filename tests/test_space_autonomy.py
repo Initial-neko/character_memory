@@ -30,6 +30,7 @@ from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
 from character_memory.space_autonomy import (
+    MAX_PENDING_COMMENT_THREADS,
     MAX_RAW_MODEL_OUTPUT_CHARS,
     SpaceAutonomyScheduler,
     SpaceAutonomyService,
@@ -1173,3 +1174,24 @@ def test_status_payload_does_not_grow_with_raw_model_output(tmp_path):
     assert "长" * 200 not in short_payload and "长" * 200 not in long_payload
     # Only wall-clock timestamps differ between the two payloads.
     assert abs(len(long_payload) - len(short_payload)) < 200
+
+
+def test_the_comment_thread_queue_refuses_to_grow_without_limit(tmp_path):
+    """One comment already fans out to several model calls, so the backlog is capped.
+
+    A reply that waited behind hundreds of queued comments would land long after
+    the comment it answers, so the worker refuses new work once its backlog is
+    full instead of accepting it and delivering it far too late.
+    """
+
+    access, store, _ = _access(tmp_path)
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository)
+
+    for comment_id in range(MAX_PENDING_COMMENT_THREADS):
+        assert scheduler.enqueue_comment_thread(7, comment_id) is True
+    assert scheduler.pending_thread_count() == MAX_PENDING_COMMENT_THREADS
+
+    assert scheduler.enqueue_comment_thread(7, MAX_PENDING_COMMENT_THREADS) is False
+    assert scheduler.pending_thread_count() == MAX_PENDING_COMMENT_THREADS
+    store.close()

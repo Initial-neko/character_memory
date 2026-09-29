@@ -466,6 +466,41 @@ class SpaceRepository:
             ).fetchall()
         return [self._reaction_from_row(row) for row in rows]
 
+    def pair_engagement_counts(self, first_id: str, second_id: str) -> dict[str, int]:
+        """Cheap durable Space affinity signal for audience selection.
+
+        This intentionally reads only public Space facts that already exist:
+        comments written on each other's posts and LIKE reactions on each
+        other's posts.  It does not invoke a model and it does not infer a
+        hidden relationship score from private chat.
+        """
+        first = str(first_id or "").strip()
+        second = str(second_id or "").strip()
+        if not first or not second or first == second:
+            return {"comments": 0, "likes": 0}
+        pair = (first, second, second, first)
+        with self.store._lock:
+            comments = self.store.conn.execute(
+                "SELECT COUNT(*) AS total FROM space_comments c "
+                "JOIN space_posts p ON p.id=c.post_id "
+                "WHERE c.actor_type='CHARACTER' AND "
+                "((c.character_id=? AND p.character_id=?) OR "
+                "(c.character_id=? AND p.character_id=?))",
+                pair,
+            ).fetchone()
+            likes = self.store.conn.execute(
+                "SELECT COUNT(*) AS total FROM space_reactions r "
+                "JOIN space_posts p ON p.id=r.post_id "
+                "WHERE r.reaction_type='LIKE' AND "
+                "((r.character_id=? AND p.character_id=?) OR "
+                "(r.character_id=? AND p.character_id=?))",
+                pair,
+            ).fetchone()
+        return {
+            "comments": int(comments["total"] if comments is not None else 0),
+            "likes": int(likes["total"] if likes is not None else 0),
+        }
+
     def set_reaction(
         self,
         post_id: int,

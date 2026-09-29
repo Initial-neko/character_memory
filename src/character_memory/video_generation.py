@@ -5,10 +5,11 @@ from datetime import datetime, timedelta
 import re
 import time
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from character_memory.remote_media import ensure_public_http_url
 from character_memory.time_utils import epoch_us
 
 
@@ -53,6 +54,7 @@ class MetasoMiniMaxVideoProvider:
         max_bytes: int = 64 * 1024 * 1024,
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        url_validator: Callable[[str], None] = ensure_public_http_url,
     ):
         self.api_key = str(api_key or "").strip()
         self.base_url = str(base_url or "").rstrip("/")
@@ -63,6 +65,7 @@ class MetasoMiniMaxVideoProvider:
         self._client = client or httpx.Client(timeout=min(self.timeout_seconds, 600.0))
         self._owns_client = client is None
         self._sleep = sleep
+        self._url_validator = url_validator
 
     def available(self) -> bool:
         return bool(self.api_key and self.base_url)
@@ -117,31 +120,54 @@ class MetasoMiniMaxVideoProvider:
             raise ValueError("video ratio must not be empty")
 
     def _download(self, url: str) -> tuple[bytes, str]:
-        parsed = urlparse(str(url or ""))
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise RuntimeError("MiniMax H3 returned an invalid video URL")
-        response = self._client.get(url, headers=self._headers(), follow_redirects=True)
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"MiniMax H3 video download failed with HTTP {response.status_code}: "
-                f"{self._safe_error(response.text)}"
-            )
-        raw_length = response.headers.get("content-length")
-        if raw_length:
+        current = str(url or "").strip()
+        for _ in range(5):
             try:
-                if int(raw_length) > self.max_bytes:
-                    raise RuntimeError("generated video exceeds configured byte limit")
-            except ValueError:
-                pass
-        payload = bytes(response.content or b"")
-        if not payload:
-            raise RuntimeError("MiniMax H3 returned an empty video")
-        if len(payload) > self.max_bytes:
-            raise RuntimeError("generated video exceeds configured byte limit")
-        mime_type = str(response.headers.get("content-type") or "video/mp4").split(";", 1)[0].strip().lower()
-        if not mime_type.startswith("video/"):
-            mime_type = "video/mp4"
-        return payload, mime_type
+                self._url_validator(current)
+            except ValueError as exc:
+                raise RuntimeError(f"MiniMax H3 returned an unsafe video URL: {exc}") from exc
+
+            # The generation API credential must never be forwarded to a returned
+            # CDN/signed URL. Validate every redirect as a separate trust boundary.
+            response = self._client.get(
+                current,
+                headers={
+                    "Accept": "video/*",
+                    "User-Agent": "character-memory/0.13 video-generation",
+                },
+                follow_redirects=False,
+            )
+            if 300 <= response.status_code < 400:
+                location = str(response.headers.get("location") or "").strip()
+                if not location:
+                    raise RuntimeError("MiniMax H3 video download redirected without Location")
+                current = urljoin(current, location)
+                continue
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"MiniMax H3 video download failed with HTTP {response.status_code}: "
+                    f"{self._safe_error(response.text)}"
+                )
+
+            raw_length = response.headers.get("content-length")
+            if raw_length:
+                try:
+                    if int(raw_length) > self.max_bytes:
+                        raise RuntimeError("generated video exceeds configured byte limit")
+                except ValueError:
+                    pass
+            payload = bytes(response.content or b"")
+            if not payload:
+                raise RuntimeError("MiniMax H3 returned an empty video")
+            if len(payload) > self.max_bytes:
+                raise RuntimeError("generated video exceeds configured byte limit")
+            mime_type = str(
+                response.headers.get("content-type") or "video/mp4"
+            ).split(";", 1)[0].strip().lower()
+            if not mime_type.startswith("video/"):
+                mime_type = "video/mp4"
+            return payload, mime_type
+        raise RuntimeError("MiniMax H3 video download exceeded redirect limit")
 
     def generate(self, request: VideoGenerationRequest) -> VideoGenerationResult:
         self._validate(request)

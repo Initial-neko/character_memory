@@ -18,6 +18,25 @@ from character_memory.time_utils import epoch_us
 logger = logging.getLogger("character_memory.world_activity")
 
 
+# A false PersonalBrowsePlan is itself a model decision: absent any new
+# character experience, immediately asking the same model the same question on
+# every 30-minute tick mostly buys repeated "browse=false" answers. These event
+# types are cheap durable signals that the person's context actually changed.
+# TIME_TICK and ACTION are intentionally excluded because scheduler noise and
+# materialized actions would otherwise defeat the gate on every cycle.
+BROWSE_RECONSIDER_EVENT_TYPES = (
+    EventType.USER_MESSAGE,
+    EventType.CHARACTER_MESSAGE,
+    EventType.LIFE_EVENT,
+    EventType.DIARY,
+    EventType.SOCIAL_POST,
+    EventType.SPACE_POST_SEEN,
+    EventType.SPACE_COMMENT_RECEIVED,
+    EventType.WORLD_OBSERVATION,
+    EventType.PROACTIVE_INTENT,
+)
+
+
 class WorldPulseTopicDraft(BaseModel):
     title: str = Field(min_length=2, max_length=240)
     summary: str = Field(min_length=2, max_length=1800)
@@ -505,6 +524,62 @@ class WorldPulseRepository:
             item["details"] = json.loads(item.pop("details_json") or "{}")
             result.append(item)
         return result
+
+    def latest_run(self, kind: str, subject_id: str) -> dict | None:
+        """Latest paid/real run for one activity subject.
+
+        Zero-LLM scheduler deferrals are state transitions rather than run rows,
+        so this remains the last point at which the browse planner was actually
+        allowed to decide.
+        """
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM world_activity_runs "
+                "WHERE kind=? AND subject_id=? "
+                "ORDER BY started_at_epoch DESC,id DESC LIMIT 1",
+                (kind, subject_id),
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["details"] = json.loads(item.pop("details_json") or "{}")
+        return item
+
+    def defer_state(
+        self,
+        kind: str,
+        subject_id: str,
+        next_at: datetime,
+        *,
+        status: str,
+        interval_minutes: float,
+    ) -> None:
+        """Move the next clock without pretending a model/provider run occurred."""
+        normalized_interval = max(10.0, float(interval_minutes))
+        with self.store.transaction():
+            self.store.conn.execute(
+                """
+                INSERT INTO world_activity_state(
+                    kind,subject_id,next_run_at,next_run_at_epoch,
+                    configured_interval_minutes,last_status,last_error
+                ) VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(kind,subject_id) DO UPDATE SET
+                    next_run_at=excluded.next_run_at,
+                    next_run_at_epoch=excluded.next_run_at_epoch,
+                    configured_interval_minutes=excluded.configured_interval_minutes,
+                    last_status=excluded.last_status,
+                    last_error=''
+                """,
+                (
+                    kind,
+                    subject_id,
+                    next_at.isoformat(),
+                    epoch_us(next_at),
+                    normalized_interval,
+                    status,
+                    "",
+                ),
+            )
 
     def count_runs_since(self, kind: str, subject_id: str, since: datetime) -> int:
         """How many runs of one kind one subject started at or after ``since``.
@@ -1016,6 +1091,70 @@ class WorldActivityScheduler:
             min(200, int(getattr(self.access.settings, "world_browse_daily_max", 10))),
         )
 
+    def browse_idle_recheck_minutes(self, base_minutes: float | None = None) -> float:
+        """How long a model-declared idle period may suppress repeated planning.
+
+        It scales with the existing browse cadence instead of introducing
+        another user-facing knob. The cap guarantees that an otherwise quiet
+        character still gets a fresh autonomous browse decision at least every
+        six hours.
+        """
+        base = (
+            self._interval("world_browse_interval_minutes", 30.0)
+            if base_minutes is None
+            else max(10.0, float(base_minutes))
+        )
+        return max(60.0, min(360.0, base * 4.0))
+
+    def _has_browse_reconsideration_signal(
+        self,
+        character_id: str,
+        *,
+        since_epoch: int,
+    ) -> bool:
+        store = self.access.read_store
+        for event_type in BROWSE_RECONSIDER_EVENT_TYPES:
+            events = store.list_events(
+                character_id,
+                limit=1,
+                event_type=event_type.value,
+            )
+            if events and epoch_us(events[-1].event_time) > since_epoch:
+                return True
+        return False
+
+    def _browse_plan_due(
+        self,
+        character_id: str,
+        now: datetime,
+        *,
+        base_minutes: float,
+    ) -> tuple[bool, str]:
+        last = self.repository.latest_run("BROWSE", character_id)
+        if last is None:
+            return True, "FIRST_OPPORTUNITY"
+        if str(last.get("status") or "").upper() != "OK":
+            return True, "RETRY_AFTER_FAILURE"
+        if (last.get("details") or {}).get("browsed") is not False:
+            return True, "LAST_PLAN_BROWSED"
+
+        last_epoch = int(
+            last.get("completed_at_epoch")
+            or last.get("started_at_epoch")
+            or 0
+        )
+        if last_epoch <= 0:
+            return True, "UNKNOWN_LAST_RUN_TIME"
+        quiet_for_minutes = max(0, epoch_us(now) - last_epoch) / 60_000_000
+        if quiet_for_minutes >= self.browse_idle_recheck_minutes(base_minutes):
+            return True, "IDLE_RECHECK_ELAPSED"
+        if self._has_browse_reconsideration_signal(
+            character_id,
+            since_epoch=last_epoch,
+        ):
+            return True, "NEW_CHARACTER_SIGNAL"
+        return False, "IDLE_NO_NEW_SIGNAL"
+
     def _browses_today(self, character_id: str, now: datetime) -> int:
         midnight = now.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
         return self.repository.count_runs_since("BROWSE", character_id, midnight)
@@ -1187,6 +1326,31 @@ class WorldActivityScheduler:
                 # Settings value an operator is expected to tune.
                 if browse_daily_max and self._browses_today(character_id, now) >= browse_daily_max:
                     continue
+                should_plan, gate_reason = self._browse_plan_due(
+                    character_id,
+                    now,
+                    base_minutes=browse_interval,
+                )
+                if not should_plan:
+                    next_minutes = self._next_interval(
+                        browse_interval,
+                        f"BROWSE-IDLE:{character_id}",
+                        now,
+                    )
+                    self.repository.defer_state(
+                        "BROWSE",
+                        character_id,
+                        now + timedelta(minutes=next_minutes),
+                        status=gate_reason,
+                        interval_minutes=browse_interval,
+                    )
+                    logger.debug(
+                        "world.activity browse_deferred character=%s reason=%s next_minutes=%.1f",
+                        character_id,
+                        gate_reason,
+                        next_minutes,
+                    )
+                    continue
                 outcomes.append(
                     self._run_kind(
                         "BROWSE",
@@ -1234,6 +1398,7 @@ class WorldActivityScheduler:
                 30.0,
             ),
             "browse_daily_max": self.browse_daily_max(),
+            "browse_idle_recheck_minutes": self.browse_idle_recheck_minutes(),
             "poll_seconds": self.poll_seconds,
             "sources": list(
                 getattr(self.access.settings, "world_pulse_sources", [])

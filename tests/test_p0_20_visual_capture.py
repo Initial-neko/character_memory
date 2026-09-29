@@ -88,6 +88,24 @@ def test_visual_capture_assets_cover_camera_display_keyframes_and_call_persisten
     assert ".voice-call-dock-visual" in css
 
 
+def test_display_capture_keeps_high_resolution_frames_for_readable_screen_text():
+    capture = Path("src/character_memory/web/visual_capture.js").read_text(encoding="utf-8")
+
+    # Difference detection remains cheap; only accepted frames pay the larger
+    # encode cost. Screen sharing gets materially more pixels and less JPEG loss
+    # than camera capture because its primary content is often small UI text.
+    assert "analysisWidth: 64" in capture
+    assert "cameraMaxSide: 720" in capture
+    assert "displayMaxSide: 1440" in capture
+    assert "cameraJpegQuality: 0.82" in capture
+    assert "displayJpegQuality: 0.90" in capture
+    assert 'const display = state.source === "DISPLAY";' in capture
+    assert "display ? config.displayMaxSide : config.cameraMaxSide" in capture
+    assert "display ? config.displayJpegQuality : config.cameraJpegQuality" in capture
+    assert "maxSide: 512" not in capture
+    assert "jpegQuality: 0.72" not in capture
+
+
 def test_voice_uses_only_confirmed_female_speaker_pool():
     voice = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
     assert "const TTS_SPEAKER_IDS = [0, 2, 5];" in voice

@@ -28,6 +28,7 @@
     let workletNode = null;
     let silentGain = null;
     let readyPromise = null;
+    let flushWaiter = null;
 
     function snapshot() {
       return {
@@ -42,8 +43,18 @@
       onStateChange(snapshot());
     }
 
+    function settleFlush(error = null, data = null) {
+      if (!flushWaiter) return;
+      const waiter = flushWaiter;
+      flushWaiter = null;
+      clearTimeout(waiter.timer);
+      if (error) waiter.reject(error);
+      else waiter.resolve(data || {});
+    }
+
     function fail(error) {
       const value = error instanceof Error ? error : new Error(String(error || "ASR stream failed"));
+      settleFlush(value);
       onError(value);
       return value;
     }
@@ -86,6 +97,10 @@
           }
           if (data.kind === "final") {
             onFinal(data);
+            return;
+          }
+          if (data.kind === "flushed") {
+            settleFlush(null, data);
             return;
           }
           if (data.kind === "error") {
@@ -166,7 +181,21 @@
     }
 
     function flush(reason = "user_stop") {
-      return command("flush", {reason});
+      if (flushWaiter) return Promise.reject(new Error("ASR flush is already pending"));
+      if (!ready || !socket || socket.readyState !== WebSocket.OPEN) {
+        return Promise.reject(new Error("ASR stream is not ready"));
+      }
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (!flushWaiter) return;
+          flushWaiter = null;
+          reject(new Error("ASR flush timed out"));
+        }, 8000);
+        flushWaiter = {resolve, reject, timer};
+        if (!command("flush", {reason})) {
+          settleFlush(new Error("ASR stream is not ready"));
+        }
+      });
     }
 
     function cancel() {
@@ -178,6 +207,7 @@
       if (closed) return;
       closed = true;
       ready = false;
+      settleFlush(new Error("ASR stream closed"));
       detach();
       try { socket?.close?.(1000, "client_close"); } catch (_) {}
       socket = null;

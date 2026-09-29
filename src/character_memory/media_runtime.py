@@ -215,6 +215,175 @@ class SherpaSenseVoiceProvider(SpeechRecognitionProvider):
         }
 
 
+class SherpaParaformerStreamingProvider(SpeechRecognitionProvider):
+    """Low-resource streaming Chinese ASR using sherpa-onnx Online Paraformer.
+
+    The provider owns model construction; each call to create_session() owns
+    exactly one OnlineStream and therefore one speech session. The model is
+    loaded lazily and remains resident for reuse.
+    """
+
+    def __init__(
+        self,
+        *,
+        encoder: str,
+        decoder: str,
+        tokens: str,
+        device: str = "cpu",
+        num_threads: int = 2,
+        endpoint_silence_ms: int = 1200,
+        endpoint_short_silence_ms: int = 800,
+    ):
+        self.encoder_path = str(encoder)
+        self.decoder_path = str(decoder)
+        self.tokens_path = str(tokens)
+        self.device = str(device or "cpu")
+        self.num_threads = max(1, int(num_threads))
+        self.endpoint_silence_ms = max(200, int(endpoint_silence_ms))
+        self.endpoint_short_silence_ms = max(200, int(endpoint_short_silence_ms))
+        self._recognizer = None
+        self._lock = threading.RLock()
+
+    def _ensure(self):
+        if self._recognizer is not None:
+            return self._recognizer
+        with self._lock:
+            if self._recognizer is not None:
+                return self._recognizer
+            required = (
+                (self.encoder_path, "Paraformer encoder"),
+                (self.decoder_path, "Paraformer decoder"),
+                (self.tokens_path, "Paraformer tokens"),
+            )
+            for value, label in required:
+                if not Path(value).is_file():
+                    raise RuntimeError(f"{label} not found: {value}")
+            try:
+                import sherpa_onnx
+            except ImportError as exc:
+                raise RuntimeError(
+                    'sherpa-onnx 未安装；执行 pip install -e ".[media]"'
+                ) from exc
+            self._recognizer = sherpa_onnx.OnlineRecognizer.from_paraformer(
+                tokens=self.tokens_path,
+                encoder=self.encoder_path,
+                decoder=self.decoder_path,
+                num_threads=self.num_threads,
+                sample_rate=16000,
+                feature_dim=80,
+                enable_endpoint_detection=True,
+                rule1_min_trailing_silence=self.endpoint_silence_ms / 1000.0,
+                rule2_min_trailing_silence=self.endpoint_short_silence_ms / 1000.0,
+                # Do not use a short utterance-length rule as a normal cutoff.
+                rule3_min_utterance_length=20.0,
+                provider=self.device,
+                decoding_method="greedy_search",
+            )
+            return self._recognizer
+
+    def create_session(self):
+        return SherpaParaformerStreamingSession(self, self._ensure())
+
+    def transcribe(self, samples: np.ndarray, sample_rate: int) -> TranscriptionResult:
+        if len(samples) == 0:
+            raise ValueError("empty audio")
+        started = time.perf_counter()
+        session = self.create_session()
+        session.push_audio(samples, sample_rate=sample_rate)
+        result = session.finish()
+        inference_ms = (time.perf_counter() - started) * 1000.0
+        if not result.text:
+            raise ValueError("未识别到可用文本")
+        return TranscriptionResult(
+            text=result.text,
+            provider="sherpa-paraformer-streaming",
+            model=self.encoder_path,
+            device=self.device,
+            inference_ms=round(inference_ms, 1),
+            audio_ms=round(len(samples) * 1000.0 / max(1, int(sample_rate)), 1),
+        )
+
+    def status(self) -> dict:
+        ready = all(
+            Path(value).is_file()
+            for value in (self.encoder_path, self.decoder_path, self.tokens_path)
+        )
+        return {
+            "ready": ready,
+            "loaded": self._recognizer is not None,
+            "provider": "sherpa-paraformer-streaming",
+            "model": self.encoder_path,
+            "decoder": self.decoder_path,
+            "tokens": self.tokens_path,
+            "device": self.device,
+            "num_threads": self.num_threads,
+            "sample_rate": 16000,
+            "streaming": True,
+            "model_params": "220M-class",
+            "endpoint_silence_ms": self.endpoint_silence_ms,
+            "endpoint_short_silence_ms": self.endpoint_short_silence_ms,
+        }
+
+
+class SherpaParaformerStreamingSession:
+    def __init__(self, provider: SherpaParaformerStreamingProvider, recognizer):
+        self.provider = provider
+        self.recognizer = recognizer
+        self.stream = recognizer.create_stream()
+        self.started = time.perf_counter()
+        self.audio_samples = 0
+        self.closed = False
+        self._last_text = ""
+
+    def push_audio(self, samples: np.ndarray, *, sample_rate: int = 16000) -> str:
+        if self.closed:
+            raise RuntimeError("ASR stream is closed")
+        values = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if values.size == 0:
+            return self._last_text
+        if int(sample_rate) != 16000:
+            raise ValueError("Paraformer streaming requires 16 kHz PCM audio")
+        self.stream.accept_waveform(16000, values)
+        self.audio_samples += int(values.size)
+        self._decode_ready()
+        self._last_text = str(self.recognizer.get_result(self.stream) or "").strip()
+        return self._last_text
+
+    def is_endpoint(self) -> bool:
+        if self.closed:
+            return True
+        return bool(self.recognizer.is_endpoint(self.stream))
+
+    def reset_endpoint(self) -> None:
+        if self.closed:
+            return
+        self.recognizer.reset(self.stream)
+        self._last_text = ""
+
+    def finish(self):
+        if self.closed:
+            return type("Result", (), {"text": self._last_text})()
+        # Paraformer streaming needs tail audio to flush the last look-ahead
+        # window. Keep this server-side so browser endpoint timing cannot drop
+        # the final syllables of an utterance.
+        self.stream.accept_waveform(
+            16000,
+            np.zeros(int(0.6 * 16000), dtype=np.float32),
+        )
+        self.stream.input_finished()
+        self._decode_ready(force=True)
+        text = str(self.recognizer.get_result(self.stream) or "").strip()
+        self.closed = True
+        return type("Result", (), {"text": text})()
+
+    def _decode_ready(self, *, force: bool = False) -> None:
+        while self.recognizer.is_ready(self.stream):
+            self.recognizer.decode_stream(self.stream)
+        if force:
+            # input_finished() can make another decode step available.
+            while self.recognizer.is_ready(self.stream):
+                self.recognizer.decode_stream(self.stream)
+
 class SherpaVitsProvider(TextToSpeechProvider):
     """Small VITS TTS provider using the same sherpa-onnx runtime as ASR."""
 
@@ -375,20 +544,41 @@ class MediaRuntime:
 
 
 def build_media_runtime_from_env() -> MediaRuntime:
-    asr_model = os.getenv("CHARACTER_MEDIA_ASR_MODEL", "").strip()
-    asr_tokens = os.getenv("CHARACTER_MEDIA_ASR_TOKENS", "").strip()
-    if asr_model and asr_tokens:
-        asr: SpeechRecognitionProvider = SherpaSenseVoiceProvider(
-            model=asr_model,
-            tokens=asr_tokens,
-            device=os.getenv("CHARACTER_MEDIA_ASR_DEVICE", "cpu"),
-            language=os.getenv("CHARACTER_MEDIA_ASR_LANGUAGE", "zh"),
-            num_threads=int(os.getenv("CHARACTER_MEDIA_ASR_THREADS", "2")),
-        )
+    asr_provider = os.getenv("CHARACTER_MEDIA_ASR_PROVIDER", "sensevoice").strip().lower()
+    if asr_provider in {"paraformer", "paraformer-streaming", "sherpa-paraformer-streaming"}:
+        encoder = os.getenv("CHARACTER_MEDIA_ASR_ENCODER", "").strip()
+        decoder = os.getenv("CHARACTER_MEDIA_ASR_DECODER", "").strip()
+        tokens = os.getenv("CHARACTER_MEDIA_ASR_TOKENS", "").strip()
+        if encoder and decoder and tokens:
+            asr: SpeechRecognitionProvider = SherpaParaformerStreamingProvider(
+                encoder=encoder,
+                decoder=decoder,
+                tokens=tokens,
+                device=os.getenv("CHARACTER_MEDIA_ASR_DEVICE", "cpu"),
+                num_threads=int(os.getenv("CHARACTER_MEDIA_ASR_THREADS", "2")),
+                endpoint_silence_ms=int(os.getenv("CHARACTER_MEDIA_ASR_ENDPOINT_SILENCE_MS", "1200")),
+                endpoint_short_silence_ms=int(os.getenv("CHARACTER_MEDIA_ASR_ENDPOINT_SHORT_SILENCE_MS", "800")),
+            )
+        else:
+            asr = UnavailableSpeechRecognitionProvider(
+                "Paraformer ASR 未配置：设置 CHARACTER_MEDIA_ASR_ENCODER / "
+                "CHARACTER_MEDIA_ASR_DECODER / CHARACTER_MEDIA_ASR_TOKENS"
+            )
     else:
-        asr = UnavailableSpeechRecognitionProvider(
-            "ASR 未配置：设置 CHARACTER_MEDIA_ASR_MODEL / CHARACTER_MEDIA_ASR_TOKENS"
-        )
+        asr_model = os.getenv("CHARACTER_MEDIA_ASR_MODEL", "").strip()
+        asr_tokens = os.getenv("CHARACTER_MEDIA_ASR_TOKENS", "").strip()
+        if asr_model and asr_tokens:
+            asr = SherpaSenseVoiceProvider(
+                model=asr_model,
+                tokens=asr_tokens,
+                device=os.getenv("CHARACTER_MEDIA_ASR_DEVICE", "cpu"),
+                language=os.getenv("CHARACTER_MEDIA_ASR_LANGUAGE", "zh"),
+                num_threads=int(os.getenv("CHARACTER_MEDIA_ASR_THREADS", "2")),
+            )
+        else:
+            asr = UnavailableSpeechRecognitionProvider(
+                "ASR 未配置：设置 CHARACTER_MEDIA_ASR_MODEL / CHARACTER_MEDIA_ASR_TOKENS"
+            )
 
     tts_model = os.getenv("CHARACTER_MEDIA_TTS_MODEL", "").strip()
     tts_tokens = os.getenv("CHARACTER_MEDIA_TTS_TOKENS", "").strip()

@@ -112,6 +112,7 @@
   function voiceReloadMessage(result) {
     const registry = result?.voice_registry;
     if (!registry || registry.reloaded !== false) return null;
+    if (registry.status === "skipped") return null;
     const reason = String(registry.reason || "").trim();
     // A payload without a status predates this split, and every one of those
     // meant "the refresh did not happen". Fall through to the refusal case so

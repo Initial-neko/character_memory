@@ -43,6 +43,7 @@ class FakeRuntime:
 class FakeModel:
     def __init__(self):
         self.calls = []
+        self.browse = True
         # The usage scope is a ContextVar, so recording it here is what proves a
         # call site actually set it -- reading the session id back later cannot.
         self.scopes = []
@@ -75,8 +76,8 @@ class FakeModel:
             )
         if schema is PersonalBrowsePlan:
             return PersonalBrowsePlan(
-                browse=True,
-                query="agent memory architecture",
+                browse=self.browse,
+                query="agent memory architecture" if self.browse else "",
             )
         if schema is PersonalBrowseAppraisal:
             return PersonalBrowseAppraisal(
@@ -421,4 +422,85 @@ def test_browse_daily_ceiling_of_zero_means_unlimited(tmp_path):
     for _ in range(3):
         scheduler.force_due("BROWSE", "c00", now=NOW)
         assert len(_browsed(scheduler.run_once(now=NOW))) == 1
+    store.close()
+
+
+def _browse_plan_call_count(model):
+    return sum(1 for name, _, _ in model.calls if name == "PersonalBrowsePlan")
+
+
+def test_idle_browse_gate_skips_repeated_plan_without_new_character_signal(tmp_path):
+    store, access, model = make_access(tmp_path, count=1)
+    access.settings.world_browse_interval_minutes = 30
+    model.browse = False
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+
+    # Establish the normal clocks, then spend one real model decision.
+    scheduler.run_once(now=NOW)
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    assert len(_browsed(scheduler.run_once(now=NOW))) == 1
+    assert _browse_plan_call_count(model) == 1
+
+    # The next due tick has the same durable person context. The previous model
+    # already said browse=false, so the scheduler re-arms without another LLM
+    # call and without consuming the daily browse-attempt ceiling.
+    again = NOW + timedelta(minutes=31)
+    scheduler.force_due("BROWSE", "c00", now=again)
+    assert _browsed(scheduler.run_once(now=again)) == []
+    assert _browse_plan_call_count(model) == 1
+    state = next(
+        item for item in repo.states()
+        if item["kind"] == "BROWSE" and item["subject_id"] == "c00"
+    )
+    assert state["last_status"] == "IDLE_NO_NEW_SIGNAL"
+    assert repo.count_runs_since("BROWSE", "c00", NOW - timedelta(minutes=1)) == 1
+    store.close()
+
+
+def test_idle_browse_gate_reopens_immediately_after_new_character_event(tmp_path):
+    store, access, model = make_access(tmp_path, count=1)
+    access.settings.world_browse_interval_minutes = 30
+    model.browse = False
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+
+    scheduler.run_once(now=NOW)
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    assert len(_browsed(scheduler.run_once(now=NOW))) == 1
+
+    changed = NOW + timedelta(minutes=10)
+    store.append_event(
+        Event(
+            character_id="c00",
+            event_type=EventType.USER_MESSAGE,
+            event_time=changed,
+            content="最近突然对本地语音模型很感兴趣。",
+            metadata={"channel": "DIRECT"},
+        )
+    )
+    scheduler.force_due("BROWSE", "c00", now=changed)
+    assert len(_browsed(scheduler.run_once(now=changed))) == 1
+    assert _browse_plan_call_count(model) == 2
+    store.close()
+
+
+def test_idle_browse_gate_periodically_rechecks_even_without_new_events(tmp_path):
+    store, access, model = make_access(tmp_path, count=1)
+    access.settings.world_browse_interval_minutes = 30
+    model.browse = False
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+
+    scheduler.run_once(now=NOW)
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    assert len(_browsed(scheduler.run_once(now=NOW))) == 1
+
+    # 4x the configured cadence = 120 minutes for the default-style 30m
+    # schedule. The gate is a backoff, not a permanent deterministic veto.
+    recheck = NOW + timedelta(minutes=121)
+    scheduler.force_due("BROWSE", "c00", now=recheck)
+    assert len(_browsed(scheduler.run_once(now=recheck))) == 1
+    assert _browse_plan_call_count(model) == 2
+    assert scheduler.status()["browse_idle_recheck_minutes"] == 120
     store.close()

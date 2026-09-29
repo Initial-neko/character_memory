@@ -33,7 +33,7 @@ groups, so what the first screen shows is decided by the schema and not by the
 frontend.
 
 ```text
-common      8 fields + the two keys a user must supply   -> first screen
+common      9 fields + the two keys a user must supply   -> first screen
 advanced   15 fields                                     -> one closed group
 diagnostic 29 fields                                     -> one closed group
 ```
@@ -42,7 +42,7 @@ Where a field goes:
 
 ```text
 common     nothing works, or nothing is understandable, without the user deciding
-           (chat temperature, TTS provider/voice/speed, the autonomy switches,
+           (chat temperature, TTS provider/voice/speed, periodic screen observation, the autonomy switches,
             the LLM and embedding API keys)
 advanced   a defensible default exists, but the value changes behaviour
            (chat/vision model, GSV runtime assets, provider choice, intervals,

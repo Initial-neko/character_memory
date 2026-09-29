@@ -13,6 +13,7 @@ from character_memory.settings_store import LEGACY_SECRET_FIELDS, SECRET_SPECS, 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "src" / "character_memory" / "web"
 CONFIG_EXAMPLE = ROOT / "config.example.yaml"
+ENV_EXAMPLE = ROOT / ".env.example"
 
 
 class _ControlParser(HTMLParser):
@@ -122,3 +123,11 @@ def test_every_dev_control_explains_its_scope_and_effect():
         if not item["title"].strip()
     ]
     assert missing == []
+
+def test_env_example_keeps_gsv_voice_references_out_of_global_runtime_config():
+    text = ENV_EXAMPLE.read_text(encoding="utf-8")
+
+    assert "GSV_TTS_REF_AUDIO=" not in text
+    assert "GSV_TTS_REF_TEXT=" not in text
+    assert "voices/<name>.yaml" in text
+

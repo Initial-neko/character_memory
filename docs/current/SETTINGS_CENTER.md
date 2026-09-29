@@ -15,6 +15,8 @@ config.yaml
 
 The two files intentionally have different ownership. `config.yaml` answers **what the application selects**; provider-specific GSV model paths do not belong there.
 
+`config.example.yaml` is the canonical configuration catalogue: every non-secret field accepted by the `Settings` model must appear there exactly once and carry an adjacent explanation comment. API keys remain documented there as environment-owned names, but never as YAML keys. CI compares the example against the model, so adding a supported config field without updating the example fails the build.
+
 Effective secret/runtime-env precedence is:
 
 ```text
@@ -25,7 +27,7 @@ real system environment > adjacent project .env > legacy config.yaml secret
 
 ## 2. Configuration levels
 
-Every schema field and every secret carries a **level**, served in `GET /v1/settings`.
+Every schema field and every secret carries a **level** and non-empty **help text**, served in `GET /v1/settings`. Settings renders the help directly beneath editable fields and exposes it as the input tooltip/accessibility description; Secret rows likewise explain what the key unlocks. CI rejects schema fields or Secrets without help text.
 The page renders `common` inline and the other two as real, closed `<details>`
 groups, so what the first screen shows is decided by the schema and not by the
 frontend.

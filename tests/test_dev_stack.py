@@ -1,4 +1,7 @@
 from pathlib import Path
+import shutil
+import subprocess
+
 
 
 def test_stack_entrypoint_and_runtime_ports_are_declared():
@@ -84,6 +87,14 @@ def test_media_setup_and_standalone_runner_declare_streaming_paraformer_assets()
     assert 'ASR_PROVIDER="paraformer-streaming"' in runner
     assert 'export CHARACTER_MEDIA_ASR_ENCODER="$STREAM_ASR_ENCODER_NATIVE"' in runner
     assert 'export CHARACTER_MEDIA_ASR_DECODER="$STREAM_ASR_DECODER_NATIVE"' in runner
+
+def test_media_shell_scripts_parse_when_bash_is_available():
+    bash = shutil.which("bash")
+    if not bash:
+        return
+    for path in ("scripts/setup-media-models.sh", "scripts/run-media.sh"):
+        result = subprocess.run([bash, "-n", path], capture_output=True, text=True)
+        assert result.returncode == 0, f"{path}: {result.stderr}"
 
 def test_dev_console_is_linked_from_settings_center():
     html = Path("src/character_memory/web/settings.html").read_text(encoding="utf-8")

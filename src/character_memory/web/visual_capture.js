@@ -295,7 +295,7 @@
         filename:`visual-${item.source.toLowerCase()}-${item.wallTime}-periodic.jpg`,
         data_url:item.dataUrl,
         source:item.source,
-        captured_at_ms:Math.round(item.capturedAt),
+        captured_at_ms:Math.ceil(item.capturedAt),
       };
     }
 

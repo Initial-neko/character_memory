@@ -27,6 +27,7 @@ from character_memory.time_utils import epoch_us
 logger = logging.getLogger("character_memory.space_autonomy")
 
 MAX_AUTONOMOUS_AUDIENCE = 10
+MAX_COLD_AUDIENCE_EXPLORERS = 2
 MAX_AUTOMATIC_REPLY_ROUNDS = 4
 
 # A reply to a Space comment is a follow-up to a comment that is already
@@ -596,18 +597,49 @@ Sources:
         return hashlib.sha256(f"{post_id}:{character_id}".encode("utf-8")).digest()
 
     def select_audience(self, post_id: int, author_id: str) -> list[str]:
+        """Choose a bounded paid audience without turning the ceiling into a target.
+
+        Existing public Space interaction is the cheapest trustworthy signal we
+        have that two characters are socially connected. Characters with that
+        history are ranked first. Cold candidates still get deterministic
+        exploration slots, so new relationships can form without spending one
+        full PersonRuntime / LLM reaction on every configured candidate.
+        """
         candidates = [
             item["id"] for item in self._active_profiles()
             if item["id"] != author_id
         ]
-        candidates.sort(key=lambda value: self._audience_rank(post_id, value))
         configured = int(getattr(self.access.settings, "space_audience_size", 5))
         size = min(
             MAX_AUTONOMOUS_AUDIENCE,
             max(0, configured),
             len(candidates),
         )
-        return candidates[:size]
+        if size <= 0:
+            return []
+
+        warm: list[tuple[int, bytes, str]] = []
+        cold: list[tuple[bytes, str]] = []
+        for character_id in candidates:
+            counts = self.repository.pair_engagement_counts(author_id, character_id)
+            # A written conversation is a stronger social signal than a LIKE,
+            # but the number is only used for ordering -- it is not exposed as
+            # a relationship score or fed into the model.
+            engagement = int(counts["comments"]) * 3 + int(counts["likes"])
+            rank = self._audience_rank(post_id, character_id)
+            if engagement > 0:
+                warm.append((-engagement, rank, character_id))
+            else:
+                cold.append((rank, character_id))
+
+        warm.sort()
+        cold.sort()
+        selected = [item[2] for item in warm[:size]]
+        remaining = size - len(selected)
+        if remaining > 0:
+            explorers = min(remaining, MAX_COLD_AUDIENCE_EXPLORERS)
+            selected.extend(item[1] for item in cold[:explorers])
+        return selected
 
     def _comment_actor_name(self, comment) -> str:
         if comment.actor_type == "USER":

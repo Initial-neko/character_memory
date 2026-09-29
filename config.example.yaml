@@ -1,161 +1,341 @@
-# Copy to config.yaml. Secrets and GSV runtime asset paths belong in .env and are managed by Settings Center.
+# Character Memory configuration reference.
+#
+# Copy this file to config.yaml. Every non-secret key accepted by Settings is
+# intentionally listed here, including low-level/legacy compatibility keys.
+# Each key has a comment describing what it changes. Secrets are NOT YAML keys:
+# keep them in .env / system environment (see the final section).
+#
+# Rule of ownership:
+#   config.yaml = selectable application/runtime behavior
+#   .env        = API keys/tokens and external runtime asset paths
+#   backend     = implementation constants that are not user-configurable
+
+# -----------------------------------------------------------------------------
+# AI / LLM
+# -----------------------------------------------------------------------------
+
+# OpenAI-compatible API root used for chat/vision requests.
 base_url: "https://opencode.ai/zen/go/v1"
-# OpenCode Go model id. deepseek-flash is used for text and image turns by default.
+
+# Main text model id used by Direct, Group, Space, World and other LLM features.
 chat_model: "deepseek-flash"
-# Optional compatibility override for providers that still require a dedicated vision model.
-# Leave empty to reuse chat_model for image input.
+
+# Optional dedicated vision model. Empty means reuse chat_model for image turns.
 vision_model: ""
+
+# Sampling temperature for ordinary chat-model requests. 0 = more deterministic.
 chat_temperature: 0.7
+
+# Maximum HTTP/model attempts for one logical LLM call, including retry/repair.
 llm_attempts: 2
 
-# Real semantic embeddings are enabled from Day 1. Runtime loading is strict-offline;
-# run scripts/setup-media-models.sh (or prefetch_embedding_model.py) before normal startup.
+# Embedding backend. "sentence-transformers" is local/offline after model setup.
 embedding_provider: "sentence-transformers"
+
+# Embedding model id/path used by semantic memory and similarity operations.
 embedding_model: "BAAI/bge-small-zh-v1.5"
-# Alternative for any provider exposing POST /embeddings:
-# embedding_provider: "openai-compatible"
-# embedding_base_url: "https://your-provider/v1"
-# embedding_model: "your-embedding-model"
 
-# Formal chat TTS. Provider Lab :9002 remains available for audition/benchmark.
-# Qwen3-TTS is not a formal realtime chat provider. Its isolated :9013 runtime
-# is reserved for experiments/future voice-design tooling.
-tts_provider: "kokoro"       # kokoro | edge | gsv | sherpa
-tts_voice: "zf_001"          # Provider-specific voice selected from the healthy provider inventory in Settings
-tts_speed: 1.0               # Edge maps 0.5..2.0 to -50%..+100%
-tts_device: "cpu"            # Desired local device. GSV hot-reloads; Kokoro(:9002)/Sherpa(:8001) require only that owning runtime to restart.
+# Base URL for an OpenAI-compatible embedding service. Empty for local embeddings.
+embedding_base_url: ""
 
-# Shared Search provider: image discovery for Avatar/Space plus web discovery for
-# World Observation. It is not exposed as an arbitrary Direct/Group browser tool.
-# Keys live in .env.
+# -----------------------------------------------------------------------------
+# Voice / TTS
+# -----------------------------------------------------------------------------
+
+# Formal realtime chat TTS provider. Supported: kokoro | edge | gsv | sherpa.
+tts_provider: "kokoro"
+
+# Provider-specific voice id. Settings limits this to voices reported healthy.
+tts_voice: "zf_001"
+
+# Speech speed multiplier. Provider support varies; normal speed is 1.0.
+tts_speed: 1.0
+
+# Preferred local inference device for providers that support local placement.
+tts_device: "cpu"
+
+# Voice-call endpointing: silence duration that closes one spoken user utterance.
+# Larger values tolerate thinking pauses; smaller values make replies start sooner.
+voice_silence_ms: 900
+
+# -----------------------------------------------------------------------------
+# Search / Browser / Image generation
+# -----------------------------------------------------------------------------
+
+# Search provider shared by image discovery and World public-web discovery.
+# Supported formal values: searchapi | brave.
 search_provider: "searchapi"
+
+# Country hint forwarded to the selected search provider.
 search_country: "jp"
+
+# Language hint forwarded to the selected search provider.
 search_language: "zh-cn"
+
+# Safe-search mode forwarded to search. "strict" is the conservative default.
 search_safe_search: "strict"
 
-# World Observation uses a real headless browser after search discovery.
-# "auto" tries Playwright Chromium first, then installed desktop Chrome.
-web_browser_channel: "auto"             # auto | chromium | chrome
-web_browser_timeout_seconds: 20
-web_browser_render_wait_ms: 700          # allow JS-rendered article content to appear
-# Brave remains available as an optional fallback:
-# search_provider: "brave"
-# search_country: "ALL"
-# search_language: "zh"
-# General Web Search discovery is now used only by World Observation.
-# The character never receives a generic arbitrary browser tool in private chat.
+# Playwright browser selection for World Observation: auto | chromium | chrome.
+web_browser_channel: "auto"
 
-# Character autonomous ImageGen and the guided chat image tool share this provider config.
-# Dev Console provides the provider-oriented diagnostics surface.
-image_generation_provider: "agnes"   # agnes | msimg
+# Maximum seconds allowed for one rendered public-page browser operation.
+web_browser_timeout_seconds: 20
+
+# Extra wait after page load so JavaScript-rendered article text can appear.
+web_browser_render_wait_ms: 700
+
+# Provider used by guided/autonomous image generation: agnes | msimg.
+image_generation_provider: "agnes"
+
+# Maximum seconds allowed for one ImageGen provider request.
 image_generation_timeout_seconds: 180
+
+# Agnes OpenAI-style API root.
 agnes_base_url: "https://apihub.agnes-ai.com/v1"
+
+# Agnes image model id.
 agnes_image_model: "agnes-image-2.1-flash"
-# For the complete local dev environment run: bash scripts/sync-all.sh
-# Comma-separated model aliases/ModelScope model IDs. Multiple values enable failover.
+
+# Comma-separated msimg/ModelScope model aliases. Multiple entries enable failover.
 msimg_models: "qwen"
 
+# -----------------------------------------------------------------------------
+# Storage / character discovery
+# -----------------------------------------------------------------------------
+
+# Main SQLite database path for runtime state, memory, scheduling and usage.
 db_path: "data/character-memory.db"
-# Empty means <db parent>/media. User-uploaded and generated image bytes live here, not in SQLite.
+
+# Media asset directory. Empty = <db parent>/media.
 media_dir: ""
+
+# Maximum bytes accepted for one ordinary stored media asset.
 media_max_bytes: 8388608
-# Empty means <db parent>/stickers. Web-imported sticker packs are global to all characters/groups.
+
+# Sticker asset directory. Empty = <db parent>/stickers.
 sticker_dir: ""
-# Empty means <db parent>/avatars. Current avatars are copied locally regardless of source.
+
+# Avatar asset directory. Empty = <db parent>/avatars.
 avatar_dir: ""
+
+# Maximum bytes accepted for one avatar asset.
 avatar_max_bytes: 8388608
+
+# Default persona file used as the compatibility/root character entry.
 persona_path: "personas/rin/persona.yaml"
+
+# Maximum number of recalled memory items injected into one normal model turn.
 recall_limit: 8
 
-# Direct-character wake. The background loop checks periodically, but the model is
-# only called when a character reaches this interval. Manual Wake ignores the
-# interval. Wake may speak, create an Intent, or stay silent. TIME_TICK /
-# PROACTIVE_INTENT do not spend ImageGen quota automatically.
+# -----------------------------------------------------------------------------
+# Proactive wake / due-intent dispatch
+# -----------------------------------------------------------------------------
+
+# Master switch for periodic character wake opportunities.
 proactive_wake_enabled: true
+
+# Minutes between normal wake opportunities for one character.
 proactive_wake_minutes: 60
 
-# Due-Intent dispatch. A character's due Intent is re-evaluated by the model, and
-# that round may itself leave another Intent. The cooldown, the delay floor and the
-# pending ceiling below are the server-side bounds that keep that from becoming a
-# self-sustaining loop; the model cannot raise them.
+# Master switch for dispatching due proactive intents.
 proactive_dispatch_enabled: true
-proactive_poll_seconds: 30                    # check latency only; does not change the dispatch interval
-proactive_min_dispatch_interval_minutes: 60   # per character; silence consumes it too (the call was already paid for)
-proactive_intent_min_delay_minutes: 10        # floor for a new intent's earliest_at; 0 disables the floor
-proactive_max_pending_intents: 20             # per character; 0 = unlimited
-proactive_intent_dedup_enabled: true          # drop an intent that repeats a recent one
-proactive_intent_duplicate_similarity: 0.90   # cosine threshold for "repeats"
-proactive_intent_dedup_window_hours: 72       # how far back duplicate detection looks
 
-# Character Space autonomous social life. The model may decide not to post on
-# any opportunity, and a character may publish several posts in one day when the
-# interval is short. Production default is one opportunity every 24H; test soak
-# runs can shorten this to 60/30/10 minutes from Dev Console.
+# Scheduler polling latency for due intents; this does NOT set the dispatch rate.
+proactive_poll_seconds: 30
+
+# Minimum minutes between paid proactive dispatch attempts per character.
+proactive_min_dispatch_interval_minutes: 60
+
+# Minimum delay applied to a newly-created future intent. 0 disables the floor.
+proactive_intent_min_delay_minutes: 10
+
+# Maximum pending intents per character. 0 means unlimited.
+proactive_max_pending_intents: 20
+
+# Whether semantically duplicate recent intents are rejected.
+proactive_intent_dedup_enabled: true
+
+# Cosine similarity threshold at/above which two intents count as duplicates.
+proactive_intent_duplicate_similarity: 0.90
+
+# Number of hours searched backwards for duplicate-intent detection.
+proactive_intent_dedup_window_hours: 72
+
+# -----------------------------------------------------------------------------
+# Character Space autonomy
+# -----------------------------------------------------------------------------
+
+# Master switch for autonomous Space opportunity evaluation.
 space_autonomy_enabled: true
-space_opportunity_interval_minutes: 1440  # 1440=24H, 60=1H, 30=30min, 10=10min
-space_max_posts_per_day: 0                # publishing ceiling per local day; 0 = unlimited
-space_media_enabled: true                 # character may naturally choose images or one voice post via formal TTS
-space_media_max_items: 3                  # execution cap per post; hard max 9
-space_image_search_enabled: true          # use configured image-search provider
-space_image_generation_enabled: true      # use configured ImageGen provider
-space_world_observation_enabled: true     # character may choose to explore public web
-space_world_max_pages: 2                  # headless-rendered pages per opportunity; hard max 4
-space_world_max_chars_per_page: 6000      # extracted readable text cap for each page
-space_audience_size: 5                    # 0 disables automatic distribution; hard max 10
-space_scheduler_poll_seconds: 60          # check latency only; does not change interval
 
-# World Activity runs independently from Space posting. Pulse reads bounded
-# aggregation/trending pages; Personal Browse lets each Character observe the
-# public web without automatically posting or writing long-term Memory.
+# Minutes between opportunities to decide whether to publish. Not a forced post rate.
+space_opportunity_interval_minutes: 1440
+
+# Per-character posts allowed per local day. 0 = no extra daily ceiling.
+space_max_posts_per_day: 0
+
+# Whether an autonomous Space post may contain generated/searched media.
+space_media_enabled: true
+
+# Maximum media items executed for one Space post; hard maximum is 9.
+space_media_max_items: 3
+
+# Whether Space may use the configured web image-search provider.
+space_image_search_enabled: true
+
+# Whether Space may use the configured AI ImageGen provider.
+space_image_generation_enabled: true
+
+# Whether one Space opportunity may explore public web context before deciding.
+space_world_observation_enabled: true
+
+# Maximum rendered public pages per Space world-observation attempt.
+space_world_max_pages: 2
+
+# Maximum readable characters retained from each observed page.
+space_world_max_chars_per_page: 6000
+
+# Maximum other characters automatically invited to react to a new post. 0 = none.
+space_audience_size: 5
+
+# Space scheduler polling latency only; it does not change opportunity frequency.
+space_scheduler_poll_seconds: 60
+
+# Legacy V2 compatibility field. Current interval scheduler no longer consumes it.
+space_daily_window_start_hour: 18
+
+# Legacy V2 compatibility field. Current interval scheduler no longer consumes it.
+space_daily_window_end_hour: 22
+
+# -----------------------------------------------------------------------------
+# World Activity
+# -----------------------------------------------------------------------------
+
+# Master switch for World Pulse and Personal Browse background work.
 world_activity_enabled: true
+
+# Whether shared World Pulse aggregation is enabled.
 world_pulse_enabled: true
+
+# Public aggregation/trending pages read when refreshing World Pulse.
 world_pulse_sources:
   - "https://tophub.today/"
   - "https://news.ycombinator.com/"
   - "https://github.com/trending"
+
+# Minutes between automatic Pulse refreshes.
 world_pulse_refresh_minutes: 60
+
+# Minutes between opportunities for characters to discuss Pulse topics.
 world_pulse_discussion_interval_minutes: 360
+
+# Maximum readable characters retained from each Pulse source.
 world_pulse_source_max_chars: 8000
+
+# Maximum active topics retained/exposed by one Pulse refresh.
 world_pulse_max_topics: 8
+
+# Maximum characters asked to consider commenting on one Pulse topic.
 world_pulse_commenter_count: 4
+
+# Whether per-character autonomous public-web browsing is enabled.
 world_browse_enabled: true
-world_browse_interval_minutes: 30  # 30m current baseline; each active character has an independent clock
+
+# Minutes between Personal Browse opportunities for each active character.
+world_browse_interval_minutes: 30
+
+# Maximum rendered pages opened by one Personal Browse opportunity.
 world_browse_max_pages: 2
-# Per active character, per local day. Every browse spends one paid web search
-# from the quota every character shares, so the interval above is not a bound by
-# itself: 30 minutes authorises 48 a day. 0 means no ceiling.
+
+# Maximum Personal Browse runs per active character per local day. 0 = unlimited.
 world_browse_daily_max: 10
+
+# World scheduler polling latency only; it does not change browse/pulse cadence.
 world_activity_poll_seconds: 60
 
-# Autonomous Group Chat. One due opportunity chooses one rotating seed member;
-# if that member naturally speaks, at most a few other members may respond once.
-# New user messages always take priority. No infinite character-to-character loop.
-group_autonomy_enabled: true
-group_autonomy_interval_minutes: 360       # 6H production baseline; 10/30/60 useful for soak tests
-group_autonomy_max_messages: 3             # hard range 1..4 visible character messages per opportunity
-group_autonomy_user_quiet_minutes: 30      # skip/rearm when the user spoke too recently; 0 disables this guard
-group_autonomy_poll_seconds: 60            # check latency only; does not change interval
+# -----------------------------------------------------------------------------
+# Autonomous Group Chat / group conversation
+# -----------------------------------------------------------------------------
 
-# Group user-turn speaker cap. One user message asks at most this many distinct
-# members to react. @-mentioned members always participate; unmentioned members
-# are truncated from the tail of the rotating order, so the audience still
-# rotates across turns. Set to 12 to restore the every-member-is-asked behavior.
+# Master switch for autonomous group-chat opportunities.
+group_autonomy_enabled: true
+
+# Minutes between formal autonomous-chat opportunities for one group.
+group_autonomy_interval_minutes: 360
+
+# Maximum visible character messages generated by one autonomous opportunity.
+group_autonomy_max_messages: 3
+
+# Scheduler polling latency only; it does not change group opportunity frequency.
+group_autonomy_poll_seconds: 60
+
+# Skip/rearm formal autonomous chat if the user spoke this many minutes ago.
+# 0 disables this guard.
+group_autonomy_user_quiet_minutes: 30
+
+# Maximum distinct group members asked to react to one user message.
 group_max_speakers_per_turn: 5
 
-# Random Encounter. Candidates live outside the formal chat list until the user
-# explicitly keeps one. Formal characters warn after 10 active entries and hard-stop at 20;
-# a full list does not stop discovery or temporary encounter chat.
+# -----------------------------------------------------------------------------
+# Random Encounter
+# -----------------------------------------------------------------------------
+
+# Master switch for scheduled Random Encounter opportunities.
 encounter_enabled: true
-encounter_interval_minutes: 1440           # 24H default; 10/30/60 useful for soak tests
-encounter_web_probability: 0.5             # WEB vs system-generated candidate selection
-encounter_poll_seconds: 60                 # scheduler check latency only
-encounter_max_pending: 3                   # do not accumulate an endless unseen candidate pile
 
+# Minutes between encounter opportunities.
+encounter_interval_minutes: 1440
 
-# GSV-TTS-Lite runtime assets are intentionally NOT stored in config.yaml.
-# Configure them in Settings Center; they persist to project-local .env:
-# GSV_TTS_GPT_MODEL="C:/path/to/voice.ckpt"
-# GSV_TTS_SOVITS_MODEL="C:/path/to/voice.pth"
-# GSV_TTS_VOICE="murasame"    # default template, i.e. voices/murasame.yaml
-# The reference audio and its transcript are not environment values: each
-# template under voices/ holds its own, with ref_audio relative to voices/.
+# Probability that AUTO encounter discovery uses public web instead of generation.
+encounter_web_probability: 0.5
+
+# Encounter scheduler polling latency only; it does not change encounter cadence.
+encounter_poll_seconds: 60
+
+# Maximum unseen/pending encounter candidates retained at once.
+encounter_max_pending: 3
+
+# -----------------------------------------------------------------------------
+# Environment-owned configuration (documented here so no supported knob is hidden)
+# -----------------------------------------------------------------------------
+#
+# API keys/tokens are deliberately NOT YAML keys. Put them in project .env or
+# the real system environment; Settings Center can manage the supported secrets:
+#
+# OPENCODE_GO_API_KEY=        # LLM / OpenCode-compatible API
+# EMBEDDING_API_KEY=          # only needed for remote embedding providers
+# SEARCHAPI_API_KEY=          # selected when search_provider=searchapi
+# BRAVE_SEARCH_API_KEY=       # selected when search_provider=brave
+# AGNES_API_KEY=              # selected when image_generation_provider=agnes
+# MSIMG_API_KEY=              # selected when image_generation_provider=msimg
+# MODELSCOPE_API_TOKEN=       # legacy fallback for MSIMG_API_KEY
+# HF_TOKEN=                   # optional model-download rate limits
+#
+# GSV-TTS-Lite runtime assets are environment-owned and edited by Settings:
+#
+# GSV_TTS_GPT_MODEL="C:/path/to/voice.ckpt"       # shared GPT acoustic model
+# GSV_TTS_SOVITS_MODEL="C:/path/to/voice.pth"     # shared SoVITS model
+# GSV_TTS_VOICE="murasame"                        # default voices/<name>.yaml
+#
+# Media Runtime model assets are normally discovered/set by character-stack or
+# scripts/run-media.sh, so they are infrastructure knobs rather than config.yaml
+# keys. They remain supported environment overrides:
+#
+# CHARACTER_MEDIA_MODEL_ROOT=                     # root used to locate local models
+# CHARACTER_MEDIA_ASR_PROVIDER=sensevoice          # sensevoice | paraformer-streaming
+# CHARACTER_MEDIA_ASR_MODEL=                       # SenseVoice ONNX model path
+# CHARACTER_MEDIA_ASR_ENCODER=                     # streaming Paraformer encoder
+# CHARACTER_MEDIA_ASR_DECODER=                     # streaming Paraformer decoder
+# CHARACTER_MEDIA_ASR_TOKENS=                      # ASR tokens file
+# CHARACTER_MEDIA_ASR_DEVICE=cpu                   # cpu / compatible sherpa provider
+# CHARACTER_MEDIA_ASR_THREADS=2                    # ASR inference threads
+# CHARACTER_MEDIA_ASR_LANGUAGE=auto                # SenseVoice language mode
+# CHARACTER_MEDIA_ASR_ENDPOINT_SILENCE_MS=1200     # streaming endpoint long silence
+# CHARACTER_MEDIA_ASR_ENDPOINT_SHORT_SILENCE_MS=800 # streaming endpoint short silence
+# CHARACTER_MEDIA_TTS_MODEL=                       # Sherpa VITS model path
+# CHARACTER_MEDIA_TTS_TOKENS=                      # Sherpa VITS tokens
+# CHARACTER_MEDIA_TTS_LEXICON=                     # Sherpa VITS lexicon
+# CHARACTER_MEDIA_TTS_DICT_DIR=                    # Sherpa VITS dictionary directory
+# CHARACTER_MEDIA_TTS_RULE_FSTS=                   # comma-separated rule FST paths
+# CHARACTER_MEDIA_TTS_DEVICE=cpu                   # local Sherpa TTS device
+# CHARACTER_MEDIA_TTS_THREADS=2                    # local Sherpa TTS threads

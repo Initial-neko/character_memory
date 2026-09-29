@@ -162,6 +162,17 @@
       return snapshot();
     }
 
+    async function pauseInput() {
+      // Stop admitting new microphone samples, but keep the worklet port alive
+      // for one task turn so frames already posted by the audio thread can reach
+      // the WebSocket before the caller sends flush.
+      try { sourceNode?.disconnect?.(workletNode); } catch (_) {}
+      sourceNode = null;
+      await new Promise(resolve => setTimeout(resolve, 0));
+      notify();
+      return snapshot();
+    }
+
     function detach() {
       try { sourceNode?.disconnect?.(workletNode); } catch (_) {}
       try { workletNode?.disconnect?.(); } catch (_) {}
@@ -217,6 +228,7 @@
     return {
       connect,
       attach,
+      pauseInput,
       detach,
       flush,
       cancel,

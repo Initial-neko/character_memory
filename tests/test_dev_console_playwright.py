@@ -115,7 +115,7 @@ def _load(page, dev_console_url: str) -> None:
     """
 
     page.goto(f"{dev_console_url}/dev", wait_until="domcontentloaded")
-    page.wait_for_selector("details.level-group > summary")
+    page.locator("details.level-group > summary").first.wait_for(state="attached")
     page.wait_for_function(
         "() => { const summary = document.querySelector('details.level-group[data-level=\"advanced\"] > summary');"
         " return !!summary && summary.textContent.includes('项）'); }"

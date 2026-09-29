@@ -706,6 +706,7 @@ def test_space_prompt_states_the_media_capability_without_policing_it(tmp_path):
 
     prompt = model.prompts[0]
     assert "文字、0-9 张图片、一条语音" in prompt
+    assert "GENERATE_VIDEO 当前不可用" in prompt
     assert "强行配图" not in prompt
     assert "不要为了展示功能" not in prompt
     store.close()

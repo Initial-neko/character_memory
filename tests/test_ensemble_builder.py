@@ -350,7 +350,7 @@ def test_researched_interaction_styles_survive_local_persona_projection():
     assert direct.disagreement != gentle.disagreement
     assert direct.care != gentle.care
     assert direct.boundaries != gentle.boundaries
-    assert "逻辑" in direct.disagreement
+    assert "推理" in direct.disagreement
     assert "陪着沉默" in gentle.silence
 
 

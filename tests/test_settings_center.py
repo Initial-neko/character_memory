@@ -841,6 +841,10 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
             "space_media_max_items",
             "space_image_search_enabled",
             "space_image_generation_enabled",
+            "space_video_generation_enabled",
+            "space_video_resolution",
+            "space_video_max_duration_seconds",
+            "space_video_daily_budget_cny",
             "space_world_observation_enabled",
             "space_world_max_pages",
             "space_world_max_chars_per_page",
@@ -1015,7 +1019,7 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     # The proactive dispatch and Intent-admission fields are counted the same
     # way: the switches and cadences are `advanced`, and only the tuning knobs
     # (poll latency, similarity threshold, dedup window) are `diagnostic`.
-    assert levels == {"common": 8, "advanced": 35, "diagnostic": 36}
+    assert levels == {"common": 8, "advanced": 39, "diagnostic": 36}
     assert "group_max_speakers_per_turn" in {
         field["name"]
         for section in schema

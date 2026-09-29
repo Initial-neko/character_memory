@@ -30,17 +30,31 @@ class SecretSpec:
     # relevant, so they keep ``level`` as given.
     provider_field: str | None = None
     provider_value: str | None = None
+    help: str = ""
 
 
 SECRET_SPECS: tuple[SecretSpec, ...] = (
-    SecretSpec("OPENCODE_GO_API_KEY", "LLM / OpenCode API Key", "api_key", level="common"),
-    SecretSpec("EMBEDDING_API_KEY", "Embedding API Key", "embedding_api_key", level="common"),
+    SecretSpec(
+        "OPENCODE_GO_API_KEY",
+        "LLM / OpenCode API Key",
+        "api_key",
+        level="common",
+        help="聊天、角色决策与视觉请求使用的 OpenAI-compatible API Key；只写入 .env，不会回显现有值。",
+    ),
+    SecretSpec(
+        "EMBEDDING_API_KEY",
+        "Embedding API Key",
+        "embedding_api_key",
+        level="common",
+        help="仅远程 embedding provider 需要；本地 sentence-transformers 不使用该 Key。",
+    ),
     SecretSpec(
         "SEARCHAPI_API_KEY",
         "SearchAPI API Key",
         "search_api_key",
         provider_field="search_provider",
         provider_value="searchapi",
+        help="search_provider=searchapi 时用于图片发现与 World 公网搜索。",
     ),
     SecretSpec(
         "BRAVE_SEARCH_API_KEY",
@@ -48,6 +62,7 @@ SECRET_SPECS: tuple[SecretSpec, ...] = (
         "search_api_key",
         provider_field="search_provider",
         provider_value="brave",
+        help="search_provider=brave 时用于图片发现与 World 公网搜索。",
     ),
     SecretSpec(
         "AGNES_API_KEY",
@@ -55,6 +70,7 @@ SECRET_SPECS: tuple[SecretSpec, ...] = (
         "agnes_api_key",
         provider_field="image_generation_provider",
         provider_value="agnes",
+        help="image_generation_provider=agnes 时使用；用于显式与自主 AI 生图。",
     ),
     SecretSpec(
         "MSIMG_API_KEY",
@@ -62,8 +78,15 @@ SECRET_SPECS: tuple[SecretSpec, ...] = (
         "msimg_api_key",
         provider_field="image_generation_provider",
         provider_value="msimg",
+        help="image_generation_provider=msimg 时使用；MODELSCOPE_API_TOKEN 仍作为兼容 fallback。",
     ),
-    SecretSpec("HF_TOKEN", "Hugging Face Token", None, level="diagnostic"),
+    SecretSpec(
+        "HF_TOKEN",
+        "Hugging Face Token",
+        None,
+        level="diagnostic",
+        help="可选，仅用于模型下载限流/鉴权；正常运行已下载模型时不需要。",
+    ),
 )
 SECRET_NAMES = {item.name for item in SECRET_SPECS}
 LEGACY_SECRET_FIELDS = {
@@ -98,6 +121,88 @@ SETTING_LEVELS = ("common", "advanced", "diagnostic")
 # field, never clutter the screen the user looks at first.
 DEFAULT_SETTING_LEVEL = "diagnostic"
 
+SETTING_HELP: dict[str, str] = {
+    "base_url": "OpenAI-compatible LLM API 根地址。只有切换兼容服务或排查网络路由时才需要修改。",
+    "chat_model": "主要文本模型 ID；Direct、Group、Space、World 等普通 LLM 调用默认使用它。",
+    "vision_model": "视觉模型 ID。留空时复用 Chat Model；只有 Provider 要求独立视觉模型时才填写。",
+    "chat_temperature": "普通聊天/角色生成的采样温度。越低越稳定，越高越发散；默认 0.7。",
+    "llm_attempts": "一次逻辑 LLM 调用最多允许多少次真实请求，包括结构化输出修复/重试。",
+    "embedding_provider": "记忆召回与语义相似度使用的向量后端；默认本地 sentence-transformers。",
+    "embedding_model": "Embedding 模型 ID 或本地模型名；影响语义召回和去重向量。",
+    "embedding_base_url": "远程 OpenAI-compatible embedding 服务地址。本地 embedding 时留空。",
+    "tts_provider": "正式聊天/通话使用的 TTS Provider；只允许选择当前健康检查通过的正式 Provider。",
+    "tts_voice": "当前 TTS Provider 的 Voice ID；角色没有专属 voice.yaml 时使用该默认声音。",
+    "tts_speed": "正式 TTS 的语速倍率；1.0 为正常速度，是否支持由当前 Provider 决定。",
+    "tts_device": "本地 TTS 推理设备。云 Provider 忽略；部分本地 Provider 修改后需要重启对应 Runtime。",
+    "voice_silence_ms": "语音通话中连续静音多久算一句话结束。大=更容忍思考停顿，小=更快接话。",
+    "GSV_TTS_GPT_MODEL": "GSV-TTS-Lite 共享 GPT 模型 .ckpt 路径；保存到 .env，不写入 config.yaml。",
+    "GSV_TTS_SOVITS_MODEL": "GSV-TTS-Lite 共享 SoVITS 模型 .pth 路径；保存到 .env，不写入 config.yaml。",
+    "GSV_TTS_VOICE": "GSV 默认声音模板名，对应 voices/<name>.yaml；角色专属声音仍优先于默认模板。",
+    "search_provider": "图片发现和 World 公网发现共用的搜索 Provider；不是私聊中的任意浏览器工具。",
+    "search_country": "传给搜索 Provider 的地区提示，用于本地化搜索结果。",
+    "search_language": "传给搜索 Provider 的语言提示，用于结果语言偏好。",
+    "search_safe_search": "搜索安全过滤模式。strict 为保守默认值。",
+    "web_browser_channel": "World Observation 使用的浏览器通道：auto / chromium / chrome。",
+    "web_browser_timeout_seconds": "单个公网网页渲染/抓取允许的最长时间；只影响浏览器诊断与 World 抓取。",
+    "web_browser_render_wait_ms": "页面 load 后额外等待 JavaScript 渲染正文的时间。",
+    "image_generation_provider": "显式 AI 生图和角色自主生图使用的 Provider。",
+    "image_generation_timeout_seconds": "单次 ImageGen Provider 请求的最大等待时间。",
+    "agnes_base_url": "Agnes ImageGen 的 API 根地址；只有切换网关/排查路由时需要修改。",
+    "agnes_image_model": "Agnes 使用的图像模型 ID。",
+    "msimg_models": "msimg/ModelScope 模型别名列表，逗号分隔；多值时允许按实现进行 failover。",
+    "recall_limit": "一次普通模型回合最多注入多少条召回记忆；越大上下文越多、Token 也越高。",
+    "proactive_wake_enabled": "是否允许角色按周期获得主动醒来机会。醒来后仍可选择沉默。",
+    "proactive_wake_minutes": "同一角色两次正常 Wake Opportunity 的间隔分钟数。",
+    "proactive_dispatch_enabled": "是否派发已经到期的主动 Intent；关闭后保留 Intent 但不继续发出。",
+    "proactive_min_dispatch_interval_minutes": "同一角色两次主动派发尝试的最小间隔；沉默也消耗该冷却。",
+    "proactive_intent_min_delay_minutes": "新 Intent earliest_at 的最小延迟；0 表示不加额外延迟下限。",
+    "proactive_max_pending_intents": "每个角色最多保留的 pending Intent 数量；0 = 不限。",
+    "proactive_intent_dedup_enabled": "是否拒绝与近期 Intent 语义重复的新 Intent。",
+    "proactive_intent_duplicate_similarity": "Intent 去重的余弦相似度阈值；越高越严格要求接近才判重复。",
+    "proactive_intent_dedup_window_hours": "Intent 去重向前检查的时间窗口小时数。",
+    "proactive_poll_seconds": "Intent 调度器检查是否到期的轮询延迟；不会改变 Intent 的真实间隔。",
+    "space_autonomy_enabled": "是否允许角色获得自主 Space 发帖机会；Opportunity 不等于强制发布。",
+    "space_opportunity_interval_minutes": "同一角色两次 Space Opportunity 的间隔；控制判断频率，不是发帖频率。",
+    "space_max_posts_per_day": "每个角色每天允许发布的 Space 动态上限；0 = 不额外限制。",
+    "space_media_enabled": "自主 Space 是否允许附带搜索图、生图或语音等媒体；关闭后仍可发纯文本。",
+    "space_media_max_items": "单条自主 Space 动态实际执行的媒体数量上限；防止一次生成过多附件。",
+    "space_image_search_enabled": "是否允许 Space 使用配置的搜索 Provider 找互联网图片。",
+    "space_image_generation_enabled": "是否允许 Space 调用正式 ImageGen Provider 生成图片。",
+    "space_world_observation_enabled": "是否允许一次 Space Opportunity 在表达前探索公开网页上下文。",
+    "space_world_max_pages": "一次 Space World Observation 最多真正打开并读取的公网页面数量。",
+    "space_world_max_chars_per_page": "每个 World 页面最多保留的可读正文字符数。",
+    "space_audience_size": "新自主动态最多邀请多少其他角色判断点赞/评论；0 表示不自动分发。",
+    "space_scheduler_poll_seconds": "Space Scheduler 检查 next opportunity 是否到期的轮询延迟。",
+    "world_activity_enabled": "World Activity 总开关；控制 Pulse 与 Personal Browse 后台工作。",
+    "world_pulse_enabled": "是否启用共享 World Pulse 聚合。",
+    "world_pulse_sources": "World Pulse 读取的公网聚合/趋势页面，一行一个 URL。",
+    "world_pulse_refresh_minutes": "自动刷新 World Pulse 的间隔分钟数。",
+    "world_pulse_discussion_interval_minutes": "角色获得评论 Pulse Topic 机会的最小间隔。",
+    "world_pulse_source_max_chars": "每个 Pulse 来源最多保留的可读正文字符数。",
+    "world_pulse_max_topics": "一次 Pulse 刷新最多保留/暴露的主题数量。",
+    "world_pulse_commenter_count": "一个 Pulse Topic 最多邀请多少角色独立判断是否评论。",
+    "world_browse_enabled": "是否允许每个角色独立进行 Personal Browse。",
+    "world_browse_interval_minutes": "同一角色两次 Personal Browse Opportunity 的间隔。",
+    "world_browse_max_pages": "一次 Personal Browse 最多打开并读取的公网页面数。",
+    "world_browse_daily_max": "每个角色每天最多执行多少次 Personal Browse；0 = 不限。",
+    "world_activity_poll_seconds": "World Scheduler 检查 Pulse/Browse 是否到期的轮询延迟。",
+    "group_autonomy_enabled": "是否允许已有群聊按周期获得自主交流机会。",
+    "group_autonomy_interval_minutes": "同一群两次自主交流 Opportunity 的间隔。",
+    "group_autonomy_max_messages": "一次自主群聊 Opportunity 最多生成多少条可见角色消息。",
+    "group_autonomy_user_quiet_minutes": "用户刚发言后多少分钟内跳过正式自主群聊；0 = 关闭该保护。",
+    "group_autonomy_poll_seconds": "自主群聊 Scheduler 的轮询延迟；不会改变 Opportunity 间隔。",
+    "group_max_speakers_per_turn": "用户发一条群消息时最多让多少不同角色参与本轮回复。",
+    "encounter_enabled": "是否允许 Random Encounter Scheduler 产生新的候选相遇。",
+    "encounter_interval_minutes": "两次 Random Encounter Opportunity 的间隔。",
+    "encounter_web_probability": "AUTO 邂逅选择公网资料来源的概率；其余概率走系统生成。",
+    "encounter_max_pending": "最多保留多少个尚未处理的邂逅候选，防止候选无限堆积。",
+    "encounter_poll_seconds": "Random Encounter Scheduler 检查是否到期的轮询延迟。",
+    "db_path": "主 SQLite 数据库路径；Memory、调度、Usage 与大多数运行状态存放于此。",
+    "media_dir": "普通媒体资产目录。留空时使用 <db parent>/media。",
+    "sticker_dir": "表情包资产目录。留空时使用 <db parent>/stickers。",
+    "avatar_dir": "当前角色头像资产目录。留空时使用 <db parent>/avatars。",
+}
+
 
 def field_level(field: dict[str, Any]) -> str:
     """The level of a schema field, defaulting to the hidden one."""
@@ -122,6 +227,7 @@ def resolved_schema() -> list[dict[str, Any]]:
             item = dict(field)
             item["level"] = field_level(field)
             item["restart_required"] = item["name"] not in HOT_APPLY_FIELDS
+            item["help"] = str(item.get("help") or SETTING_HELP.get(item["name"], "")).strip()
             fields.append(item)
         schema.append({**section, "fields": fields})
     return schema
@@ -969,6 +1075,7 @@ class SettingsStore:
                     "name": spec.name,
                     "label": spec.label,
                     "level": secret_level(spec, current),
+                    "help": spec.help,
                     "configured": configured,
                     "source": source,
                     "stored_in_env": spec.name in file_values,

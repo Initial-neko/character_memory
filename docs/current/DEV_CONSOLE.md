@@ -104,7 +104,7 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 
 `data-title` 是组的名字，`data-hint` 说明为什么需要打开它，两者都由 `tests/test_dev_console_levels.py` 强制。
 
-当前首屏是 11 个控件（`common`），全部在 1440×900 的第一屏内：刷新状态、LLM 的 Prompt + Run LLM、Space / Group 各自的开关 + 目标选择 + 应用测试配置 + 立即手动触发一次。`first_screen` 的名单同样由测试固定：把一个控件提上首屏必须同时改 markup 和测试。
+当前首屏只保留 8 个 `common` 控件：刷新状态、Detailed Dev 开关、LLM 的 Prompt + Run LLM、Space 的目标角色 + 手动测试、Group 的目标群 + 手动测试。Space / Group 的 Enabled、Interval、上限、Poll、媒体和世界观察等临时参数全部放进关闭的 **Session Override** 高级组；它们只热应用当前 Runtime，不写 `config.yaml`。正式行为配置只归 Settings Center。`first_screen` 名单由测试固定：把一个控件提上首屏必须同时修改 markup 和测试。
 
 ### LLM
 
@@ -119,7 +119,8 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 支持：
 
 - 选择一个未归档 Character；
-- 临时热调整 Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / World Observation / World Pages / World Text / Audience / Scheduler Poll；
+- 首屏只选择 Character 并手动跑一次 Opportunity；正式配置不在 Dev 重复编辑；
+- Detailed Dev 的 **Session Override** 可临时热调整 Autonomous Space / Opportunity Interval / Max Posts per Day / Space Media / Max Media / Image Search / ImageGen / World Observation / World Pages / World Text / Audience / Scheduler Poll；
 - 快捷档 `10min / 30min / 1H / 6H / 24H`；
 - `立即手动触发一次`：立即跑一次完整 Space Opportunity，不改变正式 next time；
 - `让选中角色立即到期`：把 next opportunity 设为现在，用真实后台 Scheduler 验证；
@@ -130,7 +131,7 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 - 无头浏览器打开 URL：只验证一个公开 URL 的渲染/正文抽取，不触发角色记忆或 Space 发帖；
 - 查看每个人的 last/next opportunity、last status，以及最近 opportunity run history。
 
-这里的 Space / Group Autonomy 调参只热应用到当前 Character Runtime，不写 `config.yaml`；正式值由 Settings Center 保存，重启 Character Runtime 后回到正式值。测试时可临时设为 1H 后让 stack 连续运行过夜，第二天直接从状态/动态/运行历史检查效果。
+这里的 Space / Group Autonomy Session Override 只热应用到当前 Character Runtime，不写 `config.yaml`；正式值由 Settings Center 保存，重启 Character Runtime 后回到正式值。它们被刻意移出首屏，避免 Dev 变成第二个配置中心。测试时可在 Detailed Dev 临时设为 1H 后让 stack 连续运行过夜，第二天从状态/动态/运行历史检查效果。
 
 ### World Activity
 

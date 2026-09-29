@@ -20,21 +20,21 @@ def test_dev_defaults_to_simple_and_exposes_detailed_toggle():
     assert '"simple"' in script and '"detailed"' in script
 
 
-def test_simple_dev_keeps_only_high_frequency_space_controls_on_first_surface():
+def test_space_formal_tuning_is_a_closed_runtime_override_not_first_screen_config():
     html = (WEB / "dev.html").read_text(encoding="utf-8")
 
+    # The tools still exist for soak/scheduler validation.
     assert 'id="spaceIntervalMinutes"' in html
     assert 'id="spaceMaxPostsPerDay"' in html
-    assert 'value="120"' in html
-    assert 'value="3"' in html
-    assert "到点只是让人物判断一次，不代表一定发动态" in html
-    assert "每个人物每天的发布上限" in html
-
-    # Low-frequency plumbing remains available in Detailed Dev instead of
-    # becoming normal operating controls.
     assert 'id="spacePollSeconds"' in html
     assert 'id="spaceAudienceSize"' in html
-    assert 'data-level="advanced"' in html
+    assert 'id="applySpaceConfig"' in html
+
+    # But the surface names the ownership explicitly: this is temporary,
+    # non-persistent Runtime state rather than a second Settings Center.
+    assert "Session Override（仅当前 Runtime）" in html
+    assert "不写 config.yaml" in html
+    assert "正式配置在 Settings" in html
 
 
 def test_simple_dev_keeps_llm_usage_summary_but_hides_detailed_tools():

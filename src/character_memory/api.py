@@ -188,6 +188,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         character_write_lock=character_write_lock,
         register_runtime_character=register_runtime_character,
         services=services,
+        group_store=read_store,
     )
     character_profiles = characters.profiles
     public_profile = characters.public_profile
@@ -479,6 +480,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         character_summary=character_summary,
         ensure_character=ensure_character,
         create_character_from_draft=create_character_from_draft,
+        delete_archived_character=characters.delete_archived,
+        open_direct_character=characters.open_direct,
         global_sticker_catalog=global_sticker_catalog,
         sticker_catalog_for=sticker_catalog_for,
         ai_sticker_tagger=ai_sticker_tagger,

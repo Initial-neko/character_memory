@@ -31,6 +31,8 @@ class CoreApiRouteAccess:
     character_summary: Callable[[dict[str, Any]], dict[str, Any]]
     ensure_character: Callable[[str], dict[str, Any]]
     create_character_from_draft: Callable[..., dict[str, Any]]
+    delete_archived_character: Callable[..., dict[str, Any]]
+    open_direct_character: Callable[..., dict[str, Any]]
 
     global_sticker_catalog: Callable[[], Any]
     sticker_catalog_for: Callable[[str], Any]

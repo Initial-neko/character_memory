@@ -5,7 +5,7 @@ import logging
 from pydantic import BaseModel, Field
 
 from character_memory.avatar_intent import AvatarIntentPlanner, AvatarSearchIntent
-from character_memory.config import load_persona, split_archived
+from character_memory.config import load_persona, split_archived, split_direct_pending
 from character_memory.domain.models import EventType
 
 
@@ -127,7 +127,17 @@ def attach_avatar_routes(app) -> None:
         # Filtered like ``/v1/characters``: the avatar manager republishes this
         # list straight into ``CM.state.characters``, so a route that answered
         # with archived characters would put them back in the sidebar.
+        #
+        # Deferred characters are filtered for exactly the same reason. They
+        # belong in the sidebar no more than archived ones do, and answering
+        # with them here would let opening the avatar manager leak them in --
+        # the filter would look right until the first time someone changed an
+        # avatar. ``/v1/characters?include_deferred=true`` is the route that
+        # keeps offering them to the surfaces that need them, such as the group
+        # member picker.
         listed = split_archived(access.character_profiles(), archived)
+        if not archived:
+            listed = split_direct_pending(listed, False) or listed
         return {"characters": [public_profile(item) for item in listed]}
 
     @app.get("/v1/characters/{character_id}/avatar")

@@ -345,6 +345,21 @@ class SpaceRepository:
             ).fetchone()
         return int(row["total"] if row is not None else 0)
 
+    def count_comments(self, *, character_id: str) -> int:
+        """Comments one character wrote, under posts by anyone.
+
+        The author is the commenter, not the post's owner, so this stays
+        comparable with :meth:`count_posts` and reads as "things this
+        character did". ``actor_type`` is filtered because a post's own
+        author can also reply to itself through the same table.
+        """
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) AS total FROM space_comments WHERE character_id=? AND actor_type='CHARACTER'",
+                (character_id,),
+            ).fetchone()
+        return int(row["total"] if row is not None else 0)
+
     def list_comments(self, post_id: int) -> list[SpaceComment]:
         with self.store._lock:
             rows = self.store.conn.execute(

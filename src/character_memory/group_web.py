@@ -109,6 +109,11 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                     "id": character_id,
                     "name": profiles.get(character_id, {}).get("name") or character_id,
                     "identity": profiles.get(character_id, {}).get("identity") or "",
+                    # See group_members_web.payload: the sidebar list now hides
+                    # deferred characters too, so the browser has to be told
+                    # which state a member is in rather than deducing it.
+                    "archived": "archived_at" in profiles.get(character_id, {}),
+                    "direct_pending": "direct_pending" in profiles.get(character_id, {}),
                 }
                 for character_id in group.member_ids
             ],

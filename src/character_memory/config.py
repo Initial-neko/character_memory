@@ -348,9 +348,10 @@ def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
     not need a second character registry or duplicated config list. Avatar state
     is an asset concern and is projected into the public profile dynamically.
 
-    ``archived_at`` is present only on archived characters: key presence *is*
-    the flag, which keeps the value a plain string like every other key here and
-    lets a caller filter without a second lookup.
+    ``archived_at`` is present only on archived characters, and
+    ``direct_pending`` only on characters whose direct chat is still deferred:
+    key presence *is* the flag, which keeps the values plain strings like every
+    other key here and lets a caller filter without a second lookup.
     """
 
     root = _persona_root(settings)
@@ -381,6 +382,9 @@ def discover_character_profiles(settings: Settings) -> list[dict[str, str]]:
         archived_at = read_archive_state(path)
         if archived_at is not None:
             profile["archived_at"] = archived_at
+        pending_at = read_direct_state(path)
+        if pending_at is not None:
+            profile["direct_pending"] = pending_at
         profiles.append(profile)
 
     if not profiles:
@@ -407,6 +411,80 @@ def split_archived(profiles: list[dict[str, str]], archived: bool) -> list[dict[
     """
 
     return [profile for profile in profiles if ("archived_at" in profile) is archived]
+
+
+DIRECT_PENDING_FILENAME = "direct_pending.yaml"
+
+
+def read_direct_state(persona_path: str | Path) -> str | None:
+    """Return when a character's direct chat was deferred, or ``None`` for normal.
+
+    Same sidecar doctrine as the archive marker -- presence is the flag, the
+    timestamp is decoration, a hand-broken file still counts -- but the polarity
+    is inverted, and that is the whole point. Here *absence* is the normal
+    state: a character the user made one at a time has no marker, and neither
+    does any character that existed before this flag did. They must keep
+    appearing in the sidebar exactly as before.
+    """
+
+    path = Path(persona_path).parent / DIRECT_PENDING_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return ""
+    if isinstance(data, dict):
+        return str(data.get("pending_at") or "")
+    return ""
+
+
+def set_character_direct_pending(settings: Settings, character_id: str, pending: bool) -> str:
+    """Defer or open one character's direct chat; return the stamp (``""`` when open).
+
+    A batch build is about a *group*. Dropping five new names into the sidebar
+    buries the characters the user actually talks to, so those characters start
+    out deferred: fully alive -- they speak in the group, in Space, in voice --
+    just not in the sidebar until the user says so. Opening removes the file, so
+    "has a direct chat" has exactly one representation on disk.
+
+    Atomic, following ``set_character_archived``: a torn marker would be read by
+    the next discovery as a character that vanished for no stated reason.
+    """
+
+    marker = Path(resolve_persona_path(settings, character_id)).parent / DIRECT_PENDING_FILENAME
+    if not pending:
+        try:
+            marker.unlink()
+        except FileNotFoundError:
+            pass
+        return ""
+
+    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    temp = marker.with_suffix(".yaml.tmp")
+    temp.write_text(
+        yaml.safe_dump({"pending_at": stamp}, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    temp.replace(marker)
+    return stamp
+
+
+def split_direct_pending(
+    profiles: list[dict[str, str]], pending: bool
+) -> list[dict[str, str]]:
+    """Separate deferred characters from the ones with a direct chat.
+
+    Deliberately *not* folded into :func:`split_archived`, and deliberately not
+    applied everywhere that one is. Archiving hides a character from the
+    sidebar *and* both member pickers; deferring only hides it from the sidebar.
+    A deferred character is a perfectly playable member of every group -- it is
+    how the user asked for it to be introduced -- so anything that offers
+    characters to put in a group, a Space audience or a voice call has to keep
+    seeing it.
+    """
+
+    return [profile for profile in profiles if ("direct_pending" in profile) is pending]
 
 
 def resolve_persona_path(settings: Settings, character_id: str) -> str:

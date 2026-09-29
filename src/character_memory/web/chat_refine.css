@@ -526,6 +526,24 @@ body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-compact); }
   margin-top: 6px;
 }
 
+/* Typed-name confirmation. The input is the only thing that unlocks the
+ * delete button, so it has to read as a required field rather than an
+ * optional one -- hence a label that names the exact string to type. */
+.archive-delete-card > strong:first-of-type { color: var(--ui-danger); }
+.archive-delete-label { font-size: 12px; color: var(--ui-muted); }
+.archive-delete-label b { color: var(--ui-text); font-weight: 600; }
+.archive-delete-input {
+  width: 100%;
+  min-height: var(--ui-control-h-sm);
+  padding: 6px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-size: 13px;
+}
+.archive-delete-input:focus { border-color: var(--ui-danger-line); }
+
 /* Mobile never uses the avatar rail. It gets one off-canvas drawer. */
 .sidebar-mobile-backdrop { display: none; }
 

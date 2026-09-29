@@ -681,6 +681,22 @@ class SQLiteStore:
             rows = self.conn.execute("SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL AND event_type IN (?,?) ORDER BY event_time_epoch DESC,id DESC LIMIT ?", (character_id, EventType.USER_MESSAGE.value, EventType.CHARACTER_MESSAGE.value, limit)).fetchall()
             return [self._event_from_row(r) for r in reversed(rows)]
 
+    def count_character_messages(self, character_id: str) -> int:
+        """Messages this character itself spoke in its own (private) chats.
+
+        The archive drawer shows this beside the character's posts and
+        comments, so it counts one side of the conversation on purpose:
+        including the user's turns would report activity the character never
+        performed. Group turns live in ``conversation_events`` and are added
+        by ``GroupRepository.count_character_messages``.
+        """
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS total FROM events WHERE character_id=? AND event_type=?",
+                (character_id, EventType.CHARACTER_MESSAGE.value),
+            ).fetchone()
+        return int(row["total"] if row is not None else 0)
+
     def add_runtime_trace(self, character_id: str, source_event_id: int, created_at: datetime, trace: dict) -> int:
         with self._lock:
             self.conn.execute("INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO UPDATE SET character_id=excluded.character_id,created_at=excluded.created_at,created_at_epoch=excluded.created_at_epoch,trace_json=excluded.trace_json", (character_id, source_event_id, created_at.isoformat(), epoch_us(created_at), json.dumps(trace, ensure_ascii=False)))

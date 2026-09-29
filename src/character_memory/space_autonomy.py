@@ -521,6 +521,9 @@ Sources:
         image_relations = [
             item for item in relations if str(item.get("media_type") or "").upper() == "IMAGE"
         ]
+        video_relations = [
+            item for item in relations if str(item.get("media_type") or "").upper() == "VIDEO"
+        ]
         voice_transcript = ""
         if voice_relations:
             voice_transcript = str(
@@ -534,6 +537,9 @@ Sources:
             event_content = f"[语音动态] {voice_transcript}"
         elif image_relations:
             event_content = f"[图片动态 · {len(image_relations)} 张]"
+        elif video_relations:
+            duration = int((video_relations[0].get("metadata") or {}).get("duration_seconds") or 0)
+            event_content = f"[视频动态 · {duration} 秒]" if duration > 0 else "[视频动态]"
         else:
             event_content = "[媒体动态]"
         try:
@@ -568,7 +574,7 @@ Sources:
             try:
                 self.media_repository.replace_for_post(post.id, relations, now)
             except Exception:
-                # The legacy first-media pointer still keeps one image usable.
+                # The legacy first-media pointer still keeps one media asset usable.
                 # Extra unattached assets are removed rather than leaked.
                 logger.exception("space.media attach_failed post=%s", post.id)
                 self.media_executor.discard(relations[1:])
@@ -775,6 +781,7 @@ Sources:
             media_items = self.media_repository.list_for_post(post.id)
             image_count = sum(1 for item in media_items if item.media_type == "IMAGE")
             voice_items = [item for item in media_items if item.media_type == "VOICE"]
+            video_items = [item for item in media_items if item.media_type == "VIDEO"]
             visible_parts = []
             if post.content:
                 visible_parts.append(post.content)
@@ -786,6 +793,9 @@ Sources:
                     visible_parts.append("附了一条语音")
             if image_count:
                 visible_parts.append(f"附 {image_count} 张图片")
+            if video_items:
+                duration = int((video_items[0].metadata or {}).get("duration_seconds") or 0)
+                visible_parts.append(f"附一段 {duration} 秒视频" if duration > 0 else "附一段视频")
             visible_summary = "；".join(visible_parts) or "[媒体动态]"
             result = runtime.handle(
                 Event(

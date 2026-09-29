@@ -50,6 +50,13 @@ class Settings(BaseModel):
     # 450 ms was the old hardcoded value and cut people off mid-sentence.
     voice_silence_ms: int = Field(default=DEFAULT_VOICE_SILENCE_MS, ge=200, le=3000)
 
+    # Periodic visual observation is opt-in through an already user-granted
+    # Camera/Display stream. The browser performs the cheap pixel-difference
+    # gate first; these settings only pace/cap opportunities that survive it.
+    visual_observation_enabled: bool = True
+    visual_observation_interval_seconds: float = Field(default=60.0, ge=15.0, le=3600.0)
+    visual_observation_max_per_hour: int = Field(default=12, ge=1, le=120)
+
     # Search is deliberately separate from the LLM runtime. Avatar discovery,
     # Space image expression and World Observation share one provider contract.
     # Private/direct chat still does not receive a generic arbitrary web tool.

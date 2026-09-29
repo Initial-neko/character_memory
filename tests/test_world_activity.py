@@ -432,6 +432,7 @@ def _browse_plan_call_count(model):
 def test_idle_browse_gate_skips_repeated_plan_without_new_character_signal(tmp_path):
     store, access, model = make_access(tmp_path, count=1)
     access.settings.world_browse_interval_minutes = 30
+    access.settings.world_pulse_enabled = False
     model.browse = False
     repo = WorldPulseRepository(store)
     scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
@@ -470,6 +471,7 @@ def test_idle_browse_gate_skips_repeated_plan_without_new_character_signal(tmp_p
 def test_idle_browse_gate_reopens_immediately_after_new_character_event(tmp_path):
     store, access, model = make_access(tmp_path, count=1)
     access.settings.world_browse_interval_minutes = 30
+    access.settings.world_pulse_enabled = False
     model.browse = False
     repo = WorldPulseRepository(store)
     scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
@@ -497,6 +499,7 @@ def test_idle_browse_gate_reopens_immediately_after_new_character_event(tmp_path
 def test_idle_browse_gate_periodically_rechecks_even_without_new_events(tmp_path):
     store, access, model = make_access(tmp_path, count=1)
     access.settings.world_browse_interval_minutes = 30
+    access.settings.world_pulse_enabled = False
     model.browse = False
     repo = WorldPulseRepository(store)
     scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)

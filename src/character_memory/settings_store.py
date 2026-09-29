@@ -341,8 +341,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
     },
     {
         "id": "visual",
-        "title": "Search / ImageGen",
-        "description": "图片搜索与生成 Provider。Key 在 Secrets 中维护。",
+        "title": "Visual / Search / ImageGen",
+        "description": "屏幕视觉观察、图片搜索与生成 Provider。Key 在 Secrets 中维护。",
         "fields": [
             {
                 "name": "search_provider",
@@ -399,7 +399,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "periodic_visual_observation_enabled",
                 "label": "Periodic Screen Observation",
                 "type": "checkbox",
-                "level": "advanced",
+                "level": "common",
             },
             {
                 "name": "periodic_visual_observation_interval_seconds",

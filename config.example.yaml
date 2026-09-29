@@ -55,6 +55,14 @@ agnes_image_model: "agnes-image-2.1-flash"
 # Comma-separated model aliases/ModelScope model IDs. Multiple values enable failover.
 msimg_models: "qwen"
 
+# Short-video generation provider. The bearer token lives only in
+# METASO_MINIMAX_API_KEY (.env or system environment).
+video_generation_provider: "metaso-minimax-h3"
+metaso_minimax_base_url: "https://metaso.cn/api/minimax"
+metaso_minimax_video_model: "MiniMax-H3"
+video_generation_timeout_seconds: 900
+video_generation_poll_interval_seconds: 8
+
 db_path: "data/character-memory.db"
 # Empty means <db parent>/media. User-uploaded and generated image bytes live here, not in SQLite.
 media_dir: ""
@@ -98,6 +106,13 @@ space_media_enabled: true                 # character may naturally choose image
 space_media_max_items: 3                  # execution cap per post; hard max 9
 space_image_search_enabled: true          # use configured image-search provider
 space_image_generation_enabled: true      # use configured ImageGen provider
+space_video_generation_enabled: false     # paid capability: opt in explicitly
+space_video_resolution: "2K"              # 768P | 2K
+space_video_max_duration_seconds: 5       # server hard cap, valid 5..15
+space_video_daily_budget_cny: 3.0         # account-wide local-day hard ceiling; 0 blocks video jobs
+space_video_cost_cny_per_second_768p: 0.09 # configurable estimate used by budget guard
+space_video_cost_cny_per_second_2k: 0.15  # configurable estimate used by budget guard
+space_video_max_bytes: 67108864           # 64 MiB per generated video
 space_world_observation_enabled: true     # character may choose to explore public web
 space_world_max_pages: 2                  # headless-rendered pages per opportunity; hard max 4
 space_world_max_chars_per_page: 6000      # extracted readable text cap for each page

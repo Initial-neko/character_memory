@@ -317,4 +317,20 @@ def test_dev_media_smoke_runs_real_contract_tts_then_asr():
     assert data["asr"]["provider"] == "fake-asr"
     assert [call[0] for call in fake_http.calls if call[0] == "POST"] == ["POST", "POST"]
 
+def test_llm_usage_explorer_localizes_feature_and_purpose_labels():
+    script = (Path(__file__).resolve().parents[1] / "src" / "character_memory" / "web" / "dev.js").read_text(encoding="utf-8")
+
+    # Storage/API enums stay stable; only the Dev presentation gets localized.
+    assert 'GROUP: "群聊"' in script
+    assert 'SPACE: "空间"' in script
+    assert 'WORLD: "世界活动"' in script
+    assert 'GROUP_REACTION: "群聊回复"' in script
+    assert 'SPACE_WORLD_EXPLORE: "发动态前世界探索"' in script
+    assert 'WORLD_BROWSE_PLAN: "个人浏览决策"' in script
+    assert "usageEnum(item.feature, USAGE_FEATURE_LABELS)" in script
+    assert "usageEnum(item.purpose, USAGE_PURPOSE_LABELS)" in script
+    assert "usageEnumPair(item.feature, item.purpose)" in script
+
+    # Raw enum values remain discoverable for log/debug correlation.
+    assert "if (spec.title) cell.title = String(spec.title)" in script
 

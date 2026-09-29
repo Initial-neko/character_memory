@@ -192,6 +192,8 @@ def attach_space_routes(app):
             media_type = "IMAGE"
         elif mime_type.startswith("audio/"):
             media_type = "VOICE"
+        elif mime_type.startswith("video/"):
+            media_type = "VIDEO"
         else:
             raise HTTPException(status_code=400, detail=f"unsupported Space media mime type: {asset.mime_type}")
 
@@ -250,7 +252,15 @@ def attach_space_routes(app):
         if asset is None:
             return None
         mime_type = str(asset.mime_type or "").lower()
-        media_type = "IMAGE" if mime_type.startswith("image/") else "VOICE" if mime_type.startswith("audio/") else "IMAGE"
+        media_type = (
+            "IMAGE"
+            if mime_type.startswith("image/")
+            else "VOICE"
+            if mime_type.startswith("audio/")
+            else "VIDEO"
+            if mime_type.startswith("video/")
+            else "IMAGE"
+        )
         relation = type(
             "LegacySpaceMedia",
             (),

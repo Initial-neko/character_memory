@@ -6,8 +6,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 MODEL_ROOT="${CHARACTER_MEDIA_MODEL_ROOT:-$ROOT/models}"
 ASR_NAME="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+STREAM_ASR_NAME="sherpa-onnx-streaming-paraformer-bilingual-zh-en"
 TTS_NAME="sherpa-onnx-vits-zh-ll"
 ASR_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${ASR_NAME}.tar.bz2"
+STREAM_ASR_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${STREAM_ASR_NAME}.tar.bz2"
 TTS_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${TTS_NAME}.tar.bz2"
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -53,6 +55,13 @@ fetch_model() {
 }
 
 fetch_model "$ASR_NAME" "$ASR_URL" "model.int8.onnx"
+fetch_model "$STREAM_ASR_NAME" "$STREAM_ASR_URL" "encoder.int8.onnx"
+for required in decoder.int8.onnx tokens.txt; do
+  if [[ ! -f "$MODEL_ROOT/$STREAM_ASR_NAME/$required" ]]; then
+    echo "[error] expected $MODEL_ROOT/$STREAM_ASR_NAME/$required after extraction" >&2
+    exit 1
+  fi
+done
 fetch_model "$TTS_NAME" "$TTS_URL" "model.onnx"
 
 # Reuse this existing model-setup entry for the :9002 Kokoro assets as well.
@@ -69,6 +78,14 @@ cat <<EOF
 
 Media/TTS setup is ready under:
   $MODEL_ROOT
+
+Streaming ASR assets:
+  $MODEL_ROOT/$STREAM_ASR_NAME/encoder.int8.onnx
+  $MODEL_ROOT/$STREAM_ASR_NAME/decoder.int8.onnx
+  $MODEL_ROOT/$STREAM_ASR_NAME/tokens.txt
+
+The normal stack launcher auto-selects Paraformer streaming when these files
+exist. Set CHARACTER_MEDIA_ASR_PROVIDER=sensevoice to force the batch fallback.
 
 Start the full stack with:
   uv run character-stack --open tts

@@ -592,7 +592,8 @@ class SpaceMediaExecutor:
         if self._owns_tts_client and self._tts_client is not None:
             self._tts_client.close()
             self._tts_client = None
+            self._owns_tts_client = False
         if self._owns_video_provider and self._video_provider is not None:
             self._video_provider.close()
             self._video_provider = None
-            self._owns_tts_client = False
+            self._owns_video_provider = False

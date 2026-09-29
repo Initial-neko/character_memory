@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from character_memory.config import Settings
-from character_memory.domain.models import WorldObservation
+from character_memory.domain.models import Event, EventType, WorldObservation
 from character_memory.llm.usage import current_llm_usage_context
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.time_utils import epoch_us

@@ -268,14 +268,17 @@ Manual **立即手动触发一次** remains independent from formal scheduler st
 
 ### Autonomous audience
 
-After an autonomous post is created, the current baseline selector chooses a sparse subset of active characters:
+After an autonomous post is created, the selector chooses a sparse subset of active characters:
 
 - author is excluded;
 - hard ceiling: 10 audience characters;
 - current normal default ceiling: 5, configurable from Settings Center as `space_audience_size`;
-- the selection is deterministic for a post so retries are easier to reason about.
+- **the configured value is a ceiling, not a target**: the runtime does not automatically spend one PersonRuntime / LLM reaction on every available slot;
+- characters with durable public Space interaction with the author (comments or LIKEs on each other's posts) are ranked first;
+- candidates with no prior Space interaction use at most two deterministic exploration slots per post, so new relationships can still form;
+- selection and ranking themselves use no LLM call, and remain deterministic for a post so retries are easier to reason about.
 
-Relationship/interest-aware ranking is not implemented yet. The current selector is deliberately a small deterministic baseline rather than a fake "relationship AI" score.
+The affinity signal deliberately stays narrow and auditable. It is based only on already-persisted public Space interaction; it does not inspect private chat, invent a hidden relationship score, or ask another model which characters should react. Content/interest-aware ranking remains a later refinement if runtime metrics show the extra complexity is justified.
 
 The audience step runs after the post is already public, so it is fail-soft like media execution: an outage there is reported as `audience_error`, and the run keeps `POSTED` with its `post_id`. A provider failure while deciding who noticed a post must not be recorded as a run that published nothing.
 

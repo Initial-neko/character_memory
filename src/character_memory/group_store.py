@@ -136,6 +136,24 @@ class GroupRepository:
             """
         )
 
+
+    def _migrate_character_activity_indexes(self) -> None:
+        """Index the durable per-character group experience signal.
+
+        World Browse only needs to know whether a character has actually
+        processed new shared-group context since its last browse decision.
+        Runtime traces are the durable proof of that processing; a character's
+        own visible group messages are a second direct signal.
+        """
+        self.store.conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_conversation_runtime_traces_character_time
+                ON conversation_runtime_traces(character_id,created_at_epoch DESC,id DESC);
+            CREATE INDEX IF NOT EXISTS idx_conversation_events_actor_time
+                ON conversation_events(actor_type,actor_id,event_time_epoch DESC,id DESC);
+            """
+        )
+
     def _init_schema(self) -> None:
         with self.store._lock:
             self.store._ensure_migration_table_locked()
@@ -195,6 +213,10 @@ class GroupRepository:
         self.store.apply_schema_migration("group/002-indexes", self._create_indexes)
         self.store.apply_schema_migration("group/003-conversation-archive", self._migrate_archive_state)
         self.store.apply_schema_migration("group/004-autonomy-scheduler", self._migrate_autonomy_scheduler)
+        self.store.apply_schema_migration(
+            "group/005-character-activity-indexes",
+            self._migrate_character_activity_indexes,
+        )
 
     @staticmethod
     def _event_from_row(row) -> GroupEvent:
@@ -752,6 +774,33 @@ class GroupRepository:
             )
             self.store._maybe_commit()
             return int(cur.lastrowid or 0)
+
+    def has_character_activity_since(self, character_id: str, since_epoch: int) -> bool:
+        """Return whether shared-group context changed for this character.
+
+        Group events are intentionally shared facts, so they are not duplicated
+        into each character's core events table. A runtime trace proves the
+        character actually evaluated a group fact, including a silent reaction;
+        the character's own emitted group message is also a direct experience
+        signal.
+        """
+        cutoff = int(since_epoch)
+        with self.store._lock:
+            trace = self.store.conn.execute(
+                "SELECT 1 FROM conversation_runtime_traces "
+                "WHERE character_id=? AND created_at_epoch>? "
+                "ORDER BY created_at_epoch DESC,id DESC LIMIT 1",
+                (character_id, cutoff),
+            ).fetchone()
+            if trace is not None:
+                return True
+            own_event = self.store.conn.execute(
+                "SELECT 1 FROM conversation_events "
+                "WHERE actor_type='CHARACTER' AND actor_id=? AND event_time_epoch>? "
+                "ORDER BY event_time_epoch DESC,id DESC LIMIT 1",
+                (character_id, cutoff),
+            ).fetchone()
+        return own_event is not None
 
     def list_turn_traces(self, conversation_id: str, turn_id: str) -> list[dict[str, Any]]:
         with self.store._lock:

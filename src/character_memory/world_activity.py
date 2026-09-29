@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field, model_validator
 
 from character_memory.domain.models import Event, EventType
+from character_memory.group_store import GroupRepository
 from character_memory.llm.usage import llm_usage_scope
 from character_memory.time_utils import epoch_us
 
@@ -1059,6 +1060,7 @@ class WorldActivityScheduler:
     ):
         self.access = access
         self.repository = repository
+        self.group_repository = GroupRepository(access.read_store)
         self.service = WorldActivityService(access, repository)
         self.poll_seconds = max(
             10.0,
@@ -1121,7 +1123,10 @@ class WorldActivityScheduler:
             )
             if events and epoch_us(events[-1].event_time) > since_epoch:
                 return True
-        return False
+        return self.group_repository.has_character_activity_since(
+            character_id,
+            since_epoch,
+        )
 
     def _browse_plan_due(
         self,

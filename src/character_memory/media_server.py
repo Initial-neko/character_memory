@@ -233,15 +233,11 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                         raise ValueError("PCM16 frame has odd byte length")
                     samples = np.frombuffer(payload, dtype="<i2").astype(np.float32) / 32768.0
                     text = session.push_audio(samples, sample_rate=16000)
-                    if text:
-                        await websocket.send_json({
-                            "kind": "partial",
-                            "session_id": session_id,
-                            "segment_id": segment_id,
-                            "revision": 0,
-                            "text": text,
-                        })
                     if session.is_endpoint():
+                        # Do not emit a redundant PARTIAL immediately before the
+                        # FINAL for the same audio frame. Clients replace partial
+                        # text by segment_id, but one terminal event per endpoint
+                        # keeps ordering deterministic and avoids a visible flash.
                         result = session.finish()
                         if result.text:
                             await websocket.send_json({
@@ -254,6 +250,14 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                             })
                         segment_id += 1
                         session = create_session()
+                    elif text:
+                        await websocket.send_json({
+                            "kind": "partial",
+                            "session_id": session_id,
+                            "segment_id": segment_id,
+                            "revision": 0,
+                            "text": text,
+                        })
                     continue
 
                 text_message = message.get("text")

@@ -1,0 +1,105 @@
+# Delivery & Acceptance Ledger
+
+> Baseline: `main@38d400ac2ff459c851585d0045735c6b22eed636`, 2026-09-29.
+>
+> This file separates **implemented on main** from **proven on the actual target machine**. CI-green code is not automatically a real-device acceptance result.
+
+## 1. Current convergence status
+
+| Workstream | Implementation | Real acceptance | Notes |
+| --- | --- | --- | --- |
+| Stage 1 async defects | DONE | Browser regression covered | Durable Space/Encounter replies, Enter send, archived group removal. |
+| Character archive/delete/deferred direct chat | DONE | Manual edge checks pending | Exact-name delete, activity counts, generated characters do not automatically enter the private sidebar. |
+| Screen-share image quality | DONE | TARGET-MACHINE PENDING | DISPLAY accepted frames retain up to ~1440px long side; cheap change analysis remains 64px. |
+| Ensemble Persona V2 | DONE | Persona-quality soak pending | One structured group research call plus deterministic per-character projection; no N extra Persona calls. |
+| ASR server streaming | DONE | TARGET-MACHINE PENDING | Paraformer streaming session and WebSocket protocol are implemented. |
+| Shared browser AudioWorklet | DONE | Browser regression covered | PCM16 / 16k shared streaming client. |
+| Dictation streaming | DONE | TARGET-MACHINE PENDING | Streaming preferred, batch fallback retained. |
+| Browser Call streaming | DONE | TARGET-MACHINE PENDING | Streaming preferred; speak-over-reply, pending turns, visual frames and batch fallback retained. |
+| LLM usage observability | DONE | Runtime soak pending | Feature/Purpose, request/logical ratio, chars, token coverage, retry/error/latency. |
+| World browse cost gate | DONE | Runtime soak pending | Repeated browse=false planning can be skipped until a new signal/recheck boundary. |
+| Space audience cost gate | DONE | Runtime soak pending | Public social ties prioritized; cold posts use at most two exploration audience slots. |
+| Periodic screen observation | DONE | TARGET-MACHINE PENDING | Direct DISPLAY only; significant-change + busy + dedup + interval + hourly quota gates. |
+| Settings/config contract | DONE | Manual usability pass pending | Supported knobs live in config.example.yaml with help and common/advanced/diagnostic ownership. |
+
+## 2. P0 target-machine acceptance
+
+### 2.1 Streaming ASR
+
+Run on the machine that will actually host Media Runtime. Record provider/model/device and keep the same audio corpus for comparisons.
+
+| Case | Evidence to record | Pass condition |
+| --- | --- | --- |
+| 30–60s natural Mandarin | reference transcript, final transcript, CER/D/S/I | no material tail/phrase deletion |
+| 0.5–1.5s thinking pauses | segment ids + timestamps | pauses do not arbitrarily lose or duplicate content |
+| fast / low-volume / mild noise | reference + final | degradation is visible and bounded, no hallucinated conversational reply from noise |
+| Chinese + English technical terms | reference + final | substitutions tracked separately; project/character names explicitly included |
+| first partial latency | timestamp | measured, not inferred from UI |
+| finalization latency | endpoint -> final timestamp | measured and compared with product tolerance |
+| reconnect / cancel | WebSocket event log | no duplicate final message |
+| speak while character is replying | browser event log | recognized turn enters pendingTurns and is dispatched after reply |
+| repeated sessions | CPU/RAM/VRAM at 1/10/50 sessions | no monotonic resource leak |
+| configured GPU execution | health + process/device evidence | no silent CPU fallback |
+
+Do not select a final ASR model from one aggregate score. Report deletion rate separately from CER.
+
+### 2.2 Screen-share readability and periodic observation
+
+Use a real 1920×1080 or higher desktop and explicitly share the target window/screen.
+
+| Scene | Check |
+| --- | --- |
+| VS Code / IDE, 12–14px text | Character can read representative Chinese/English source text from accepted DISPLAY frame. |
+| Browser settings/data table | Small labels and values remain legible enough for the intended Vision provider. |
+| Terminal | Commands and short error lines remain readable. |
+| Static screen for >2 intervals | After the initial eligible observation, unchanged content creates no new periodic Vision call. |
+| Significant window/content change | A new observation may be accepted after the minimum interval. |
+| User speaking / reply in flight | Periodic observation is skipped rather than competing with the active turn. |
+| Stop screen share | No new observation is scheduled after stop. |
+| Hourly cap | Accepted observations do not exceed `periodic_visual_observation_max_per_hour`. |
+| Chat history | `VISUAL_OBSERVATION` is not rendered as a fake user message. |
+| Memory | Screen observation does not create durable Memory/Intent. |
+
+Use Dev LLM Usage Explorer to confirm periodic observations appear under `VISUAL / SCREEN_OBSERVATION_VISION`.
+
+## 3. Cost-soak acceptance
+
+Capture at least one comparable usage window before and after the convergence changes.
+
+Required breakdown:
+
+- `WORLD_BROWSE_PLAN`: requests, logical calls and number of real browse/appraisal runs;
+- `SPACE_AUDIENCE`: calls per autonomous post, with warm vs cold audience examples;
+- `SPACE_REPLY`: calls per comment thread and automatic-round depth;
+- `VISUAL / SCREEN_OBSERVATION_VISION`: accepted calls/hour and silence rate;
+- request/logical-call ratio and retry/error hotspots;
+- input-character share for the top Feature/Purpose rows.
+
+The objective is not to force characters to be quiet. The objective is to remove **mechanical model calls that do not correspond to a meaningful opportunity**.
+
+## 4. Real Chromium product pass
+
+Run against the real character-stack, not a mocked page:
+
+- Direct Chat: text, image, voice message, streaming call, speak-over-reply, screen share.
+- Group: add/remove member, archived member removal, mentions, large-group readability, grouped message rendering.
+- Character creation / one-click group: distinct Persona behavior, avatar prepared, voice or explicit setup state, generated members not forced into private sidebar.
+- Space: infinite feed, collapsed replies, durable user comment then asynchronous AI continuation, sparse audience behavior.
+- Encounter: durable user reply then asynchronous continuation.
+- Settings: Common surface remains small; every field has help; restart/hot-apply semantics match the UI.
+- Dev: LLM Usage table identifies feature/purpose hotspots and token-coverage gaps.
+- Failure recovery: microphone/camera/display denial, SSE reconnect, Media Runtime/TTS failure, generation failure.
+
+## 5. Release exit criteria
+
+A release candidate may be promoted only when:
+
+1. CI is green on the release candidate commit.
+2. The ASR target-machine matrix has recorded results rather than unchecked assumptions.
+3. Screen readability passes on IDE/browser/terminal examples.
+4. Periodic visual observation shows bounded Vision cost in the Dev usage table.
+5. Core Direct/Group/Space/Settings/Dev flows pass the real Chromium run.
+6. Known failures are either fixed or explicitly recorded with scope/workaround.
+7. `STATUS.md` and the owning domain docs match the code being tagged.
+
+Open feature work unrelated to these acceptance gates (for example experimental Space video generation) does not silently redefine the release baseline.

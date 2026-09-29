@@ -63,6 +63,13 @@ SECRET_SPECS: tuple[SecretSpec, ...] = (
         provider_field="image_generation_provider",
         provider_value="msimg",
     ),
+    SecretSpec(
+        "METASO_MINIMAX_API_KEY",
+        "MetaSo MiniMax H3 Video API Key",
+        "metaso_minimax_api_key",
+        provider_field="video_generation_provider",
+        provider_value="metaso-minimax-h3",
+    ),
     SecretSpec("HF_TOKEN", "Hugging Face Token", None, level="diagnostic"),
 )
 SECRET_NAMES = {item.name for item in SECRET_SPECS}
@@ -401,6 +408,43 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
             },
             {"name": "space_image_search_enabled", "label": "Web Image Search", "type": "checkbox", "level": "advanced"},
             {"name": "space_image_generation_enabled", "label": "AI ImageGen", "type": "checkbox", "level": "advanced"},
+            {
+                "name": "space_video_generation_enabled",
+                "label": "AI VideoGen",
+                "type": "checkbox",
+                "level": "advanced",
+                "help": "付费能力，默认关闭。开启后角色仍只在动作/过程确实需要时间维度时选择视频，并受每日预算硬上限约束。",
+            },
+            {
+                "name": "space_video_resolution",
+                "label": "Video Resolution",
+                "type": "select",
+                "level": "advanced",
+                "options": [
+                    {"value": "768P", "label": "768P"},
+                    {"value": "2K", "label": "2K"},
+                ],
+            },
+            {
+                "name": "space_video_max_duration_seconds",
+                "label": "Max Video Duration (s)",
+                "type": "number",
+                "min": 5,
+                "max": 15,
+                "step": 1,
+                "level": "advanced",
+                "help": "服务端硬上限；模型即使请求更长，也会被压到这里。",
+            },
+            {
+                "name": "space_video_daily_budget_cny",
+                "label": "Video Daily Budget (CNY)",
+                "type": "number",
+                "min": 0,
+                "max": 10000,
+                "step": 0.1,
+                "level": "advanced",
+                "help": "整个 Character Space 每个本地自然日的视频估算花费上限。0 = 禁止产生付费视频任务。",
+            },
             {
                 "name": "space_world_observation_enabled",
                 "label": "World Observation",

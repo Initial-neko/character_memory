@@ -65,6 +65,8 @@ voice_silence_ms: 900
 # Search provider shared by image discovery and World public-web discovery.
 # Supported formal values: searchapi | brave.
 search_provider: "searchapi"
+# Alternative example (requires BRAVE_SEARCH_API_KEY in .env):
+# search_provider: "brave"
 
 # Country hint forwarded to the selected search provider.
 search_country: "jp"

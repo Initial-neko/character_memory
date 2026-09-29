@@ -116,6 +116,9 @@ def evaluate_reaction(
     elif event.event_type == EventType.WORLD_OBSERVATION:
         feature = "WORLD"
         purpose = "WORLD_REACTION"
+    elif event.event_type == EventType.VISUAL_OBSERVATION:
+        feature = "VISUAL"
+        purpose = "SCREEN_OBSERVATION"
     else:
         feature = "DIRECT"
         purpose = "DIRECT_REACTION"

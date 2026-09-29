@@ -200,41 +200,12 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     rollback_created_character = characters.rollback_created
 
     def refresh_voice_registry() -> dict[str, object]:
-        """Best-effort GSV registry refresh after archive/restore.
+        """Refresh the active GSV roster without slowing non-GSV deployments.
 
-        Archiving is a lifecycle change, not data deletion. The voice.yaml stays
-        on disk, while a running GSV sidecar should immediately stop resolving
-        that character id until it is restored.
-
-        Three outcomes, and the caller needs them apart:
-
-        ``reloaded``     the sidecar answered and took the new roster.
-        ``rejected``     the sidecar's reload route refused it with the one
-                         status it defines for that. This is the outcome that is
-                         genuinely the user's problem: the sidecar is
-                         demonstrably running and demonstrably still holding the
-                         old roster, so a warning about it is actionable and
-                         true.
-        ``unreachable``  nothing refused. No sidecar at all -- most deployments,
-                         since ``dev_stack`` only starts one when
-                         ``.external/GSV-TTS-Lite/.venv`` exists and the usual
-                         ``tts_provider`` is not ``gsv`` -- or nothing answered
-                         in time, or something in front of the port answered
-                         that is not the reload route.
-
-        The two failures used to arrive as the same ``{"ok": false,
-        "reloaded": false}``, so the browser could not tell them apart and
-        pinned a permanent "a running GSV sidecar may still be synthesizing the
-        old roster" banner. On a machine with no sidecar that sentence was
-        false, and on one with a busy sidecar it was a coin flip. ``status``
-        names which of the three happened.
-
-        Note what the refusal is *not*: it is not "an HTTP response arrived". A
-        loopback port that nothing is listening on does not necessarily refuse
-        the connection -- a proxy in TUN mode will answer 502 for it -- so
-        anything other than the reload route's own status is sorted with the
-        sidecars that are not there, and the reason string keeps the details for
-        the log.
+        reloaded means the sidecar accepted the roster; rejected means its
+        reload route refused it; unreachable means no valid reload route
+        answered; skipped means GSV is not the active formal provider.
+        Archive/restore itself succeeds for every outcome.
         """
         if str(getattr(settings, "tts_provider", "") or "").strip().lower() != "gsv":
             # Archive/restore changes the GSV roster only when GSV is the active

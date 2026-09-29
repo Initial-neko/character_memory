@@ -167,7 +167,15 @@ class ReactionScheduler:
                 return {"state": "typing", "watermark": latest_id}
             return {"state": "idle", "watermark": state.processed_id}
 
-    def _enqueue(self, key: str, event, image_data_urls: list[str] | None, target: Callable[[str, _PendingState], None]) -> None:
+    def _enqueue(
+        self,
+        key: str,
+        event,
+        image_data_urls: list[str] | None,
+        target: Callable[[str, _PendingState], None],
+        *,
+        only_if_idle: bool = False,
+    ) -> bool:
         if event.id is None:
             raise ValueError("asynchronous reaction requires a persisted event id")
         state = self._state(key)
@@ -177,6 +185,11 @@ class ReactionScheduler:
         incoming_id = int(event.id)
         urls = [str(value).strip() for value in (image_data_urls or []) if str(value).strip()]
         with state.condition:
+            if only_if_idle:
+                latest_id = int(state.latest_event.id) if state.latest_event is not None else state.processed_id
+                if state.active or latest_id > state.processed_id:
+                    logger.debug("scheduler.enqueue skipped_busy channel=%s incoming=%s", key, incoming_id)
+                    return False
             # Persistence order is authoritative. Request threads may reach this
             # method out of order, so the in-memory watermark must never move
             # backwards after a newer durable event has already been observed.
@@ -187,7 +200,7 @@ class ReactionScheduler:
                     incoming_id,
                     state.processed_id,
                 )
-                return
+                return False
 
             current_id = int(state.latest_event.id) if state.latest_event is not None else state.processed_id
             if incoming_id > current_id:
@@ -217,6 +230,7 @@ class ReactionScheduler:
         self.hub.publish(key, "reaction_status", {"state": "queued", "watermark": queued_watermark})
         if should_start:
             threading.Thread(target=target, args=(key, state), daemon=True, name=f"reaction-{key[:32]}").start()
+        return True
 
     @staticmethod
     def _image_urls(image_data_url: str | None = None, image_data_urls: list[str] | None = None) -> list[str]:
@@ -233,14 +247,16 @@ class ReactionScheduler:
         *,
         image_data_url: str | None = None,
         image_data_urls: list[str] | None = None,
-    ) -> None:
+        only_if_idle: bool = False,
+    ) -> bool:
         key = direct_channel(character_id, conversation_id)
         event.metadata.setdefault("conversation_id", conversation_id)
-        self._enqueue(
+        return self._enqueue(
             key,
             event,
             self._image_urls(image_data_url, image_data_urls),
             lambda channel, state: self._run_direct(channel, state, character_id, conversation_id),
+            only_if_idle=only_if_idle,
         )
 
     def enqueue_group(
@@ -308,6 +324,22 @@ class ReactionScheduler:
         with store._lock:
             row = store.conn.execute(
                 "SELECT id FROM events WHERE character_id=? AND event_type='USER_MESSAGE' "
+                "AND json_extract(metadata_json,'$.conversation_id')=? ORDER BY id DESC LIMIT 1",
+                (character_id, conversation_id),
+            ).fetchone()
+        return int(row["id"]) if row else None
+
+    @staticmethod
+    def _latest_direct_visual_source_id(store, character_id: str, conversation_id: str) -> int | None:
+        """Newest direct fact that can supersede a periodic visual observation.
+
+        A later user message always wins. A later visual observation also makes
+        the older screen reaction stale. Ordinary character output does neither.
+        """
+        with store._lock:
+            row = store.conn.execute(
+                "SELECT id FROM events WHERE character_id=? "
+                "AND event_type IN ('USER_MESSAGE','VISUAL_OBSERVATION') "
                 "AND json_extract(metadata_json,'$.conversation_id')=? ORDER BY id DESC LIMIT 1",
                 (character_id, conversation_id),
             ).fetchone()
@@ -398,7 +430,15 @@ class ReactionScheduler:
                         event,
                         image_data_urls=image_urls or None,
                         persist_event=False,
-                        commit_guard=lambda: self._latest_direct_user_id(bundle.store, character_id, conversation_id) == watermark,
+                        commit_guard=(
+                            (lambda: self._latest_direct_visual_source_id(
+                                bundle.store, character_id, conversation_id
+                            ) == watermark)
+                            if event.event_type.value == "VISUAL_OBSERVATION"
+                            else (lambda: self._latest_direct_user_id(
+                                bundle.store, character_id, conversation_id
+                            ) == watermark)
+                        ),
                     )
                 self.publish_direct_responses(
                     bundle.store,

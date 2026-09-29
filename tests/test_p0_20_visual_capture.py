@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from character_memory.application.async_conversation import ConversationEventHub, ReactionScheduler, _PendingState
 from character_memory.config import Settings
 from character_memory.dev_server import create_dev_app
-from character_memory.visual_capture_web import DirectVisualMessageRequest, VisualFrameRequest, normalize_visual_frames
+from character_memory.visual_capture_web import DirectVisualMessageRequest, PeriodicVisualObservationGate, VisualFrameRequest, normalize_visual_frames
 
 
 def _jpeg_data_url(payload: bytes = b"\xff\xd8\xffvisual-frame") -> str:
@@ -36,6 +36,17 @@ def test_visual_frames_are_validated_as_transient_context():
         "sources": ["DISPLAY"],
         "captured_at_ms": {"first": 1234, "last": 1234},
     }
+
+
+def test_periodic_visual_gate_deduplicates_rate_limits_and_caps_hourly_cost():
+    gate = PeriodicVisualObservationGate()
+
+    assert gate.claim("direct:rin:one", "frame-a", interval_seconds=30, max_per_hour=2, now=100.0) == (True, "ACCEPTED")
+    assert gate.claim("direct:rin:one", "frame-a", interval_seconds=30, max_per_hour=2, now=140.0) == (False, "DUPLICATE_FRAME")
+    assert gate.claim("direct:rin:one", "frame-b", interval_seconds=30, max_per_hour=2, now=120.0) == (False, "INTERVAL")
+    assert gate.claim("direct:rin:one", "frame-b", interval_seconds=30, max_per_hour=2, now=140.0) == (True, "ACCEPTED")
+    assert gate.claim("direct:rin:one", "frame-c", interval_seconds=30, max_per_hour=2, now=180.0) == (False, "HOURLY_LIMIT")
+    assert gate.claim("direct:rin:disabled", "frame-a", interval_seconds=30, max_per_hour=0, now=100.0) == (False, "HOURLY_LIMIT_DISABLED")
 
 
 def test_scheduler_keeps_multiple_images_for_one_event():
@@ -86,6 +97,25 @@ def test_visual_capture_assets_cover_camera_display_keyframes_and_call_persisten
     minimize_block = voice.split("function minimizeCall()", 1)[1].split("function expandCall()", 1)[0]
     assert "visualSession" not in minimize_block
     assert ".voice-call-dock-visual" in css
+
+
+def test_periodic_screen_observation_only_uses_significant_display_candidates():
+    capture = Path("src/character_memory/web/visual_capture.js").read_text(encoding="utf-8")
+    voice = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
+    routes = Path("src/character_memory/visual_capture_web.py").read_text(encoding="utf-8")
+
+    assert "latestSignificantFrame" in capture
+    assert "candidate.score >= config.changeThreshold" in capture
+    assert 'source = "DISPLAY"' in capture
+    assert "/v1/visual/periodic/config" in voice
+    assert "/v1/visual/direct/observations" in voice
+    assert 'voice.target?.scope !== "direct"' in voice
+    assert 'visual.source !== "DISPLAY"' in voice
+    assert "replyInFlight()" in voice
+    assert '["recording", "transcribing"].includes(voice.capturePhase)' in voice
+    assert 'event_type=EventType.VISUAL_OBSERVATION' in routes
+    assert 'only_if_idle=True' in routes
+    assert 'req.visual_frame.source != "DISPLAY"' in routes
 
 
 def test_display_capture_keeps_high_resolution_frames_for_readable_screen_text():

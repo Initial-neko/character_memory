@@ -582,6 +582,10 @@ def _voice_registry_after_archive(tmp_path: Path, monkeypatch, base_url: str, lo
     """
 
     config = _config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + '\ntts_provider: "gsv"\n',
+        encoding="utf-8",
+    )
     settings = load_settings(str(config))
     momo_dir = Path(settings.persona_path).parent.parent / "momo"
     (momo_dir / "voice.yaml").write_text("template: murasame\n", encoding="utf-8")
@@ -595,6 +599,29 @@ def _voice_registry_after_archive(tmp_path: Path, monkeypatch, base_url: str, lo
     assert archived.status_code == 200, archived.text
     assert (momo_dir / "voice.yaml").read_text(encoding="utf-8") == "template: murasame\n"
     return archived.json()["voice_registry"]
+
+
+def test_archive_skips_gsv_reload_when_gsv_is_not_the_active_provider(tmp_path: Path, monkeypatch):
+    config = _config(tmp_path)
+    called = {"reload": False}
+
+    def fail_if_called(self):
+        called["reload"] = True
+        raise AssertionError("inactive GSV provider must not be probed")
+
+    monkeypatch.setattr("character_memory.tts_lab.GsvVoiceReloader.reload", fail_if_called)
+
+    with TestClient(create_api(str(config))) as client:
+        archived = client.post("/v1/characters/momo/archive")
+
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["voice_registry"] == {
+        "ok": True,
+        "reloaded": False,
+        "status": "skipped",
+        "reason": "GSV is not the active TTS provider",
+    }
+    assert called["reload"] is False
 
 
 def test_archive_reports_a_sidecar_that_took_the_new_roster(tmp_path: Path, monkeypatch):

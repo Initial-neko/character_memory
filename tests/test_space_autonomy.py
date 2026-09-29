@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from character_memory.domain.models import (
@@ -861,6 +861,50 @@ def test_space_behavior_uses_configurable_interval_and_audience_size(tmp_path):
     assert status["interval_minutes"] == 60
     assert status["audience_size"] == 2
     assert status["characters"][0]["next_opportunity_at"].startswith("2026-09-21T06:00")
+    store.close()
+
+
+def test_cold_space_audience_uses_only_deterministic_exploration_slots(tmp_path):
+    access, store, _ = _access(
+        tmp_path,
+        ids=("c00", "c01", "c02", "c03", "c04", "c05"),
+    )
+    access.settings.space_audience_size = 5
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    now = datetime(2026, 9, 21, 5, 0, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "第一次发给大家看的动态", now)
+
+    first = service.select_audience(post.id, "c00")
+    second = service.select_audience(post.id, "c00")
+
+    assert first == second
+    assert len(first) == 2
+    assert all(character_id != "c00" for character_id in first)
+    store.close()
+
+
+def test_space_audience_prioritizes_existing_public_social_ties(tmp_path):
+    access, store, _ = _access(
+        tmp_path,
+        ids=("c00", "c01", "c02", "c03", "c04", "c05"),
+    )
+    access.settings.space_audience_size = 5
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    now = datetime(2026, 9, 21, 5, 0, tzinfo=timezone.utc)
+    earlier = now - timedelta(days=1)
+
+    old_post = repository.create_post("c00", "昨天的一条动态", earlier)
+    repository.add_comment(old_post.id, "c03", "我看到了。", earlier)
+    repository.set_reaction(old_post.id, "c04", "LIKE", True, earlier)
+    new_post = repository.create_post("c00", "今天的新动态", now)
+
+    selected = service.select_audience(new_post.id, "c00")
+
+    assert selected[:2] == ["c03", "c04"]
+    assert len(selected) == 4
+    assert set(selected[2:]).issubset({"c01", "c02", "c05"})
     store.close()
 
 

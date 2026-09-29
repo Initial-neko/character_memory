@@ -49,8 +49,6 @@ _VOID = {
 # by accident; joining it takes an edit on both sides of the contract.
 FIRST_SCREEN = {
     "refreshAll",
-    "llmPrompt",
-    "runLlm",
     "spaceCharacter",
     "runSpaceOpportunity",
     "groupAutonomyGroup",
@@ -59,7 +57,7 @@ FIRST_SCREEN = {
 }
 # The first screen is intentionally tiny. Formal configuration belongs to
 # Settings; Space/Group runtime overrides live in closed advanced groups.
-FIRST_SCREEN_BAND = (7, 10)
+FIRST_SCREEN_BAND = (5, 8)
 
 
 class _Markup(HTMLParser):
@@ -73,7 +71,7 @@ class _Markup(HTMLParser):
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.stack: list[tuple[str, str | None]] = []
+        self.stack: list[tuple[str, str | None, str | None]] = []
         self.controls: list[dict] = []
         self.groups: list[dict] = []
         self._open_groups: list[int] = []
@@ -86,7 +84,8 @@ class _Markup(HTMLParser):
                     "tag": tag,
                     "id": attrs.get("id"),
                     "declared": self._declared(),
-                    "details": sum(1 for name, _ in self.stack if name == "details"),
+                    "surface": self._surface(),
+                    "details": sum(1 for name, _level, _surface in self.stack if name == "details"),
                 }
             )
             for index in self._open_groups:
@@ -98,7 +97,7 @@ class _Markup(HTMLParser):
             self.groups[self._open_groups[-1]]["summary"] = True
 
         if tag not in _VOID:
-            self.stack.append((tag, attrs.get("data-level")))
+            self.stack.append((tag, attrs.get("data-level"), attrs.get("data-dev-surface")))
 
     def handle_endtag(self, tag):
         if tag == "details" and self._open_groups:
@@ -109,9 +108,15 @@ class _Markup(HTMLParser):
                 return
 
     def _declared(self) -> str | None:
-        for _tag, level in reversed(self.stack):
+        for _tag, level, _surface in reversed(self.stack):
             if level is not None:
                 return level
+        return None
+
+    def _surface(self) -> str | None:
+        for _tag, _level, surface in reversed(self.stack):
+            if surface is not None:
+                return surface
         return None
 
 
@@ -161,13 +166,18 @@ def test_a_declared_level_is_one_of_the_three_levels():
 
 def test_the_first_screen_is_the_named_short_list():
     parsed = _page()
-    shown = [control for control in parsed.controls if control["declared"] == "common"]
+    shown = [
+        control
+        for control in parsed.controls
+        if control["declared"] == "common" and control["surface"] != "detailed"
+    ]
 
     assert sorted(_label(control) for control in shown) == sorted(FIRST_SCREEN)
     html = (WEB / "dev.html").read_text(encoding="utf-8")
     script = (WEB / "dev.js").read_text(encoding="utf-8")
     assert 'id="mediaLiveSmokeCard"' in html
     assert 'id="runMediaSmoke"' in html
+    assert 'id="llmSmokeCard" data-dev-surface="detailed"' in html
     assert 'id="runTts"' not in html
     assert 'fetch("/v1/dev/tts"' not in script
     low, high = FIRST_SCREEN_BAND

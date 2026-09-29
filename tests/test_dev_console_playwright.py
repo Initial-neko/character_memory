@@ -39,8 +39,6 @@ ROOT = Path(__file__).resolve().parents[1]
 FIRST_SCREEN = [
     "refreshAll",
     "devModeToggle",
-    "llmPrompt",
-    "runLlm",
     "spaceCharacter",
     "runSpaceOpportunity",
     "groupAutonomyGroup",
@@ -115,65 +113,51 @@ def _load(page, dev_console_url: str) -> None:
     """
 
     page.goto(f"{dev_console_url}/dev", wait_until="domcontentloaded")
-    page.wait_for_selector("details.level-group > summary")
+    page.locator("details.level-group > summary").first.wait_for(state="attached")
     page.wait_for_function(
         "() => { const summary = document.querySelector('details.level-group[data-level=\"advanced\"] > summary');"
         " return !!summary && summary.textContent.includes('项）'); }"
     )
 
 
-def test_the_rendered_page_exposes_only_the_first_screen(dev_console_url):
-    sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+def test_the_rendered_page_exposes_only_the_first_screen(page, dev_console_url):
+    page.set_viewport_size({"width": 1440, "height": 900})
+    _load(page, dev_console_url)
 
-    with sync_playwright() as driver:
-        browser = driver.chromium.launch()
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
-        _load(page, dev_console_url)
+    # Every control a person can reach without opening anything.
+    assert page.evaluate(_VISIBLE_CONTROLS) == FIRST_SCREEN
 
-        # Every control a person can reach without opening anything.
-        assert page.evaluate(_VISIBLE_CONTROLS) == FIRST_SCREEN
+    # And they are on the first screen, not merely unfolded: the point of
+    # the levels is that the answer to "where do I start" is one screenful.
+    assert page.evaluate(_ABOVE_THE_FOLD) == FIRST_SCREEN
 
-        # And they are on the first screen, not merely unfolded: the point of
-        # the levels is that the answer to "where do I start" is one screenful.
-        assert page.evaluate(_ABOVE_THE_FOLD) == FIRST_SCREEN
+    # Nothing arrives expanded.
+    assert page.locator("details[open]").count() == 0
+    assert page.evaluate("() => document.body.scrollHeight") < TALLEST_ACCEPTABLE_PAGE
 
-        # Nothing arrives expanded.
-        assert page.locator("details[open]").count() == 0
-        assert page.evaluate("() => document.body.scrollHeight") < TALLEST_ACCEPTABLE_PAGE
-
-        # A closed group has to be worth opening: the summary counts what it
-        # holds and names the first few, so it cannot say the wrong thing about
-        # its contents. The one group that holds prose rather than controls
-        # (the extension-slot note) claims no count.
-        groups = page.evaluate(_GROUPS)
-        assert groups
-        for group in groups:
-            summary = group["summary"]
-            assert group["hint"], group
-            if group["controls"]:
-                assert f"（{group['controls']} 项）" in summary, summary
-                assert "：" in summary, summary
-            else:
-                assert "项）" not in summary, summary
-
-        browser.close()
+    # A closed group has to be worth opening: the summary counts what it
+    # holds and names the first few, so it cannot say the wrong thing about
+    # its contents. The one group that holds prose rather than controls
+    # (the extension-slot note) claims no count.
+    groups = page.evaluate(_GROUPS)
+    assert groups
+    for group in groups:
+        summary = group["summary"]
+        assert group["hint"], group
+        if group["controls"]:
+            assert f"（{group['controls']} 项）" in summary, summary
+            assert "：" in summary, summary
+        else:
+            assert "项）" not in summary, summary
 
 
-def test_the_markup_was_complete_enough_that_nothing_needed_rescuing(dev_console_url):
-    """`sweep` is the runtime default for a control that declares no level.
+def test_the_markup_was_complete_enough_that_nothing_needed_rescuing(page, dev_console_url):
+    """The runtime sweep is a safety net, not the ownership model.
 
-    It is a safety net, not a feature: on a page whose markup says where every
-    control belongs it finds nothing. A non-empty list here means a control was
-    added without a level and is being kept off the first screen by the sweep
-    instead of by its author -- the same failure
-    ``test_every_control_declares_a_level`` reports statically.
+    A non-empty list here means a control was added without a declared level
+    and only hidden at runtime instead of by its author.
     """
 
-    sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
-
-    with sync_playwright() as driver:
-        browser = driver.chromium.launch()
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
-        _load(page, dev_console_url)
-        assert page.evaluate("() => window.CMDevLevels.lastSweep") == []
-        browser.close()
+    page.set_viewport_size({"width": 1440, "height": 900})
+    _load(page, dev_console_url)
+    assert page.evaluate("() => window.CMDevLevels.lastSweep") == []

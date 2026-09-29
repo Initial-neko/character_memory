@@ -76,6 +76,14 @@ class Settings(BaseModel):
     msimg_api_key: str = ""
     msimg_models: str = "qwen"
 
+    # Periodic screen observation is only eligible while the user has explicitly
+    # shared a DISPLAY source in a direct voice call. Browser-side change
+    # detection makes an opportunity cheap; the server interval and hourly
+    # ceiling remain authoritative cost guards for Vision calls.
+    periodic_visual_observation_enabled: bool = True
+    periodic_visual_observation_interval_seconds: float = Field(default=30.0, ge=10.0, le=600.0)
+    periodic_visual_observation_max_per_hour: int = Field(default=6, ge=0, le=120)
+
     db_path: str = "data/character-memory.db"
     media_dir: str = ""
     media_max_bytes: int = Field(default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)

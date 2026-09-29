@@ -161,37 +161,17 @@ def _media_env(base: dict[str, str]) -> dict[str, str]:
     env = dict(base)
     model_root = Path(env.get("CHARACTER_MEDIA_MODEL_ROOT", ROOT / "models")).resolve()
     asr_dir = model_root / "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
-    stream_asr_dir = model_root / "sherpa-onnx-streaming-paraformer-bilingual-zh-en"
     tts_dir = model_root / "sherpa-onnx-vits-zh-ll"
 
-    explicit_provider = str(env.get("CHARACTER_MEDIA_ASR_PROVIDER") or "").strip().lower()
-    stream_assets = (
-        stream_asr_dir / "encoder.int8.onnx",
-        stream_asr_dir / "decoder.int8.onnx",
-        stream_asr_dir / "tokens.txt",
-    )
-    if explicit_provider:
-        asr_provider = explicit_provider
-    else:
-        asr_provider = "paraformer-streaming" if all(path.is_file() for path in stream_assets) else "sensevoice"
-        env["CHARACTER_MEDIA_ASR_PROVIDER"] = asr_provider
-
-    streaming = asr_provider in {"paraformer", "paraformer-streaming", "sherpa-paraformer-streaming"}
     defaults = {
-        "CHARACTER_MEDIA_ASR_TOKENS": stream_asr_dir / "tokens.txt" if streaming else asr_dir / "tokens.txt",
+        "CHARACTER_MEDIA_ASR_MODEL": asr_dir / "model.int8.onnx",
+        "CHARACTER_MEDIA_ASR_TOKENS": asr_dir / "tokens.txt",
         "CHARACTER_MEDIA_TTS_MODEL": tts_dir / "model.onnx",
         "CHARACTER_MEDIA_TTS_TOKENS": tts_dir / "tokens.txt",
         "CHARACTER_MEDIA_TTS_LEXICON": tts_dir / "lexicon.txt",
         "CHARACTER_MEDIA_TTS_DICT_DIR": tts_dir / "dict",
         "CHARACTER_MEDIA_TTS_RULE_FSTS": f"{tts_dir / 'phone.fst'},{tts_dir / 'number.fst'}",
     }
-    if streaming:
-        defaults.update({
-            "CHARACTER_MEDIA_ASR_ENCODER": stream_asr_dir / "encoder.int8.onnx",
-            "CHARACTER_MEDIA_ASR_DECODER": stream_asr_dir / "decoder.int8.onnx",
-        })
-    else:
-        defaults["CHARACTER_MEDIA_ASR_MODEL"] = asr_dir / "model.int8.onnx"
     for key, value in defaults.items():
         env.setdefault(key, str(value))
     env.setdefault("CHARACTER_MEDIA_ASR_DEVICE", "cpu")

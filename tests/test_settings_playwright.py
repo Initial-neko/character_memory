@@ -127,6 +127,7 @@ def test_first_screen_shows_only_the_common_level(page, settings_server):
         "tts_provider",
         "tts_voice",
         "tts_speed",
+        "periodic_visual_observation_enabled",
         "proactive_wake_enabled",
         "space_autonomy_enabled",
         "space_media_enabled",

@@ -159,7 +159,7 @@ def test_voice_js_reads_the_threshold_from_health_and_keeps_a_default():
 
     assert "voice_capture" in source
     assert "function applyVoiceCapture(health)" in source
-    assert "applyVoiceCapture(await checkMedia())" in source
+    assert "const health = await checkMedia();" in source\n    assert "applyVoiceCapture(health);" in source
     assert "DEFAULT_SILENCE_MS = 900" in source
     # The old hardcoded value is what cut people off mid-sentence.
     assert "silenceMs: 450" not in source

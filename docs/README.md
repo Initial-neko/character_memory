@@ -42,7 +42,7 @@ Prefer extending an existing domain document. Add a new `docs/current/*.md` only
 
 Do not create one document per provider, sidecar, UI widget, PR, implementation plan or agent task.
 
-Implementation plans, acceptance logs and temporary handoffs belong in Issues/PRs or local untracked notes. Durable behavior changes belong in the owning current contract.
+Implementation plans, temporary handoffs and one-off acceptance logs belong in Issues/PRs or local untracked notes. Durable behavior changes belong in the owning current contract. `DELIVERY_PLAN.md` is the deliberate exception: it is the release-convergence **acceptance ledger** that separates implementation status from target-machine proof, not a feature implementation plan.
 
 ## Research and archive
 

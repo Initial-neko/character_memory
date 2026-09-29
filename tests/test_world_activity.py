@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from character_memory.config import Settings
 from character_memory.domain.models import Event, EventType, WorldObservation
+from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.llm.usage import current_llm_usage_context
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.time_utils import epoch_us
@@ -489,6 +490,52 @@ def test_idle_browse_gate_reopens_immediately_after_new_character_event(tmp_path
             content="最近突然对本地语音模型很感兴趣。",
             metadata={"channel": "DIRECT"},
         )
+    )
+    scheduler.force_due("BROWSE", "c00", now=changed)
+    assert len(_browsed(scheduler.run_once(now=changed))) == 1
+    assert _browse_plan_call_count(model) == 2
+    store.close()
+
+
+def test_idle_browse_gate_reopens_after_character_processes_new_group_fact(tmp_path):
+    store, access, model = make_access(tmp_path, count=2)
+    access.settings.world_browse_interval_minutes = 30
+    access.settings.world_pulse_enabled = False
+    model.browse = False
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+
+    scheduler.run_once(now=NOW)
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    assert len(_browsed(scheduler.run_once(now=NOW))) == 1
+    assert _browse_plan_call_count(model) == 1
+
+    changed = NOW + timedelta(minutes=10)
+    group_repo = GroupRepository(store)
+    group = group_repo.create_group("研究群", ["c00", "c01"], NOW)
+    source = group_repo.append_event(
+        GroupEvent(
+            conversation_id=group.id,
+            turn_id="turn-1",
+            actor_type="USER",
+            actor_id="user",
+            event_type="USER_MESSAGE",
+            event_time=changed,
+            content="我们刚聊到本地语音模型的新进展。",
+        )
+    )
+    group_repo.add_trace(
+        group.id,
+        source.turn_id,
+        "c00",
+        int(source.id),
+        changed,
+        {"actions": [], "mental_state_after": "对本地语音模型更好奇了"},
+    )
+
+    assert scheduler._browse_plan_due("c00", changed, base_minutes=30) == (
+        True,
+        "NEW_CHARACTER_SIGNAL",
     )
     scheduler.force_due("BROWSE", "c00", now=changed)
     assert len(_browsed(scheduler.run_once(now=changed))) == 1

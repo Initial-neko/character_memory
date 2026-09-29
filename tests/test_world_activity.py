@@ -446,6 +446,15 @@ def test_idle_browse_gate_skips_repeated_plan_without_new_character_signal(tmp_p
     # already said browse=false, so the scheduler re-arms without another LLM
     # call and without consuming the daily browse-attempt ceiling.
     again = NOW + timedelta(minutes=31)
+    last = repo.latest_run("BROWSE", "c00")
+    assert last is not None
+    assert last["status"] == "OK"
+    assert last["details"]["browsed"] is False
+    assert store.list_events("c00", limit=20) == []
+    assert scheduler._browse_plan_due("c00", again, base_minutes=30) == (
+        False,
+        "IDLE_NO_NEW_SIGNAL",
+    )
     scheduler.force_due("BROWSE", "c00", now=again)
     assert _browsed(scheduler.run_once(now=again)) == []
     assert _browse_plan_call_count(model) == 1

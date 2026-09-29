@@ -906,26 +906,24 @@ This gives the project a stable foundation for accuracy improvements without rep
 
 ---
 
-## 21. Next implementation PRs
+## 21. Implementation / acceptance sequence
 
-The intended implementation sequence is deliberately small:
+The original implementation sequence is now partly complete:
 
-1. **ASR Phase 0:** observability + segment ledger.
-2. **ASR Phase 1:** unified ASR Session contract and compatibility adapter.
-3. **ASR Phase 2:** streaming VAD/endpoint + Paraformer integration.
-4. **ASR Phase 3:** corpus benchmark and resource benchmark.
-5. **ASR Phase 4:** optional final-accuracy pass.
+1. **ASR Phase 0 — DONE:** observable segment/session protocol.
+2. **ASR Phase 1 — DONE:** unified streaming session contract plus compatibility fallback.
+3. **ASR Phase 2 — DONE:** server endpoint + Paraformer streaming integration, shared Browser AudioWorklet, Dictation and Call migration.
+4. **ASR Phase 3 — PENDING:** fixed-corpus accuracy benchmark and actual target-machine CPU/RAM/VRAM/latency benchmark.
+5. **ASR Phase 4 — CONDITIONAL:** optional final-accuracy pass only if Phase 3 proves the streaming final transcript is insufficient.
 
-No phase should be skipped merely because a model appears to recognize a demo sentence correctly.
-
-The acceptance target is reliable speech-to-text behavior in the actual Character Memory voice flows.
+The remaining acceptance target is reliable speech-to-text behavior in the actual Character Memory voice flows. CI-green streaming code does not satisfy Phase 3 by itself.
 
 
 ## 22. Current model decision
 
-### Production target: Paraformer-zh-streaming
+### Current streaming implementation: Paraformer-zh-streaming
 
-The current project should converge on:
+The current project implementation has converged on:
 
 ```text
 sherpa-onnx
@@ -936,6 +934,8 @@ server-side endpoint policy
     +
 future FSMN-VAD integration
 ```
+
+This is the current low-resource streaming implementation, **not yet a target-machine accuracy verdict**. Phase 3 may still justify a different/final-pass configuration.
 
 This choice is based on the actual requirements of Character Memory:
 

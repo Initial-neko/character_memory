@@ -174,10 +174,32 @@ class SpaceAutonomyService:
         ) or "- 无"
         media_enabled = bool(getattr(self.access.settings, "space_media_enabled", True))
         media_max = max(0, min(9, int(getattr(self.access.settings, "space_media_max_items", 3))))
+        video_enabled = (
+            media_enabled
+            and bool(getattr(self.access.settings, "space_video_generation_enabled", False))
+            and float(getattr(self.access.settings, "space_video_daily_budget_cny", 0.0)) > 0
+        )
+        video_max_duration = max(
+            5,
+            min(
+                15,
+                int(getattr(self.access.settings, "space_video_max_duration_seconds", 5)),
+            ),
+        )
+        video_resolution = str(
+            getattr(self.access.settings, "space_video_resolution", "2K") or "2K"
+        )
         media_instruction = (
-            f"当前允许媒体，单条最多 {media_max} 个媒体资源（图片或语音）。"
+            f"当前允许媒体，单条最多 {media_max} 个媒体资源（图片、语音或视频）。"
             if media_enabled and media_max > 0
             else "当前媒体能力关闭，media_intents 必须返回 []。"
+        )
+        video_instruction = (
+            f"GENERATE_VIDEO 当前可用：默认/最高 {video_max_duration} 秒、{video_resolution}。"
+            "视频是付费能力，只在动作、过程、镜头变化或时间推进确实比静态图片更能表达时使用；"
+            "video_prompt 要直接描述可拍摄的短镜头、主体动作、环境与镜头运动，单条动态最多一个视频。"
+            if video_enabled
+            else "GENERATE_VIDEO 当前不可用，不要选择它。"
         )
         return f"""# Persona
 {person_context.persona}
@@ -202,14 +224,16 @@ class SpaceAutonomyService:
 不要凭空创造没有发生过的新事件。
 
 本次只规划 Space 动态：
-- 一条动态可以是：文字、0-9 张图片、一条语音，或它们的任意组合。
+- 一条动态可以是：文字、0-9 张图片、一条语音、一个短视频，或合理组合。
 - social_post 和 media_intents 都可以为空。
 - 如果发文字，写成这个人物自己会公开发出的自然短动态，不要写“根据我的记忆/状态”等系统口吻。
 - SEARCH_IMAGE 用于现实中已经存在、适合从互联网搜索的图片；query 必须是简短公开搜索词，不能泄露私聊原句、用户隐私或长期记忆里的秘密。
 - GENERATE_IMAGE 用于角色自拍或需要创作出来的场景；purpose 只能是 SELFIE 或 SCENE，并给出简洁 visual_intent。
+- {video_instruction}
+- GENERATE_VIDEO 的 duration_seconds 只能在 5-{video_max_duration} 秒内；video_ratio 默认 16:9。不要为了“更高级”而用视频，静态内容优先图片。
 - VOICE 表示这条动态更适合直接说出来；voice_text 必须是角色真正会公开说出的完整连续表达，而不是 TTS 指令、幕后说明或文字动态的机械朗读。单条动态最多一条 VOICE。
 - social_post 与 VOICE 可以二选一，也可以是简短文字说明 + 一条语音；不要把同一句话原样重复两遍。
-- count 是图片数量，总图片数不要超过系统上限；VOICE 的 count 固定为 1。
+- count 是图片数量，总图片数不要超过系统上限；VOICE 与 GENERATE_VIDEO 的 count 固定为 1。
 - {media_instruction}
 """
 

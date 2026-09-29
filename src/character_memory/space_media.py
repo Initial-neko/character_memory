@@ -10,7 +10,7 @@ from character_memory.time_utils import epoch_us, parse_datetime
 
 
 MAX_SPACE_MEDIA_PER_POST = 9
-SPACE_MEDIA_TYPES = {"IMAGE", "VOICE", "LINK_PREVIEW"}
+SPACE_MEDIA_TYPES = {"IMAGE", "VOICE", "VIDEO", "LINK_PREVIEW"}
 SPACE_MEDIA_SOURCES = {"SEARCH", "GENERATED", "CHARACTER", "WEB", "LEGACY"}
 
 
@@ -79,8 +79,11 @@ class SpacePostMediaRepository:
                     metadata_json,created_at,created_at_epoch
                 )
                 SELECT p.id,p.media_id,
-                       CASE WHEN LOWER(COALESCE(m.mime_type,'')) LIKE 'audio/%'
-                            THEN 'VOICE' ELSE 'IMAGE' END,
+                       CASE
+                            WHEN LOWER(COALESCE(m.mime_type,'')) LIKE 'audio/%' THEN 'VOICE'
+                            WHEN LOWER(COALESCE(m.mime_type,'')) LIKE 'video/%' THEN 'VIDEO'
+                            ELSE 'IMAGE'
+                       END,
                        'LEGACY',0,'{}',p.created_at,p.created_at_epoch
                 FROM space_posts p
                 LEFT JOIN media_assets m ON m.id=p.media_id
@@ -101,10 +104,25 @@ class SpacePostMediaRepository:
                   )
                 """
             )
+            self.store.conn.execute(
+                """
+                UPDATE space_post_media
+                SET media_type='VIDEO'
+                WHERE source_type='LEGACY' AND media_type='IMAGE'
+                  AND media_id IN (
+                      SELECT id FROM media_assets
+                      WHERE LOWER(COALESCE(mime_type,'')) LIKE 'video/%'
+                  )
+                """
+            )
             self.store._ensure_migration_table_locked()
             self.store.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
                 ("space/004-post-media", now.isoformat()),
+            )
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
+                ("space/005-video-media", now.isoformat()),
             )
             self.store._maybe_commit()
 

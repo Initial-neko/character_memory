@@ -277,6 +277,16 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                             "text": result.text,
                             "endpoint_reason": reason,
                         })
+                    # A flush with no recognized text still needs an acknowledgement:
+                    # Dictation must know the server consumed every PCM frame before
+                    # it releases the WebSocket, rather than sleeping for a guessed
+                    # amount of time and occasionally cutting off the last syllable.
+                    await websocket.send_json({
+                        "kind": "flushed",
+                        "session_id": session_id,
+                        "segment_id": segment_id,
+                        "endpoint_reason": reason,
+                    })
                     segment_id += 1
                     session = create_session()
                     continue

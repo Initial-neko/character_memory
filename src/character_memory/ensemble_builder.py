@@ -68,6 +68,11 @@ def member_research_to_persona(member: "EnsembleMemberResearch") -> PersonaDraft
     tagline_source = speech or identity or description
     tagline = " ".join(tagline_source.split())[:120] or f"{member.name} 的人物草稿"
 
+    boundaries = _clean_list(member.boundaries, limit=6) or [
+        "不无条件迎合用户",
+        "关系通过共同经历自然发展",
+    ]
+
     return PersonaDraft(
         name=member.name.strip(),
         age=_age_hint_to_int(member.age),
@@ -76,13 +81,19 @@ def member_research_to_persona(member: "EnsembleMemberResearch") -> PersonaDraft
         description=description[:1600],
         personality=personality,
         conversation=speech[:320],
-        expression="表达贴合人物性格和当下情绪，不过度表演，也不机械重复固定口癖。",
-        questions="真正好奇或需要确认时才追问，一次聚焦一个自然问题。",
-        silence="没有自然想说的话时可以沉默，不为了维持对话强行输出。",
-        initiative="遇到与自己的兴趣、关系或共同经历有关的事情时会自然主动提起。",
-        disagreement="不同意时会按人物自己的价值判断表达理由，不为了迎合用户假装赞同。",
-        care="通过符合人物性格的具体反应、行动和记住细节来表达关心。",
-        boundaries=["不无条件迎合用户", "关系通过共同经历自然发展"],
+        expression=(str(member.expression_style or "").strip() or
+                    "表达贴合人物性格和当下情绪，不过度表演，也不机械重复固定口癖。")[:420],
+        questions=(str(member.question_style or "").strip() or
+                   "真正好奇或需要确认时才追问，一次聚焦一个自然问题。")[:420],
+        silence=(str(member.silence_style or "").strip() or
+                 "没有自然想说的话时可以沉默，不为了维持对话强行输出。")[:420],
+        initiative=(str(member.initiative_style or "").strip() or
+                    "遇到与自己的兴趣、关系或共同经历有关的事情时会自然主动提起。")[:420],
+        disagreement=(str(member.disagreement_style or "").strip() or
+                      "不同意时会按人物自己的价值判断表达理由，不为了迎合用户假装赞同。")[:420],
+        care=(str(member.care_style or "").strip() or
+              "通过符合人物性格的具体反应、行动和记住细节来表达关心。")[:420],
+        boundaries=boundaries,
     )
 
 
@@ -96,10 +107,21 @@ class EnsembleMemberResearch(BaseModel):
     description: str = Field(min_length=20, max_length=1800)
     speech_style: str = Field(default="", max_length=800)
     personality: list[str] = Field(default_factory=list, max_length=8)
+    # These interaction fields are researched in the same group-level model
+    # call. Keeping them here avoids the old N-extra-LLM persona pass while
+    # preventing every generated member from inheriting one generic behaviour
+    # skeleton.
+    expression_style: str = Field(default="", max_length=800)
+    question_style: str = Field(default="", max_length=800)
+    silence_style: str = Field(default="", max_length=800)
+    initiative_style: str = Field(default="", max_length=800)
+    disagreement_style: str = Field(default="", max_length=800)
+    care_style: str = Field(default="", max_length=800)
+    boundaries: list[str] = Field(default_factory=list, max_length=8)
     relationship_notes: list[str] = Field(default_factory=list, max_length=10)
     tags: list[str] = Field(default_factory=list, max_length=8)
 
-    @field_validator("personality", "relationship_notes", "tags", mode="before")
+    @field_validator("personality", "boundaries", "relationship_notes", "tags", mode="before")
     @classmethod
     def _normalize_text_list(cls, value):
         if value is None:
@@ -462,8 +484,10 @@ Content:
 - overview：一句到几句群体背景。
 - members：2～{MAX_GROUP_CHARACTERS} 位最核心、明确属于用户所指群体的成员。
 - 每位成员保留 canonical name、公开身份、性格/行为特征、说话风格、与同群其他成员的关系摘要。
+- 除 speech_style 外，还要尽量从公开设定归纳人物自己的 interaction style：expression_style / question_style / silence_style / initiative_style / disagreement_style / care_style / boundaries。它们描述“这个人物具体会怎样做”，不要给所有成员复制同一套通用 AI 建议。
+- 这些 interaction style 必须彼此有辨识度：例如谁更会追问、谁倾向先观察、谁会直接反驳、谁用行动而不是语言关心，都应跟人物资料一致；资料不足的字段允许留空，由本地安全 fallback 补齐。
 - age 只是弱提示：可以是数字、"18岁（大学一年级）"、"年龄不详"或 null，不要为了年龄字段编造信息。
-- personality / relationship_notes / tags 尽量使用短列表；资料不足时允许为空。
+- personality / boundaries / relationship_notes / tags 尽量使用短列表；资料不足时允许为空。
 - 不抄原作长台词，不补写资料没有支持的具体事件。
 - 如果来源之间有差异，采用最稳妥的公开共识，不要为了凑人数编角色。
 """

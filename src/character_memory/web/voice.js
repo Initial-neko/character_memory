@@ -28,6 +28,10 @@
     seenAsrSegments: new Set(),
     eventSource: null,
     visualSession: null,
+    periodicVisualTimer: null,
+    periodicVisualConfig: {enabled:false, intervalSeconds:30, maxPerHour:0},
+    periodicVisualLastFrameAt: 0,
+    periodicVisualSending: false,
     currentAudio: null,
     chunks: [],
     preRoll: [],
@@ -272,8 +276,93 @@
     return voice.visualSession;
   }
 
+  function stopPeriodicVisualObservation() {
+    if (voice.periodicVisualTimer != null) {
+      clearInterval(voice.periodicVisualTimer);
+      voice.periodicVisualTimer = null;
+    }
+    voice.periodicVisualSending = false;
+  }
+
+  async function loadPeriodicVisualConfig() {
+    try {
+      const response = await fetch("/v1/visual/periodic/config", {cache:"no-store"});
+      if (!response.ok) throw new Error(`periodic visual config ${response.status}`);
+      const data = await response.json();
+      const interval = Number(data.interval_seconds);
+      const maxPerHour = Number(data.max_per_hour);
+      voice.periodicVisualConfig = {
+        enabled:Boolean(data.enabled),
+        intervalSeconds:Number.isFinite(interval) ? Math.max(10, Math.min(600, interval)) : 30,
+        maxPerHour:Number.isFinite(maxPerHour) ? Math.max(0, maxPerHour) : 0,
+      };
+    } catch (error) {
+      console.debug("periodic visual observation unavailable", error);
+      voice.periodicVisualConfig = {enabled:false, intervalSeconds:30, maxPerHour:0};
+    }
+    return voice.periodicVisualConfig;
+  }
+
+  async function runPeriodicVisualObservation() {
+    if (
+      !voice.active ||
+      voice.target?.scope !== "direct" ||
+      !voice.periodicVisualConfig.enabled ||
+      voice.periodicVisualConfig.maxPerHour <= 0 ||
+      voice.periodicVisualSending ||
+      replyInFlight() ||
+      ["recording", "transcribing"].includes(voice.capturePhase)
+    ) return;
+
+    const session = voice.visualSession;
+    const visual = session?.getState?.();
+    if (!visual?.active || visual.source !== "DISPLAY") return;
+    const frame = session.latestSignificantFrame?.({
+      afterMs:voice.periodicVisualLastFrameAt,
+      source:"DISPLAY",
+    });
+    if (!frame) return;
+
+    // Consume the changed frame before the HTTP request. A busy/quota refusal
+    // should not make a stale screen keep retrying forever; a later meaningful
+    // change will create a new candidate and another opportunity.
+    voice.periodicVisualLastFrameAt = Number(frame.captured_at_ms || performance.now());
+    voice.periodicVisualSending = true;
+    try {
+      const response = await fetch("/v1/visual/direct/observations", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          character_id:voice.target.characterId,
+          conversation_id:voice.target.conversationId,
+          visual_frame:frame,
+        }),
+      });
+      if (!response.ok) throw new Error(`periodic visual observation ${response.status}`);
+      const data = await response.json();
+      if (data.accepted) console.debug("periodic visual observation accepted", data.event_id);
+    } catch (error) {
+      console.debug("periodic visual observation failed", error);
+    } finally {
+      voice.periodicVisualSending = false;
+    }
+  }
+
+  async function startPeriodicVisualObservation() {
+    stopPeriodicVisualObservation();
+    voice.periodicVisualLastFrameAt = 0;
+    if (voice.target?.scope !== "direct") return;
+    const config = await loadPeriodicVisualConfig();
+    if (!config.enabled || config.maxPerHour <= 0) return;
+    const delay = Math.max(10000, Math.round(config.intervalSeconds * 1000));
+    voice.periodicVisualTimer = setInterval(() => {
+      runPeriodicVisualObservation().catch(error => console.debug("periodic visual tick failed", error));
+    }, delay);
+  }
+
   async function startCameraVisual() {
     if (!voice.active) throw new Error("请先开始通话");
+    stopPeriodicVisualObservation();
     const session = ensureVisualSession();
     await session.startCamera();
     updateVisualUi();
@@ -286,9 +375,11 @@
     await session.startDisplay();
     updateVisualUi();
     resumeInputState();
+    await startPeriodicVisualObservation();
   }
 
   function stopVisual({clearCandidates = false} = {}) {
+    stopPeriodicVisualObservation();
     voice.visualSession?.stop?.({clearCandidates, reason:"视觉已关闭"});
     updateVisualUi();
     resumeInputState();
@@ -1155,6 +1246,7 @@
 
   async function stopCall() {
     voice.active = false;
+    stopPeriodicVisualObservation();
     voice.minimized = false;
     voice.eventSource?.close?.();
     voice.eventSource = null;
@@ -1173,6 +1265,7 @@
     await stopMicrophone({updateStatus:false});
     voice.visualSession?.stop?.({clearCandidates:true, reason:"视觉已关闭"});
     voice.visualSession = null;
+    voice.periodicVisualLastFrameAt = 0;
     voice.queue = [];
     voice.pendingTurns = [];
     voice.chunks = [];

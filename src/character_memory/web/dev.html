@@ -422,7 +422,7 @@
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 上传、录音与转写" data-hint="上传 WAV 或用浏览器麦克风">
           <summary>诊断 · 上传、录音与转写</summary>
           <div class="asr-controls">
-            <label class="file-button">选择 WAV<input id="asrFile" type="file" accept="audio/wav,.wav" / title="选择一段 WAV/PCM16 音频作为本次 ASR Smoke 输入；不会自动上传。"></label>
+            <label class="file-button">选择 WAV<input id="asrFile" type="file" accept="audio/wav,.wav" title="选择一段 WAV/PCM16 音频作为本次 ASR Smoke 输入；不会自动上传。" /></label>
             <button id="recordAsr" class="secondary" title="通过浏览器麦克风录制一段测试音频，停止后可交给正式 ASR。">开始录音</button>
             <button id="stopAsr" class="secondary" disabled title="停止当前浏览器录音并把录音作为待识别的测试输入。">停止录音</button>
             <button class="primary" id="runAsr" disabled title="把当前测试 WAV 发送给正式 Media Runtime ASR 并显示文本与延迟。">Transcribe</button>

@@ -1,6 +1,6 @@
 # Current Status & Roadmap
 
-> Last audited against product `main`: 2026-09-25, `3bff5afea674a12597581b4e1e59d796d19ba641`.
+> Last audited against product `main`: 2026-09-29, `38d400ac2ff459c851585d0045735c6b22eed636`.
 >
 > This file owns **implementation status only**. Source/tests remain authoritative; the other topic documents define current behavior contracts.
 
@@ -31,13 +31,13 @@ An open PR never upgrades a capability to SHIPPED.
 | Random Encounter | SHIPPED | Temporary WEB/GENERATED candidates, trial chat, accept/dismiss lifecycle and scheduler. |
 | Memory governance | SHIPPED | Inspect, pin/unpin, forget/restore and provenance-preserving correction. |
 | Voice Message | SHIPPED | Direct/Group durable voice-message lifecycle through formal TTS. |
-| Browser call | SHIPPED | Microphone/TTS call flow with independent visual capture and hardened late-permission ownership. |
-| Visual capture | SHIPPED | Camera/Display keyframes as transient current-turn Vision context. |
+| Browser call | SHIPPED | Shared streaming ASR is preferred when Media Runtime advertises it, with batch fallback; speak-over-reply, TTS, pending turns, visual context and hardened late-permission ownership are retained. |
+| Visual capture | SHIPPED | Camera/Display keyframes remain transient; DISPLAY frames preserve up to ~1440px long side, and direct screen sharing can create bounded periodic `VISUAL_OBSERVATION` opportunities on significant changes. |
 | Visual generation / Avatar | SHIPPED | SELFIE/SCENE ImageGen, explicit generation, avatar search/generation/local ownership. |
 | Settings Center | SHIPPED | Persistent config/secrets ownership and apply/restart semantics. |
 | Dev Console | SHIPPED | Common/advanced/diagnostic layers, runtime diagnostics and LLM Usage Explorer. |
 | LLM Usage telemetry | SHIPPED | Requests vs logical calls, provider/model/feature attribution, token coverage, retries/errors and latency. |
-| Media/TTS Runtime | SHIPPED | SenseVoice ASR; Sherpa/Kokoro/Edge/GSV formal routing; Workbench and Qwen tooling remain bounded. |
+| Media/TTS Runtime | SHIPPED | SenseVoice batch ASR plus Paraformer streaming-session support; Dictation/Call prefer streaming when health advertises it and retain batch fallback. Sherpa/Kokoro/Edge/GSV formal TTS routing remains supported. |
 | Mobile browser access | SHIPPED baseline | Private Tailscale Serve path; no native Android/iOS client is claimed. |
 
 ## Current validation work
@@ -50,9 +50,11 @@ Issue #121 owns the current real-stack browser acceptance pass. It validates Cha
 
 Failures should become focused PRs with browser evidence and regression coverage where practical.
 
-### P0 acceptance freeze
+### P0 convergence / acceptance
 
-The current feature-development cycle is intentionally frozen. No new product feature PRs are planned until the following P0 acceptance items are cleared:
+The current implementation baseline has converged enough that release work should now distinguish code completion from real-machine proof. The authoritative execution checklist is [DELIVERY_PLAN.md](DELIVERY_PLAN.md). New work should primarily close acceptance gaps or measured regressions rather than add unrelated surface area.
+
+The following P0 acceptance items remain:
 
 1. **Real Chromium end-to-end pass** — Chat, Group, Character creation, Space, Settings, Dev Console, microphone/visual controls and responsive layout.
 2. **Group Chat closure** — verify turn-level folding, media-in-turn rendering, speaker cap, @-mention behavior, member add/remove and large-group readability in real Chromium.
@@ -67,9 +69,9 @@ Only correctness fixes required by these checks should create the next implement
 
 ### Model-call cost optimization
 
-Status: **BACKLOG**
+Status: **IN PROGRESS**
 
-LLM Usage Explorer is now shipped, so optimization should be chosen from measured runtime data rather than intuition. Primary questions include Group silence cost, structured-output retries, Space propagation cost and Ensemble Persona generation cost.
+LLM Usage Explorer is shipped and two mechanical-call reductions are already on main: Personal Browse can skip repeated planning after a durable `browse=false` result when no new person signal exists, and Space no longer fills every configured cold Audience slot with a paid reaction (at most two deterministic cold exploration slots; existing public social ties are prioritized). The next step is runtime soak measurement, especially `SPACE_REPLY`, Group silence cost, structured-output retries and periodic Vision silence rate.
 
 ### Long-run Person / Society validation
 
@@ -98,7 +100,7 @@ Keep these deferred until evidence requires them:
 
 Current stable contract does not promise:
 
-- WebRTC full-duplex voice, barge-in or streaming ASR/TTS;
+- WebRTC media transport or streaming TTS; browser audio input currently uses the shipped WebSocket streaming-ASR session when available;
 - persistent raw camera/screen/audio recording;
 - automatic reuse of old visual-capture bytes;
 - native Android/iOS clients;

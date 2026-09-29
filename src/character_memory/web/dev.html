@@ -28,14 +28,14 @@
       <div>
         <p class="eyebrow">Character Memory</p>
         <h1>Dev Console</h1>
-        <p class="subtle">独立诊断 Character Runtime、Media Runtime、外部模型与视觉能力。</p>
+        <p class="subtle">独立诊断 Character Runtime、Media Runtime、外部模型与视觉能力。将鼠标停在任意输入框、选择框或按钮上，可查看它的作用、是否持久化以及影响范围。</p>
       </div>
       <div class="service-links" data-level="common">
         <a class="secondary-link" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">打开 Chat :8000</a>
         <a class="secondary-link" data-dev-surface="detailed" href="http://127.0.0.1:8001/health" target="_blank" rel="noreferrer">Media :8001</a>
         <a class="secondary-link" href="http://127.0.0.1:9002/tts" target="_blank" rel="noreferrer">TTS Workbench :9002</a>
-        <button id="refreshAll" class="secondary">刷新状态</button>
-        <button id="devModeToggle" class="secondary dev-mode-toggle" type="button" aria-pressed="false">Detailed Dev</button>
+        <button id="refreshAll" class="secondary" title="重新读取 Runtime 状态、调度状态、用量和资源指标；不修改任何正式配置。">刷新状态</button>
+        <button id="devModeToggle" class="secondary dev-mode-toggle" type="button" aria-pressed="false" title="切换 Simple / Detailed Dev。只改变浏览器显示范围，不影响 Runtime 配置。">Detailed Dev</button>
         <span id="devModeHint" class="dev-mode-hint">简洁模式：只显示日常观察与高频调节。</span>
       </div>
     </header>
@@ -69,13 +69,13 @@
         <div class="card-title-row"><h2>LLM</h2><span class="pill">cloud</span></div>
         <div data-level="common">
           <label for="llmPrompt">Prompt</label>
-          <textarea id="llmPrompt" class="dev-llm-prompt" rows="5">请只回复：LLM 接口正常。</textarea>
-          <div class="actions"><button class="primary" id="runLlm">Run LLM</button><span id="llmLatency" class="metric-inline">-</span></div>
+          <textarea id="llmPrompt" class="dev-llm-prompt" rows="5" title="本次 LLM Smoke 的用户 Prompt；只用于测试请求，不会保存为系统配置。">请只回复：LLM 接口正常。</textarea>
+          <div class="actions"><button class="primary" id="runLlm" title="使用当前正式 LLM Provider/Model 发起一次真实测试请求，不修改配置。">Run LLM</button><span id="llmLatency" class="metric-inline">-</span></div>
         </div>
         <details class="level-group" data-level="advanced" data-title="高级 · System Prompt" data-hint="留空则直接发送用户 Prompt">
           <summary>高级 · System Prompt</summary>
           <label for="llmSystem">System Prompt</label>
-          <textarea id="llmSystem" rows="2" placeholder="可选；留空则直接发送用户 Prompt"></textarea>
+          <textarea id="llmSystem" rows="2" placeholder="可选；留空则直接发送用户 Prompt" title="本次 LLM Smoke 可选 System Prompt；留空则只发送用户 Prompt，不持久化。"></textarea>
         </details>
         <pre id="llmReply" class="result">等待请求...</pre>
         <details class="debug-output">
@@ -91,10 +91,10 @@
         </div>
 
         <div class="level-row" data-level="common">
-          <label>Character<select id="spaceCharacter"><option value="rin">rin</option></select></label>
+          <label>Character<select id="spaceCharacter" title="选择本次 Space 手动验收/状态查看的角色；不会改变角色配置。"><option value="rin">rin</option></select></label>
         </div>
         <div class="actions" data-level="common">
-          <button class="primary" id="runSpaceOpportunity" type="button">手动测试一次</button>
+          <button class="primary" id="runSpaceOpportunity" type="button" title="立即跑一次完整 Space Opportunity；不移动正式 next opportunity，不写配置。">手动测试一次</button>
           <span class="subtle" id="spaceStatusAge">尚未读取调度状态。</span>
         </div>
         <p id="spaceScheduleSummary" class="schedule-summary" data-level="common">正在读取实际下一次执行时间…</p>
@@ -105,46 +105,46 @@
           <div class="field-group">
             <span class="field-group-label">临时行为</span>
             <div class="visual-provider-row">
-              <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked /> Autonomous Space</label>
-              <label>Opportunity Interval (min)<input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="120" /><small>只改变“多久判断一次”，不强制发动态。</small></label>
-              <label>Max Posts / Day<input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="3" /><small>每天发布上限；0 = 不限。</small></label>
+              <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked / title="仅当前 Runtime 的临时 Space 开关；正式值由 Settings/config.yaml 管理。"> Autonomous Space</label>
+              <label>Opportunity Interval (min)<input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="120" / title="仅当前 Runtime 的临时 Space Opportunity 间隔；正式值在 Settings。"><small>只改变“多久判断一次”，不强制发动态。</small></label>
+              <label>Max Posts / Day<input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="3" / title="仅当前 Runtime 的临时每日发帖上限；0 表示不额外限制，正式值在 Settings。"><small>每天发布上限；0 = 不限。</small></label>
             </div>
           </div>
           <div class="field-group">
             <span class="field-group-label">调度</span>
             <div class="visual-provider-row">
-              <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /><small>只影响检查到期的延迟。</small></label>
-              <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /><small>最多邀请多少其他角色判断是否互动。</small></label>
+              <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" / title="仅当前 Runtime 的临时 Scheduler Poll；只影响检查延迟，不改变 Opportunity 间隔。"><small>只影响检查到期的延迟。</small></label>
+              <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" / title="仅当前 Runtime 的临时 Audience 上限；控制最多邀请多少其他角色判断互动。"><small>最多邀请多少其他角色判断是否互动。</small></label>
             </div>
           </div>
           <div class="field-group">
             <span class="field-group-label">媒体</span>
             <div class="visual-provider-row">
-              <label class="visual-check"><input id="spaceMediaEnabled" type="checkbox" checked /> Space Media</label>
-              <label>Max Media / Post<input id="spaceMediaMaxItems" type="number" min="0" max="9" step="1" value="3" /></label>
-              <label class="visual-check"><input id="spaceImageSearchEnabled" type="checkbox" checked /> Web Image Search</label>
-              <label class="visual-check"><input id="spaceImageGenerationEnabled" type="checkbox" checked /> AI ImageGen</label>
+              <label class="visual-check"><input id="spaceMediaEnabled" type="checkbox" checked / title="仅当前 Runtime 的临时媒体总开关；关闭后自主 Space 仍可发纯文本。"> Space Media</label>
+              <label>Max Media / Post<input id="spaceMediaMaxItems" type="number" min="0" max="9" step="1" value="3" / title="仅当前 Runtime 的临时单帖媒体执行上限；正式值在 Settings。"></label>
+              <label class="visual-check"><input id="spaceImageSearchEnabled" type="checkbox" checked / title="仅当前 Runtime 临时允许或禁止 Space 搜图；正式值在 Settings。"> Web Image Search</label>
+              <label class="visual-check"><input id="spaceImageGenerationEnabled" type="checkbox" checked / title="仅当前 Runtime 临时允许或禁止 Space AI 生图；正式值在 Settings。"> AI ImageGen</label>
             </div>
           </div>
           <div class="field-group">
             <span class="field-group-label">世界观察</span>
             <div class="visual-provider-row">
-              <label class="visual-check"><input id="spaceWorldObservationEnabled" type="checkbox" checked /> World Observation</label>
-              <label>World Pages<input id="spaceWorldMaxPages" type="number" min="1" max="4" step="1" value="2" /></label>
-              <label>World Text / Page<input id="spaceWorldMaxChars" type="number" min="500" max="16000" step="500" value="6000" /></label>
+              <label class="visual-check"><input id="spaceWorldObservationEnabled" type="checkbox" checked / title="仅当前 Runtime 临时允许或禁止 Space 在表达前观察公网。"> World Observation</label>
+              <label>World Pages<input id="spaceWorldMaxPages" type="number" min="1" max="4" step="1" value="2" / title="仅当前 Runtime 的临时 World 页面上限；控制一次最多打开多少页。"></label>
+              <label>World Text / Page<input id="spaceWorldMaxChars" type="number" min="500" max="16000" step="500" value="6000" / title="仅当前 Runtime 的临时单页正文字符上限；用于限制上下文与抓取成本。"></label>
             </div>
           </div>
           <div class="field-group">
             <span class="field-group-label">临时应用与调度验收</span>
             <div class="actions">
-              <button class="secondary" id="applySpaceConfig" type="button">应用 Session Override</button>
-              <button class="secondary space-preset" data-minutes="10" type="button">10min</button>
-              <button class="secondary space-preset" data-minutes="30" type="button">30min</button>
-              <button class="secondary space-preset" data-minutes="60" type="button">1H</button>
-              <button class="secondary space-preset" data-minutes="360" type="button">6H</button>
-              <button class="secondary space-preset" data-minutes="1440" type="button">24H / 正式</button>
-              <button class="secondary" id="forceSpaceDue" type="button">让选中角色立即到期</button>
-              <button class="secondary" id="refreshSpaceStatus" type="button">刷新调度状态</button>
+              <button class="secondary" id="applySpaceConfig" type="button" title="把本组 Session Override 热应用到当前 Character Runtime；不会写 config.yaml，重启即恢复正式值。">应用 Session Override</button>
+              <button class="secondary space-preset" data-minutes="10" type="button" title="只修改 Space Session Override 的 Opportunity Interval 输入框为 10min；点击应用 Session Override 后才生效。">10min</button>
+              <button class="secondary space-preset" data-minutes="30" type="button" title="只修改 Space Session Override 的 Opportunity Interval 输入框为 30min；点击应用 Session Override 后才生效。">30min</button>
+              <button class="secondary space-preset" data-minutes="60" type="button" title="只修改 Space Session Override 的 Opportunity Interval 输入框为 1H；点击应用 Session Override 后才生效。">1H</button>
+              <button class="secondary space-preset" data-minutes="360" type="button" title="只修改 Space Session Override 的 Opportunity Interval 输入框为 6H；点击应用 Session Override 后才生效。">6H</button>
+              <button class="secondary space-preset" data-minutes="1440" type="button" title="只修改 Space Session Override 的 Opportunity Interval 输入框为 24H / 正式；点击应用 Session Override 后才生效。">24H / 正式</button>
+              <button class="secondary" id="forceSpaceDue" type="button" title="把选中角色当前 Runtime 的 next Space opportunity 设为现在，用真实 Scheduler 验收。">让选中角色立即到期</button>
+              <button class="secondary" id="refreshSpaceStatus" type="button" title="重新读取 Space Scheduler 的 effective 状态、next/last opportunity 与 recent runs。">刷新调度状态</button>
             </div>
           </div>
           <p class="subtle">“手动测试一次”不改变正式 next opportunity；“立即到期”才会修改当前 Scheduler 的 next time。Poll 只影响检查延迟，不会增加 Opportunity 次数。</p>
@@ -155,8 +155,8 @@
           <div class="field-group">
             <span class="field-group-label">Audience 回放</span>
             <div class="visual-provider-row">
-              <label>Post ID<input id="spacePostId" type="number" min="1" placeholder="自动填入最近测试动态" /></label>
-              <button class="secondary" id="runSpaceAudience" type="button">再次模拟 Audience</button>
+              <label>Post ID<input id="spacePostId" type="number" min="1" placeholder="自动填入最近测试动态" / title="Audience 回放使用的 Space Post ID；通常由最近一次测试动态自动填入。"></label>
+              <button class="secondary" id="runSpaceAudience" type="button" title="对指定 Space Post 再运行一次 Audience 判断，用于验收点赞/评论链路。">再次模拟 Audience</button>
             </div>
           </div>
 
@@ -164,24 +164,24 @@
             <span class="field-group-label">媒体测试</span>
             <div class="visual-provider-row">
               <label>Media Test
-                <select id="spaceMediaType">
+                <select id="spaceMediaType" title="选择这一次媒体 Smoke 的类型；只影响本次测试动态，不修改正式能力开关。">
                   <option value="SEARCH_IMAGE">SEARCH_IMAGE · 互联网图片</option>
                   <option value="GENERATE_IMAGE">GENERATE_IMAGE · AI 生图</option>
                   <option value="VOICE">VOICE · 语音动态</option>
                 </select>
               </label>
-              <label>Count<input id="spaceMediaCount" type="number" min="1" max="9" step="1" value="1" /></label>
+              <label>Count<input id="spaceMediaCount" type="number" min="1" max="9" step="1" value="1" / title="本次测试动态请求的媒体数量；受 Runtime 上限约束，不持久化。"></label>
               <label>Purpose
-                <select id="spaceMediaPurpose">
+                <select id="spaceMediaPurpose" title="本次 AI 生图的表达目的；SCENE 为场景，SELFIE 为角色自拍。">
                   <option value="SCENE">SCENE</option>
                   <option value="SELFIE">SELFIE</option>
                 </select>
               </label>
-              <label>Search Query<input id="spaceMediaQuery" type="text" value="Tokyo night street photography" /></label>
-              <label>Visual Intent<input id="spaceMediaVisualIntent" type="text" value="夜晚街道的自然生活氛围" /></label>
-              <label>Voice Text<input id="spaceMediaVoiceText" type="text" value="今天不想打字，就直接说一句。" /></label>
-              <label>Post Text<input id="spaceMediaPostText" type="text" value="随手分享一下。" /></label>
-              <button class="secondary" id="runSpaceMedia" type="button">测试媒体动态</button>
+              <label>Search Query<input id="spaceMediaQuery" type="text" value="Tokyo night street photography" / title="SEARCH_IMAGE 测试使用的搜索词；只用于本次请求。"></label>
+              <label>Visual Intent<input id="spaceMediaVisualIntent" type="text" value="夜晚街道的自然生活氛围" / title="GENERATE_IMAGE 测试的自然语言视觉意图；只用于本次请求。"></label>
+              <label>Voice Text<input id="spaceMediaVoiceText" type="text" value="今天不想打字，就直接说一句。" / title="VOICE 测试交给正式 TTS 合成的文本；只用于本次请求。"></label>
+              <label>Post Text<input id="spaceMediaPostText" type="text" value="随手分享一下。" / title="本次媒体测试动态的正文；会创建测试动态，但不是系统配置。"></label>
+              <button class="secondary" id="runSpaceMedia" type="button" title="真实执行选中的 Space 媒体能力并发布一条测试动态；不移动正式 Scheduler。">测试媒体动态</button>
             </div>
             <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE / VOICE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图；Voice Text 会走正式 :8001/v1/tts。</p>
           </div>
@@ -189,13 +189,13 @@
           <div class="field-group">
             <span class="field-group-label">世界观察测试</span>
             <div class="visual-provider-row">
-              <label>World Query<input id="worldQuery" type="text" value="AI agent memory systems latest research" /></label>
-              <label>Pages<input id="worldPages" type="number" min="1" max="4" step="1" value="2" /></label>
-              <button class="secondary" id="runWorldSearch" type="button">测试 World Observation</button>
+              <label>World Query<input id="worldQuery" type="text" value="AI agent memory systems latest research" / title="World Observation 测试使用的搜索主题；只用于本次公网观察。"></label>
+              <label>Pages<input id="worldPages" type="number" min="1" max="4" step="1" value="2" / title="本次 World Observation 最多打开的公网页面数；不修改正式 Settings。"></label>
+              <button class="secondary" id="runWorldSearch" type="button" title="按测试 Query 搜索候选 URL，再用受限无头浏览器打开并抽取正文。">测试 World Observation</button>
             </div>
             <div class="visual-provider-row">
-              <label>Browser URL<input id="worldUrl" type="url" value="https://example.com" /></label>
-              <button class="secondary" id="runWorldFetch" type="button">无头浏览器打开 URL</button>
+              <label>Browser URL<input id="worldUrl" type="url" value="https://example.com" / title="单 URL 浏览器诊断目标；仅允许公开 http/https 地址，不携带自定义 Secret/Header。"></label>
+              <button class="secondary" id="runWorldFetch" type="button" title="用正式受限 Browser 抓取指定公开 URL；只验证渲染/正文抽取。">无头浏览器打开 URL</button>
             </div>
             <p class="subtle">World Observation 会先搜索候选 URL，再由 Playwright 无头 Chromium 执行页面 JS 并抽取正文。URL 测试只验证浏览器抓取，不触发角色记忆或 Space 发帖。</p>
           </div>
@@ -203,8 +203,8 @@
           <div class="field-group">
             <span class="field-group-label">决策账本</span>
             <div class="visual-provider-row">
-              <label>Run ID<input id="spaceRunId" type="number" min="1" placeholder="调度状态 recent_runs 里的 id" /></label>
-              <button class="secondary" id="loadSpaceRunRaw" type="button">读取该次决策的原始模型输出</button>
+              <label>Run ID<input id="spaceRunId" type="number" min="1" placeholder="调度状态 recent_runs 里的 id" / title="Space recent_runs 中的一次运行 ID，用于读取该次决策的原始模型输出。"></label>
+              <button class="secondary" id="loadSpaceRunRaw" type="button" title="读取指定 Space Run 的原始决策结果；只读诊断，不重新执行模型。">读取该次决策的原始模型输出</button>
             </div>
           </div>
         </details>
@@ -232,12 +232,12 @@
         <details class="level-group" data-level="diagnostic" data-title="诊断 · World Pulse / Personal Browse" data-hint="手动运行真实网络观察，不修改正式配置">
           <summary>诊断 · World Pulse / Personal Browse</summary>
           <div class="visual-provider-row">
-            <label>Pulse Topic ID<input id="worldPulseTopicId" type="number" min="1" placeholder="刷新后自动填入最新 Topic" /></label>
-            <button class="secondary" id="refreshWorldPulse" type="button">刷新 World Pulse</button>
-            <button class="secondary" id="discussWorldPulse" type="button">让角色评论 Topic</button>
-            <button class="secondary" id="browseWorldAsCharacter" type="button">选中 Space Character 自主上网</button>
-            <button class="secondary" id="runWorldActivity" type="button">执行当前到期任务</button>
-            <button class="secondary" id="refreshWorldActivity" type="button">刷新状态</button>
+            <label>Pulse Topic ID<input id="worldPulseTopicId" type="number" min="1" placeholder="刷新后自动填入最新 Topic" / title="要手动讨论的 World Pulse Topic ID；刷新 Pulse 后通常自动填入最新项。"></label>
+            <button class="secondary" id="refreshWorldPulse" type="button" title="立即按正式 Settings 刷新一次 World Pulse；不修改 Pulse 配置。">刷新 World Pulse</button>
+            <button class="secondary" id="discussWorldPulse" type="button" title="让角色对指定 Pulse Topic 独立判断是否评论；用于真实链路验收。">让角色评论 Topic</button>
+            <button class="secondary" id="browseWorldAsCharacter" type="button" title="让当前 Space Character 立即执行一次 Personal Browse；只形成近期观察，不自动发帖。">选中 Space Character 自主上网</button>
+            <button class="secondary" id="runWorldActivity" type="button" title="执行当前已经到期的 World Activity 任务；不改变正式配置。">执行当前到期任务</button>
+            <button class="secondary" id="refreshWorldActivity" type="button" title="重新读取 World Pulse / Personal Browse 状态与调度信息。">刷新状态</button>
           </div>
           <p class="subtle">这里没有配置保存入口。Pulse 读取 Settings 中的聚合页并做有限去重/摘要；Personal Browse 的结果只成为近期 WORLD_OBSERVATION，不自动发布 Space、发送 Direct 或直接写长期 Memory。</p>
         </details>
@@ -258,10 +258,10 @@
         </div>
 
         <div class="level-row" data-level="common">
-          <label>群聊<select id="groupAutonomyGroup"><option value="">暂无群聊</option></select></label>
+          <label>群聊<select id="groupAutonomyGroup" title="选择本次自主群聊手动验收的已有群；不会修改群成员或正式配置。"><option value="">暂无群聊</option></select></label>
         </div>
         <div class="actions" data-level="common">
-          <button class="primary" id="runGroupAutonomyOpportunity" type="button">立即手动触发一次</button>
+          <button class="primary" id="runGroupAutonomyOpportunity" type="button" title="立即手动执行一次自主群聊 Opportunity；方便验收且不要求等到 Scheduler 到期。">立即手动触发一次</button>
           <span class="subtle" id="groupAutonomyStatusAge">尚未读取调度状态。</span>
         </div>
 
@@ -271,24 +271,24 @@
           <div class="field-group">
             <span class="field-group-label">临时行为与调度</span>
             <div class="visual-provider-row">
-              <label class="visual-check"><input id="groupAutonomyEnabled" type="checkbox" checked /> 自主群聊</label>
-              <label>Opportunity Interval (min)<input id="groupAutonomyInterval" type="number" min="10" max="10080" step="10" value="360" /></label>
-              <label>Max Messages<input id="groupAutonomyMaxMessages" type="number" min="1" max="4" step="1" value="3" /></label>
-              <label>User Quiet Guard (min)<input id="groupAutonomyQuietMinutes" type="number" min="0" max="1440" step="5" value="30" /></label>
-              <label>Scheduler Poll (s)<input id="groupAutonomyPollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
+              <label class="visual-check"><input id="groupAutonomyEnabled" type="checkbox" checked / title="仅当前 Runtime 的临时自主群聊开关；正式值由 Settings 管理。"> 自主群聊</label>
+              <label>Opportunity Interval (min)<input id="groupAutonomyInterval" type="number" min="10" max="10080" step="10" value="360" / title="仅当前 Runtime 的临时群聊 Opportunity 间隔；正式值在 Settings。"></label>
+              <label>Max Messages<input id="groupAutonomyMaxMessages" type="number" min="1" max="4" step="1" value="3" / title="仅当前 Runtime 的临时单次自主群聊消息上限。"></label>
+              <label>User Quiet Guard (min)<input id="groupAutonomyQuietMinutes" type="number" min="0" max="1440" step="5" value="30" / title="仅当前 Runtime 的临时 User Quiet Guard；正式 Scheduler 会用它保护用户刚发言后的安静期。"></label>
+              <label>Scheduler Poll (s)<input id="groupAutonomyPollSeconds" type="number" min="10" max="3600" step="10" value="60" / title="仅当前 Runtime 的临时 Scheduler Poll；只影响检查延迟。"></label>
             </div>
           </div>
           <div class="field-group">
             <span class="field-group-label">临时应用与调度验收</span>
             <div class="actions">
-              <button class="secondary" id="applyGroupAutonomyConfig" type="button">应用 Session Override</button>
-              <button class="secondary group-autonomy-preset" data-minutes="10" type="button">10min</button>
-              <button class="secondary group-autonomy-preset" data-minutes="30" type="button">30min</button>
-              <button class="secondary group-autonomy-preset" data-minutes="60" type="button">1H</button>
-              <button class="secondary group-autonomy-preset" data-minutes="360" type="button">6H / 默认</button>
-              <button class="secondary group-autonomy-preset" data-minutes="1440" type="button">24H</button>
-              <button class="secondary" id="forceGroupAutonomyDue" type="button">让选中群立即到期</button>
-              <button class="secondary" id="refreshGroupAutonomyStatus" type="button">刷新调度状态</button>
+              <button class="secondary" id="applyGroupAutonomyConfig" type="button" title="把本组自主群聊 Session Override 热应用到当前 Runtime；不会写 config.yaml。">应用 Session Override</button>
+              <button class="secondary group-autonomy-preset" data-minutes="10" type="button" title="只修改 Group Session Override 的 Opportunity Interval 输入框为 10min；点击应用 Session Override 后才生效。">10min</button>
+              <button class="secondary group-autonomy-preset" data-minutes="30" type="button" title="只修改 Group Session Override 的 Opportunity Interval 输入框为 30min；点击应用 Session Override 后才生效。">30min</button>
+              <button class="secondary group-autonomy-preset" data-minutes="60" type="button" title="只修改 Group Session Override 的 Opportunity Interval 输入框为 1H；点击应用 Session Override 后才生效。">1H</button>
+              <button class="secondary group-autonomy-preset" data-minutes="360" type="button" title="只修改 Group Session Override 的 Opportunity Interval 输入框为 6H / 默认；点击应用 Session Override 后才生效。">6H / 默认</button>
+              <button class="secondary group-autonomy-preset" data-minutes="1440" type="button" title="只修改 Group Session Override 的 Opportunity Interval 输入框为 24H；点击应用 Session Override 后才生效。">24H</button>
+              <button class="secondary" id="forceGroupAutonomyDue" type="button" title="把选中群的 next autonomous opportunity 设为现在，用真实 Scheduler 验收。">让选中群立即到期</button>
+              <button class="secondary" id="refreshGroupAutonomyStatus" type="button" title="重新读取自主群聊 effective 配置、next/last opportunity 与运行状态。">刷新调度状态</button>
             </div>
           </div>
           <p class="subtle">手动触发会忽略 User Quiet Guard 方便验收；正式 Scheduler 会遵守 Quiet Guard。Poll 只影响到期检查延迟。</p>
@@ -313,15 +313,15 @@
           <summary>诊断 · Random Encounter 手动验收</summary>
           <div class="visual-provider-row">
             <label>Source
-              <select id="encounterSource">
+              <select id="encounterSource" title="选择本次邂逅测试来源：AUTO 按正式概率，WEB 强制公网，GENERATED 强制系统生成。">
                 <option value="AUTO">AUTO · 按正式概率</option>
                 <option value="WEB">WEB · 强制互联网资料</option>
                 <option value="GENERATED">GENERATED · 强制系统生成</option>
               </select>
             </label>
-            <button class="primary" id="runEncounterOpportunity" type="button">立即生成一次邂逅</button>
-            <button class="secondary" id="forceEncounterDue" type="button">让 Scheduler 立即到期</button>
-            <button class="secondary" id="refreshEncounterStatus" type="button">刷新状态</button>
+            <button class="primary" id="runEncounterOpportunity" type="button" title="立即生成一次 Random Encounter 候选；不修改正式 next opportunity。">立即生成一次邂逅</button>
+            <button class="secondary" id="forceEncounterDue" type="button" title="把 Random Encounter Scheduler 的 next opportunity 设为现在。">让 Scheduler 立即到期</button>
+            <button class="secondary" id="refreshEncounterStatus" type="button" title="重新读取 Random Encounter 调度与 pending candidate 状态。">刷新状态</button>
           </div>
           <p class="subtle" id="encounterStatusAge">尚未读取邂逅调度状态。</p>
         </details>
@@ -343,13 +343,13 @@
         <details class="level-group" data-level="advanced" data-title="高级 · 采集、关键帧与 Vision 测试" data-hint="需要摄像头 / 屏幕权限">
           <summary>高级 · 采集、关键帧与 Vision 测试</summary>
           <div class="visual-dev-controls">
-            <button class="primary" id="visualCamera" type="button">📷 前置摄像头</button>
-            <button class="primary" id="visualScreen" type="button">🖥 选择窗口 / Tab / 屏幕</button>
-            <button id="visualStop" type="button" class="secondary" disabled>停止采集</button>
-            <button id="visualSample" type="button" class="secondary">立即采样</button>
-            <button id="visualSelect" type="button" class="secondary">选择关键帧</button>
+            <button class="primary" id="visualCamera" type="button" title="请求浏览器前置摄像头权限并开始关键帧候选采集；原始视频不上传。">📷 前置摄像头</button>
+            <button class="primary" id="visualScreen" type="button" title="请求浏览器窗口、Tab 或屏幕共享并开始关键帧候选采集；原始视频不上传。">🖥 选择窗口 / Tab / 屏幕</button>
+            <button id="visualStop" type="button" class="secondary" disabled title="停止当前摄像头或屏幕采集并释放浏览器媒体轨道。">停止采集</button>
+            <button id="visualSample" type="button" class="secondary" title="立即从当前画面采一帧加入候选集，用于 Vision 测试。">立即采样</button>
+            <button id="visualSelect" type="button" class="secondary" title="按变化度从候选帧中选择关键帧；不会调用 Vision 模型。">选择关键帧</button>
             <label class="subtle">最多
-              <select id="visualFrameLimit">
+              <select id="visualFrameLimit" title="限制一次 Vision 测试最多发送多少关键帧；只影响本次浏览器测试。">
                 <option value="3">3</option>
                 <option value="4" selected>4</option>
                 <option value="5">5</option>
@@ -364,10 +364,10 @@
             <div><div id="visualFrames" class="visual-dev-frames"></div></div>
           </div>
           <label for="visionSystem">Vision System Prompt</label>
-          <textarea id="visionSystem" rows="2">只根据提供的图像回答；如果看不清就明确说看不清，不要猜测画面中不存在的内容。</textarea>
+          <textarea id="visionSystem" rows="2" title="本次 Vision Smoke 的 System Prompt；只用于测试，不是正式角色 Prompt。">只根据提供的图像回答；如果看不清就明确说看不清，不要猜测画面中不存在的内容。</textarea>
           <label for="visionPrompt">Vision Prompt</label>
-          <textarea id="visionPrompt" rows="3">请按时间顺序看看这些关键帧，简洁说明你看到了什么，以及画面是否发生了明显变化。</textarea>
-          <div class="actions"><button class="primary" id="runVision">Run Vision Test</button><span id="visionLatency" class="metric-inline">-</span></div>
+          <textarea id="visionPrompt" rows="3" title="本次 Vision Smoke 针对已选关键帧的问题或指令；不持久化。">请按时间顺序看看这些关键帧，简洁说明你看到了什么，以及画面是否发生了明显变化。</textarea>
+          <div class="actions"><button class="primary" id="runVision" title="把选中的关键帧发送给当前正式 Vision Model 做一次真实测试。">Run Vision Test</button><span id="visionLatency" class="metric-inline">-</span></div>
           <pre id="visionReply" class="result">等待视觉测试...</pre>
         </details>
         <details class="debug-output">
@@ -384,19 +384,19 @@
         <details class="level-group" data-level="advanced" data-title="高级 · 生成参数与结果" data-hint="真实调用 Provider，按需展开">
           <summary>高级 · 生成参数与结果</summary>
           <div class="visual-provider-row">
-            <label>Character<select id="imageCharacter"><option value="rin">rin</option></select></label>
-            <label>Provider<select id="imageProvider"><option value="agnes">agnes</option><option value="msimg">msimg</option></select></label>
-            <label>Purpose<select id="imagePurpose"><option value="SELFIE">SELFIE</option><option value="SCENE">SCENE</option><option value="AVATAR">AVATAR</option></select></label>
+            <label>Character<select id="imageCharacter" title="选择本次 ImageGen 测试所使用的角色身份和头像上下文。"><option value="rin">rin</option></select></label>
+            <label>Provider<select id="imageProvider" title="选择本次 ImageGen Smoke 的 Provider；正式默认 Provider 仍由 Settings 管理。"><option value="agnes">agnes</option><option value="msimg">msimg</option></select></label>
+            <label>Purpose<select id="imagePurpose" title="本次生图用途：SELFIE、SCENE 或 AVATAR；会影响 Prompt 规划方式。"><option value="SELFIE">SELFIE</option><option value="SCENE">SCENE</option><option value="AVATAR">AVATAR</option></select></label>
           </div>
           <label for="imageIntent">Instruction / Visual Intent</label>
-          <textarea id="imageIntent" rows="3">自然分享一下现在的样子，保持人物身份一致，像日常聊天里随手发来的照片。</textarea>
-          <label class="visual-check"><input id="imageUseAvatar" type="checkbox" checked /> Provider 支持时使用当前头像作为 identity reference</label>
+          <textarea id="imageIntent" rows="3" title="本次 ImageGen 的自然语言创作意图；只用于测试生成。">自然分享一下现在的样子，保持人物身份一致，像日常聊天里随手发来的照片。</textarea>
+          <label class="visual-check"><input id="imageUseAvatar" type="checkbox" checked / title="Provider 支持参考图时，是否把该角色当前头像作为身份参考。"> Provider 支持时使用当前头像作为 identity reference</label>
           <div class="actions">
-            <button id="rewriteImagePrompt" class="secondary">Rewrite Prompt</button>
-            <button class="primary" id="runImageGen">Generate Image</button>
-            <button id="copyImagePrompt" class="secondary" hidden>复制 Prompt</button>
-            <button id="refreshImageProviders" class="secondary">刷新 Provider</button>
-            <button id="useImageAsAvatar" class="secondary" hidden>设为当前头像</button>
+            <button id="rewriteImagePrompt" class="secondary" title="只运行正式 Prompt Rewrite，查看最终绘图 Prompt；不生成图片。">Rewrite Prompt</button>
+            <button class="primary" id="runImageGen" title="真实执行 Prompt Rewrite → Provider → MediaStorage，并保留测试 MediaAsset 供预览。">Generate Image</button>
+            <button id="copyImagePrompt" class="secondary" hidden title="把最近一次润色后的 ImageGen Prompt 复制到剪贴板。">复制 Prompt</button>
+            <button id="refreshImageProviders" class="secondary" title="重新读取 ImageGen Provider 的 configured、available、model 和能力状态。">刷新 Provider</button>
+            <button id="useImageAsAvatar" class="secondary" hidden title="把最近生成且已持久化的测试图片设置为当前角色头像。">设为当前头像</button>
             <span id="imageGenLatency" class="metric-inline">-</span>
           </div>
           <label>Polished Prompt</label>
@@ -422,10 +422,10 @@
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 上传、录音与转写" data-hint="上传 WAV 或用浏览器麦克风">
           <summary>诊断 · 上传、录音与转写</summary>
           <div class="asr-controls">
-            <label class="file-button">选择 WAV<input id="asrFile" type="file" accept="audio/wav,.wav" /></label>
-            <button id="recordAsr" class="secondary">开始录音</button>
-            <button id="stopAsr" class="secondary" disabled>停止录音</button>
-            <button class="primary" id="runAsr" disabled>Transcribe</button>
+            <label class="file-button">选择 WAV<input id="asrFile" type="file" accept="audio/wav,.wav" / title="选择一段 WAV/PCM16 音频作为本次 ASR Smoke 输入；不会自动上传。"></label>
+            <button id="recordAsr" class="secondary" title="通过浏览器麦克风录制一段测试音频，停止后可交给正式 ASR。">开始录音</button>
+            <button id="stopAsr" class="secondary" disabled title="停止当前浏览器录音并把录音作为待识别的测试输入。">停止录音</button>
+            <button class="primary" id="runAsr" disabled title="把当前测试 WAV 发送给正式 Media Runtime ASR 并显示文本与延迟。">Transcribe</button>
           </div>
           <div class="audio-meta">
             <span id="asrSource">尚未选择音频</span>
@@ -447,9 +447,9 @@
           <summary>诊断 · 采集回看</summary>
           <p class="subtle">保存的是媒体运行时实际收到的那段音频，也就是模型的输入。因此它记录的就是真实的通话与听写路径，不存在第二条测试用采集链路。默认关闭；关闭时不写入任何文件。</p>
           <div class="asr-controls">
-            <button id="asrCaptureToggle" class="secondary" type="button" aria-pressed="false">测试态：关</button>
-            <button id="asrCaptureRefresh" class="secondary" type="button">刷新</button>
-            <button id="asrCaptureClear" class="secondary" type="button">清空</button>
+            <button id="asrCaptureToggle" class="secondary" type="button" aria-pressed="false" title="开启或关闭 Media Runtime ASR 采集回看测试态；仅进程内存有效，重启默认关闭。">测试态：关</button>
+            <button id="asrCaptureRefresh" class="secondary" type="button" title="刷新 ASR Capture Review 列表，不改变测试态。">刷新</button>
+            <button id="asrCaptureClear" class="secondary" type="button" title="删除 ASR Capture Review 的测试录音和识别记录；不影响正式聊天历史。">清空</button>
             <span id="asrCaptureStatus" class="metric-inline">-</span>
           </div>
           <div id="asrCaptureList" class="asr-capture-list"><div class="subtle">尚无记录</div></div>
@@ -462,7 +462,7 @@
           <summary>诊断 · 运行 Media Smoke</summary>
           <p class="subtle">真实执行 TTS → WAV → ASR。它不是 mock；失败时会显示 Media Runtime 的原始状态码与 detail。</p>
           <div class="actions">
-            <button class="primary" id="runMediaSmoke">Run Media Smoke</button>
+            <button class="primary" id="runMediaSmoke" title="使用当前正式 TTS 生成 WAV，再交给正式 ASR 识别，验证端到端 Media 链路。">Run Media Smoke</button>
             <span id="mediaSmokeLatency" class="metric-inline">-</span>
             <span id="mediaSmokeText" class="subtle">尚未运行</span>
           </div>
@@ -486,14 +486,14 @@
             <summary>高级 · 统计窗口</summary>
             <div class="actions">
             <label>统计窗口
-              <select id="llmUsageWindow">
+              <select id="llmUsageWindow" title="选择 LLM Usage 统计查询窗口；只改变报表范围，不修改 Runtime 配置。">
                 <option value="1">1 小时</option>
                 <option value="24" selected>24 小时</option>
                 <option value="168">7 天</option>
                 <option value="720">30 天</option>
               </select>
             </label>
-            <button id="refreshLlmUsage" class="secondary compact" type="button">刷新用量</button>
+            <button id="refreshLlmUsage" class="secondary compact" type="button" title="重新查询真实 LLM 请求用量、Feature/Purpose 归因、重试与错误统计。">刷新用量</button>
           </div>
             </div>
           </details>
@@ -539,7 +539,7 @@
           <summary>诊断 · 采样与进程表</summary>
           <div class="actions">
             <label for="resourceInterval" class="subtle">自动刷新
-              <select id="resourceInterval">
+              <select id="resourceInterval" title="设置 Dev 页面资源监控的浏览器自动刷新频率；只影响该页面，不改后端配置。">
                 <option value="0">关闭</option>
                 <option value="5">5 秒</option>
                 <option value="10">10 秒</option>
@@ -548,7 +548,7 @@
                 <option value="300">5 分钟</option>
               </select>
             </label>
-            <button id="refreshResources" class="secondary compact">刷新</button>
+            <button id="refreshResources" class="secondary compact" title="立即采样 Character/Media 等进程 RAM、可用 GPU VRAM 和加载状态。">刷新</button>
           </div>
           <p class="subtle">默认 60 秒采样一次；平时也可以关闭自动刷新，仅在需要观察 RAM / VRAM 峰值时手动刷新。</p>
           <details class="debug-output">
@@ -569,7 +569,7 @@
         <div class="card-title-row"><h2>Media Metrics</h2></div>
         <details class="level-group" data-level="diagnostic" data-title="诊断 · 最近 30 条延迟" data-hint="Media Runtime bounded latency buffer">
           <summary>诊断 · 最近 30 条延迟</summary>
-          <div class="actions"><button id="refreshMetrics" class="secondary compact">刷新</button></div>
+          <div class="actions"><button id="refreshMetrics" class="secondary compact" title="重新读取 Media Runtime 最近的 ASR/TTS 延迟指标。">刷新</button></div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Kind</th><th>Provider</th><th>Device</th><th>Inference</th><th>Audio</th><th>HTTP/Total</th></tr></thead>

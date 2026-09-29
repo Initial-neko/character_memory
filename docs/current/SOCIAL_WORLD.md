@@ -512,7 +512,9 @@ It does not automatically:
 
 This keeps a higher browsing frequency from turning into high-frequency publishing or uncontrolled Memory growth.
 
-The clock also has a daily ceiling. `world_browse_daily_max` bounds how many times one character may browse in a local day and defaults to 10; 0 means no ceiling. The interval is not a bound on cost by itself — 30 minutes authorises 48 browses a day — and each browse spends one paid search from the provider quota that every character shares, so a per-character ceiling is the knob that protects it. The ceiling counts *attempts* from the World Activity run ledger, because a browse whose search failed still spent the character's opportunity even though it spent no quota. It never forces a browse: a character that is not due does not consume it.
+The clock also has a daily ceiling. `world_browse_daily_max` bounds how many times one character may browse in a local day and defaults to 10; 0 means no ceiling. The interval is not a bound on cost by itself — 30 minutes authorises 48 opportunities a day — so the scheduler also keeps an **idle planning gate** in front of the LLM. When the previous successful `PersonalBrowsePlan` explicitly returned `browse=false` and the person has had no new durable chat/life/Space/World event since then, repeated due ticks are re-armed without another model call. Any new person-level signal reopens planning immediately; otherwise the model is reconsidered after `4 × interval`, bounded to 1–6 hours. This is a temporary backoff of the model's own prior decision, not a keyword-based interest rule.
+
+Zero-LLM idle deferrals are only scheduler state transitions: they do not create a `BROWSE` run row and therefore do not consume the daily ceiling. Real browse-plan attempts remain in the World Activity run ledger; a run whose search later fails still counts as an attempt because the character's browsing opportunity was actually spent.
 
 ### Scheduling
 
@@ -522,7 +524,7 @@ The clock also has a daily ceiling. `world_browse_daily_max` bounds how many tim
 | --- | ---: | --- |
 | `PULSE` | 60 min | refresh aggregation pages and topic pool |
 | `DISCUSS` | 360 min | let a few characters consider a fresh Pulse topic |
-| `BROWSE:<character>` | 90 min base | give one character a personal browsing opportunity |
+| `BROWSE:<character>` | 30 min base | give one character a personal browsing opportunity |
 
 Personal browsing is jittered so all characters do not hit the network at the same minute.
 
@@ -553,7 +555,7 @@ world_pulse_max_topics: 8
 world_pulse_commenter_count: 4
 
 world_browse_enabled: true
-world_browse_interval_minutes: 90
+world_browse_interval_minutes: 30
 world_browse_max_pages: 2
 world_activity_poll_seconds: 60
 ```

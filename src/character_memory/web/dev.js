@@ -83,6 +83,68 @@
     }
   }
 
+  const USAGE_FEATURE_LABELS = Object.freeze({
+    DIRECT: "私聊",
+    GROUP: "群聊",
+    SPACE: "空间",
+    PROACTIVE: "主动行为",
+    WORLD: "世界活动",
+    PERSONA: "人物设定",
+    ENSEMBLE: "AI 建群",
+    ENCOUNTER: "随机邂逅",
+    LIFE: "生活模拟",
+    AVATAR: "头像",
+    VISUAL: "视觉",
+    STICKER: "表情包",
+    DEV: "开发诊断",
+    OTHER: "其他",
+  });
+
+  const USAGE_PURPOSE_LABELS = Object.freeze({
+    DIRECT_REACTION: "私聊回复",
+    GROUP_REACTION: "群聊回复",
+    PROACTIVE_REACTION: "主动回复",
+    SPACE_POST_PLAN: "发动态决策",
+    SPACE_AUDIENCE: "动态受众互动",
+    SPACE_REPLY: "空间回复",
+    SPACE_WORLD_EXPLORE: "发动态前世界探索",
+    SPACE_WORLD_APPRAISAL: "世界观察评估",
+    WORLD_PULSE_SUMMARY: "世界脉搏摘要",
+    WORLD_PULSE_TAKE: "世界话题观点",
+    WORLD_BROWSE_PLAN: "个人浏览决策",
+    WORLD_BROWSE_APPRAISAL: "个人浏览评估",
+    WORLD_REACTION: "世界经历反应",
+    PERSONA_BUILD: "人物设定生成",
+    ENSEMBLE_RESEARCH: "建群角色调研",
+    ENCOUNTER_WEB_SEED: "邂逅网页候选",
+    ENCOUNTER_PRESENTATION: "邂逅候选整理",
+    ENCOUNTER_CHAT: "邂逅试聊",
+    ENCOUNTER_PERSONA: "邂逅人物生成",
+    AVATAR_SEARCH_INTENT: "头像搜索意图",
+    VISUAL_PROMPT: "视觉提示词规划",
+    STICKER_AUTO_TAG: "表情包自动标注",
+    LIFE_PLAN: "生活事件规划",
+    LIFE_DIARY: "生活日记生成",
+    DEV_LLM_PROBE: "LLM 测试",
+    DEV_VISION_PROBE: "Vision 测试",
+    DOCTOR_PROBE: "Doctor 诊断",
+    OTHER: "其他",
+  });
+
+  function usageEnum(value, labels) {
+    const raw = String(value || "OTHER").trim().toUpperCase() || "OTHER";
+    return { text: labels[raw] || raw, title: raw };
+  }
+
+  function usageEnumPair(feature, purpose) {
+    const featureLabel = usageEnum(feature, USAGE_FEATURE_LABELS);
+    const purposeLabel = usageEnum(purpose, USAGE_PURPOSE_LABELS);
+    return {
+      text: `${featureLabel.text} / ${purposeLabel.text}`,
+      title: `${featureLabel.title} / ${purposeLabel.title}`,
+    };
+  }
+
   function usageNumber(value) {
     const number = Number(value || 0);
     return Number.isFinite(number) ? number.toLocaleString("zh-CN") : "0";
@@ -102,7 +164,11 @@
     const row = document.createElement("tr");
     for (const value of values) {
       const cell = document.createElement("td");
-      cell.textContent = String(value ?? "—");
+      const spec = value && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : { text: value };
+      cell.textContent = String(spec.text ?? "—");
+      if (spec.title) cell.title = String(spec.title);
       row.appendChild(cell);
     }
     return row;
@@ -133,8 +199,8 @@
       featureBody.replaceChildren(...(
         features.length
           ? features.map((item) => usageRow([
-              item.feature,
-              item.purpose,
+              usageEnum(item.feature, USAGE_FEATURE_LABELS),
+              usageEnum(item.purpose, USAGE_PURPOSE_LABELS),
               usageNumber(item.requests),
               usageNumber(item.logical_calls),
               Number(item.requests_per_logical_call || 0).toFixed(2),
@@ -174,7 +240,7 @@
         recent.length
           ? recent.map((item) => usageRow([
               item.created_at ? new Date(item.created_at).toLocaleString() : "—",
-              `${item.feature || "OTHER"} / ${item.purpose || "OTHER"}`,
+              usageEnumPair(item.feature, item.purpose),
               item.character_id || "—",
               item.model || "—",
               item.attempt || 1,

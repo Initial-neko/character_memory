@@ -336,7 +336,7 @@ encounter_max_pending: 3
 # keys. They remain supported environment overrides:
 #
 # CHARACTER_MEDIA_MODEL_ROOT=                     # root used to locate local models
-# CHARACTER_MEDIA_ASR_PROVIDER=sensevoice          # sensevoice | paraformer-streaming
+# CHARACTER_MEDIA_ASR_PROVIDER=                    # unset = auto (prefer prepared Paraformer); sensevoice | paraformer-streaming
 # CHARACTER_MEDIA_ASR_MODEL=                       # SenseVoice ONNX model path
 # CHARACTER_MEDIA_ASR_ENCODER=                     # streaming Paraformer encoder
 # CHARACTER_MEDIA_ASR_DECODER=                     # streaming Paraformer decoder

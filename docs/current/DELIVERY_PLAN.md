@@ -12,7 +12,7 @@
 | Character archive/delete/deferred direct chat | DONE | Manual edge checks pending | Exact-name delete, activity counts, generated characters do not automatically enter the private sidebar. |
 | Screen-share image quality | DONE | TARGET-MACHINE PENDING | DISPLAY accepted frames retain up to ~1440px long side; cheap change analysis remains 64px. |
 | Ensemble Persona V2 | DONE | Persona-quality soak pending | One structured group research call plus deterministic per-character projection; no N extra Persona calls. |
-| ASR server streaming | DONE | TARGET-MACHINE PENDING | Paraformer streaming session and WebSocket protocol are implemented. |
+| ASR server streaming | DONE | TARGET-MACHINE PENDING | Paraformer streaming session/WebSocket are implemented; canonical media setup prepares the int8 model and auto-selects streaming when assets are complete. |
 | Shared browser AudioWorklet | DONE | Browser regression covered | PCM16 / 16k shared streaming client. |
 | Dictation streaming | DONE | TARGET-MACHINE PENDING | Streaming preferred, batch fallback retained. |
 | Browser Call streaming | DONE | TARGET-MACHINE PENDING | Streaming preferred; speak-over-reply, pending turns, visual frames and batch fallback retained. |

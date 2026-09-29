@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import re
 import time
 from typing import Callable
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 

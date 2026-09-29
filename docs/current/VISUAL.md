@@ -67,10 +67,12 @@ visual message request
 当前 `visual_capture.js` 的实现默认会：
 
 - 大约每 `800 ms` 做一次候选采样；
-- 将送往模型的长边压到约 `512 px`；
+- **变化检测仍只使用约 64px 宽的灰度分析图**，避免为了判断“画面变没变”消耗高分辨率处理；
+- 真正送往 Vision 的 accepted frame 使用来源区分的质量档：Camera 长边最多约 `720 px` / JPEG `0.82`，Display 长边最多约 `1440 px` / JPEG `0.90`；
 - 只在画面变化明显或经过一段时间后保留候选；
 - candidate cache 有上限；
-- 发送时优先保留首尾、变化较大的帧并保持时间顺序。
+- 普通 turn 发送时优先保留首尾、变化较大的帧并保持时间顺序；
+- 周期屏幕观察只会取 `score >= changeThreshold` 的 DISPLAY candidate，强制保活缓存帧本身不会触发一次周期 Vision。
 
 这些是当前实现参数，不是需要长期冻结的产品 API。稳定 contract 是“选择少量代表性关键帧，而不是连续上传视频”。
 
@@ -81,7 +83,12 @@ visual message request
 ```text
 POST /v1/visual/direct/messages
 POST /v1/visual/groups/{conversation_id}/messages
+
+GET  /v1/visual/periodic/config
+POST /v1/visual/direct/observations
 ```
+
+前两条 route 是“用户消息 + 当前视觉关键帧”。后两条是周期屏幕观察控制面与低优先级观察入口；周期观察当前只接受 Direct Call 中用户明确开启的 `DISPLAY` source，不接受 Camera，也不为 Group 自动 fan-out。
 
 请求包含正常用户文字和 `visual_frames[]`。
 
@@ -169,7 +176,7 @@ shared user fact + transient frames
 
 所以 Camera / Screen 不拥有独立 Memory、Mental State 或 Persona。
 
-如果人物之后需要记住视觉内容，应由正常 Person reaction / Memory admission 形成语义 Memory，而不是把原始帧当 Memory。
+普通用户消息携带的视觉内容仍可按正常 Person reaction / Memory admission 形成语义 Memory，但原始帧永远不作为 Memory。**周期 `VISUAL_OBSERVATION` 更严格：服务端会硬删除该事件产生的 Memory candidate 与未来 Intent**，因为共享屏幕上的临时内容不应悄悄进入长期人物记忆。
 
 ### 7. Direct / Group semantics
 
@@ -207,14 +214,13 @@ speech
 
 当麦克风关闭而 Camera/Screen 仍在共享时，当前通话目标中的普通文字消息会自动选择最近约 15 秒内的少量关键帧，并走现有 visual message route。若用户切换到其他 Direct/Group conversation，视觉帧不会跟随到非通话目标。
 
-当前 validity gate：
+当前 Call transcript validity gate 是一个**中文优先的噪声保护层**，不是 ASR 模型能力声明：
 
 ```text
-trim 后空字符串        -> reject
-纯空白/标点/符号        -> reject
-任意汉字                -> accept
-ASCII Latin/digit >= 2 -> accept
-其它                    -> reject
+trim 后空字符串   -> reject
+纯空白/标点/符号   -> reject
+包含任意汉字       -> accept
+其它               -> reject (no_han)
 ```
 
 例如：
@@ -224,13 +230,16 @@ ASCII Latin/digit >= 2 -> accept
 "……"    reject
 "?"     reject
 "a"     reject
+"OK"    reject
+"GPT"   reject
+"123"   reject
 
 "嗯"     accept
 "你好"   accept
-"OK"    accept
-"GPT"   accept
-"123"   accept
+"GPT 可以吗" accept
 ```
+
+纯英文/数字目前被有意拒绝，因为旧识别器在风扇、咳嗽、键盘声上容易产生短英文 hallucination。要支持纯英文通话，应单独修改并验收这个 gate，而不是把它误认为 Paraformer/SenseVoice 本身“不支持英文”。
 
 无效 ASR：
 
@@ -239,6 +248,38 @@ ASCII Latin/digit >= 2 -> accept
 - UI 回到 listening。
 
 这样可以避免一次纯噪声识别同时误提交一组 Camera/Screen 数据。
+
+#### Periodic screen observation
+
+Direct Call 中用户主动开启 Screen Share 后，可以启用一条独立的低优先级观察路径：
+
+```text
+DISPLAY sampling
+  -> cheap 64px change analysis
+  -> significant changed candidate only
+  -> client skips while speech/reply is active
+  -> server BUSY gate
+  -> exact-frame dedup
+  -> minimum interval
+  -> per-conversation hourly quota
+  -> transient frame + VISUAL_OBSERVATION
+  -> same PersonRuntime / Vision
+  -> character may speak naturally or remain silent
+```
+
+默认配置：
+
+```yaml
+periodic_visual_observation_enabled: true
+periodic_visual_observation_interval_seconds: 30
+periodic_visual_observation_max_per_hour: 6
+```
+
+这里的 `30s` 是**最小允许调用间隔**，不是“每 30 秒调用一次 Vision”。静止画面没有新的 significant candidate，因此花费为 0；正在识别用户语音、等待角色 reply、播放回复或 Direct scheduler 非 idle 时也会跳过。服务端另外按同一会话做 frame digest 去重和每小时额度限制。
+
+`VISUAL_OBSERVATION` 不是伪造的 `USER_MESSAGE`，不会在聊天历史里显示成“用户说了一句话”。Raw frame 仍只作为当轮 transient `image_data_urls`；人物可以对真正值得说的变化自然回应，也可以 `actions=[]`。
+
+当前 **不对 Group 自动做周期视觉观察**。如果以后支持 Group，应先形成一次共享视觉 perception，再让角色基于同一 perception 决定是否反应，不能把同一张屏幕图复制成 “1 frame × N characters” 的 Vision 调用。
 
 ### 9. Lifecycle and privacy
 
@@ -261,9 +302,9 @@ Browser stream 生命周期由用户明确控制：
 - raw video persistence；
 - raw frame history browser；
 - 把整个屏幕共享 session 上传服务器；
-- 跨 turn 自动重用过去 capture bytes。
+- 把历史 capture bytes 作为长期视觉记忆反复使用。
 
-因此 Visual Capture 更接近“这一句话说出口时，我顺便给你看几张当前画面”，而不是监控/录像系统。
+普通 visual message 更接近“这一句话说出口时，我顺便给你看几张当前画面”；周期观察也只消费当前 candidate 的 transient bytes。两者都不是后台录像或可回放监控系统。
 
 ### 10. Failure boundary
 
@@ -287,7 +328,12 @@ Visual Capture 是可选输入能力：
 - 挂断后到达的权限许可不会留下活着的 track；
 - selected frames 不超过后端上限；
 - Voice invalid transcript 不发送 frames；
-- valid transcript + capture 仍进入同一个 PersonRuntime。
+- valid transcript + capture 仍进入同一个 PersonRuntime；
+- DISPLAY accepted frame 质量不会回退到旧 512px 级别；
+- 周期观察只接受 Direct + DISPLAY + significant candidate；
+- unchanged screen、busy turn、duplicate frame、interval 和 hourly quota 都能阻止无意义 Vision；
+- `VISUAL_OBSERVATION` 不伪装成 User Message，不写长期 Memory/Intent；
+- Group 不会因为周期屏幕观察形成一帧多角色 Vision fan-out。
 
 相关长期回归清单见 [`EVALS.md`](EVALS.md)。
 

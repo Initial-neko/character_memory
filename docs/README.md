@@ -19,6 +19,7 @@ Historical material never overrides current code or `docs/current/`.
 | Document | Owner |
 | --- | --- |
 | [STATUS](current/STATUS.md) | What is shipped / active / backlog / deferred. |
+| [DELIVERY_PLAN](current/DELIVERY_PLAN.md) | Release-convergence ledger: implemented vs real-machine acceptance. |
 | [DESIGN](current/DESIGN.md) | Product goal, phases and value boundaries. |
 | [ARCHITECTURE](current/ARCHITECTURE.md) | Runtime topology, process/data boundaries and composition. |
 | [CODEBASE_LAYOUT](current/CODEBASE_LAYOUT.md) | Module ownership and where to start reading for a change. |
@@ -41,7 +42,7 @@ Prefer extending an existing domain document. Add a new `docs/current/*.md` only
 
 Do not create one document per provider, sidecar, UI widget, PR, implementation plan or agent task.
 
-Implementation plans, acceptance logs and temporary handoffs belong in Issues/PRs or local untracked notes. Durable behavior changes belong in the owning current contract.
+Implementation plans, temporary handoffs and one-off acceptance logs belong in Issues/PRs or local untracked notes. Durable behavior changes belong in the owning current contract. `DELIVERY_PLAN.md` is the deliberate exception: it is the release-convergence **acceptance ledger** that separates implementation status from target-machine proof, not a feature implementation plan.
 
 ## Research and archive
 

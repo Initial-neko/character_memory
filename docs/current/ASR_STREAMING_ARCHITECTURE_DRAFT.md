@@ -1,16 +1,16 @@
 # ASR Streaming Architecture Draft
 
-> Status: Draft implementation foundation  
-> Scope: server streaming/session foundation is implemented here; browser AudioWorklet integration and target-machine acceptance remain pending  
-> Related: `docs/current/ASR_P0_TECHNICAL_REPORT.md`
+> Status: implementation baseline shipped; target-machine acceptance pending  
+> Scope: server streaming/session, shared Browser AudioWorklet client, Dictation migration and Browser Call migration are on `main`; batch fallback remains intentionally available  
+> Related: `docs/current/ASR_P0_TECHNICAL_REPORT.md`, `docs/current/DELIVERY_PLAN.md`
 
 ## 1. Purpose
 
-The current voice stack can recognize speech, but its contract is fundamentally batch-oriented:
+This document started from a batch-oriented baseline:
 
 `microphone -> browser recording -> WAV -> POST /v1/asr -> one final string`
 
-This makes three different problems look like one ASR problem:
+That baseline made three different problems look like one ASR problem:
 
 1. audio capture and loss;
 2. speech segmentation / endpointing;
@@ -18,9 +18,25 @@ This makes three different problems look like one ASR problem:
 
 The next implementation cycle should therefore **not start by replacing SenseVoice with another model**.
 
-The target is a reliable **Streaming ASR Session** that makes these responsibilities explicit and observable.
+The implemented baseline is now a **Streaming ASR Session** that makes these responsibilities explicit and observable. The architecture below remains the contract; the outstanding work is real-machine accuracy/resource acceptance and any measured final-pass refinement.
 
-### Target pipeline
+### Implementation checkpoint — 2026-09-29
+
+```text
+Media Runtime WebSocket session      SHIPPED
+Paraformer streaming provider        SHIPPED
+shared AudioWorklet PCM16 / 16 kHz   SHIPPED
+Dictation streaming-first path       SHIPPED
+Browser Call streaming-first path    SHIPPED
+flush/final reconciliation           SHIPPED
+batch /v1/asr fallback               RETAINED
+target-machine corpus benchmark      PENDING
+optional high-accuracy final pass    DEFERRED UNTIL BENCHMARK
+```
+
+Sections below that describe ScriptProcessor/WAV-only Dictation or browser RMS/WAV Call are retained as **historical motivation**, not the current primary runtime path.
+
+### Target / current streaming pipeline
 
 ```text
 Browser Microphone
@@ -62,11 +78,13 @@ These are separate responsibilities.
 
 ---
 
-## 2. Current-state problems
+## 2. Historical baseline problems
 
-The current implementation has two recording semantics.
+Before the streaming migration, the implementation had two recording semantics.
 
-### Dictation
+### Dictation — historical batch path / current fallback
+
+The old primary path was:
 
 ```text
 getUserMedia
@@ -82,11 +100,11 @@ getUserMedia
  -> input box
 ```
 
-Dictation is therefore whole-recording batch recognition. The browser controls when the complete recording is submitted.
+Today Dictation prefers the shared AudioWorklet + WebSocket streaming session when Media Runtime health advertises streaming support. The batch path above is retained as a compatibility fallback rather than deleted.
 
-### Browser Call
+### Browser Call — historical batch path / current fallback
 
-The call path adds browser-side RMS endpointing:
+The old call path added browser-side RMS endpointing:
 
 - RMS threshold: approximately `0.025`
 - speech start requires consecutive hot frames
@@ -96,7 +114,7 @@ The call path adds browser-side RMS endpointing:
 - hard segment limit is approximately 12 s
 - the selected segment is converted to WAV and sent to batch ASR
 
-This creates a second segmentation policy.
+That created a second segmentation policy. The current streaming-first Call path delegates primary segment/final semantics to the shared ASR session while preserving the old batch/RMS path for fallback.
 
 ### Why this matters
 
@@ -888,26 +906,24 @@ This gives the project a stable foundation for accuracy improvements without rep
 
 ---
 
-## 21. Next implementation PRs
+## 21. Implementation / acceptance sequence
 
-The intended implementation sequence is deliberately small:
+The original implementation sequence is now partly complete:
 
-1. **ASR Phase 0:** observability + segment ledger.
-2. **ASR Phase 1:** unified ASR Session contract and compatibility adapter.
-3. **ASR Phase 2:** streaming VAD/endpoint + Paraformer integration.
-4. **ASR Phase 3:** corpus benchmark and resource benchmark.
-5. **ASR Phase 4:** optional final-accuracy pass.
+1. **ASR Phase 0 — DONE:** observable segment/session protocol.
+2. **ASR Phase 1 — DONE:** unified streaming session contract plus compatibility fallback.
+3. **ASR Phase 2 — DONE:** server endpoint + Paraformer streaming integration, shared Browser AudioWorklet, Dictation and Call migration.
+4. **ASR Phase 3 — PENDING:** fixed-corpus accuracy benchmark and actual target-machine CPU/RAM/VRAM/latency benchmark.
+5. **ASR Phase 4 — CONDITIONAL:** optional final-accuracy pass only if Phase 3 proves the streaming final transcript is insufficient.
 
-No phase should be skipped merely because a model appears to recognize a demo sentence correctly.
-
-The acceptance target is reliable speech-to-text behavior in the actual Character Memory voice flows.
+The remaining acceptance target is reliable speech-to-text behavior in the actual Character Memory voice flows. CI-green streaming code does not satisfy Phase 3 by itself.
 
 
 ## 22. Current model decision
 
-### Production target: Paraformer-zh-streaming
+### Current streaming implementation: Paraformer-zh-streaming
 
-The current project should converge on:
+The current project implementation has converged on:
 
 ```text
 sherpa-onnx
@@ -918,6 +934,8 @@ server-side endpoint policy
     +
 future FSMN-VAD integration
 ```
+
+This is the current low-resource streaming implementation, **not yet a target-machine accuracy verdict**. Phase 3 may still justify a different/final-pass configuration.
 
 This choice is based on the actual requirements of Character Memory:
 

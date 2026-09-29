@@ -27,11 +27,19 @@ speech
 
 ### 1. Architecture
 
+Browser audio input now has a streaming-first path and an explicit compatibility fallback:
+
 ```text
 Browser microphone
-  ↓ PCM16 WAV / VAD
-Media Runtime :8001
-  ↓ SenseVoice ASR
+  ↓
+shared AudioWorklet
+  ↓ PCM16 / 16 kHz
+Media Runtime :8001/v1/asr/stream
+  ↓ Sherpa Online Paraformer when health.asr.streaming=true
+partial / final segment events
+  ↓
+Dictation input OR Browser Call final turn
+  ↓
 Character Runtime :8000
   ↓ normal async chat / same PersonRuntime
   ↓ SSE character events
@@ -42,6 +50,18 @@ Media Runtime :8001/v1/tts
   └─ gsv -> :9002/v1/tts -> :9014 GSV-TTS-Lite
 Browser playback
 ```
+
+Compatibility fallback is intentionally retained:
+
+```text
+Browser recording / legacy VAD
+  -> WAV
+  -> POST :8001/v1/asr
+  -> configured offline-capable ASR provider
+  -> final text
+```
+
+Dictation and Browser Call prefer the shared streaming session only when Media Runtime reports a ready streaming ASR provider and Browser AudioWorklet support is available. A streaming connection failure can fall back to the batch path instead of making voice input unusable.
 
 完整开发栈：
 
@@ -84,11 +104,12 @@ Character Runtime owns：
 
 Media Runtime owns：
 
-- ASR model lifecycle
-- Sherpa TTS model lifecycle
-- audio parsing/resampling
-- formal `/v1/tts` routing
-- local media inference timings
+- ASR model lifecycle；
+- streaming ASR session / endpoint / finalization semantics；
+- Sherpa TTS model lifecycle；
+- audio parsing/resampling；
+- formal `/v1/tts` routing；
+- local media inference timings。
 
 TTS Provider Runtime / Workbench `:9002` 当前 owns：
 
@@ -120,7 +141,7 @@ bash scripts/setup-media-models.sh
 `setup-media-models.sh` 会先复用 `sync-all.sh`，然后准备：
 
 - local BGE Embedding cache；
-- SenseVoice ASR；
+- SenseVoice batch/fallback ASR；
 - Sherpa VITS；
 - Kokoro `v1.1-zh` model + voice packs。
 
@@ -139,6 +160,8 @@ Kokoro 依赖进入 canonical `all` extra；CosyVoice 仍保持独立 Python 3.1
 
 #### ASR
 
+Batch/fallback baseline：
+
 ```text
 models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/
 ```
@@ -147,6 +170,23 @@ models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/
 
 - `model.int8.onnx`
 - `tokens.txt`
+
+Streaming provider uses Sherpa Online Paraformer. Runtime selection is environment-owned:
+
+```text
+CHARACTER_MEDIA_ASR_PROVIDER=paraformer-streaming
+CHARACTER_MEDIA_ASR_ENCODER=...
+CHARACTER_MEDIA_ASR_DECODER=...
+CHARACTER_MEDIA_ASR_TOKENS=...
+CHARACTER_MEDIA_ASR_DEVICE=cpu
+CHARACTER_MEDIA_ASR_THREADS=2
+CHARACTER_MEDIA_ASR_ENDPOINT_SILENCE_MS=1200
+CHARACTER_MEDIA_ASR_ENDPOINT_SHORT_SILENCE_MS=800
+```
+
+The provider advertises `streaming: true` in Media Runtime health only when the streaming route is the configured ASR implementation. Online Paraformer uses 16 kHz PCM and keeps the recognizer resident while each speech session owns a separate OnlineStream. Server-side finalization appends a short zero tail before `input_finished()` so the browser cannot accidentally cut off the recognizer's final look-ahead window.
+
+SenseVoice remains the batch/fallback baseline until target-machine acceptance demonstrates that the streaming production configuration is sufficiently complete and accurate.
 
 #### Sherpa TTS fallback
 
@@ -441,12 +481,15 @@ capturePhase
 
 #### 9.4 Transcript validity gate
 
+当前 Browser Call 使用中文优先的噪声保护 gate：
+
 ```text
 empty / punctuation-only   -> reject
 any Han character          -> accept
-ASCII Latin/digit >= 2     -> accept
-otherwise                  -> reject
+otherwise                  -> reject (no_han)
 ```
+
+因此纯 `OK / GPT / 123` 当前也会被拒绝。这个 gate 是为了压住风扇、咳嗽、键盘声被旧识别器误识别成短英文的 hallucination；它不是 ASR provider 的语言能力声明。要正式支持纯英文 Call，需要单独修改并验收这个 gate。
 
 无效 transcript 不创建 chat message，也不上传当前通话中的 Visual Capture frames。
 
@@ -665,9 +708,11 @@ This command:
 
 1. runs the canonical dependency sync;
 2. prefetches the local BGE embedding model;
-3. prepares SenseVoice ASR;
+3. prepares the SenseVoice batch/fallback ASR assets;
 4. prepares Sherpa VITS;
 5. prefetches Kokoro model/voice assets.
+
+It **does not currently download Paraformer streaming encoder/decoder assets**. The streaming provider therefore still requires `CHARACTER_MEDIA_ASR_ENCODER / DECODER / TOKENS` to point at locally prepared files. Closing that setup gap belongs to deployment tooling, not to the Browser ASR protocol.
 
 Normal Character Runtime embedding is strict-offline, so network model acquisition belongs here rather than in startup/first chat.
 

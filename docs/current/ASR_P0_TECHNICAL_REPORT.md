@@ -1,16 +1,18 @@
 # ASR P0 Technical Report
 
-> Status: research / acceptance input only. No production code change in this PR.
+> Status: research baseline + acceptance input. The streaming architecture proposed here has since been implemented; target-machine model/resource acceptance is still pending.
 >
-> Baseline audited: `main` at `3bff5afea674a12597581b4e1e59d796d19ba641`.
+> Original research baseline: `main@3bff5afea674a12597581b4e1e59d796d19ba641`. Current implementation checkpoint: 2026-09-29 `main@38d400ac2ff459c851585d0045735c6b22eed636`.
 >
 > Goal: make local ASR robust against missing words, premature segmentation, and recognition errors. Latency is a secondary concern; transcript completeness and correctness are P0.
 
 ## 1. Executive conclusion
 
-The current ASR problem is architectural as well as model-related.
+> Implementation update: the shared Media Runtime streaming session, Sherpa Online Paraformer provider, browser AudioWorklet client, Dictation migration and Browser Call migration are now on `main`, with batch fallback retained. The benchmark/model-selection conclusions below remain open until the real target-machine corpus is measured. See [DELIVERY_PLAN.md](DELIVERY_PLAN.md).
 
-The current browser call path performs local RMS endpointing and then sends one complete WAV to `POST /v1/asr`. The provider contract is offline/batch-oriented: an audio sample array is transcribed into one final result. There is no shared streaming session, partial transcript protocol, transcript reconciliation layer, or final-pass correction contract.
+The original ASR problem was architectural as well as model-related.
+
+At the original audit baseline, Browser Call performed local RMS endpointing and sent one complete WAV to `POST /v1/asr`; there was no shared streaming session or partial/final protocol. That finding motivated the implementation now on `main`. The old batch/RMS path remains only as compatibility fallback.
 
 Therefore, replacing SenseVoice with another offline model alone is not sufficient.
 
@@ -672,4 +674,4 @@ ASR should not be marked complete until all of the following are demonstrated on
 
 This route minimizes resource usage while directly addressing the actual P0 failure modes: missing words, premature endpointing, and final-text regression.
 
-The next implementation PR should be created only after the benchmark corpus and actual target-machine VRAM measurements are available. This report intentionally does not make a production model-selection claim before those measurements.
+The streaming implementation no longer waits on the benchmark: it is already available behind the configured Paraformer provider with batch fallback. **Any further production model-selection change or optional high-accuracy final pass still requires the benchmark corpus and actual target-machine resource measurements.** This report intentionally does not make that model-selection claim before those measurements.

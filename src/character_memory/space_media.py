@@ -67,11 +67,11 @@ class SpacePostMediaRepository:
             #
             # The kind is read from the asset's own mime type instead of being
             # assumed. A legacy attachment is not necessarily an image -- the
-            # media store holds voice clips too -- and because the INSERT is
+            # media store also holds voice clips and videos -- and because the INSERT is
             # OR IGNORE against UNIQUE(post_id,media_id), a wrong guess here is
             # never revisited: the row is written once and skipped forever.
-            # An asset that is missing or neither image nor audio still lands as
-            # IMAGE, which is the only remaining guess SPACE_MEDIA_TYPES allows.
+            # An asset that is missing, or is not recognized as image/audio/video,
+            # still uses IMAGE as the legacy compatibility fallback.
             self.store.conn.execute(
                 """
                 INSERT OR IGNORE INTO space_post_media(

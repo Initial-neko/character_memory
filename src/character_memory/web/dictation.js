@@ -14,15 +14,16 @@
     sourceNode: null,
     processor: null,
     chunks: [],
+    streaming: false,
+    asrSession: null,
+    finalTexts: [],
+    partialText: "",
+    streamError: null,
   };
-  // A start that is still waiting on the permission prompt is only wanted until the user
-  // aims at the call instead: the call takes the microphone for itself, and this module must
-  // not hold a second capture open next to it. Starting a call retires the generation the
-  // start came in with, so the answer to the prompt is judged against what was wanted when
-  // the request was made, not against what is wanted after the browser replies. It is this
-  // module's own "still wanted" marker rather than an ownership token: dictation always
-  // keeps the right to stop what it adopted, and only a call may retire a start that has
-  // not adopted a stream yet.
+
+  // A start that is still waiting on the permission prompt is only wanted until
+  // the call takes the microphone. The generation token prevents a late browser
+  // permission answer from adopting a stream in the wrong conversation mode.
   let wantedGeneration = 0;
   const callOwnsMicrophone = () => Boolean(CM.features.voice?.state?.active);
 
@@ -33,13 +34,15 @@
     button.disabled = mode === "starting" || mode === "transcribing";
     if (mode === "recording") {
       button.textContent = "■";
-      button.title = "停止录音并识别";
+      button.title = state.partialText
+        ? `正在听：${state.partialText.slice(-48)}`
+        : (state.streaming ? "停止并完成流式识别" : "停止录音并识别");
       button.setAttribute("aria-label", "停止录音并识别");
       return;
     }
     if (mode === "transcribing") {
       button.textContent = "…";
-      button.title = "正在识别语音";
+      button.title = "正在完成语音识别";
       button.setAttribute("aria-label", "正在识别语音");
       return;
     }
@@ -110,7 +113,7 @@
     return new Blob([buffer], {type:"audio/wav"});
   }
 
-  function cleanupCapture() {
+  function releaseAudioCapture() {
     state.processor?.disconnect?.();
     state.sourceNode?.disconnect?.();
     state.stream?.getTracks?.().forEach(track => track.stop());
@@ -120,7 +123,23 @@
     state.sourceNode = null;
     state.processor = null;
     state.recording = false;
+    state.chunks = [];
     if (context) context.close().catch(() => {});
+  }
+
+  function resetStreamingState() {
+    state.streaming = false;
+    state.asrSession = null;
+    state.finalTexts = [];
+    state.partialText = "";
+    state.streamError = null;
+  }
+
+  function cleanupCapture() {
+    try { state.asrSession?.cancel?.(); } catch (_) {}
+    releaseAudioCapture();
+    resetStreamingState();
+    state.busy = false;
   }
 
   function insertTranscript(text) {
@@ -142,7 +161,7 @@
     input.focus();
   }
 
-  async function transcribe(chunks, sourceRate) {
+  async function transcribeBatch(chunks, sourceRate) {
     if (!chunks.length) return;
     state.busy = true;
     setButton("transcribing");
@@ -152,7 +171,7 @@
       const pcm = downsample(raw, sourceRate, 16000);
       const response = await fetch(`${mediaBase()}/v1/asr`, {
         method: "POST",
-        headers: {"Content-Type":"audio/wav"},
+        headers: {"Content-Type":"audio/wav", "X-ASR-Source":"dictation"},
         body: wavBlob(pcm, 16000),
       });
       if (!response.ok) throw new Error(await response.text());
@@ -169,8 +188,43 @@
   }
 
   function audioFrame(event) {
-    if (!state.recording) return;
+    if (!state.recording || state.streaming) return;
     state.chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+  }
+
+  function canStream(health, context) {
+    return Boolean(
+      health?.asr?.streaming &&
+      window.StreamingAsr?.createSession &&
+      context?.audioWorklet &&
+      window.AudioWorkletNode
+    );
+  }
+
+  async function attachStreaming(context, source) {
+    const session = window.StreamingAsr.createSession({
+      mediaBase: mediaBase(),
+      source: "dictation",
+      onPartial(data) {
+        if (state.asrSession !== session) return;
+        state.partialText = String(data.text || "").trim();
+        if (state.recording) setButton("recording");
+      },
+      onFinal(data) {
+        if (state.asrSession !== session) return;
+        const text = String(data.text || "").trim();
+        if (text) state.finalTexts.push(text);
+        state.partialText = "";
+        if (state.recording) setButton("recording");
+      },
+      onError(error) {
+        if (state.asrSession === session) state.streamError = error;
+      },
+    });
+    state.asrSession = session;
+    await session.connect();
+    await session.attach(context, source);
+    state.streaming = true;
   }
 
   async function startRecording() {
@@ -183,10 +237,8 @@
     setButton("starting");
     const generation = wantedGeneration;
     try {
-      await checkAsr();
+      const health = await checkAsr();
       if (generation !== wantedGeneration) {
-        // The call was asked for while the runtime was still being checked, so the
-        // microphone prompt this start was about to open is not wanted any more.
         setButton("idle");
         return;
       }
@@ -194,25 +246,37 @@
         audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
       });
       if (generation !== wantedGeneration || callOwnsMicrophone()) {
-        // The call was asked for while the permission prompt was open, so this capture
-        // stopped being wanted before the browser answered it. The granted stream is real
-        // hardware: hand it straight back instead of leaving a second microphone running.
         stream.getTracks().forEach(track => track.stop());
         setButton("idle");
         return;
       }
+
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       const context = new AudioContextClass();
       const source = context.createMediaStreamSource(stream);
-      const processor = context.createScriptProcessor(2048, 1, 1);
-      processor.onaudioprocess = audioFrame;
-      source.connect(processor);
-      processor.connect(context.destination);
       state.stream = stream;
       state.audioContext = context;
       state.sourceNode = source;
-      state.processor = processor;
-      state.chunks = [];
+      state.finalTexts = [];
+      state.partialText = "";
+      state.streamError = null;
+
+      if (canStream(health, context)) {
+        await attachStreaming(context, source);
+      } else {
+        const processor = context.createScriptProcessor(2048, 1, 1);
+        processor.onaudioprocess = audioFrame;
+        source.connect(processor);
+        processor.connect(context.destination);
+        state.processor = processor;
+        state.streaming = false;
+      }
+
+      if (generation !== wantedGeneration || callOwnsMicrophone()) {
+        cleanupCapture();
+        setButton("idle");
+        return;
+      }
       state.recording = true;
       setButton("recording");
     } catch (error) {
@@ -224,12 +288,48 @@
 
   async function stopRecording({recognize = true} = {}) {
     if (!state.recording) return;
+
+    if (state.streaming && state.asrSession) {
+      const session = state.asrSession;
+      state.recording = false;
+
+      if (!recognize) {
+        try { session.cancel(); } catch (_) {}
+        releaseAudioCapture();
+        resetStreamingState();
+        setButton("idle");
+        return;
+      }
+
+      state.busy = true;
+      setButton("transcribing");
+      try {
+        await session.pauseInput();
+        // pauseInput keeps the port alive for one task turn, so every PCM frame
+        // already posted by the audio thread reaches the socket before flush.
+        releaseAudioCapture();
+        await session.flush("user_stop");
+        if (state.streamError) throw state.streamError;
+        const text = state.finalTexts.map(item => String(item || "").trim()).filter(Boolean).join("\n").trim();
+        if (!text) throw new Error("没有识别到文字");
+        insertTranscript(text);
+      } catch (error) {
+        alert(`语音识别失败：${error.message}`);
+      } finally {
+        try { session.close(); } catch (_) {}
+        resetStreamingState();
+        state.busy = false;
+        setButton("idle");
+      }
+      return;
+    }
+
     const chunks = state.chunks;
     const sourceRate = state.audioContext?.sampleRate || 48000;
     state.chunks = [];
-    cleanupCapture();
+    releaseAudioCapture();
     setButton("idle");
-    if (recognize) await transcribe(chunks, sourceRate);
+    if (recognize) await transcribeBatch(chunks, sourceRate);
   }
 
   async function toggleRecording() {
@@ -242,15 +342,10 @@
     toggleRecording().catch(console.error);
   });
   callButton?.addEventListener("click", () => {
-    // A call takes the microphone, so it also retires a start that has not adopted a
-    // stream yet. This listener sees the click before voice.js starts the call.
     wantedGeneration += 1;
     if (state.recording) stopRecording({recognize:false}).catch(console.error);
   }, {capture:true});
   CM.on("conversationChanged", () => {
-    // A capture belongs to the conversation it was asked for, so moving on retires a start
-    // that is still waiting for the permission prompt as well: the answer arrives in another
-    // context and must be released rather than adopted.
     wantedGeneration += 1;
     if (state.recording) stopRecording({recognize:false}).catch(console.error);
   });

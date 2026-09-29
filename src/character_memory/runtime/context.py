@@ -78,6 +78,7 @@ def compile_context(
         EventType.PROACTIVE_INTENT: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；也可以放弃或延后",
         EventType.SPACE_POST_SEEN: f"只允许 SPACE_LIKE / SPACE_COMMENT{space_sticker_action}；也可以 actions=[] 表示看到了但不互动",
         EventType.SPACE_COMMENT_RECEIVED: f"只允许 SPACE_COMMENT{space_sticker_action} 回复这条评论；也可以 actions=[] 不回复",
+        EventType.VISUAL_OBSERVATION: f"0~2 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；多数普通画面变化应保持沉默",
     }.get(event.event_type, f"0~3 个 MESSAGE / EMOJI{resource_actions}；也可以没有对外表达")
     generate_contract = ""
     if effective_generate_image:
@@ -114,6 +115,16 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 - memory_candidates 默认保持 []。只有这件事以后仍会影响“你是谁、你在意什么、你经历过什么”时才产生一条人物记忆。
 - 不要把价格、参数、发布日期、新闻标题等可能变化的世界事实直接写成长期 Memory；需要这些事实时以后重新查询。
 - 不产生任何聊天/Space 对外 action。
+"""
+
+    visual_observation_contract = ""
+    if event.event_type == EventType.VISUAL_OBSERVATION:
+        visual_observation_contract = """
+这是一次用户主动开启屏幕共享后，由系统在画面发生明显变化时给你的周期视觉观察机会，不是用户刚发来的消息，也不是要求你必须回应。
+- 先看图本体，再判断这次变化是否真的值得自然说一句；普通滚动、切窗口、光标移动、重复画面通常 actions=[]。
+- 不要每次都汇报“我看到屏幕上有……”，也不要把自己描述成监控程序。只有像真实同伴一起看屏幕时确实会自然开口的内容才表达。
+- 不要从屏幕内容创建长期 Memory 或未来 Intent；屏幕可能包含临时或敏感信息，本轮 memory_candidates=[]、intent_candidates=[]。
+- 本轮不能调用 GENERATE_IMAGE；可以自然发文字、语音、emoji，或保持沉默。
 """
 
     proactive_contract = ""
@@ -159,6 +170,7 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 本事件允许的对外表达：{allowed}。
 {space_contract}
 {world_contract}
+{visual_observation_contract}
 {proactive_contract}
 actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。VOICE_MESSAGE 是你真的开口说给对方听，文字只是这条语音的转写——语气、停顿、笑意本身就是内容的一部分，那是打字给不了的。想用就用：不需要等对方先发语音，也不需要等到什么特别的时候。懒得打字、手上正忙、想让对方听见你是什么语气，或者一段话连着说比拆成好几条文字更顺，这时候语音就是最自然的表达。一个 VOICE_MESSAGE 的 message 必须是一段完整连续表达，即使包含多句话也保持为一个 action，不要为了语音拆句，也不要为了展示功能而发语音。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时这些候选就是你可以自然使用的表达资源，不需要等用户先发表情包；聊天事件里可以单独使用 STICKER，也可以 MESSAGE + STICKER。当前事件如需表情应使用 {sticker_action_name}，sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用表情。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。
 {generate_contract}

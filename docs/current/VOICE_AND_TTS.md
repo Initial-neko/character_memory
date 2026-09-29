@@ -27,11 +27,19 @@ speech
 
 ### 1. Architecture
 
+Browser audio input now has a streaming-first path and an explicit compatibility fallback:
+
 ```text
 Browser microphone
-  ↓ PCM16 WAV / VAD
-Media Runtime :8001
-  ↓ SenseVoice ASR
+  ↓
+shared AudioWorklet
+  ↓ PCM16 / 16 kHz
+Media Runtime :8001/v1/asr/stream
+  ↓ Sherpa Online Paraformer when health.asr.streaming=true
+partial / final segment events
+  ↓
+Dictation input OR Browser Call final turn
+  ↓
 Character Runtime :8000
   ↓ normal async chat / same PersonRuntime
   ↓ SSE character events
@@ -42,6 +50,18 @@ Media Runtime :8001/v1/tts
   └─ gsv -> :9002/v1/tts -> :9014 GSV-TTS-Lite
 Browser playback
 ```
+
+Compatibility fallback is intentionally retained:
+
+```text
+Browser recording / legacy VAD
+  -> WAV
+  -> POST :8001/v1/asr
+  -> configured offline-capable ASR provider
+  -> final text
+```
+
+Dictation and Browser Call prefer the shared streaming session only when Media Runtime reports a ready streaming ASR provider and Browser AudioWorklet support is available. A streaming connection failure can fall back to the batch path instead of making voice input unusable.
 
 完整开发栈：
 
@@ -84,11 +104,12 @@ Character Runtime owns：
 
 Media Runtime owns：
 
-- ASR model lifecycle
-- Sherpa TTS model lifecycle
-- audio parsing/resampling
-- formal `/v1/tts` routing
-- local media inference timings
+- ASR model lifecycle；
+- streaming ASR session / endpoint / finalization semantics；
+- Sherpa TTS model lifecycle；
+- audio parsing/resampling；
+- formal `/v1/tts` routing；
+- local media inference timings。
 
 TTS Provider Runtime / Workbench `:9002` 当前 owns：
 
@@ -139,6 +160,8 @@ Kokoro 依赖进入 canonical `all` extra；CosyVoice 仍保持独立 Python 3.1
 
 #### ASR
 
+Batch/fallback baseline：
+
 ```text
 models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/
 ```
@@ -147,6 +170,23 @@ models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/
 
 - `model.int8.onnx`
 - `tokens.txt`
+
+Streaming provider uses Sherpa Online Paraformer. Runtime selection is environment-owned:
+
+```text
+CHARACTER_MEDIA_ASR_PROVIDER=paraformer-streaming
+CHARACTER_MEDIA_ASR_ENCODER=...
+CHARACTER_MEDIA_ASR_DECODER=...
+CHARACTER_MEDIA_ASR_TOKENS=...
+CHARACTER_MEDIA_ASR_DEVICE=cpu
+CHARACTER_MEDIA_ASR_THREADS=2
+CHARACTER_MEDIA_ASR_ENDPOINT_SILENCE_MS=1200
+CHARACTER_MEDIA_ASR_ENDPOINT_SHORT_SILENCE_MS=800
+```
+
+The provider advertises `streaming: true` in Media Runtime health only when the streaming route is the configured ASR implementation. Online Paraformer uses 16 kHz PCM and keeps the recognizer resident while each speech session owns a separate OnlineStream. Server-side finalization appends a short zero tail before `input_finished()` so the browser cannot accidentally cut off the recognizer's final look-ahead window.
+
+SenseVoice remains the batch/fallback baseline until target-machine acceptance demonstrates that the streaming production configuration is sufficiently complete and accurate.
 
 #### Sherpa TTS fallback
 

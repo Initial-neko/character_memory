@@ -91,3 +91,26 @@ def test_streaming_asr_websocket_emits_partial_then_one_final():
         assert final["text"] == "你好世界"
         assert final["segment_id"] == 1
         assert final["endpoint_reason"] == "model_endpoint"
+
+
+def test_streaming_asr_flush_acknowledges_every_consumed_frame():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(_FakeStreamingAsr(), _UnusedTts())
+    with TestClient(create_media_app(runtime)).websocket_connect("/v1/asr/stream") as ws:
+        ws.send_json({"op": "start", "source": "dictation"})
+        assert ws.receive_json()["kind"] == "ready"
+
+        ws.send_bytes(b"\x00\x00" * 160)
+        assert ws.receive_json()["kind"] == "partial"
+
+        ws.send_json({"op": "flush", "reason": "user_stop"})
+        final = ws.receive_json()
+        flushed = ws.receive_json()
+
+        assert final["kind"] == "final"
+        assert final["text"] == "你好世界"
+        assert flushed["kind"] == "flushed"
+        assert flushed["segment_id"] == final["segment_id"]
+        assert flushed["endpoint_reason"] == "user_stop"

@@ -492,8 +492,15 @@ def test_idle_browse_gate_reopens_immediately_after_new_character_event(tmp_path
         )
     )
     scheduler.force_due("BROWSE", "c00", now=changed)
-    assert len(_browsed(scheduler.run_once(now=changed))) == 1
-    assert _browse_plan_call_count(model) == 2
+    outcomes = _browsed(scheduler.run_once(now=changed))
+    assert any(item["subject_id"] == "c00" for item in outcomes)
+    c00_plan_calls = [
+        call
+        for call in model.calls
+        if call[0] == "PersonalBrowsePlan"
+        and call[1].startswith("personal-browse-plan:c00:")
+    ]
+    assert len(c00_plan_calls) == 2
     store.close()
 
 

@@ -10,10 +10,12 @@ from character_memory.search import ImageSearchResult, SearchApiProvider
 from character_memory.space_media_executor import SpaceMediaExecutor
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.visual_generation import ImageGenerationResult
+from character_memory.video_generation import VideoGenerationResult
 
 
 PNG = b"\x89PNG\r\n\x1a\nspace-test"
 WAV = b"RIFF" + (b"\x00" * 4) + b"WAVEfmt " + (b"\x00" * 24)
+MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64
 
 
 class FakeSearchProvider:
@@ -93,6 +95,31 @@ class FakeImageProvider:
         )
 
 
+class FakeVideoProvider:
+    provider_id = "fake-video"
+    model = "fake-video-1"
+
+    def __init__(self):
+        self.calls = []
+
+    def available(self):
+        return True
+
+    def generate(self, request):
+        self.calls.append(request)
+        return VideoGenerationResult(
+            provider=self.provider_id,
+            model=self.model,
+            task_id="task-video-1",
+            payload=MP4,
+            mime_type="video/mp4",
+            video_url="https://cdn.example.test/video.mp4",
+            resolution=request.resolution,
+            duration_seconds=request.duration_seconds,
+            ratio=request.ratio,
+        )
+
+
 def _access(tmp_path, *, max_items=3):
     store = SQLiteStore(tmp_path / "space-media-executor.db")
     media_storage = MediaStorage(tmp_path / "media")
@@ -102,6 +129,13 @@ def _access(tmp_path, *, max_items=3):
         space_image_search_enabled=True,
         space_image_generation_enabled=True,
         image_generation_provider="fake",
+        space_video_generation_enabled=True,
+        space_video_resolution="2K",
+        space_video_max_duration_seconds=5,
+        space_video_daily_budget_cny=1.0,
+        space_video_cost_cny_per_second_768p=0.09,
+        space_video_cost_cny_per_second_2k=0.15,
+        space_video_max_bytes=64 * 1024 * 1024,
         tts_provider="kokoro",
     )
     access = SimpleNamespace(
@@ -290,4 +324,69 @@ def test_space_voice_failure_is_fail_soft_and_does_not_create_asset(tmp_path):
     assert result["errors"][0]["type"] == "VOICE"
     assert "tts unavailable" in result["errors"][0]["error"]
     assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
+    store.close()
+
+
+def test_space_generated_video_reserves_budget_and_persists_asset(tmp_path):
+    access, store = _access(tmp_path)
+    provider = FakeVideoProvider()
+    executor = SpaceMediaExecutor(access, video_provider=provider)
+    now = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
+
+    result = executor.execute(
+        "c00",
+        [
+            SpaceMediaIntent(
+                type="GENERATE_VIDEO",
+                video_prompt="雨夜街道，角色撑伞向前走，镜头缓慢跟随。",
+                duration_seconds=5,
+                video_ratio="16:9",
+            )
+        ],
+        now=now,
+    )
+
+    assert result["errors"] == []
+    assert len(provider.calls) == 1
+    assert len(result["relations"]) == 1
+    relation = result["relations"][0]
+    assert relation["media_type"] == "VIDEO"
+    assert relation["source_type"] == "GENERATED"
+    assert relation["metadata"]["task_id"] == "task-video-1"
+    assert relation["metadata"]["estimated_cost_cny"] == 0.75
+    asset = store.get_media_asset(relation["media_id"])
+    assert asset is not None
+    assert asset.mime_type == "video/mp4"
+    assert asset.source == "SPACE_GENERATED_VIDEO"
+    assert access.media_storage.asset_path(asset).read_bytes() == MP4
+    usage = store.conn.execute(
+        "SELECT status,task_id,estimated_cost_cny FROM video_generation_usage"
+    ).fetchone()
+    assert tuple(usage) == ("SUCCEEDED", "task-video-1", 0.75)
+    store.close()
+
+
+def test_space_generated_video_stops_before_provider_when_daily_budget_would_be_exceeded(tmp_path):
+    access, store = _access(tmp_path)
+    access.settings.space_video_daily_budget_cny = 0.5
+    provider = FakeVideoProvider()
+    executor = SpaceMediaExecutor(access, video_provider=provider)
+
+    result = executor.execute(
+        "c00",
+        [
+            SpaceMediaIntent(
+                type="GENERATE_VIDEO",
+                video_prompt="五秒钟的动作镜头",
+                duration_seconds=5,
+            )
+        ],
+        now=datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc),
+    )
+
+    assert result["relations"] == []
+    assert provider.calls == []
+    assert result["errors"][0]["type"] == "GENERATE_VIDEO"
+    assert "daily budget exceeded" in result["errors"][0]["error"]
+    assert store.conn.execute("SELECT COUNT(*) FROM video_generation_usage").fetchone()[0] == 0
     store.close()

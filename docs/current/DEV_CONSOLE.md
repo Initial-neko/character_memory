@@ -104,13 +104,13 @@ Dev Console 的控件是手写 markup，没有 Settings Center 那样的 schema�
 
 `data-title` 是组的名字，`data-hint` 说明为什么需要打开它，两者都由 `tests/test_dev_console_levels.py` 强制。
 
-当前首屏只保留 8 个 `common` 控件：刷新状态、Detailed Dev 开关、LLM 的 Prompt + Run LLM、Space 的目标角色 + 手动测试、Group 的目标群 + 手动测试。Space / Group 的 Enabled、Interval、上限、Poll、媒体和世界观察等临时参数全部放进关闭的 **Session Override** 高级组；它们只热应用当前 Runtime，不写 `config.yaml`。正式行为配置只归 Settings Center。`first_screen` 名单由测试固定：把一个控件提上首屏必须同时修改 markup 和测试。
+当前首屏只保留 6 个实际可见控件：刷新状态、Detailed Dev 开关、Space 的目标角色 + 手动测试、Group 的目标群 + 手动测试。LLM Smoke 整张卡属于 `Detailed Dev`，不会因为内部控件标成 `common` 就出现在简洁首屏。Space / Group 的 Enabled、Interval、上限、Poll、媒体和世界观察等临时参数全部放进关闭的 **Session Override** 高级组；它们只热应用当前 Runtime，不写 `config.yaml`。正式行为配置只归 Settings Center。`first_screen` 名单由测试固定：把一个控件提上首屏必须同时修改 markup 和测试。
 
 ### LLM
 
-通过服务端配置的 OpenAI-compatible Provider 发送开发 probe。
+LLM Smoke 属于 **Detailed Dev**：通过服务端配置的 OpenAI-compatible Provider 发送一次真实开发 probe，用于验证 Provider / Model / latency，不属于日常首屏。
 
-浏览器不传 API Key，也不持久化 key。
+浏览器不传 API Key，也不持久化 key。Simple Dev 只保留运行状态、Space/Group 手动验收和 LLM Usage 摘要，不直接暴露 Prompt/Run LLM。
 
 ### Character Space Autonomy
 

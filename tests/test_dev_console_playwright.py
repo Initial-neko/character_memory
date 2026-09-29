@@ -38,17 +38,12 @@ ROOT = Path(__file__).resolve().parents[1]
 # The first screen, by id, matching tests/test_dev_console_levels.py.
 FIRST_SCREEN = [
     "refreshAll",
+    "devModeToggle",
     "llmPrompt",
     "runLlm",
-    "ttsText",
-    "runTts",
-    "spaceEnabled",
     "spaceCharacter",
-    "applySpaceConfig",
     "runSpaceOpportunity",
-    "groupAutonomyEnabled",
     "groupAutonomyGroup",
-    "applyGroupAutonomyConfig",
     "runGroupAutonomyOpportunity",
 ]
 

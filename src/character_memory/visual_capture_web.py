@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import base64
+from collections import deque
+import hashlib
 import logging
 import re
+import threading
+import time
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from character_memory.application.async_conversation import direct_channel
 from character_memory.application.chat_service import build_user_event
 from character_memory.application.group_conversation_service import build_group_user_event, resolve_group_mentions
+from character_memory.domain.models import Event, EventType
 from character_memory.group_store import GroupRepository
 from character_memory.media import MediaStorage
 
@@ -40,6 +46,56 @@ class GroupVisualMessageRequest(BaseModel):
     visual_frames: list[VisualFrameRequest] = Field(min_length=1, max_length=5)
     mentions: list[str] = Field(default_factory=list, max_length=4)
     at: datetime | None = None
+
+
+class DirectVisualObservationRequest(BaseModel):
+    character_id: str = "rin"
+    conversation_id: str = "default"
+    visual_frame: VisualFrameRequest
+
+
+class PeriodicVisualObservationGate:
+    """Process-local cost/dedup gate in front of paid periodic Vision turns."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._accepted: dict[str, deque[float]] = {}
+        self._last_at: dict[str, float] = {}
+        self._last_digest: dict[str, str] = {}
+
+    def claim(
+        self,
+        key: str,
+        frame_digest: str,
+        *,
+        interval_seconds: float,
+        max_per_hour: int,
+        now: float | None = None,
+    ) -> tuple[bool, str]:
+        stamp = time.monotonic() if now is None else float(now)
+        interval = max(0.0, float(interval_seconds))
+        hourly = max(0, int(max_per_hour))
+        if hourly <= 0:
+            return False, "HOURLY_LIMIT_DISABLED"
+        with self._lock:
+            recent = self._accepted.setdefault(key, deque())
+            floor = stamp - 3600.0
+            while recent and recent[0] <= floor:
+                recent.popleft()
+            if self._last_digest.get(key) == frame_digest:
+                return False, "DUPLICATE_FRAME"
+            previous = self._last_at.get(key)
+            if previous is not None and stamp - previous < interval:
+                return False, "INTERVAL"
+            if len(recent) >= hourly:
+                return False, "HOURLY_LIMIT"
+            recent.append(stamp)
+            self._last_at[key] = stamp
+            self._last_digest[key] = frame_digest
+            return True, "ACCEPTED"
+
+
+_PERIODIC_VISUAL_GATE = PeriodicVisualObservationGate()
 
 
 def normalize_visual_frames(frames: list[VisualFrameRequest]) -> tuple[list[str], dict]:
@@ -105,6 +161,101 @@ def attach_visual_capture_routes(app):
         if value is None:
             raise HTTPException(status_code=503, detail="async reaction scheduler is not ready")
         return value
+
+    @app.get("/v1/visual/periodic/config")
+    def periodic_visual_config():
+        return {
+            "enabled": bool(getattr(access.settings, "periodic_visual_observation_enabled", True)),
+            "interval_seconds": float(
+                getattr(access.settings, "periodic_visual_observation_interval_seconds", 30.0)
+            ),
+            "max_per_hour": int(
+                getattr(access.settings, "periodic_visual_observation_max_per_hour", 6)
+            ),
+            "scope": "DIRECT_DISPLAY_ONLY",
+        }
+
+    @app.post("/v1/visual/direct/observations", status_code=202)
+    def accept_direct_visual_observation(req: DirectVisualObservationRequest):
+        """Accept one low-priority screen-change observation.
+
+        The browser already performs cheap pixel-difference filtering. This
+        endpoint adds server-side cost/dedup/busy guards before a Vision call.
+        Raw frame bytes are only handed to the reaction worker and never stored.
+        """
+        ensure_character(req.character_id)
+        if req.visual_frame.source != "DISPLAY":
+            raise HTTPException(status_code=400, detail="periodic visual observation only accepts DISPLAY frames")
+        if not bool(getattr(access.settings, "periodic_visual_observation_enabled", True)):
+            return {"accepted": False, "reason": "DISABLED"}
+
+        reaction_scheduler = scheduler()
+        key = direct_channel(req.character_id, req.conversation_id)
+        if reaction_scheduler.status_snapshot(key).get("state") != "idle":
+            return {"accepted": False, "reason": "BUSY"}
+
+        try:
+            frame_urls, visual_metadata = normalize_visual_frames([req.visual_frame])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        digest = hashlib.sha256(frame_urls[0].encode("utf-8")).hexdigest()
+        claimed, reason = _PERIODIC_VISUAL_GATE.claim(
+            key,
+            digest,
+            interval_seconds=float(
+                getattr(access.settings, "periodic_visual_observation_interval_seconds", 30.0)
+            ),
+            max_per_hour=int(
+                getattr(access.settings, "periodic_visual_observation_max_per_hour", 6)
+            ),
+        )
+        if not claimed:
+            return {"accepted": False, "reason": reason}
+
+        now = datetime.now().astimezone()
+        event = access.store().append_event(
+            Event(
+                character_id=req.character_id,
+                event_type=EventType.VISUAL_OBSERVATION,
+                event_time=now,
+                content="屏幕共享画面出现了新的显著变化；请结合本轮临时图像判断是否值得自然回应。",
+                metadata={
+                    "channel": "DIRECT",
+                    "conversation_id": req.conversation_id,
+                    "periodic_screen_observation": True,
+                    "visual_capture": visual_metadata,
+                },
+            )
+        )
+        queued = reaction_scheduler.enqueue_direct(
+            req.character_id,
+            req.conversation_id,
+            event,
+            image_data_urls=frame_urls,
+            only_if_idle=True,
+        )
+        if not queued:
+            logger.info(
+                "visual.periodic skipped_busy_race character=%s conversation=%s event_id=%s",
+                req.character_id,
+                req.conversation_id,
+                event.id,
+            )
+            return {"accepted": False, "reason": "BUSY_RACE", "event_id": event.id}
+
+        logger.info(
+            "visual.periodic accepted character=%s conversation=%s event_id=%s",
+            req.character_id,
+            req.conversation_id,
+            event.id,
+        )
+        return {
+            "accepted": True,
+            "reason": "ACCEPTED",
+            "event_id": event.id,
+            "visual_capture": visual_metadata,
+        }
 
     @app.post("/v1/visual/direct/messages", status_code=202)
     def accept_direct_visual_message(req: DirectVisualMessageRequest):

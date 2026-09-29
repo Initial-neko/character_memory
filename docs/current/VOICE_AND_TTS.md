@@ -141,7 +141,7 @@ bash scripts/setup-media-models.sh
 `setup-media-models.sh` 会先复用 `sync-all.sh`，然后准备：
 
 - local BGE Embedding cache；
-- SenseVoice ASR；
+- SenseVoice batch/fallback ASR；
 - Sherpa VITS；
 - Kokoro `v1.1-zh` model + voice packs。
 
@@ -481,12 +481,15 @@ capturePhase
 
 #### 9.4 Transcript validity gate
 
+当前 Browser Call 使用中文优先的噪声保护 gate：
+
 ```text
 empty / punctuation-only   -> reject
 any Han character          -> accept
-ASCII Latin/digit >= 2     -> accept
-otherwise                  -> reject
+otherwise                  -> reject (no_han)
 ```
+
+因此纯 `OK / GPT / 123` 当前也会被拒绝。这个 gate 是为了压住风扇、咳嗽、键盘声被旧识别器误识别成短英文的 hallucination；它不是 ASR provider 的语言能力声明。要正式支持纯英文 Call，需要单独修改并验收这个 gate。
 
 无效 transcript 不创建 chat message，也不上传当前通话中的 Visual Capture frames。
 
@@ -705,9 +708,11 @@ This command:
 
 1. runs the canonical dependency sync;
 2. prefetches the local BGE embedding model;
-3. prepares SenseVoice ASR;
+3. prepares the SenseVoice batch/fallback ASR assets;
 4. prepares Sherpa VITS;
 5. prefetches Kokoro model/voice assets.
+
+It **does not currently download Paraformer streaming encoder/decoder assets**. The streaming provider therefore still requires `CHARACTER_MEDIA_ASR_ENCODER / DECODER / TOKENS` to point at locally prepared files. Closing that setup gap belongs to deployment tooling, not to the Browser ASR protocol.
 
 Normal Character Runtime embedding is strict-offline, so network model acquisition belongs here rather than in startup/first chat.
 

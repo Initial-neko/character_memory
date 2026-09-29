@@ -21,6 +21,11 @@
     audioContext: null,
     sourceNode: null,
     processor: null,
+    asrSession: null,
+    streamingAsr: false,
+    streamingSegmentId: null,
+    streamingSegmentStartedAt: 0,
+    seenAsrSegments: new Set(),
     eventSource: null,
     visualSession: null,
     currentAudio: null,
@@ -458,6 +463,133 @@
     return {valid:false, text, reason:"no_han"};
   }
 
+  function canStreamAsr(health, context) {
+    return Boolean(
+      health?.asr?.streaming &&
+      window.StreamingAsr?.createSession &&
+      context?.audioWorklet &&
+      window.AudioWorkletNode
+    );
+  }
+
+  function streamingSegmentKey(data) {
+    return `${String(data?.session_id || "")}:${String(data?.segment_id ?? "")}`;
+  }
+
+  function handleStreamingPartial(data) {
+    if (!voice.active || !voice.micActive || !voice.streamingAsr) return;
+    const text = String(data?.text || "").trim();
+    if (!text) return;
+    const key = streamingSegmentKey(data);
+    if (voice.streamingSegmentId !== key) {
+      voice.streamingSegmentId = key;
+      voice.streamingSegmentStartedAt = performance.now();
+    }
+    setCapturePhase("recording");
+    if (dom.transcript && !replyInFlight()) dom.transcript.textContent = `你：${text} …`;
+    if (!replyInFlight()) setPhase("recording", "正在听你说…");
+  }
+
+  async function handleStreamingFinal(data) {
+    if (!voice.active || !voice.micActive || !voice.streamingAsr) return;
+    const key = streamingSegmentKey(data);
+    if (voice.seenAsrSegments.has(key)) return;
+    voice.seenAsrSegments.add(key);
+    if (voice.seenAsrSegments.size > 64) {
+      voice.seenAsrSegments = new Set([...voice.seenAsrSegments].slice(-32));
+    }
+
+    const endedAt = performance.now();
+    const startedAt = voice.streamingSegmentId === key && voice.streamingSegmentStartedAt
+      ? voice.streamingSegmentStartedAt
+      : Math.max(0, endedAt - 15000);
+    voice.streamingSegmentId = null;
+    voice.streamingSegmentStartedAt = 0;
+    const validation = validateAsrTranscript(data?.text);
+    setCapturePhase("listening");
+
+    if (!validation.valid) {
+      if (dom.transcript) dom.transcript.textContent = "没有识别到有效内容";
+      if (!replyInFlight()) setPhase("listening", "正在听…");
+      console.debug("[voice] ignored invalid streaming ASR transcript", validation.reason, validation.text);
+      return;
+    }
+
+    const visualFrames = voice.visualSession?.selectFrames?.({
+      fromMs:Math.max(0, startedAt - 1000),
+      toMs:endedAt,
+      maxFrames:4,
+    }) || [];
+    // Streaming finals do not expose a stable inference-only latency yet. Do not
+    // manufacture a 0 ms metric; batch mode still reports its measured ASR time.
+    const turn = {text:validation.text, visualFrames, asrMs:null};
+    if (replyInFlight()) {
+      voice.pendingTurns.push(turn);
+      if (dom.transcript) {
+        dom.transcript.textContent = `你：${validation.text} · 已听到，等这轮回应结束后发送…`;
+      }
+      return;
+    }
+    await dispatchRecognizedTurn(turn);
+  }
+
+  async function attachStreamingAsr(context, source) {
+    const session = window.StreamingAsr.createSession({
+      mediaBase: mediaBase(),
+      source: "call",
+      onPartial: handleStreamingPartial,
+      onFinal(data) {
+        handleStreamingFinal(data).catch(error => {
+          console.warn("[voice] streaming final failed", error);
+        });
+      },
+      onError(error) {
+        if (!voice.active || voice.asrSession !== session) return;
+        // An error during initial connect is handled by startMicrophone's fallback.
+        // Once the call owns the mic, degrade in place instead of making the user
+        // toggle hardware just because the WebSocket path failed.
+        if (!voice.micActive) return;
+        console.warn("[voice] streaming ASR failed; switching to batch capture", error);
+        try { session.close(); } catch (_) {}
+        voice.asrSession = null;
+        voice.streamingAsr = false;
+        voice.streamingSegmentId = null;
+        voice.streamingSegmentStartedAt = 0;
+        try {
+          if (voice.audioContext && voice.sourceNode && !voice.processor) {
+            attachBatchAsr(voice.audioContext, voice.sourceNode);
+            setCapturePhase("listening");
+            if (dom.transcript) dom.transcript.textContent = "流式语音连接异常，已切换到兼容识别模式。";
+            if (!replyInFlight()) setPhase("listening", "正在听… · 兼容模式");
+            return;
+          }
+        } catch (fallbackError) {
+          console.warn("[voice] batch ASR fallback failed", fallbackError);
+        }
+        if (dom.transcript) dom.transcript.textContent = `流式语音连接异常：${error.message}`;
+        if (!replyInFlight()) setPhase("error", "流式语音连接异常 · 可重开麦克风");
+      },
+    });
+    voice.asrSession = session;
+    await session.connect();
+    await session.attach(context, source);
+    voice.streamingAsr = true;
+    voice.streamingSegmentId = null;
+    voice.streamingSegmentStartedAt = 0;
+    voice.seenAsrSegments = new Set();
+    return session;
+  }
+
+  function attachBatchAsr(context, source) {
+    const processor = context.createScriptProcessor(2048, 1, 1);
+    processor.onaudioprocess = audioFrame;
+    source.connect(processor);
+    processor.connect(context.destination);
+    voice.processor = processor;
+    voice.streamingAsr = false;
+    return processor;
+  }
+
   function handleCharacterEvent(data, characterId) {
     if (!voice.active) return;
     const action = String(data.metadata?.action || "").toUpperCase();
@@ -577,7 +709,8 @@
     // queued by finishSpeech and sent when this one ends.
     setCapturePhase(voice.micActive ? "listening" : "idle");
     voice.turnStartedAt = performance.now();
-    voice.lastMetrics = {asr:Number(turn.asrMs || 0)};
+    voice.lastMetrics = {};
+    if (turn.asrMs != null) voice.lastMetrics.asr = Number(turn.asrMs);
     formatMetrics();
     if (dom.transcript) {
       dom.transcript.textContent = `你：${text}${turn.visualFrames?.length ? ` · 附 ${turn.visualFrames.length} 个视觉关键帧` : ""}`;
@@ -606,10 +739,15 @@
         visualFrames.push(frame);
       }
     }
+    const measuredAsr = turns
+      .map(turn => turn.asrMs)
+      .filter(value => value != null)
+      .map(Number)
+      .filter(Number.isFinite);
     return {
       text:turns.map(turn => String(turn.text || "").trim()).filter(Boolean).join("\n"),
       visualFrames:visualFrames.slice(-4),
-      asrMs:turns.reduce((sum, turn) => sum + Number(turn.asrMs || 0), 0),
+      asrMs:measuredAsr.length ? measuredAsr.reduce((sum, value) => sum + value, 0) : null,
     };
   }
 
@@ -652,7 +790,7 @@
     try {
       const response = await fetch(`${mediaBase()}/v1/asr`, {
         method: "POST",
-        headers: {"Content-Type":"audio/wav"},
+        headers: {"Content-Type":"audio/wav", "X-ASR-Source":"call"},
         body: blob,
       });
       if (!response.ok) throw new Error(await response.text());
@@ -864,6 +1002,12 @@
   async function stopMicrophone({updateStatus = true} = {}) {
     micOwnerSeq = claimMicTicket(); // whatever the browser is still asking permission for is void now
     voice.micActive = false;
+    try { voice.asrSession?.cancel?.(); } catch (_) {}
+    voice.asrSession = null;
+    voice.streamingAsr = false;
+    voice.streamingSegmentId = null;
+    voice.streamingSegmentStartedAt = 0;
+    voice.seenAsrSegments = new Set();
     voice.processor?.disconnect?.();
     voice.sourceNode?.disconnect?.();
     releaseStream(voice.stream);
@@ -886,42 +1030,59 @@
     const ticket = claimMicTicket();
     micOwnerSeq = ticket - 1; // this start supersedes every earlier one, whichever answer lands first
     try {
-      applyVoiceCapture(await checkMedia());
+      const health = await checkMedia();
+      applyVoiceCapture(health);
       if (ticket <= micOwnerSeq) {
-        // Retired while the runtime was still being checked: do not open a permission prompt
-        // for a microphone nobody wants any more.
         return false;
       }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
       });
       if (ticket <= micOwnerSeq) {
-        // The call ended -- or the microphone was muted, or started again -- while the browser
-        // still held the permission prompt, and only now answered it. This stream is live
-        // hardware that no call owns any more: release it, and leave the UI to whoever retired
-        // this start instead of writing "正在听…" back onto it.
         releaseStream(stream);
         return false;
       }
+
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       const context = new AudioContextClass();
       const source = context.createMediaStreamSource(stream);
-      const processor = context.createScriptProcessor(2048, 1, 1);
-      processor.onaudioprocess = audioFrame;
-      source.connect(processor);
-      processor.connect(context.destination);
-
       voice.stream = stream;
       voice.audioContext = context;
       voice.sourceNode = source;
-      voice.processor = processor;
+      voice.processor = null;
+      voice.asrSession = null;
+      voice.streamingAsr = false;
+
+      if (canStreamAsr(health, context)) {
+        try {
+          await attachStreamingAsr(context, source);
+        } catch (streamError) {
+          if (ticket <= micOwnerSeq) throw streamError;
+          console.warn("[voice] streaming ASR unavailable; falling back to batch capture", streamError);
+          try { voice.asrSession?.close?.(); } catch (_) {}
+          voice.asrSession = null;
+          voice.streamingAsr = false;
+          attachBatchAsr(context, source);
+        }
+      } else {
+        attachBatchAsr(context, source);
+      }
+
+      if (ticket <= micOwnerSeq) {
+        await stopMicrophone({updateStatus:false});
+        return false;
+      }
+
       voice.micActive = true;
       voice.preRoll = [];
       voice.chunks = [];
       voice.hotFrames = 0;
+      voice.streamingSegmentId = null;
+      voice.streamingSegmentStartedAt = 0;
+      voice.seenAsrSegments = new Set();
       setCapturePhase("listening");
       updateMicUi();
-      setPhase("listening", "正在听…");
+      setPhase("listening", voice.streamingAsr ? "正在听… · 流式识别" : "正在听…");
       return true;
     } catch (error) {
       if (ticket <= micOwnerSeq) return false; // a retired start reports nothing, not even its own failure
@@ -963,6 +1124,11 @@
       voice.preRoll = [];
       voice.chunks = [];
       voice.hotFrames = 0;
+      voice.asrSession = null;
+      voice.streamingAsr = false;
+      voice.streamingSegmentId = null;
+      voice.streamingSegmentStartedAt = 0;
+      voice.seenAsrSegments = new Set();
       setCapturePhase("idle");
       openVoiceEvents();
 

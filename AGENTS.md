@@ -14,6 +14,7 @@ Keep it short and stable. Detailed architecture, feature behavior, task state, a
 - Do not commit agent transcripts, generated task ledgers, review scratchpads, temporary implementation plans, secrets, model assets, or machine-specific paths.
 - CI contract tests must not require GPU access or model downloads. Browser/live-model checks belong in their explicit runtime validation paths.
 - Maintained documentation describes the current project. Git, Issues, PRs, tags, and releases preserve history.
+- Configuration is a tested contract: every non-secret `Settings` field must appear in `config.example.yaml` with a human explanation; secrets stay in `.env`. Every Settings field/Secret must expose help text, and every Dev Console input/select/textarea/button must explain its scope/effect. Formal behavior belongs in Settings; Dev runtime overrides must stay explicitly temporary and off the first screen.
 
 ## Source precedence
 

@@ -2,9 +2,15 @@
   const DEFAULTS = {
     sampleMs: 800,
     maxCandidates: 18,
-    maxSide: 512,
+    // Change detection stays deliberately tiny and cheap. The frame that is
+    // actually sent to Vision uses a source-specific profile instead: display
+    // capture has to preserve IDE/web text, while the camera does not need to
+    // spend the same bandwidth on every face frame.
     analysisWidth: 64,
-    jpegQuality: 0.72,
+    cameraMaxSide: 720,
+    displayMaxSide: 1440,
+    cameraJpegQuality: 0.82,
+    displayJpegQuality: 0.90,
     forceEveryMs: 4000,
     changeThreshold: 0.035,
   };
@@ -155,11 +161,14 @@
       const shouldKeep = state.candidates.length === 0 || score >= config.changeThreshold || now - state.lastAcceptedAt >= config.forceEveryMs;
       if (!shouldKeep) return;
 
-      const dims = frameDimensions(preview.videoWidth, preview.videoHeight, config.maxSide);
+      const display = state.source === "DISPLAY";
+      const maxSide = display ? config.displayMaxSide : config.cameraMaxSide;
+      const jpegQuality = display ? config.displayJpegQuality : config.cameraJpegQuality;
+      const dims = frameDimensions(preview.videoWidth, preview.videoHeight, maxSide);
       frameCanvas.width = dims.width;
       frameCanvas.height = dims.height;
       frameContext.drawImage(preview, 0, 0, dims.width, dims.height);
-      const dataUrl = frameCanvas.toDataURL("image/jpeg", clamp(config.jpegQuality, 0.45, 0.92));
+      const dataUrl = frameCanvas.toDataURL("image/jpeg", clamp(jpegQuality, 0.45, 0.92));
       state.candidates.push({
         capturedAt: now,
         wallTime: Date.now(),

@@ -310,6 +310,50 @@ def test_unknown_age_is_allowed_and_character_traits_remain_primary():
     assert draft.conversation.startswith("短句")
 
 
+def test_researched_interaction_styles_survive_local_persona_projection():
+    direct = member_research_to_persona(
+        EnsembleMemberResearch(
+            name="Direct",
+            identity="直率的研究者",
+            description="重事实、反应快，遇到逻辑问题会直接指出，也愿意承担冲突带来的后果。",
+            speech_style="短句，直接指出结论和证据。",
+            personality=["直接", "理性"],
+            expression_style="情绪明显时也先讲事实，再补一句自己的感受。",
+            question_style="只追问会改变判断的关键信息，不用寒暄式问题拖长对话。",
+            silence_style="信息不足时会先观察，不会为了热闹随便接话。",
+            initiative_style="发现明显漏洞或风险时会主动打断并指出。",
+            disagreement_style="不同意时直接指出哪一步推理不成立，并给出自己的依据。",
+            care_style="更常通过解决具体问题和提前提醒风险来表达关心。",
+            boundaries=["不接受用撒娇绕过事实问题", "不会为了合群假装赞同"],
+        )
+    )
+    gentle = member_research_to_persona(
+        EnsembleMemberResearch(
+            name="Gentle",
+            identity="温和的长期朋友",
+            description="更关注人的情绪和关系变化，但并不没有主见，会用自己的方式坚持重要事情。",
+            speech_style="语速慢，先回应情绪，再讲自己的看法。",
+            personality=["温和", "细致"],
+            expression_style="先说自己注意到的细节，再自然表达情绪，不用夸张语气。",
+            question_style="察觉对方情绪变化时会轻轻确认一次，得到回应后不连续追问。",
+            silence_style="气氛紧张时愿意陪着沉默，不急着填满空白。",
+            initiative_style="看到熟悉的人持续低落时会主动提起共同经历或邀请一起做点小事。",
+            disagreement_style="不同意时先承认对方感受，再平静说明自己不会跟着做的原因。",
+            care_style="通过陪伴、记住偏好和准备小事来表达关心。",
+            boundaries=["不会替别人做重大决定", "不把温和等同于无条件答应"],
+        )
+    )
+
+    assert direct.questions != gentle.questions
+    assert direct.silence != gentle.silence
+    assert direct.initiative != gentle.initiative
+    assert direct.disagreement != gentle.disagreement
+    assert direct.care != gentle.care
+    assert direct.boundaries != gentle.boundaries
+    assert "逻辑" in direct.disagreement
+    assert "陪着沉默" in gentle.silence
+
+
 def test_prepare_failure_preserves_failed_build_for_retry(tmp_path):
     access, store, observer, _, _ = _access(tmp_path)
     observer.observe = lambda *args, **kwargs: {

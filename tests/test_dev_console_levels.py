@@ -51,22 +51,15 @@ FIRST_SCREEN = {
     "refreshAll",
     "llmPrompt",
     "runLlm",
-    "spaceEnabled",
     "spaceCharacter",
-    "applySpaceConfig",
     "runSpaceOpportunity",
-    "groupAutonomyEnabled",
     "groupAutonomyGroup",
-    "applyGroupAutonomyConfig",
     "runGroupAutonomyOpportunity",
     "devModeToggle",
-    "spaceIntervalMinutes",
-    "spaceMaxPostsPerDay",
-    "groupAutonomyInterval",
 }
-# The band is the point of the exercise: the page it replaced exposed 87
-# controls, every one of them a live field, with nothing saying where to start.
-FIRST_SCREEN_BAND = (10, 15)
+# The first screen is intentionally tiny. Formal configuration belongs to
+# Settings; Space/Group runtime overrides live in closed advanced groups.
+FIRST_SCREEN_BAND = (7, 10)
 
 
 class _Markup(HTMLParser):

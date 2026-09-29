@@ -20,6 +20,71 @@ def test_stack_entrypoint_and_runtime_ports_are_declared():
     assert 'choices=("dev", "chat", "settings", "tts")' in script
 
 
+def test_media_env_prefers_streaming_paraformer_when_assets_are_present(tmp_path):
+    from character_memory.dev_stack import _media_env
+
+    stream = tmp_path / "sherpa-onnx-streaming-paraformer-bilingual-zh-en"
+    stream.mkdir()
+    for name in ("encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"):
+        (stream / name).write_bytes(b"x")
+
+    env = _media_env({"CHARACTER_MEDIA_MODEL_ROOT": str(tmp_path)})
+
+    assert env["CHARACTER_MEDIA_ASR_PROVIDER"] == "paraformer-streaming"
+    assert env["CHARACTER_MEDIA_ASR_ENCODER"] == str(stream / "encoder.int8.onnx")
+    assert env["CHARACTER_MEDIA_ASR_DECODER"] == str(stream / "decoder.int8.onnx")
+    assert env["CHARACTER_MEDIA_ASR_TOKENS"] == str(stream / "tokens.txt")
+    assert "CHARACTER_MEDIA_ASR_MODEL" not in env
+
+
+def test_media_env_falls_back_to_sensevoice_without_complete_streaming_assets(tmp_path):
+    from character_memory.dev_stack import _media_env
+
+    stream = tmp_path / "sherpa-onnx-streaming-paraformer-bilingual-zh-en"
+    stream.mkdir()
+    (stream / "encoder.int8.onnx").write_bytes(b"x")
+    sense = tmp_path / "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+
+    env = _media_env({"CHARACTER_MEDIA_MODEL_ROOT": str(tmp_path)})
+
+    assert env["CHARACTER_MEDIA_ASR_PROVIDER"] == "sensevoice"
+    assert env["CHARACTER_MEDIA_ASR_MODEL"] == str(sense / "model.int8.onnx")
+    assert env["CHARACTER_MEDIA_ASR_TOKENS"] == str(sense / "tokens.txt")
+    assert "CHARACTER_MEDIA_ASR_ENCODER" not in env
+
+
+def test_media_env_respects_explicit_sensevoice_even_when_streaming_assets_exist(tmp_path):
+    from character_memory.dev_stack import _media_env
+
+    stream = tmp_path / "sherpa-onnx-streaming-paraformer-bilingual-zh-en"
+    stream.mkdir()
+    for name in ("encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"):
+        (stream / name).write_bytes(b"x")
+
+    env = _media_env({
+        "CHARACTER_MEDIA_MODEL_ROOT": str(tmp_path),
+        "CHARACTER_MEDIA_ASR_PROVIDER": "sensevoice",
+    })
+
+    assert env["CHARACTER_MEDIA_ASR_PROVIDER"] == "sensevoice"
+    assert env["CHARACTER_MEDIA_ASR_TOKENS"].endswith(
+        "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt"
+    )
+    assert "CHARACTER_MEDIA_ASR_ENCODER" not in env
+
+
+def test_media_setup_and_standalone_runner_declare_streaming_paraformer_assets():
+    setup = Path("scripts/setup-media-models.sh").read_text(encoding="utf-8")
+    runner = Path("scripts/run-media.sh").read_text(encoding="utf-8")
+
+    assert 'STREAM_ASR_NAME="sherpa-onnx-streaming-paraformer-bilingual-zh-en"' in setup
+    assert 'fetch_model "$STREAM_ASR_NAME" "$STREAM_ASR_URL" "encoder.int8.onnx"' in setup
+    assert "decoder.int8.onnx" in setup
+    assert 'ASR_PROVIDER="${CHARACTER_MEDIA_ASR_PROVIDER:-}"' in runner
+    assert 'ASR_PROVIDER="paraformer-streaming"' in runner
+    assert 'export CHARACTER_MEDIA_ASR_ENCODER="$STREAM_ASR_ENCODER_NATIVE"' in runner
+    assert 'export CHARACTER_MEDIA_ASR_DECODER="$STREAM_ASR_DECODER_NATIVE"' in runner
+
 def test_dev_console_is_linked_from_settings_center():
     html = Path("src/character_memory/web/settings.html").read_text(encoding="utf-8")
     assert 'href="http://127.0.0.1:8000"' in html

@@ -19,6 +19,7 @@ Historical material never overrides current code or `docs/current/`.
 | Document | Owner |
 | --- | --- |
 | [STATUS](current/STATUS.md) | What is shipped / active / backlog / deferred. |
+| [DELIVERY_PLAN](current/DELIVERY_PLAN.md) | Release-convergence ledger: implemented vs real-machine acceptance. |
 | [DESIGN](current/DESIGN.md) | Product goal, phases and value boundaries. |
 | [ARCHITECTURE](current/ARCHITECTURE.md) | Runtime topology, process/data boundaries and composition. |
 | [CODEBASE_LAYOUT](current/CODEBASE_LAYOUT.md) | Module ownership and where to start reading for a change. |

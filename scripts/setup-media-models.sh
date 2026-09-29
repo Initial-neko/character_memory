@@ -33,13 +33,29 @@ done
 fetch_model() {
   local name="$1"
   local url="$2"
-  local required="$3"
+  shift 2
+  local required_files=("$@")
   local dir="$MODEL_ROOT/$name"
   local archive="$MODEL_ROOT/$name.tar.bz2"
+  local complete=1
 
-  if [[ -f "$dir/$required" ]]; then
+  for required in "${required_files[@]}"; do
+    if [[ ! -f "$dir/$required" ]]; then
+      complete=0
+      break
+    fi
+  done
+  if [[ "$complete" -eq 1 ]]; then
     echo "[ok] $name already exists"
     return
+  fi
+
+  # A previous interrupted extraction is not a valid installation. Remove the
+  # partial model directory so extracting the canonical archive repairs it
+  # instead of mixing old/new files.
+  if [[ -d "$dir" ]]; then
+    echo "[repair] removing incomplete $dir"
+    rm -rf "$dir"
   fi
 
   echo "[download] $name"
@@ -48,21 +64,21 @@ fetch_model() {
   tar -xjf "$archive" -C "$MODEL_ROOT"
   rm -f "$archive"
 
-  if [[ ! -f "$dir/$required" ]]; then
-    echo "[error] expected $dir/$required after extraction" >&2
-    exit 1
-  fi
+  for required in "${required_files[@]}"; do
+    if [[ ! -f "$dir/$required" ]]; then
+      echo "[error] expected $dir/$required after extraction" >&2
+      exit 1
+    fi
+  done
 }
 
-fetch_model "$ASR_NAME" "$ASR_URL" "model.int8.onnx"
-fetch_model "$STREAM_ASR_NAME" "$STREAM_ASR_URL" "encoder.int8.onnx"
-for required in decoder.int8.onnx tokens.txt; do
-  if [[ ! -f "$MODEL_ROOT/$STREAM_ASR_NAME/$required" ]]; then
-    echo "[error] expected $MODEL_ROOT/$STREAM_ASR_NAME/$required after extraction" >&2
-    exit 1
-  fi
-done
-fetch_model "$TTS_NAME" "$TTS_URL" "model.onnx"
+fetch_model "$ASR_NAME" "$ASR_URL" "model.int8.onnx" "tokens.txt"
+fetch_model "$STREAM_ASR_NAME" "$STREAM_ASR_URL" "encoder.int8.onnx" "decoder.int8.onnx" "tokens.txt"
+fetch_model "$TTS_NAME" "$TTS_URL" "model.onnx" "tokens.txt" "lexicon.txt" "phone.fst" "number.fst"
+if [[ ! -d "$MODEL_ROOT/$TTS_NAME/dict" ]]; then
+  echo "[error] expected $MODEL_ROOT/$TTS_NAME/dict after extraction" >&2
+  exit 1
+fi
 
 # Reuse this existing model-setup entry for the :9002 Kokoro assets as well.
 # The helper uses the Hugging Face cache under models/huggingface and downloads

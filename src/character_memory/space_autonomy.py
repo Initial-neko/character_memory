@@ -177,6 +177,7 @@ class SpaceAutonomyService:
         video_enabled = (
             media_enabled
             and bool(getattr(self.access.settings, "space_video_generation_enabled", False))
+            and bool(str(getattr(self.access.settings, "metaso_minimax_api_key", "") or "").strip())
             and float(getattr(self.access.settings, "space_video_daily_budget_cny", 0.0)) > 0
         )
         video_max_duration = max(

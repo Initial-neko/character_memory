@@ -21,6 +21,7 @@ def _clear_secret_env(monkeypatch):
         "AGNES_API_KEY",
         "MSIMG_API_KEY",
         "MODELSCOPE_API_TOKEN",
+        "METASO_MINIMAX_API_KEY",
         "HF_TOKEN",
         "GSV_TTS_GPT_MODEL",
         "GSV_TTS_SOVITS_MODEL",

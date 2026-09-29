@@ -979,7 +979,7 @@ def test_settings_center_persists_world_activity_sources_as_a_real_list(tmp_path
 
 
 def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypatch):
-    """The page opens on eight fields, and every other field is behind a group.
+    """The page opens on nine essential fields, and every other field is behind a group.
 
     Levels decide what the first screen is, so they are a contract rather than a
     styling choice: promoting a field (or forgetting to mark a new one) changes
@@ -998,6 +998,7 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
         "tts_provider",
         "tts_voice",
         "tts_speed",
+        "periodic_visual_observation_enabled",
         "proactive_wake_enabled",
         "space_autonomy_enabled",
         "space_media_enabled",
@@ -1014,7 +1015,7 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     # The proactive dispatch and Intent-admission fields are counted the same
     # way: the switches and cadences are `advanced`, and only the tuning knobs
     # (poll latency, similarity threshold, dedup window) are `diagnostic`.
-    assert levels == {"common": 8, "advanced": 35, "diagnostic": 36}
+    assert levels == {"common": 9, "advanced": 37, "diagnostic": 36}
     assert "group_max_speakers_per_turn" in {
         field["name"]
         for section in schema

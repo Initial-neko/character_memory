@@ -545,8 +545,15 @@ def test_idle_browse_gate_reopens_after_character_processes_new_group_fact(tmp_p
         "NEW_CHARACTER_SIGNAL",
     )
     scheduler.force_due("BROWSE", "c00", now=changed)
-    assert len(_browsed(scheduler.run_once(now=changed))) == 1
-    assert _browse_plan_call_count(model) == 2
+    calls_before = _browse_plan_call_count(model)
+    runs = _browsed(scheduler.run_once(now=changed))
+    c00_runs = [item for item in runs if item["subject_id"] == "c00"]
+
+    # Other characters may independently become due on this scheduler tick.
+    # This regression only owns the claim that c00 is no longer suppressed by
+    # its earlier browse=false decision after it processed new group context.
+    assert len(c00_runs) == 1
+    assert _browse_plan_call_count(model) > calls_before
     store.close()
 
 

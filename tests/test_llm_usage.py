@@ -89,7 +89,14 @@ def test_usage_store_aggregates_requests_logical_calls_retries_and_features(tmp_
     grouped = {(row["feature"], row["purpose"]): row for row in usage["by_feature"]}
     assert grouped[("GROUP", "GROUP_REACTION")]["requests"] == 2
     assert grouped[("GROUP", "GROUP_REACTION")]["total_tokens"] == 101
+    assert grouped[("GROUP", "GROUP_REACTION")]["input_chars"] == 200
+    assert grouped[("GROUP", "GROUP_REACTION")]["input_char_share"] == 0.6667
+    assert grouped[("GROUP", "GROUP_REACTION")]["requests_per_logical_call"] == 2.0
+    assert grouped[("GROUP", "GROUP_REACTION")]["token_coverage"] == 1.0
     assert grouped[("SPACE", "SPACE_REPLY")]["token_known_requests"] == 0
+    assert grouped[("SPACE", "SPACE_REPLY")]["input_chars"] == 100
+    assert grouped[("SPACE", "SPACE_REPLY")]["input_char_share"] == 0.3333
+    assert grouped[("SPACE", "SPACE_REPLY")]["token_coverage"] == 0.0
 
 
 def test_openai_compatible_request_records_exact_provider_usage_and_attribution(tmp_path):

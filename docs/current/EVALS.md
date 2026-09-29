@@ -120,10 +120,15 @@ uv run pytest -q
 - Sticker/Image/media contracts；
 - Direct + Group autonomous ImageGen；
 - Visual Capture transient-frame contracts；
+- periodic screen observation significant-change / busy / dedup / interval / hourly-cost gates；
 - Dev Console proxy contracts；
 - Settings config/secret migration contracts；
 - formal TTS routing；
 - Media Runtime fake-provider/native bootstrap contracts；
+- streaming ASR WebSocket partial/final/flush protocol；
+- shared AudioWorklet 16 kHz PCM conversion；
+- Dictation / Browser Call streaming-first + batch fallback contracts；
+- Browser Call speak-over-reply / pending-turn preservation；
 - browser ASR transcript validity gate；
 - shared timestamp formatting。
 
@@ -139,14 +144,17 @@ CI green **不等于**以下真实链路已经验证：
 
 - Windows sherpa native DLL；
 - SenseVoice/Sherpa/Kokoro real model inference；
+- Paraformer streaming real inference、partial/final latency、endpoint completeness；
 - Kokoro `:8001 -> :9002` 实际路由；
 - Agnes API key / real image generation；
 - ModelScope/msimg runtime；
 - 本机 GPU/CPU 性能；
 - 麦克风/摄像头/屏幕共享权限；
+- 1080p+ IDE / Browser / Terminal 小字号屏幕可读性；
+- periodic screen observation 的真实 Vision 调用频率与 silence rate；
 - CosyVoice 独立环境。
 
-这些必须在本机 Dev Console / TTS Lab / browser / benchmark 单独验收。
+这些必须在本机 Dev Console / TTS Lab / browser / benchmark 单独验收。当前收敛阶段的可执行矩阵见 [DELIVERY_PLAN.md](DELIVERY_PLAN.md)；CI 只能证明工程 regression，不得替代 target-machine 结果。
 
 ## 4. Async conversation regression
 

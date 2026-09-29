@@ -323,11 +323,13 @@ class LlmUsageStore:
                 SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END) AS token_known_requests,
                 COUNT(DISTINCT CASE WHEN attempt>1 THEN logical_call_id END) AS retried_logical_calls,
                 SUM(CASE WHEN status!='SUCCESS' THEN 1 ELSE 0 END) AS errors,
-                ROUND(AVG(duration_ms),1) AS avg_latency_ms
+                ROUND(AVG(duration_ms),1) AS avg_latency_ms,
+                COALESCE(SUM(input_chars),0) AS input_chars,
+                COALESCE(SUM(output_chars),0) AS output_chars
             FROM llm_calls
             WHERE created_at_epoch>=?
             GROUP BY {group_cols}
-            ORDER BY total_tokens DESC, requests DESC
+            ORDER BY input_chars DESC, requests DESC
         """
         with self._lock:
             summary_row = self.conn.execute(aggregate_sql, (since,)).fetchone()
@@ -356,11 +358,33 @@ class LlmUsageStore:
         requests = int(summary.get("requests") or 0)
         known = int(summary.get("token_known_requests") or 0)
         summary["token_coverage"] = round(known / requests, 4) if requests else 1.0
+
+        def hotspot_rows(rows) -> list[dict[str, Any]]:
+            total_input_chars = max(0, int(summary.get("input_chars") or 0))
+            items = []
+            for row in rows:
+                item = self._row_dict(row)
+                row_requests = max(0, int(item.get("requests") or 0))
+                logical_calls = max(0, int(item.get("logical_calls") or 0))
+                input_chars = max(0, int(item.get("input_chars") or 0))
+                token_known = max(0, int(item.get("token_known_requests") or 0))
+                item["input_char_share"] = (
+                    round(input_chars / total_input_chars, 4) if total_input_chars else 0.0
+                )
+                item["requests_per_logical_call"] = (
+                    round(row_requests / logical_calls, 2) if logical_calls else 0.0
+                )
+                item["token_coverage"] = (
+                    round(token_known / row_requests, 4) if row_requests else 1.0
+                )
+                items.append(item)
+            return items
+
         return {
             "window_hours": max(1, min(24 * 90, int(hours))),
             "summary": summary,
-            "by_feature": [self._row_dict(row) for row in by_feature],
-            "by_model": [self._row_dict(row) for row in by_model],
+            "by_feature": hotspot_rows(by_feature),
+            "by_model": hotspot_rows(by_model),
             "recent": [self._row_dict(row) for row in recent],
         }
 

@@ -137,6 +137,9 @@
               item.purpose,
               usageNumber(item.requests),
               usageNumber(item.logical_calls),
+              Number(item.requests_per_logical_call || 0).toFixed(2),
+              usageNumber(item.input_chars),
+              usagePercent(item.input_chars, summary.input_chars),
               usageToken(item, "input_tokens"),
               usageToken(item, "output_tokens"),
               usageToken(item, "total_tokens"),
@@ -144,7 +147,7 @@
               usageNumber(item.errors),
               usageNumber(Math.round(Number(item.avg_latency_ms || 0))),
             ]))
-          : [usageRow(["暂无数据", "", "", "", "", "", "", "", "", ""])]
+          : [usageRow(["暂无数据", "", "", "", "", "", "", "", "", "", "", "", ""])]
       ));
 
       const modelBody = $("llmUsageModelBody");
@@ -183,7 +186,7 @@
       ));
     } catch (error) {
       $("llmUsageFeatureBody").replaceChildren(
-        usageRow([`Usage unavailable: ${error.message}`, "", "", "", "", "", "", "", "", ""])
+        usageRow([`Usage unavailable: ${error.message}`, "", "", "", "", "", "", "", "", "", "", "", ""])
       );
     }
   }

@@ -236,6 +236,19 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         sidecars that are not there, and the reason string keeps the details for
         the log.
         """
+        if str(getattr(settings, "tts_provider", "") or "").strip().lower() != "gsv":
+            # Archive/restore changes the GSV roster only when GSV is the active
+            # formal TTS provider. Probing an unconfigured sidecar here used to
+            # make every lifecycle action pay the full network timeout on the
+            # common non-GSV deployment. When GSV is selected later, its normal
+            # configure/load path rebuilds the registry from disk.
+            return {
+                "ok": True,
+                "reloaded": False,
+                "status": "skipped",
+                "reason": "GSV is not the active TTS provider",
+            }
+
         from character_memory.tts_lab import GsvVoiceReloadRejected, GsvVoiceReloader
 
         try:

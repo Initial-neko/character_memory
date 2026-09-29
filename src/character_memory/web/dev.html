@@ -91,36 +91,32 @@
         </div>
 
         <div class="level-row" data-level="common">
-          <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked /> Autonomous Space</label>
           <label>Character<select id="spaceCharacter"><option value="rin">rin</option></select></label>
         </div>
-        <div class="dev-key-controls" data-level="common">
-          <label>发动态机会间隔
-            <input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="120" />
-            <small>到点只是让人物判断一次，不代表一定发动态。</small>
-          </label>
-          <label>每天最多动态
-            <input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="3" />
-            <small>每个人物每天的发布上限；0 = 不限，不会强制发满。</small>
-          </label>
-        </div>
         <div class="actions" data-level="common">
-          <button class="secondary" id="applySpaceConfig" type="button" title="只热应用到当前运行中的 Character Runtime；不会写入 config.yaml">临时应用</button>
-          <button class="primary" id="runSpaceOpportunity" type="button" title="立即跑一次判断，不改变正式 Scheduler 的下一次时间">手动测试一次</button>
+          <button class="primary" id="runSpaceOpportunity" type="button">手动测试一次</button>
           <span class="subtle" id="spaceStatusAge">尚未读取调度状态。</span>
         </div>
         <p id="spaceScheduleSummary" class="schedule-summary" data-level="common">正在读取实际下一次执行时间…</p>
 
-        <details class="level-group" data-level="advanced" data-title="高级 · 调度、媒体与世界观察" data-hint="有合理默认，通常不用改">
-          <summary>高级 · 调度、媒体与世界观察</summary>
+        <details class="level-group" data-level="advanced" data-title="高级 · Session Override（仅当前 Runtime）" data-hint="正式配置在 Settings；这里只为短期 soak / 调度验收临时覆盖">
+          <summary>高级 · Session Override（仅当前 Runtime）</summary>
+          <p class="subtle">下面所有值只热应用到当前 Character Runtime，不写 config.yaml。重启后恢复 Settings Center 的正式配置；因此这里只用于短期测试，不是第二个配置中心。</p>
+          <div class="field-group">
+            <span class="field-group-label">临时行为</span>
+            <div class="visual-provider-row">
+              <label class="visual-check"><input id="spaceEnabled" type="checkbox" checked /> Autonomous Space</label>
+              <label>Opportunity Interval (min)<input id="spaceIntervalMinutes" type="number" min="10" max="10080" step="10" value="120" /><small>只改变“多久判断一次”，不强制发动态。</small></label>
+              <label>Max Posts / Day<input id="spaceMaxPostsPerDay" type="number" min="0" max="200" step="1" value="3" /><small>每天发布上限；0 = 不限。</small></label>
+            </div>
+          </div>
           <div class="field-group">
             <span class="field-group-label">调度</span>
             <div class="visual-provider-row">
-              <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /><small>只影响“多久检查一次是否到期”，不会增加 Opportunity。</small></label>
-              <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /><small>一条自主动态最多让多少个其他人物看到并判断是否互动。</small></label>
+              <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" /><small>只影响检查到期的延迟。</small></label>
+              <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" /><small>最多邀请多少其他角色判断是否互动。</small></label>
             </div>
           </div>
-
           <div class="field-group">
             <span class="field-group-label">媒体</span>
             <div class="visual-provider-row">
@@ -130,7 +126,6 @@
               <label class="visual-check"><input id="spaceImageGenerationEnabled" type="checkbox" checked /> AI ImageGen</label>
             </div>
           </div>
-
           <div class="field-group">
             <span class="field-group-label">世界观察</span>
             <div class="visual-provider-row">
@@ -139,10 +134,10 @@
               <label>World Text / Page<input id="spaceWorldMaxChars" type="number" min="500" max="16000" step="500" value="6000" /></label>
             </div>
           </div>
-
           <div class="field-group">
-            <span class="field-group-label">快捷档与手动执行</span>
+            <span class="field-group-label">临时应用与调度验收</span>
             <div class="actions">
+              <button class="secondary" id="applySpaceConfig" type="button">应用 Session Override</button>
               <button class="secondary space-preset" data-minutes="10" type="button">10min</button>
               <button class="secondary space-preset" data-minutes="30" type="button">30min</button>
               <button class="secondary space-preset" data-minutes="60" type="button">1H</button>
@@ -152,7 +147,11 @@
               <button class="secondary" id="refreshSpaceStatus" type="button">刷新调度状态</button>
             </div>
           </div>
+          <p class="subtle">“手动测试一次”不改变正式 next opportunity；“立即到期”才会修改当前 Scheduler 的 next time。Poll 只影响检查延迟，不会增加 Opportunity 次数。</p>
+        </details>
 
+        <details class="level-group" data-level="diagnostic" data-title="诊断 · 媒体测试与世界观察测试" data-hint="真实调用 Provider，逐项验证">
+          <summary>诊断 · 媒体测试与世界观察测试</summary>
           <div class="field-group">
             <span class="field-group-label">Audience 回放</span>
             <div class="visual-provider-row">
@@ -161,12 +160,6 @@
             </div>
           </div>
 
-          <p class="subtle">这里仅热应用到当前 Character Runtime，不写 config.yaml；重启后回到 Settings Center 保存的正式配置。修改 Interval 时默认从“现在”重新计算下一次时间；Poll 只影响检查延迟，不会增加 Opportunity 次数。Max Posts / Day 是每天发布上限，0 = 不限——它只是上限，不会强制发帖。</p>
-          <p class="subtle">“手动触发”不改变正式 next opportunity；“立即到期”则用于测试真实 Scheduler：把选中角色的 next opportunity 设为现在，后台线程会按 Poll 周期自动执行。手动触发会忽略 User Quiet Guard（自主群聊同理），方便验收。</p>
-        </details>
-
-        <details class="level-group" data-level="diagnostic" data-title="诊断 · 媒体测试与世界观察测试" data-hint="真实调用 Provider，逐项验证">
-          <summary>诊断 · 媒体测试与世界观察测试</summary>
           <div class="field-group">
             <span class="field-group-label">媒体测试</span>
             <div class="visual-provider-row">
@@ -265,32 +258,30 @@
         </div>
 
         <div class="level-row" data-level="common">
-          <label class="visual-check"><input id="groupAutonomyEnabled" type="checkbox" checked /> 自主群聊</label>
           <label>群聊<select id="groupAutonomyGroup"><option value="">暂无群聊</option></select></label>
-          <label>交流机会间隔
-            <input id="groupAutonomyInterval" type="number" min="10" max="10080" step="10" value="360" />
-            <small>同一群两次正式自主交流机会之间的间隔。</small>
-          </label>
         </div>
         <div class="actions" data-level="common">
-          <button class="secondary" id="applyGroupAutonomyConfig" type="button">应用测试配置</button>
           <button class="primary" id="runGroupAutonomyOpportunity" type="button">立即手动触发一次</button>
           <span class="subtle" id="groupAutonomyStatusAge">尚未读取调度状态。</span>
         </div>
 
-        <details class="level-group" data-level="advanced" data-title="高级 · 间隔、上限与手动执行" data-hint="有合理默认，通常不用改">
-          <summary>高级 · 间隔、上限与手动执行</summary>
+        <details class="level-group" data-level="advanced" data-title="高级 · Session Override（仅当前 Runtime）" data-hint="正式配置在 Settings；这里只为短期群聊调度验收临时覆盖">
+          <summary>高级 · Session Override（仅当前 Runtime）</summary>
+          <p class="subtle">下面所有值只作用于当前 Character Runtime，不写 config.yaml；重启后恢复 Settings Center 的正式配置。</p>
           <div class="field-group">
-            <span class="field-group-label">调度</span>
+            <span class="field-group-label">临时行为与调度</span>
             <div class="visual-provider-row">
+              <label class="visual-check"><input id="groupAutonomyEnabled" type="checkbox" checked /> 自主群聊</label>
+              <label>Opportunity Interval (min)<input id="groupAutonomyInterval" type="number" min="10" max="10080" step="10" value="360" /></label>
               <label>Max Messages<input id="groupAutonomyMaxMessages" type="number" min="1" max="4" step="1" value="3" /></label>
               <label>User Quiet Guard (min)<input id="groupAutonomyQuietMinutes" type="number" min="0" max="1440" step="5" value="30" /></label>
               <label>Scheduler Poll (s)<input id="groupAutonomyPollSeconds" type="number" min="10" max="3600" step="10" value="60" /></label>
             </div>
           </div>
           <div class="field-group">
-            <span class="field-group-label">快捷档与手动执行</span>
+            <span class="field-group-label">临时应用与调度验收</span>
             <div class="actions">
+              <button class="secondary" id="applyGroupAutonomyConfig" type="button">应用 Session Override</button>
               <button class="secondary group-autonomy-preset" data-minutes="10" type="button">10min</button>
               <button class="secondary group-autonomy-preset" data-minutes="30" type="button">30min</button>
               <button class="secondary group-autonomy-preset" data-minutes="60" type="button">1H</button>
@@ -300,7 +291,7 @@
               <button class="secondary" id="refreshGroupAutonomyStatus" type="button">刷新调度状态</button>
             </div>
           </div>
-          <p class="subtle">这里的调参只作用于当前 Character Runtime，不写 config.yaml；重启后恢复 Settings Center 的正式配置。手动触发会忽略 User Quiet Guard，方便验收；正式 Scheduler 会遵守 Quiet Guard。</p>
+          <p class="subtle">手动触发会忽略 User Quiet Guard 方便验收；正式 Scheduler 会遵守 Quiet Guard。Poll 只影响到期检查延迟。</p>
         </details>
 
         <details class="debug-output">

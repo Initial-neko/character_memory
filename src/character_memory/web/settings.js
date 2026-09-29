@@ -97,6 +97,10 @@
     }
     input.dataset.setting = field.name;
     input.id = `setting-${field.name}`;
+    if (field.help) {
+      input.title = field.help;
+      input.setAttribute("aria-description", field.help);
+    }
     return input;
   }
 
@@ -213,6 +217,7 @@
       previewButton.type = "button";
       previewButton.className = "secondary";
       previewButton.textContent = "测试当前 TTS";
+      previewButton.title = "使用当前 Settings 中选中的 Provider / Voice / Speed 生成一句真实试听，不修改配置。";
 
       previewAudio = document.createElement("audio");
       previewAudio.controls = true;
@@ -412,6 +417,12 @@
     meta.innerHTML = `<strong></strong><span></span>`;
     meta.querySelector("strong").textContent = secret.label || secret.name;
     meta.querySelector("span").textContent = `${secret.name} · ${status}`;
+    if (secret.help) {
+      const help = document.createElement("div");
+      help.className = "subtle field-help";
+      help.textContent = secret.help;
+      meta.appendChild(help);
+    }
 
     const inputWrap = document.createElement("div");
     inputWrap.className = "secret-input";
@@ -420,6 +431,10 @@
     input.autocomplete = "new-password";
     input.placeholder = secret.configured ? "输入新值以替换；现有值不会显示" : "输入 Secret";
     input.dataset.secret = secret.name;
+    if (secret.help) {
+      input.title = secret.help;
+      input.setAttribute("aria-description", secret.help);
+    }
     inputWrap.appendChild(input);
 
     const actions = document.createElement("div");
@@ -428,6 +443,7 @@
     save.type = "button";
     save.className = "secondary";
     save.textContent = "保存";
+    save.title = "把输入的新 Secret 写入项目 .env；页面不会读取或回显旧值。";
     save.addEventListener("click", async () => {
       const value = input.value.trim();
       if (!value) return showNotice(`${secret.name} 不能为空`, true);
@@ -452,6 +468,7 @@
     remove.type = "button";
     remove.className = "danger";
     remove.textContent = "删除 .env 值";
+    remove.title = "只删除项目 .env 中的该值；不会修改真实系统环境变量。";
     remove.disabled = !secret.stored_in_env;
     remove.addEventListener("click", async () => {
       if (!confirm(`从 .env 删除 ${secret.name}？系统环境变量不会被修改。`)) return;

@@ -142,7 +142,6 @@ bash scripts/setup-media-models.sh
 
 - local BGE Embedding cache；
 - SenseVoice batch/fallback ASR；
-- Streaming Paraformer bilingual zh-en int8 encoder/decoder/tokens；
 - Sherpa VITS；
 - Kokoro `v1.1-zh` model + voice packs。
 
@@ -713,7 +712,7 @@ This command:
 4. prepares Sherpa VITS;
 5. prefetches Kokoro model/voice assets.
 
-`setup-media-models.sh` also prepares the official `sherpa-onnx-streaming-paraformer-bilingual-zh-en` int8 encoder/decoder/tokens. With no explicit `CHARACTER_MEDIA_ASR_PROVIDER`, the normal stack launcher selects Paraformer streaming when those three files are complete and falls back to SenseVoice when they are absent/incomplete. An explicit provider environment override always wins. This keeps existing partial installs recoverable while making a fresh canonical setup streaming-first.
+It **does not currently download Paraformer streaming encoder/decoder assets**. The streaming provider therefore still requires `CHARACTER_MEDIA_ASR_ENCODER / DECODER / TOKENS` to point at locally prepared files. Closing that setup gap belongs to deployment tooling, not to the Browser ASR protocol.
 
 Normal Character Runtime embedding is strict-offline, so network model acquisition belongs here rather than in startup/first chat.
 

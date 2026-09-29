@@ -13,14 +13,29 @@
   }
 
   function memberRows(group) {
-    const currentIds = new Set(group?.member_ids || []);
-    return CM.state.characters.map(profile => {
-      const joined = currentIds.has(profile.id);
-      if (joined) {
-        return `<div class="group-member-option group-member-option-joined"><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>已在群聊中</small></span><button type="button" class="danger compact" data-group-member-remove="${CM.escapeHtml(profile.id)}">移出群聊</button></div>`;
-      }
-      return `<label class="group-member-option"><input type="checkbox" data-group-member-id="${CM.escapeHtml(profile.id)}"><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>${CM.escapeHtml(profile.identity || "可加入群聊")}</small></span></label>`;
+    // Joined rows are driven by the group's own member list, not by
+    // CM.state.characters: that list holds active characters only, so reading it
+    // here used to hide an archived member's row completely -- and with it the
+    // one "移出群聊" button that could remove them. The name still comes from the
+    // server payload, which includes archived members.
+    const memberById = new Map(
+      (group?.members || []).map(member => [String(member?.id ?? ""), member])
+    );
+    const currentIds = (group?.member_ids || []).map(String);
+    const joined = currentIds.map(id => {
+      const member = memberById.get(id) || null;
+      const profile = CM.state.characters.find(item => item.id === id) || null;
+      const name = member?.name || profile?.name || id;
+      const note = profile
+        ? "<small>已在群聊中</small>"
+        : '<small class="group-member-note-archived">已归档，仍可移出</small>';
+      return `<div class="group-member-option group-member-option-joined"><span><strong>${CM.escapeHtml(name)}</strong>${note}</span><button type="button" class="danger compact" data-group-member-remove="${CM.escapeHtml(id)}">移出群聊</button></div>`;
     }).join("");
+    const candidates = CM.state.characters
+      .filter(profile => !currentIds.includes(String(profile.id)))
+      .map(profile => `<label class="group-member-option"><input type="checkbox" data-group-member-id="${CM.escapeHtml(profile.id)}"><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>${CM.escapeHtml(profile.identity || "可加入群聊")}</small></span></label>`)
+      .join("");
+    return joined + candidates;
   }
 
   function showGroupSettings() {
@@ -100,8 +115,11 @@
       }
       return;
     }
+    // An archived member has no entry in CM.state.characters, so the group
+    // payload is the first place the failure message can find a real name.
+    const member = (group.members || []).find(item => String(item?.id ?? "") === String(characterId));
     const profile = CM.state.characters.find(item => item.id === characterId);
-    const label = profile?.name || characterId;
+    const label = member?.name || profile?.name || characterId;
     try {
       await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(characterId)}`, {method:"DELETE"});
       await CM.features.groups?.loadGroups?.();

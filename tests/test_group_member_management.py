@@ -134,6 +134,24 @@ def test_group_settings_exposes_add_member_flow():
     assert "新成员从下一轮消息开始参与" in script
 
 
+def test_group_settings_lists_joined_members_from_the_group_not_the_active_list():
+    """An archived member must keep a row, or they can never be removed.
+
+    CM.state.characters holds active characters only. Reading it to decide which
+    rows to draw meant an archived member disappeared from the member list
+    entirely, and the only "移出群聊" button that could remove them disappeared
+    with it -- the server route was never the problem.
+    """
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "src" / "character_memory" / "web" / "group_settings.js").read_text(encoding="utf-8")
+    # Joined rows iterate the group's own ids, and the display name comes from
+    # the member payload, which includes archived members.
+    assert "group?.member_ids || []).map" in script
+    assert "group?.members || []" in script
+    assert "const member = (group.members || []).find(" in script
+    assert "已归档，仍可移出" in script
+
+
 def test_core_launchers_start_only_character_runtime():
     root = Path(__file__).resolve().parents[1]
     for name in ["core-start.sh", "mobile-core-start.sh"]:

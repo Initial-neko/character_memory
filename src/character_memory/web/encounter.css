@@ -21,7 +21,12 @@
 .encounter-dismiss{border:1px solid var(--ui-line);border-radius:var(--ui-r-sm);padding:0 12px;background:transparent;color:var(--ui-muted);cursor:pointer}
 .encounter-actions button:disabled{opacity:.42;cursor:not-allowed}
 .encounter-limit-note{margin-top:8px;color:var(--ui-muted);font-size:10px;line-height:1.45}
-.encounter-chat-panel{margin-top:12px;border-top:1px solid var(--ui-line);padding-top:10px}
+/* Opening the chat used to replace the panel in a single frame, so the card
+   jumped to its full height with no transition and read as a layout glitch. The
+   keyframes animate max-height (layout) rather than only opacity, and the cap is
+   above the chat log's own 260px so the panel never clips on the way in. */
+.encounter-chat-panel{margin-top:12px;border-top:1px solid var(--ui-line);padding-top:10px;overflow:hidden;animation:encounter-panel-open .24s ease-out}
+@keyframes encounter-panel-open{from{max-height:0;opacity:0}to{max-height:420px;opacity:1}}
 .encounter-chat-log{display:grid;gap:7px;max-height:260px;overflow:auto;padding-right:3px}
 .encounter-message{display:grid;gap:2px;font-size:11px}.encounter-message span{font-size:9px;color:var(--ui-faint)}.encounter-message div{width:max-content;max-width:86%;padding:7px 9px;border-radius:10px;background:var(--ui-surface-sunken);line-height:1.5}
 .encounter-message.user{justify-items:end}.encounter-message.user div{background:var(--ui-hover)}

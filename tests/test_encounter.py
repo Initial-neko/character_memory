@@ -112,6 +112,108 @@ def test_scheduler_skips_creation_when_pending_pool_is_full(tmp_path):
     store.close()
 
 
+def _chat_candidate(repo, now):
+    return repo.create_candidate(
+        source_type="GENERATED",
+        draft=draft(),
+        encounter_hook="偶然遇见。",
+        opening_message="……你也是来找零件的吗？",
+        now=now,
+    )
+
+
+class _RecordingModel:
+    """Returns one canned line per call and counts the calls."""
+
+    def __init__(self, message="……嗯，我还在。"):
+        self.message = message
+        self.calls = 0
+        self.sessions = []
+
+    def structured_for_session(self, prompt, schema, session_id):
+        self.calls += 1
+        self.sessions.append(session_id)
+        return SimpleNamespace(message=self.message)
+
+
+def test_a_message_is_stored_before_the_character_answers(tmp_path):
+    """The send no longer waits on the model, so the two halves are separable."""
+
+    store = SQLiteStore(str(tmp_path / "x.db"))
+    repo = EncounterRepository(store)
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    candidate = _chat_candidate(repo, now)
+
+    model = _RecordingModel()
+    access = SimpleNamespace(require_bundle=lambda: SimpleNamespace(model=model))
+    service = EncounterService(access, repo)
+
+    posted = service.post_message(candidate["id"], "你还在吗？", now=now)
+    assert model.calls == 0
+    assert [item["role"] for item in posted["messages"]] == ["USER"]
+    # The panel is rendered open from the status, so the status has to move with
+    # the message rather than with the reply.
+    assert repo.get_candidate(candidate["id"])["status"] == "CHATTING"
+
+    answered = service.reply(candidate["id"], now=now)
+    assert model.calls == 1
+    assert model.sessions == [f"encounter-chat:{candidate['id']}"]
+    assert [item["role"] for item in answered["messages"]] == ["USER", "CHARACTER"]
+    assert answered["message"]["content"] == "……嗯，我还在。"
+    store.close()
+
+
+def test_a_closed_encounter_is_never_answered(tmp_path):
+    """A reply that arrives after the person moved on is dropped, not forced."""
+
+    store = SQLiteStore(str(tmp_path / "x.db"))
+    repo = EncounterRepository(store)
+    now = datetime(2026, 9, 22, 12, 30, tzinfo=timezone.utc)
+    candidate = _chat_candidate(repo, now)
+
+    model = _RecordingModel()
+    access = SimpleNamespace(require_bundle=lambda: SimpleNamespace(model=model))
+    service = EncounterService(access, repo)
+
+    service.post_message(candidate["id"], "还在吗？", now=now)
+    service.dismiss(candidate["id"], now=now)
+    assert service.reply(candidate["id"], now=now) is None
+    assert model.calls == 0
+    store.close()
+
+
+def test_scheduler_answers_queued_messages_and_survives_a_failure(tmp_path):
+    """Queued replies run on the worker, and a broken one never escapes it."""
+
+    store = SQLiteStore(str(tmp_path / "x.db"))
+    repo = EncounterRepository(store)
+    now = datetime(2026, 9, 22, 13, 0, tzinfo=timezone.utc)
+    candidate = _chat_candidate(repo, now)
+
+    model = _RecordingModel("我这边刚把外壳装回去。")
+    access = SimpleNamespace(
+        settings=SimpleNamespace(),
+        require_bundle=lambda: SimpleNamespace(model=model),
+    )
+    scheduler = EncounterScheduler(access, repo)
+
+    assert scheduler.enqueue_reply(candidate["id"], now=now) is True
+    assert scheduler.pending_reply_count() == 1
+    answered = scheduler.drain_pending_replies()
+    assert scheduler.pending_reply_count() == 0
+    assert [item["role"] for item in answered[0]["messages"]] == ["CHARACTER"]
+    assert answered[0]["message"]["content"] == "我这边刚把外壳装回去。"
+
+    def explode(candidate_id, *, now=None):
+        raise RuntimeError("provider exploded")
+
+    scheduler.service.reply = explode
+    assert scheduler.enqueue_reply(candidate["id"], now=now) is True
+    assert scheduler.drain_pending_replies() == []
+    assert scheduler.pending_reply_count() == 0
+    store.close()
+
+
 def test_encounter_ui_and_server_wiring_exist():
     root = Path(__file__).resolve().parents[1]
     server = (root / "src" / "character_memory" / "server.py").read_text(encoding="utf-8")
@@ -129,3 +231,24 @@ def test_encounter_ui_and_server_wiring_exist():
         "active_character_soft_limit",
     ]:
         assert token in script
+
+
+def test_the_chat_panel_opens_with_a_transition_and_re_reads_for_the_reply():
+    """The panel used to appear in one frame, and the reply now lands later.
+
+    Opening the chat replaced the panel instantly, so the card jumped to its full
+    height and read as a layout glitch. The reply is also generated after the
+    POST answers, so the panel has to re-read once the worker has stored it.
+    """
+    root = Path(__file__).resolve().parents[1]
+    web = root / "src" / "character_memory" / "web"
+    css = (web / "encounter.css").read_text(encoding="utf-8")
+    script = (web / "encounter.js").read_text(encoding="utf-8")
+
+    assert "@keyframes encounter-panel-open" in css
+    assert "animation:encounter-panel-open" in css
+    assert "from{max-height:0" in css
+
+    # Bounded re-reads, and only while the panel is still open.
+    assert "for (const delay of [2500, 6500])" in script
+    assert "data-encounter-panel]:not(.hidden)" in script

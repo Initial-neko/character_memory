@@ -25,7 +25,6 @@ required=(
   "$TTS_DIR/phone.fst"
   "$TTS_DIR/number.fst"
 )
-LEGACY_REQUIRED_REMOVED
 case "$ASR_PROVIDER" in
   paraformer|paraformer-streaming|sherpa-paraformer-streaming)
     required+=(
@@ -41,15 +40,6 @@ case "$ASR_PROVIDER" in
     )
     ;;
 esac
-: <<'LEGACY_REQUIRED_REMOVED'
-  "$ASR_DIR/model.int8.onnx"
-  "$ASR_DIR/tokens.txt"
-  "$TTS_DIR/model.onnx"
-  "$TTS_DIR/tokens.txt"
-  "$TTS_DIR/lexicon.txt"
-  "$TTS_DIR/phone.fst"
-  "$TTS_DIR/number.fst"
-)
 for file in "${required[@]}"; do
   if [[ ! -f "$file" ]]; then
     echo "[error] missing $file" >&2

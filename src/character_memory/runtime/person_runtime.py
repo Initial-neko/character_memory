@@ -35,6 +35,7 @@ _NO_SELF_INTENT_EVENTS = frozenset({
     EventType.SPACE_POST_SEEN,
     EventType.SPACE_COMMENT_RECEIVED,
     EventType.WORLD_OBSERVATION,
+    EventType.VISUAL_OBSERVATION,
 })
 
 
@@ -386,6 +387,17 @@ class PersonRuntime:
                 "self_loop" if self_loop else "channel",
             )
             reaction = reaction.model_copy(update={"intent_candidates": []})
+
+        if event.event_type == EventType.VISUAL_OBSERVATION and reaction.memory_candidates:
+            dropped.extend(
+                {
+                    "type": "MEMORY_CANDIDATE",
+                    "decision": "DROP_TRANSIENT_VISUAL_MEMORY",
+                    "content_chars": len(candidate.content or ""),
+                }
+                for candidate in reaction.memory_candidates
+            )
+            reaction = reaction.model_copy(update={"memory_candidates": []})
 
         if event.event_type == EventType.SPACE_POST_SEEN:
             allowed = {ActionType.SPACE_LIKE, ActionType.SPACE_COMMENT, ActionType.SPACE_STICKER}

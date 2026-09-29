@@ -33,7 +33,7 @@ groups, so what the first screen shows is decided by the schema and not by the
 frontend.
 
 ```text
-common      8 fields + the two keys a user must supply   -> first screen
+common      9 fields + the two keys a user must supply   -> first screen
 advanced   15 fields                                     -> one closed group
 diagnostic 29 fields                                     -> one closed group
 ```
@@ -42,7 +42,7 @@ Where a field goes:
 
 ```text
 common     nothing works, or nothing is understandable, without the user deciding
-           (chat temperature, TTS provider/voice/speed, the autonomy switches,
+           (chat temperature, TTS provider/voice/speed, periodic screen observation, the autonomy switches,
             the LLM and embedding API keys)
 advanced   a defensible default exists, but the value changes behaviour
            (chat/vision model, GSV runtime assets, provider choice, intervals,
@@ -185,3 +185,17 @@ proactive_intent_dedup_window_hours: 72
 The rest are not suggestions the model may exceed. The cooldown, the delay floor and the pending ceiling are enforced on the write and dispatch paths and are documented in `PERSON_RUNTIME.md` §10; the similarity threshold and the dedup window are the tuning knobs for the duplicate rule. Dispatch switches and the interval are advanced; the poll, the similarity threshold and the dedup window are diagnostic.
 
 None of these fields are hot-applied: like the Space and World scheduling values, they take effect after a restart. The dispatch loop reads `proactive_dispatch_enabled` on every tick, so turning it off is immediate even though turning it back on is not.
+
+### 3.5 Periodic Screen Observation
+
+Periodic visual observation is intentionally narrower than ordinary visual capture. V1 only runs while the user has explicitly started a **direct voice call** and chosen **screen sharing** (`DISPLAY`); camera capture and group calls do not autonomously trigger Vision.
+
+```yaml
+periodic_visual_observation_enabled: true
+periodic_visual_observation_interval_seconds: 30
+periodic_visual_observation_max_per_hour: 6
+```
+
+The interval is a **minimum accepted Vision-call interval**, not a promise to call Vision every 30 seconds. Browser-side 64px change detection first requires a significant new screen candidate. The direct conversation must also be idle, the exact frame must not be a duplicate, and the hourly ceiling must still have capacity. Therefore an unchanged shared screen spends zero periodic Vision calls.
+
+The observation event is `VISUAL_OBSERVATION`, not a fake `USER_MESSAGE`. Raw frame bytes remain transient; the durable event contains only generic observation metadata. The runtime may naturally say something or stay silent, but screen observations are not allowed to create long-term Memory, future Intent, or autonomous image-generation requests. These settings are persisted in `config.yaml` and take effect after the normal Settings restart boundary.

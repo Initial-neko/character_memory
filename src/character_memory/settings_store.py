@@ -134,6 +134,9 @@ SETTING_HELP: dict[str, str] = {
     "tts_voice": "当前 TTS Provider 的 Voice ID；角色没有专属 voice.yaml 时使用该默认声音。",
     "tts_speed": "正式 TTS 的语速倍率；1.0 为正常速度，是否支持由当前 Provider 决定。",
     "tts_device": "本地 TTS 推理设备。云 Provider 忽略；部分本地 Provider 修改后需要重启对应 Runtime。",
+    "periodic_visual_observation_enabled": "用户在单聊通话中主动共享屏幕后，是否允许角色在画面显著变化时获得周期视觉观察机会；普通无变化画面不会调用 Vision。",
+    "periodic_visual_observation_interval_seconds": "两次周期屏幕观察 Vision 调用之间的服务端最小间隔秒数；这是成本/节奏硬约束，不是浏览器轮询频率。",
+    "periodic_visual_observation_max_per_hour": "每个单聊会话每小时最多接受多少次周期屏幕观察；0 = 禁用周期观察调用。",
     "voice_silence_ms": "语音通话中连续静音多久算一句话结束。大=更容忍思考停顿，小=更快接话。",
     "GSV_TTS_GPT_MODEL": "GSV-TTS-Lite 共享 GPT 模型 .ckpt 路径；保存到 .env，不写入 config.yaml。",
     "GSV_TTS_SOVITS_MODEL": "GSV-TTS-Lite 共享 SoVITS 模型 .pth 路径；保存到 .env，不写入 config.yaml。",
@@ -338,8 +341,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
     },
     {
         "id": "visual",
-        "title": "Search / ImageGen",
-        "description": "图片搜索与生成 Provider。Key 在 Secrets 中维护。",
+        "title": "Visual / Search / ImageGen",
+        "description": "屏幕视觉观察、图片搜索与生成 Provider。Key 在 Secrets 中维护。",
         "fields": [
             {
                 "name": "search_provider",
@@ -392,6 +395,30 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
             {"name": "agnes_base_url", "label": "Agnes Base URL", "type": "text", "level": "diagnostic"},
             {"name": "agnes_image_model", "label": "Agnes Model", "type": "text", "level": "diagnostic"},
             {"name": "msimg_models", "label": "msimg Models", "type": "text", "level": "diagnostic"},
+            {
+                "name": "periodic_visual_observation_enabled",
+                "label": "Periodic Screen Observation",
+                "type": "checkbox",
+                "level": "common",
+            },
+            {
+                "name": "periodic_visual_observation_interval_seconds",
+                "label": "Screen Observation Interval (s)",
+                "type": "number",
+                "min": 10,
+                "max": 600,
+                "step": 5,
+                "level": "advanced",
+            },
+            {
+                "name": "periodic_visual_observation_max_per_hour",
+                "label": "Screen Observations / Hour",
+                "type": "number",
+                "min": 0,
+                "max": 120,
+                "step": 1,
+                "level": "advanced",
+            },
         ],
     },
     {

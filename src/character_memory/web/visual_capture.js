@@ -281,12 +281,31 @@
       notify(state.source ? `${state.source === "CAMERA" ? "摄像头" : "屏幕"} · 候选帧已清空` : "视觉候选帧已清空");
     }
 
+    function latestSignificantFrame({afterMs = 0, source = "DISPLAY"} = {}) {
+      const expectedSource = String(source || "DISPLAY").toUpperCase();
+      const item = [...state.candidates]
+        .reverse()
+        .find(candidate =>
+          candidate.source === expectedSource &&
+          candidate.capturedAt > Number(afterMs || 0) &&
+          candidate.score >= config.changeThreshold
+        );
+      if (!item) return null;
+      return {
+        filename:`visual-${item.source.toLowerCase()}-${item.wallTime}-periodic.jpg`,
+        data_url:item.dataUrl,
+        source:item.source,
+        captured_at_ms:Math.ceil(item.capturedAt),
+      };
+    }
+
     return {
       startCamera,
       startDisplay,
       stop,
       sample,
       selectFrames,
+      latestSignificantFrame,
       clearCandidates,
       getState:snapshot,
       state,

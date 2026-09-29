@@ -88,6 +88,38 @@ class SparseModel(PersonModel):
         return DiaryResult(diary="", mental_state_update="")
 
 
+def test_periodic_visual_observation_can_react_but_cannot_persist_screen_memory(tmp_path):
+    store = SQLiteStore(tmp_path / "x.db")
+    emb = DeterministicEmbedding()
+    runtime = PersonRuntime(store, VectorRecall(store, emb), emb, FakeModel(), "persona")
+    now = datetime.now(timezone.utc)
+
+    result = runtime.handle(
+        Event(
+            character_id="rin",
+            event_type=EventType.VISUAL_OBSERVATION,
+            event_time=now,
+            content="屏幕共享画面出现了新的显著变化。",
+            metadata={"channel": "DIRECT", "conversation_id": "screen-call"},
+        )
+    )
+
+    assert "不是用户刚发来的消息" in result.context
+    assert "memory_candidates=[]" in result.context
+    assert result.created_memory_ids == []
+    assert store.list_memories("rin") == []
+    assert [event.content for event in store.list_chat_events("rin")] == ["知道了"]
+    trace = store.get_runtime_trace(result.event.id)
+    assert trace["channel_decisions"] == [
+        {
+            "type": "MEMORY_CANDIDATE",
+            "decision": "DROP_TRANSIENT_VISUAL_MEMORY",
+            "content_chars": len("用户今天说到家了"),
+        }
+    ]
+    store.close()
+
+
 def test_empty_actions_are_real_silence_and_keep_previous_state(tmp_path):
     store = SQLiteStore(tmp_path / "x.db")
     now = datetime.now(timezone.utc)

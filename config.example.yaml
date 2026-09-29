@@ -101,6 +101,18 @@ agnes_image_model: "agnes-image-2.1-flash"
 # Comma-separated msimg/ModelScope model aliases. Multiple entries enable failover.
 msimg_models: "qwen"
 
+# Allow periodic AI observations only while the user explicitly shares a screen
+# inside a direct voice call. Camera and group-call autoplay are intentionally excluded.
+periodic_visual_observation_enabled: true
+
+# Minimum seconds between accepted periodic screen-observation Vision calls.
+# Browser-side pixel-difference filtering may skip many intervals entirely.
+periodic_visual_observation_interval_seconds: 30
+
+# Maximum accepted periodic screen observations per direct conversation per hour.
+# 0 disables periodic observation calls even if the master switch is true.
+periodic_visual_observation_max_per_hour: 6
+
 # -----------------------------------------------------------------------------
 # Storage / character discovery
 # -----------------------------------------------------------------------------

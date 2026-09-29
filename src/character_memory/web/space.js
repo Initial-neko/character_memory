@@ -124,7 +124,12 @@
     const voices = items.filter(item =>
       item.media_type === "VOICE" || String(item.mime_type || "").startsWith("audio/")
     ).slice(0, 1);
-    const other = items.filter(item => !images.includes(item) && !voices.includes(item));
+    const videos = items.filter(item =>
+      item.media_type === "VIDEO" || String(item.mime_type || "").startsWith("video/")
+    ).slice(0, 1);
+    const other = items.filter(item =>
+      !images.includes(item) && !voices.includes(item) && !videos.includes(item)
+    );
 
     let imageHtml = "";
     if (images.length) {
@@ -137,11 +142,20 @@
     }
 
     const voiceMediaHtml = voices.map(voiceHtml).join("");
+    const videoHtml = videos.map(item => {
+      const metadata = item.metadata || {};
+      const seconds = Number(metadata.duration_seconds || 0);
+      const detail = [seconds > 0 ? `${seconds}s` : "", String(metadata.resolution || "")].filter(Boolean).join(" · ");
+      return `<figure class="space-video">
+        <video class="space-video-player" controls playsinline preload="metadata" src="${CM.escapeHtml(item.url)}" aria-label="${CM.escapeHtml(item.label || "角色生成视频")}"></video>
+        ${detail ? `<figcaption>${CM.escapeHtml(detail)}</figcaption>` : ""}
+      </figure>`;
+    }).join("");
     const links = other.map(item =>
       `<a class="space-media-link" href="${CM.escapeHtml(item.url)}" target="_blank" rel="noreferrer">查看附件 · ${CM.escapeHtml(item.label || "媒体")}</a>`
     ).join("");
 
-    return `${imageHtml}${voiceMediaHtml}${links}`;
+    return `${imageHtml}${voiceMediaHtml}${videoHtml}${links}`;
   }
 
   function renderLightbox() {

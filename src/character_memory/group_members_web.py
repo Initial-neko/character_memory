@@ -69,6 +69,12 @@ def attach_group_member_routes(app):
                     "id": character_id,
                     "name": profiles.get(character_id, {}).get("name") or character_id,
                     "identity": profiles.get(character_id, {}).get("identity") or "",
+                    # The browser cannot infer either of these from the sidebar
+                    # list any more: that list hides archived characters *and*
+                    # characters whose direct chat is still deferred, so
+                    # "absent from it" no longer means "archived".
+                    "archived": "archived_at" in profiles.get(character_id, {}),
+                    "direct_pending": "direct_pending" in profiles.get(character_id, {}),
                 }
                 for character_id in group.member_ids
             ],

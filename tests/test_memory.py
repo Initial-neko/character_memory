@@ -55,16 +55,22 @@ def test_memory_candidate_set_is_bounded_but_keeps_old_important_memory(tmp_path
             embedding=emb.embed("非常重要的长期约定"),
         )
     )
-    for index in range(1100):
-        store.add_memory(
-            Memory(
-                character_id="rin",
-                content=f"普通记忆 {index}",
-                event_time=start + timedelta(days=index + 1),
-                importance=0.1,
-                embedding=emb.embed(f"普通记忆 {index}"),
+    # One transaction for the bulk load. `add_memory` commits per call, and
+    # 1100 commits is 1100 fsyncs -- on this machine that was 43s of the suite's
+    # 9 minutes, for a test whose subject is the *read* bound below. The
+    # transaction is the store's own nesting-aware API, so the single-row
+    # semantics each call has elsewhere are untouched.
+    with store.transaction():
+        for index in range(1100):
+            store.add_memory(
+                Memory(
+                    character_id="rin",
+                    content=f"普通记忆 {index}",
+                    event_time=start + timedelta(days=index + 1),
+                    importance=0.1,
+                    embedding=emb.embed(f"普通记忆 {index}"),
+                )
             )
-        )
 
     candidates = store.list_memory_candidates(
         "rin",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 import logging
 import shutil
@@ -17,8 +18,10 @@ from character_memory.config import (
     discover_character_profiles,
     resolve_persona_path,
     set_character_archived,
+    set_character_direct_pending,
     split_archived,
 )
+from character_memory.group_store import GroupRepository
 from character_memory.persona_builder import (
     PersonaDraft,
     normalize_character_id,
@@ -45,11 +48,20 @@ class ApiCharacterService:
         character_write_lock: threading.RLock,
         register_runtime_character: Callable[[dict[str, Any]], None],
         services: Any | None = None,
+        group_store: Any | None = None,
     ):
         self.settings = settings
         self.current_bundle = current_bundle
         self.character_write_lock = character_write_lock
         self.register_runtime_character = register_runtime_character
+        # Deletion has to see which conversations still hold the character, or
+        # it would remove the persona and leave groups pointing at it. The
+        # composition root hands over the store it already owns and this service
+        # builds the repository, so api.py does not have to import one -- api.py
+        # is under a line budget that exists to keep it a composition root.
+        # Optional so the creation-only callers (and their tests) stay as they
+        # were; delete_archived refuses rather than guessing when it is absent.
+        self.group_store = group_store
         self.onboarding = (
             CharacterOnboardingService(
                 settings=settings,
@@ -245,7 +257,16 @@ class ApiCharacterService:
         if isinstance(runtime_map, dict):
             runtime_map.pop(character_id, None)
 
-    def _cleanup_created_character(self, character_id: str, persona_dir: Path) -> None:
+    def _remove_character_artifacts(self, character_id: str, persona_dir: Path) -> None:
+        """Delete everything that *defines* a character, and nothing else.
+
+        Shared by the batch-build rollback and the archive-drawer deletion.
+        Both need the persona directory (``voice.yaml`` lives inside it), the
+        avatar files and the live runtime registration gone. Neither may touch
+        the durable record of what the character said or published -- that is
+        the relationship's history, not part of the definition, and the archive
+        notice promises it survives.
+        """
         self._remove_runtime_character(character_id)
         try:
             shutil.rmtree(persona_dir)
@@ -299,6 +320,14 @@ class ApiCharacterService:
                 draft,
                 character_id,
             )
+            # A batch build introduces a *group*; its members are real
+            # characters that simply have no direct chat yet, and dropping five
+            # new names into the sidebar buries the ones the user talks to. The
+            # write happens before discovery on purpose: the profile registered
+            # into the live runtime below has to carry the flag already, or the
+            # sidebar would show the character until the next reload.
+            if str((creation or {}).get("source") or "") == "ENSEMBLE_BUILDER":
+                set_character_direct_pending(self.settings, character_id, True)
             try:
                 profiles = discover_character_profiles(self.settings)
                 profile = next(
@@ -308,7 +337,7 @@ class ApiCharacterService:
                 )
                 self.register_runtime_character(profile)
             except Exception:
-                self._cleanup_created_character(character_id, path.parent)
+                self._remove_character_artifacts(character_id, path.parent)
                 raise
 
         try:
@@ -323,7 +352,7 @@ class ApiCharacterService:
             )
         except Exception:
             with self.character_write_lock:
-                self._cleanup_created_character(character_id, path.parent)
+                self._remove_character_artifacts(character_id, path.parent)
             raise
 
         if initialization is not None:
@@ -352,4 +381,161 @@ class ApiCharacterService:
             if profile is None:
                 return
             persona_path = Path(profile["persona_path"])
-            self._cleanup_created_character(character_id, persona_path.parent)
+            self._remove_character_artifacts(character_id, persona_path.parent)
+
+    def _group_repository(self) -> Any:
+        store = self.group_store
+        if store is None:
+            raise RuntimeError(
+                "delete_archived needs the group store: without it the "
+                "deletion cannot see which conversations still hold the "
+                "character, and would leave them pointing at a persona that no "
+                "longer exists"
+            )
+        return GroupRepository(store)
+
+    def _groups_holding(self, character_id: str) -> list[Any]:
+        """Every conversation that still lists this character, archived or not.
+
+        Archived groups count: an archived group is still a group, and leaving
+        the member behind there would strand the same dangling reference.
+        """
+
+        repository = self._group_repository()
+        return [
+            group
+            for group in (
+                *repository.list_groups(),
+                *repository.list_groups(archived=True),
+            )
+            if character_id in group.member_ids
+        ]
+
+    def delete_archived(self, character_id: str, *, confirm_name: str) -> dict[str, Any]:
+        """Delete an archived character's definition, keeping its history.
+
+        Three gates, in the order the user can do something about them:
+
+        1. The character must exist.
+        2. It must be archived. Archiving is the deliberate first step, and
+           requiring it keeps a stale request from deleting someone the user is
+           still talking to mid-conversation.
+        3. ``confirm_name`` must equal the character's display name exactly.
+
+        Groups are the subtle part. ``remove_member`` refuses to take a group
+        below two characters -- a real floor, because a one-person group is not
+        a conversation. Rather than bypass it (which would leave a group that
+        both ``/v1/groups`` and its archive drawer filter out, i.e. a group the
+        user can no longer see *or* restore), deletion refuses and names the
+        groups in the way. Archiving those groups first is one click, and it is
+        the same step the member picker already asks for.
+        """
+
+        from fastapi import HTTPException
+
+        with self.character_write_lock:
+            try:
+                resolve_persona_path(self.settings, character_id)
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+            profile = next(
+                (item for item in self.profiles() if item["id"] == character_id),
+                None,
+            )
+            if profile is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown character: {character_id}",
+                )
+            if "archived_at" not in profile:
+                raise HTTPException(
+                    status_code=409,
+                    detail="只能删除已归档的人物；请先归档，再删除。",
+                )
+
+            expected = str(profile.get("name") or character_id)
+            if str(confirm_name or "").strip() != expected:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"名称不一致。请输入「{expected}」以确认删除。",
+                )
+
+            groups = self._groups_holding(character_id)
+            blocking = [group for group in groups if len(group.member_ids) <= 2]
+            if blocking:
+                names = "、".join(f"「{group.name}」" for group in blocking)
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"TA 还是 {names} 的成员，而该群只有两个人。删掉后这个群会只剩一人，"
+                        "无法继续对话。请先归档这个群，再删除人物。"
+                    ),
+                )
+
+            now = datetime.now().astimezone()
+            repository = self._group_repository()
+            for group in groups:
+                repository.remove_member(group.id, character_id, now)
+
+            persona_dir = Path(profile["persona_path"]).parent
+            self._remove_character_artifacts(character_id, persona_dir)
+
+        logger.info(
+            "api.character deleted character=%s groups=%s",
+            character_id,
+            [group.id for group in groups],
+        )
+        return {
+            "deleted": True,
+            "character_id": character_id,
+            "confirm_name": expected,
+            "left_groups": [group.id for group in groups],
+        }
+
+    def open_direct(self, character_id: str) -> dict[str, Any]:
+        """Give a deferred character its own place in the sidebar.
+
+        Idempotent, because the button that calls it lives on a member list that
+        may be a few seconds stale and a second press must not be an error. The
+        character was never disabled -- it speaks in its group, in Space and in
+        voice the whole time -- so opening changes nothing but the sidebar.
+        """
+
+        from fastapi import HTTPException
+
+        with self.character_write_lock:
+            try:
+                resolve_persona_path(self.settings, character_id)
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+            profile = next(
+                (item for item in self.profiles() if item["id"] == character_id),
+                None,
+            )
+            if profile is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown character: {character_id}",
+                )
+            if "archived_at" in profile:
+                raise HTTPException(
+                    status_code=409,
+                    detail="已归档的人物不能直接开启对话；请先恢复，再开始对话。",
+                )
+
+            was_pending = "direct_pending" in profile
+            set_character_direct_pending(self.settings, character_id, False)
+            self.refresh_cache()
+
+        logger.info(
+            "api.character direct_opened character=%s was_pending=%s",
+            character_id,
+            was_pending,
+        )
+        return {
+            "character_id": character_id,
+            "direct_pending": False,
+            "was_pending": was_pending,
+        }

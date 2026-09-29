@@ -6,6 +6,7 @@ that the definition file comes out of an archive byte-identical.
 """
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -28,7 +29,10 @@ from character_memory.config import (
     load_settings,
     set_character_archived,
 )
+from character_memory.domain.models import Event, EventType
+from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.group_web import attach_group_routes
+from character_memory.space_store import SpaceRepository
 
 
 def _personas(tmp_path: Path) -> Path:
@@ -153,6 +157,255 @@ def test_archived_character_leaves_every_picker_but_stays_resolvable(tmp_path: P
         assert client.get("/v1/characters?archived=true").json()["characters"] == []
 
 
+def test_the_archive_list_counts_only_what_the_character_itself_produced(tmp_path: Path):
+    """Three numbers, and all three are the character's own work.
+
+    The user's turns in the same conversations are deliberately excluded. A
+    character that never spoke but was spoken to is not active, and these
+    counts are what the user decides restore-versus-delete on -- counting the
+    other side of the conversation would make a silent character look busy.
+    """
+
+    config = _config(tmp_path)
+    app = create_api(str(config))
+    attach_group_routes(app, str(config))
+
+    with TestClient(app) as client:
+        store = app.state.character_memory.read_store
+        space = SpaceRepository(store)
+        groups = GroupRepository(store)
+        now = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+
+        rin_post = space.create_post("rin", "安静的下午", now)
+        space.create_post("momo", "今天天气不错", now)
+        space.create_post("momo", "第二篇", now)
+        space.add_comment(rin_post.id, "momo", "同意", now)
+        space.add_comment(rin_post.id, "user", "我也觉得", now, actor_type="USER")
+
+        store.append_event(
+            Event(
+                character_id="momo",
+                event_type=EventType.CHARACTER_MESSAGE,
+                event_time=now,
+                content="在的",
+            )
+        )
+        store.append_event(
+            Event(
+                character_id="momo",
+                event_type=EventType.USER_MESSAGE,
+                event_time=now,
+                content="在吗",
+            )
+        )
+
+        group_id = client.post(
+            "/v1/groups", json={"name": "三人行", "member_ids": ["rin", "momo"]}
+        ).json()["group"]["id"]
+        groups.append_event(
+            GroupEvent(
+                conversation_id=group_id,
+                turn_id="t1",
+                actor_type="CHARACTER",
+                actor_id="momo",
+                event_type="CHARACTER_MESSAGE",
+                event_time=now,
+                content="群里也说一句",
+            )
+        )
+        groups.append_event(
+            GroupEvent(
+                conversation_id=group_id,
+                turn_id="t1",
+                actor_type="USER",
+                actor_id="user",
+                event_type="USER_MESSAGE",
+                event_time=now,
+                content="群里的用户消息",
+            )
+        )
+
+        assert client.post("/v1/characters/momo/archive").status_code == 200
+        archived = client.get("/v1/characters?archived=true").json()["characters"]
+        momo = next(item for item in archived if item["id"] == "momo")
+
+        # Two posts it published, one comment it wrote, one private message and
+        # one group turn it spoke -- and not the two user-side turns.
+        assert momo["activity"] == {"posts": 2, "comments": 1, "messages": 2}
+
+
+def test_the_active_list_does_not_pay_for_activity_counters(tmp_path: Path):
+    """Counting is scoped to the archive list on purpose.
+
+    The sidebar asks for the active list on every render. Three count queries
+    per character for numbers it never displays would be pure cost, so the
+    payload must stay exactly as it was for the unarchived case.
+    """
+
+    config = _config(tmp_path)
+    app = create_api(str(config))
+
+    with TestClient(app) as client:
+        listed = client.get("/v1/characters").json()["characters"]
+        assert listed
+        assert all("activity" not in item for item in listed)
+
+
+def test_the_archive_drawer_renders_the_three_activity_numbers():
+    """The drawer has to actually show what the API started sending.
+
+    Without this the endpoint could grow a field nobody reads -- the exact
+    shape of the defect this stage exists to fix.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    web = root / "src" / "character_memory" / "web"
+    script = (web / "character_archive.js").read_text(encoding="utf-8")
+    css = (web / "styles.css").read_text(encoding="utf-8")
+
+    assert "profile.activity" in script
+    for label in ["条动态", "条评论", "条消息"]:
+        assert label in script
+    assert "还没有发过动态" in script
+    assert "character-archive-activity" in script
+    assert "character-archive-activity" in css
+
+
+def test_deleting_an_archived_character_needs_its_own_name(tmp_path: Path):
+    """The typed name is the whole guard on an irreversible operation."""
+
+    config = _config(tmp_path)
+    app = create_api(str(config))
+    persona_dir = tmp_path / "personas" / "momo"
+
+    with TestClient(app) as client:
+        assert client.post("/v1/characters/momo/archive").status_code == 200
+
+        # Wrong name, empty name, and the id instead of the display name.
+        for wrong in ("momo", "", "Momo!"):
+            response = client.post("/v1/characters/momo/delete", json={"confirm_name": wrong})
+            assert response.status_code == 400, wrong
+            assert persona_dir.is_dir(), wrong
+            assert [
+                item["id"]
+                for item in client.get("/v1/characters?archived=true").json()["characters"]
+            ] == ["momo"], wrong
+
+        deleted = client.post("/v1/characters/momo/delete", json={"confirm_name": "Momo"})
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+        assert not persona_dir.exists()
+        assert client.get("/v1/characters?archived=true").json()["characters"] == []
+        assert client.post("/v1/characters/momo/archive").status_code == 404
+
+
+def test_an_active_character_cannot_be_deleted(tmp_path: Path):
+    """Archiving first is the deliberate step; deletion must not skip it.
+
+    Without this, a stale request built from yesterday's list would delete
+    someone the user is still talking to.
+    """
+
+    config = _config(tmp_path)
+    app = create_api(str(config))
+
+    with TestClient(app) as client:
+        response = client.post("/v1/characters/rei/delete", json={"confirm_name": "Rei"})
+        assert response.status_code == 409
+        assert (tmp_path / "personas" / "rei").is_dir()
+        assert "rei" in {item["id"] for item in client.get("/v1/characters").json()["characters"]}
+
+
+def test_deleting_a_character_keeps_everything_it_said(tmp_path: Path):
+    """The point of the split: the definition goes, the history stays.
+
+    The archive notice promises exactly this ("聊天、Memory、Trace、头像和空间
+    动态都仍然保留"), so deletion has to honour it or the promise was a lie.
+    """
+
+    config = _config(tmp_path)
+    app = create_api(str(config))
+
+    with TestClient(app) as client:
+        store = app.state.character_memory.read_store
+        space = SpaceRepository(store)
+        now = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+        space.create_post("momo", "今天天气不错", now)
+        rin_post = space.create_post("rin", "安静的下午", now)
+        space.add_comment(rin_post.id, "momo", "同意", now)
+        store.append_event(
+            Event(
+                character_id="momo",
+                event_type=EventType.CHARACTER_MESSAGE,
+                event_time=now,
+                content="在的",
+            )
+        )
+
+        assert client.post("/v1/characters/momo/archive").status_code == 200
+        assert client.post("/v1/characters/momo/delete", json={"confirm_name": "Momo"}).status_code == 200
+
+        assert space.count_posts(character_id="momo") == 1
+        assert space.count_comments(character_id="momo") == 1
+        assert store.count_character_messages("momo") == 1
+        assert store.list_chat_events("momo", limit=10)
+
+
+def test_deleting_refuses_while_a_two_person_group_still_holds_the_character(tmp_path: Path):
+    """Refusing beats orphaning: a one-person group is invisible *and* unrestorable.
+
+    ``remove_member`` will not take a group below two, and ``/v1/groups`` plus
+    its archive drawer both filter groups under two out -- so bypassing the
+    floor would not leave a small group, it would leave one the user can
+    neither see nor restore. Deletion names the blocking groups instead.
+    """
+
+    config = _config(tmp_path)
+    app = create_api(str(config))
+    attach_group_routes(app, str(config))
+
+    with TestClient(app) as client:
+        client.post("/v1/groups", json={"name": "双人组", "member_ids": ["rin", "momo"]})
+        assert client.post("/v1/characters/momo/archive").status_code == 200
+
+        response = client.post("/v1/characters/momo/delete", json={"confirm_name": "Momo"})
+        assert response.status_code == 409
+        assert "双人组" in response.text
+        assert (tmp_path / "personas" / "momo").is_dir()
+        assert [
+            item["id"] for item in client.get("/v1/groups").json()["groups"][0]["members"]
+        ] == ["rin", "momo"]
+
+
+def test_deleting_removes_the_character_from_groups_that_can_afford_it(tmp_path: Path):
+    """A group of three survives losing one member, so the deletion goes through.
+
+    Leaving the membership behind would point the group at a persona that no
+    longer exists -- the same dangling reference as the archived-member bug
+    Stage 1 fixed, one level deeper.
+    """
+
+    config = _config(tmp_path)
+    app = create_api(str(config))
+    attach_group_routes(app, str(config))
+
+    with TestClient(app) as client:
+        group_id = client.post(
+            "/v1/groups",
+            json={"name": "三人行", "member_ids": ["rin", "momo", "rei"]},
+        ).json()["group"]["id"]
+        assert client.post("/v1/characters/momo/archive").status_code == 200
+
+        deleted = client.post("/v1/characters/momo/delete", json={"confirm_name": "Momo"})
+        assert deleted.status_code == 200
+        assert deleted.json()["left_groups"] == [group_id]
+
+        group = next(
+            item for item in client.get("/v1/groups").json()["groups"] if item["id"] == group_id
+        )
+        assert [item["id"] for item in group["members"]] == ["rin", "rei"]
+
+
 def test_archive_api_is_idempotent_and_refuses_unknown_characters(tmp_path: Path):
     config = _config(tmp_path)
     app = create_api(str(config))
@@ -202,12 +455,21 @@ def test_character_archive_frontend_contract_and_syntax():
         "?archived=true",
         "/archive",
         "/restore",
+        # Deletion is irreversible, so the typed-name gate is a contract too:
+        # losing the input, the disabled default or the name comparison would
+        # each turn one mis-click into a deleted character.
+        "/delete",
+        "data-character-delete",
+        "data-character-delete-input",
+        "data-character-delete-confirm",
+        "data-character-delete-expected",
+        "syncDeleteConfirm",
     ]:
         assert token in script
     # The row's archive control lives behind the row's "···" menu, so both the
     # trigger and the menu it opens have to be styled.
-    for token in ["character-more-button", "character-context-menu", "character-archive-card", "character-archive-list-button"]:
-        assert token in css
+    for token in ["character-more-button", "character-context-menu", "character-archive-card", "character-archive-list-button", "character-archive-actions", "archive-delete-input"]:
+        assert token in css or token in (web / "chat_refine.css").read_text(encoding="utf-8")
 
     node = shutil.which("node")
     if node:

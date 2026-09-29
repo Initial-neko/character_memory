@@ -193,6 +193,18 @@
     CM.closeDrawer();
   }
 
+  function activityLine(profile) {
+    const activity = profile.activity;
+    if (!activity) return "";
+    const posts = Number(activity.posts) || 0;
+    const comments = Number(activity.comments) || 0;
+    const messages = Number(activity.messages) || 0;
+    if (!(posts + comments + messages)) {
+      return '<small class="character-archive-activity is-quiet">还没有发过动态，也没有聊过天</small>';
+    }
+    return `<small class="character-archive-activity">${posts} 条动态 · ${comments} 条评论 · ${messages} 条消息</small>`;
+  }
+
   function renderArchivedDrawer() {
     if (!archived.length) {
       CM.dom.drawerBody.innerHTML = '<p class="muted">还没有归档的人物。</p>';
@@ -200,12 +212,12 @@
     }
     CM.dom.drawerBody.innerHTML = `<div class="character-archive-list">${archived.map(profile => {
       const archivedAt = profile.archived_at ? CM.fmtDate(profile.archived_at) : "";
-      return `<div class="character-archive-card"><div class="character-archive-copy"><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><span>${CM.escapeHtml(profile.identity || profile.tagline || "")}</span>${archivedAt ? `<small>归档于 ${CM.escapeHtml(archivedAt)}</small>` : ""}</div><button type="button" data-character-restore="${CM.escapeHtml(profile.id)}">恢复</button></div>`;
+      return `<div class="character-archive-card"><div class="character-archive-copy"><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><span>${CM.escapeHtml(profile.identity || profile.tagline || "")}</span>${activityLine(profile)}${archivedAt ? `<small>归档于 ${CM.escapeHtml(archivedAt)}</small>` : ""}</div><div class="character-archive-actions"><button type="button" data-character-restore="${CM.escapeHtml(profile.id)}">恢复</button><button class="danger" type="button" data-character-delete="${CM.escapeHtml(profile.id)}" title="永久删除人物设定">删除…</button></div></div>`;
     }).join("")}</div>`;
   }
 
   async function showArchived() {
-    CM.openDrawer("已归档人物", "这里可以恢复人物；聊天、Memory、Trace、头像和空间动态都仍然保留");
+    CM.openDrawer("已归档人物", "这里可以恢复人物；聊天、Memory、Trace、头像和空间动态都仍然保留。下面的数字是 TA 自己发过的动态、评论和消息");
     CM.dom.drawerBody.innerHTML = "<p>正在读取归档人物…</p>";
     try {
       const data = await CM.api("/v1/characters?archived=true");
@@ -227,6 +239,52 @@
     if (needsConfirm && !window.confirm(`当前已有 ${capacity.activeTotal} 位角色。恢复后会超过 10 位提醒阈值，是否继续？`)) return;
     const query = needsConfirm ? "?confirm_over_soft_limit=true" : "";
     const result = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/restore${query}`, {method:"POST"});
+    archived = archived.filter(item => item.id !== characterId);
+    await reloadCharacters();
+    renderArchivedDrawer();
+    renderArchiveListButton();
+    showVoiceReloadWarning(result);
+  }
+
+  // Deletion is the one irreversible action in this drawer, so its guard is
+  // proportional: the user types the character's own name and the confirm
+  // button stays disabled until it matches exactly. The same rule is enforced
+  // again on the server -- this is a speed bump for the human, not the thing
+  // standing between a stale request and the data.
+  function requestDelete(characterId) {
+    const profile = archived.find(item => item.id === characterId);
+    if (!profile) return;
+    const name = profile.name || profile.id;
+    CM.openDrawer(`删除「${name}」？`, "此操作不可撤销，无法恢复");
+    CM.dom.drawerBody.innerHTML = `
+      <section class="archive-confirm-card archive-delete-card">
+        <strong>会被删除</strong>
+        <p>人物设定（含 voice.yaml）、头像文件和语音引用，以及 TA 在所有群聊里的成员身份。</p>
+        <strong>会被保留</strong>
+        <p>聊天记录、Memory、Trace 和空间动态都不会删 —— 这一点和归档时的承诺一致。</p>
+        <label class="archive-delete-label" for="archiveDeleteInput">请输入 <b>${CM.escapeHtml(name)}</b> 以确认</label>
+        <input id="archiveDeleteInput" class="archive-delete-input" type="text" autocomplete="off" spellcheck="false"
+               data-character-delete-input="${CM.escapeHtml(characterId)}"
+               data-character-delete-expected="${CM.escapeHtml(name)}">
+        <div class="archive-confirm-actions">
+          <button type="button" data-character-delete-cancel>取消</button>
+          <button class="danger" type="button" data-character-delete-confirm="${CM.escapeHtml(characterId)}" disabled>永久删除</button>
+        </div>
+      </section>`;
+    CM.dom.drawerBody.querySelector("[data-character-delete-input]")?.focus();
+  }
+
+  function syncDeleteConfirm(input) {
+    const confirm = CM.dom.drawerBody.querySelector("[data-character-delete-confirm]");
+    if (!confirm) return;
+    confirm.disabled = input.value.trim() !== String(input.dataset.characterDeleteExpected || "");
+  }
+
+  async function deleteCharacter(characterId, confirmName) {
+    const result = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/delete`, {
+      method: "POST",
+      body: JSON.stringify({confirm_name: confirmName}),
+    });
     archived = archived.filter(item => item.id !== characterId);
     await reloadCharacters();
     renderArchivedDrawer();
@@ -273,7 +331,34 @@
       return;
     }
     const restore = event.target.closest("[data-character-restore]");
-    if (restore) restoreCharacter(restore.dataset.characterRestore).catch(console.error);
+    if (restore) {
+      restoreCharacter(restore.dataset.characterRestore).catch(console.error);
+      return;
+    }
+    if (event.target.closest("[data-character-delete-cancel]")) {
+      renderArchivedDrawer();
+      return;
+    }
+    const remove = event.target.closest("[data-character-delete-confirm]");
+    if (remove) {
+      const input = CM.dom.drawerBody.querySelector("[data-character-delete-input]");
+      remove.disabled = true;
+      deleteCharacter(remove.dataset.characterDeleteConfirm, input?.value || "")
+        .catch(error => {
+          remove.disabled = false;
+          CM.dom.drawerBody.insertAdjacentHTML("afterbegin", `<div class="error">${CM.escapeHtml(error.message)}</div>`);
+        });
+      return;
+    }
+    const startDelete = event.target.closest("[data-character-delete]");
+    if (startDelete) requestDelete(startDelete.dataset.characterDelete);
+  });
+
+  // The confirm button is only ever unlocked by the input, so the handler lives
+  // on the container: the panel is re-rendered from a string every time.
+  CM.dom.drawerBody.addEventListener("input", event => {
+    const input = event.target.closest("[data-character-delete-input]");
+    if (input) syncDeleteConfirm(input);
   });
 
   archiveListButton.addEventListener("click", () => showArchived().catch(console.error));
@@ -295,6 +380,8 @@
     requestArchive,
     archiveCharacter,
     restoreCharacter,
+    requestDelete,
+    deleteCharacter,
     refreshArchiveCount,
     syncCurrentAction,
   });

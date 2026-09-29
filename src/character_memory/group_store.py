@@ -711,6 +711,21 @@ class GroupRepository:
             ).fetchone()
         return int(row["n"] if row else 0)
 
+    def count_character_messages(self, character_id: str) -> int:
+        """Group turns one character spoke, summed over every conversation.
+
+        The group-side half of the archive drawer's message count. Mirrors
+        ``Storage.count_character_messages``: it counts what the character
+        said, not what was said to it, so the user's turns in the same
+        conversations are excluded.
+        """
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) AS n FROM conversation_events WHERE actor_id=? AND actor_type='CHARACTER'",
+                (character_id,),
+            ).fetchone()
+        return int(row["n"] if row else 0)
+
     def add_trace(
         self,
         conversation_id: str,

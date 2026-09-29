@@ -32,9 +32,14 @@ button,textarea { font:inherit; }
 .character-context-menu button:hover { background:var(--ui-hover); }
 .character-archive-list { display:grid; gap:8px; }
 .character-archive-card { display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--ui-line); border-radius:var(--ui-r-sm); padding:10px 12px; }
+.character-archive-actions { display:flex; flex:none; gap:6px; }
 .character-archive-copy { display:grid; gap:2px; min-width:0; }
 .character-archive-copy span { color:var(--ui-muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .character-archive-copy small { color:var(--ui-muted); font-size:10px; }
+/* Activity is the number the user is deciding on, so it sits a step above the
+ * identity/date metadata instead of blending into it. */
+.character-archive-activity { color:var(--ui-text); font-size:11px; font-variant-numeric:tabular-nums; }
+.character-archive-activity.is-quiet { color:var(--ui-muted); font-style:italic; }
 .character-archive-card button { min-height:0; padding:6px 12px; border-radius:var(--ui-r-sm); }
 .character-archive-empty { color:var(--ui-muted); font-size:12px; padding:10px; }
 /* Archive/restore may succeed while the live GSV registry reload fails. Keep

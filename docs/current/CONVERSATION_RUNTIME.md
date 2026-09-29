@@ -284,6 +284,47 @@ archived_at_epoch
 
 Archive 与 group reaction 使用同一 per-group lock，避免形成半提交状态。
 
+### Character Lifecycle：归档 / 删除 / 延迟私聊
+
+Character 生命周期一律是**旁挂标记**，不写进 `persona.yaml`：整个 persona 文档会原样交给模型，UI 状态不能进 prompt。标记文件的存在与否就是 flag，内容里的时间戳只是装饰。
+
+| 与 `persona.yaml` 同级的标记 | 存在表示 | 缺席表示 |
+|---|---|---|
+| `archived.yaml` | 已归档 | 正常 |
+| `direct_pending.yaml` | 私聊尚未开启 | 正常（默认） |
+
+两者极性相反。`direct_pending.yaml` 用"缺席即正常"，因为它是后加的：逐个创建的人物、以及在这个标记出现之前就存在的人物都没有这个文件，必须继续照旧出现在侧边栏。
+
+**归档**：`POST /v1/characters/{id}/archive` 与 `/restore`。隐藏但不删事实；已归档角色仍保留群成员身份，历史照常渲染，也仍可被移出群聊。
+
+**删除**：`POST /v1/characters/{id}/delete`，body `{"confirm_name": "<显示名>"}`。三重校验：
+
+1. 人物必须存在（404）；
+2. **必须是已归档状态**（409）——归档是前置的确认动作，否则一份过期的列表就足以删掉用户正在聊天的人；
+3. `confirm_name` 必须与该角色显示名完全一致（400）。
+
+用 POST 而不是 `DELETE`：`DELETE` 只能把确认信息放进 body，而 body 恰好是中间层唯一被允许丢弃的部分，丢了会变成"空确认"而不是报错。
+
+删除范围（不可逆）——移除的是**定义**，保留的是**历史**：
+
+- 移除：persona 目录（含 `voice.yaml`）、头像文件、语音引用、在所有群聊里的成员身份、运行时注册；
+- 保留：`events`（聊天）、`memories`、`runtime_traces`、`space_posts` / `space_comments`。归档提示里"聊天、Memory、Trace、头像和空间动态都仍然保留"这条承诺对删除同样成立。
+
+群成员身份有一条硬约束：`remove_member` 不允许把群降到 2 人以下，而 `GET /v1/groups` 与群归档抽屉都会过滤掉成员数 <2 的群。绕开这条下限不会留下"小群"，而是留下一个用户**既看不见、也无法恢复**的群。所以删除改为**拒绝并点名**那些只有 2 人的群，让用户先归档它。
+
+**延迟私聊（deferred direct chat）**：ensemble 批量建群创建的人物默认带 `direct_pending.yaml`。它们是**完全正常的角色**——照常参与群聊、Space、语音、World——只是暂不进侧边栏，直到用户主动开启。`POST /v1/characters/{id}/open-direct`（幂等）移除标记。
+
+过滤只发生在"会渲染成侧边栏"的那两条路径上：
+
+- `GET /v1/characters`（默认，`include_deferred=false`）；
+- `GET /v1/character-profiles` —— 头像管理器会把结果直接回写 `CM.state.characters`，不过滤就会漏回侧边栏。
+
+群成员选择器必须显式请求 `GET /v1/characters?include_deferred=true`。兜底规则：如果过滤会让活跃列表变空，则返回未过滤的列表——浏览器把空列表当成"没有发现任何 Persona"并拒绝启动，"隐藏到空"不是可接受的结果。
+
+`direct_pending` 与 `archived` 会出现在群成员 payload（`group_web` / `group_members_web` 的 `members[]`）上，因为浏览器已经不能再用"不在侧边栏里"来推断"已归档"了。
+
+**归档列表统计**：`GET /v1/characters?archived=true` 为每个角色附带 `activity: {posts, comments, messages}`。三个数字都只数**角色自己的产出**（它发的动态、它写的评论、它说的话），不数对话的另一侧——否则一个从不开口的角色会显得很活跃。仅 `archived=true` 时才计算。
+
 ## 7. Group Mentions
 
 Mention 是**注意力与顺序信号**，不是独占路由权限。
@@ -531,7 +572,6 @@ Chat dictation (`web/dictation.js`) and a voice call exclude each other: only on
 
 ### Boundaries
 
-- `VOICE_MESSAGE` is a normal way to speak, sitting beside `MESSAGE`, not a rare action kept for special occasions. The prompt carries no frequency prohibition, and one must not be added back: over the whole trace archive (5958 reactions) the model chose `VOICE_MESSAGE` **3 times**, while `STICKER` — which has a candidate list and an explicit "you may use these" line — was chosen 81 times. What the contract has to supply is a concrete occasion (too much to type, tone is the point, one stretch of speech beats several messages), not a discouragement.
 - One `VOICE_MESSAGE` is one complete TTS request; no sentence/chunk splitting in V1.
 - Ordinary `MESSAGE` remains text-only and is not automatically materialized.
 - Audio is MediaAsset data, not Memory.

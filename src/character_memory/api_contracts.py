@@ -61,6 +61,18 @@ class CreateCharacterRequest(BaseModel):
     creation: CharacterCreationMetadataRequest | None = None
 
 
+class DeleteArchivedCharacterRequest(BaseModel):
+    """Confirmation for a deletion that cannot be undone.
+
+    The caller has to name the character it means. An id in the URL is enough
+    to identify one, but nothing about a bare id proves a human meant *this*
+    character -- and once the persona directory is gone there is nothing to
+    restore from. The route checks the name against the character's own.
+    """
+
+    confirm_name: str = Field(default="", max_length=120)
+
+
 class CharacterCapacityConfirmationRequired(ValueError):
     def __init__(self, active_count: int, add_count: int):
         self.active_count = int(active_count)

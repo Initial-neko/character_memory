@@ -1,12 +1,16 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 import character_memory.ensemble_builder as ensemble_module
+from character_memory.character_onboarding import save_creation_metadata
 from character_memory.ensemble_builder import (
     EnsembleBuilderService,
     EnsembleMemberResearch,
@@ -168,8 +172,29 @@ def _access(tmp_path):
         skip_capacity_check=False,
         creation=None,
     ):
+        if not skip_capacity_check:
+            check_capacity(
+                1,
+                confirm_over_soft_limit=confirm_over_soft_limit,
+            )
         character_id = draft.name.lower()
-        profile = {"id": character_id, "name": draft.name, "identity": draft.identity}
+        persona_path = tmp_path / "personas" / character_id / "persona.yaml"
+        persona_path.parent.mkdir(parents=True, exist_ok=True)
+        persona_path.write_text(
+            f"id: {character_id}\nname: {draft.name}\n",
+            encoding="utf-8",
+        )
+        save_creation_metadata(
+            persona_path,
+            creation=creation,
+            initialization={"avatar": {"status": "ready"}},
+        )
+        profile = {
+            "id": character_id,
+            "name": draft.name,
+            "identity": draft.identity,
+            "persona_path": str(persona_path),
+        }
         profiles.append(profile)
         created.append(character_id)
         creation_records.append({"character_id": character_id, **(creation or {})})
@@ -251,6 +276,105 @@ def test_ensemble_confirmation_fills_same_group_and_only_creates_missing_charact
     ]
     assert all(item["group_id"] == result["group_id"] or item["group_id"] == started["group_id"] for item in access.creation_records)
     assert all("LAB MEM" in item["prompt"] for item in access.creation_records)
+    for character_id in created:
+        creation = json.loads(
+            (tmp_path / "personas" / character_id / "creation.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert creation["group_id"] == result["group_id"]
+    store.close()
+
+
+def test_confirmation_rechecks_stale_existing_character_matches(tmp_path):
+    access, store, _, profiles, created = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    service.research(started["group_id"])
+
+    # A READY build may outlive a character it matched during research.
+    profiles[:] = [item for item in profiles if item["id"] != "kurisu"]
+
+    result = service.confirm(started["group_id"], [0, 1])
+
+    current_ids = {item["id"] for item in profiles}
+    assert set(result["group"]["member_ids"]) <= current_ids
+    assert created == ["kurisu", "okabe"]
+    store.close()
+
+
+def test_confirmation_rechecks_capacity_at_each_character_write(tmp_path):
+    access, store, _, profiles, created = _access(tmp_path)
+    for index in range(17):
+        profiles.append(
+            {"id": f"extra-{index}", "name": f"Extra {index}", "identity": "测试"}
+        )
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    service.research(started["group_id"])
+
+    original_create = access.create_character_from_draft
+    inserted = False
+
+    def create_with_concurrent_character(*args, **kwargs):
+        nonlocal inserted
+        profile = original_create(*args, **kwargs)
+        if not inserted:
+            inserted = True
+            profiles.append(
+                {"id": "concurrent", "name": "Concurrent", "identity": "并发创建"}
+            )
+        return profile
+
+    access.create_character_from_draft = create_with_concurrent_character
+
+    with pytest.raises(ValueError, match="hard limit"):
+        service.confirm(
+            started["group_id"],
+            [0, 1, 2],
+            confirm_over_soft_limit=True,
+        )
+
+    assert GroupRepository(store).list_groups() == []
+    assert "okabe" not in {item["id"] for item in profiles}
+    assert "mayuri" not in {item["id"] for item in profiles}
+    assert created == []
+    store.close()
+
+
+def test_duplicate_concurrent_confirmation_commits_once_and_keeps_build_alias(tmp_path):
+    access, store, _, _, created = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    service.research(started["group_id"])
+
+    original_create = access.create_character_from_draft
+    first_create_started = threading.Event()
+    release_first_create = threading.Event()
+
+    def slow_first_create(*args, **kwargs):
+        if not first_create_started.is_set():
+            first_create_started.set()
+            assert release_first_create.wait(timeout=5)
+        return original_create(*args, **kwargs)
+
+    access.create_character_from_draft = slow_first_create
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(service.confirm, started["group_id"], [0, 1])
+        assert first_create_started.wait(timeout=5)
+        duplicate = executor.submit(service.confirm, started["group_id"], [0, 1])
+        release_first_create.set()
+        first_result = first.result(timeout=5)
+        duplicate_result = duplicate.result(timeout=5)
+
+    assert first_result["group_id"] == duplicate_result["group_id"]
+    assert first_result["status"] == duplicate_result["status"] == "ACTIVE"
+    assert created == ["okabe"]
+    assert len(GroupRepository(store).list_groups()) == 1
+    assert repository.get(started["group_id"])["group_id"] == first_result["group_id"]
     store.close()
 
 
@@ -443,6 +567,59 @@ def test_prepare_route_returns_failed_build_without_raw_502_detail(tmp_path):
     store.close()
 
 
+def test_routes_recover_interrupted_build_and_expose_it_for_resume(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    started = EnsembleBuilderService(access, repository).start(
+        "复刻命运石之门的 LAB MEM，并形成群聊",
+        now=datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc),
+    )
+    assert started["status"] == "BUILDING"
+
+    # Route attachment represents the next process startup: no in-memory task
+    # can still own a BUILDING record from the previous process.
+    app = FastAPI()
+    app.state.character_memory = access
+    attach_ensemble_routes(app)
+
+    with TestClient(app) as client:
+        response = client.get("/v1/ensembles")
+
+    assert response.status_code == 200
+    build = response.json()["build"]
+    assert build["group_id"] == started["group_id"]
+    assert build["status"] == "FAILED"
+    assert "服务重启" in build["error"]
+    store.close()
+
+
+def test_latest_build_does_not_resurface_an_older_failed_attempt(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    failed = service.start(
+        "第一次失败的群像资料整理",
+        now=datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc),
+    )
+    repository.set_status(
+        failed["group_id"],
+        "FAILED",
+        datetime(2026, 9, 22, 12, 1, tzinfo=timezone.utc),
+        error="provider unavailable",
+    )
+    cancelled = service.start(
+        "第二次随后被用户取消的群像资料整理",
+        now=datetime(2026, 9, 22, 12, 2, tzinfo=timezone.utc),
+    )
+    service.cancel(
+        cancelled["group_id"],
+        now=datetime(2026, 9, 22, 12, 3, tzinfo=timezone.utc),
+    )
+
+    assert repository.latest_resumable() is None
+    store.close()
+
+
 def test_one_failed_member_does_not_fail_the_whole_ensemble(tmp_path, monkeypatch):
     access, store, _, _, _ = _access(tmp_path)
     repository = EnsembleRepository(store)
@@ -579,6 +756,7 @@ def test_ensemble_web_assets_are_loaded():
     assert "/static/ensemble.js" in index
     assert "/static/ensemble.css" in index
     for token in [
+        'CM.api("/v1/ensembles")',
         "/v1/ensembles/prepare",
         "/confirm",
         "/members/",

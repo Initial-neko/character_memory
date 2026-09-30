@@ -13,6 +13,7 @@ from uuid import uuid4
 import httpx
 from pydantic import BaseModel, Field, field_validator
 
+from character_memory.character_onboarding import save_creation_metadata
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.persona_builder import PersonaDraft
 from character_memory.time_utils import epoch_us
@@ -179,6 +180,10 @@ class EnsembleRepository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_ensemble_builds_updated
                     ON ensemble_builds(updated_at_epoch DESC,group_id);
+                CREATE TABLE IF NOT EXISTS ensemble_build_aliases(
+                    build_id TEXT PRIMARY KEY,
+                    group_id TEXT NOT NULL
+                );
                 """
             )
             self.store._ensure_migration_table_locked()
@@ -240,7 +245,43 @@ class EnsembleRepository:
                 "SELECT * FROM ensemble_builds WHERE group_id=?",
                 (group_id,),
             ).fetchone()
+            if row is None:
+                row = self.store.conn.execute(
+                    """
+                    SELECT builds.* FROM ensemble_build_aliases AS aliases
+                    JOIN ensemble_builds AS builds ON builds.group_id=aliases.group_id
+                    WHERE aliases.build_id=?
+                    """,
+                    (group_id,),
+                ).fetchone()
         return self._payload(row) if row is not None else None
+
+    def recover_interrupted(self) -> int:
+        """Turn process-local BUILDING work into an explicit retryable state."""
+
+        with self.store._lock:
+            cur = self.store.conn.execute(
+                """
+                UPDATE ensemble_builds SET status='FAILED',
+                    error='资料整理在服务重启前未完成，请重试整理'
+                WHERE status='BUILDING'
+                """
+            )
+            self.store._maybe_commit()
+            return int(cur.rowcount)
+
+    def latest_resumable(self) -> dict[str, Any] | None:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                """
+                SELECT * FROM ensemble_builds
+                ORDER BY updated_at_epoch DESC,group_id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None or str(row["status"]) not in {"READY", "FAILED"}:
+            return None
+        return self._payload(row)
 
     def save_research(
         self,
@@ -334,6 +375,13 @@ class EnsembleRepository:
             )
             if cur.rowcount <= 0:
                 raise KeyError("ensemble build not found")
+            self.store.conn.execute(
+                """
+                INSERT INTO ensemble_build_aliases(build_id,group_id) VALUES(?,?)
+                ON CONFLICT(build_id) DO UPDATE SET group_id=excluded.group_id
+                """,
+                (build_id, group_id),
+            )
         build = self.get(group_id)
         if build is None:
             raise KeyError("activated ensemble build not found")
@@ -354,6 +402,8 @@ class EnsembleBuilderService:
         self.access = access
         self.repository = repository
         self.groups = GroupRepository(access.store())
+        self._confirm_locks_guard = threading.Lock()
+        self._confirm_locks: dict[str, threading.Lock] = {}
         self.voice_design_lab_base = str(
             getattr(
                 access,
@@ -397,14 +447,64 @@ class EnsembleBuilderService:
             "warning": active + int(add_count) > soft,
         }
 
+    def _refresh_existing_matches(
+        self,
+        drafts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Project research drafts against the current active registry.
+
+        A READY build is durable and may be confirmed much later. Character
+        deletion, archive, restore or an unrelated creation can all change
+        which researched member should be reused in the meantime, so the
+        research-time id is display context rather than a commit-time fact.
+        """
+
+        active_by_name = {
+            str(profile.get("name") or "").strip().casefold(): str(profile["id"])
+            for profile in self._active_profiles()
+            if str(profile.get("name") or "").strip()
+        }
+        refreshed: list[dict[str, Any]] = []
+        for item in drafts:
+            current = dict(item)
+            draft = current.get("draft") if isinstance(current.get("draft"), dict) else {}
+            name = str(current.get("canonical_name") or draft.get("name") or "").strip()
+            current["existing_character_id"] = active_by_name.get(name.casefold())
+            refreshed.append(current)
+        return refreshed
+
+    def _bind_created_characters_to_group(
+        self,
+        character_ids: list[str],
+        group_id: str,
+    ) -> None:
+        """Replace the temporary build id in creation provenance with the real group."""
+
+        profiles = {
+            str(profile.get("id") or ""): profile
+            for profile in self.access.character_profiles()
+        }
+        for character_id in character_ids:
+            profile = profiles.get(character_id)
+            persona_path = str((profile or {}).get("persona_path") or "").strip()
+            if not persona_path:
+                raise RuntimeError(
+                    f"created character is missing from the registry: {character_id}"
+                )
+            save_creation_metadata(
+                persona_path,
+                creation={"group_id": group_id},
+            )
+
     def payload(self, build: dict[str, Any]) -> dict[str, Any]:
-        drafts = list(build.get("drafts") or [])
+        drafts = self._refresh_existing_matches(list(build.get("drafts") or []))
         ready = [item for item in drafts if item.get("status", "READY") == "READY" and item.get("draft")]
         failed = [item for item in drafts if item.get("status") == "FAILED"]
         new_count = sum(1 for item in ready if not item.get("existing_character_id"))
         group = self.groups.get_group(build["group_id"], include_archived=True)
         return {
             **build,
+            "drafts": drafts,
             "ready_member_count": len(ready),
             "failed_members": [
                 {
@@ -604,7 +704,7 @@ Content:
         build = self.repository.get(group_id)
         if build is None:
             raise KeyError("ensemble build not found")
-        drafts = list(build.get("drafts") or [])
+        drafts = self._refresh_existing_matches(list(build.get("drafts") or []))
         target = next((item for item in drafts if int(item.get("index", -1)) == int(index)), None)
         if target is None:
             raise KeyError("ensemble member not found")
@@ -745,6 +845,29 @@ Content:
         use_voice_design: bool = False,
         now: datetime | None = None,
     ) -> dict[str, Any]:
+        # A browser may retry the same POST after losing the response. Keep one
+        # commit owner per durable build; after the first commit, repository.get
+        # resolves the original build id through its active-group alias.
+        with self._confirm_locks_guard:
+            lock = self._confirm_locks.setdefault(group_id, threading.Lock())
+        with lock:
+            return self._confirm_once(
+                group_id,
+                selected_indices,
+                confirm_over_soft_limit=confirm_over_soft_limit,
+                use_voice_design=use_voice_design,
+                now=now,
+            )
+
+    def _confirm_once(
+        self,
+        group_id: str,
+        selected_indices: list[int],
+        *,
+        confirm_over_soft_limit: bool = False,
+        use_voice_design: bool = False,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
         now = now or datetime.now().astimezone()
         build = self.repository.get(group_id)
         if build is None:
@@ -756,7 +879,7 @@ Content:
                 raise ValueError("上次资料整理失败，请先重试整理")
             raise ValueError("群像资料还没有准备好")
 
-        drafts = list(build.get("drafts") or [])
+        drafts = self._refresh_existing_matches(list(build.get("drafts") or []))
         index_map = {int(item.get("index", -1)): item for item in drafts}
         selected: list[dict[str, Any]] = []
         for raw in selected_indices:
@@ -805,7 +928,12 @@ Content:
                     draft,
                     "",
                     confirm_over_soft_limit=True,
-                    skip_capacity_check=True,
+                    # The batch check above gives the UI one confirmation and
+                    # a useful all-or-nothing forecast. The actual character
+                    # write still rechecks the hard boundary under the shared
+                    # registry lock because onboarding releases that lock for
+                    # provider work and another creation may interleave.
+                    skip_capacity_check=False,
                     creation={
                         "source": "ENSEMBLE_BUILDER",
                         "prompt": str(build.get("prompt") or ""),
@@ -826,6 +954,7 @@ Content:
                 group = self.groups.create_group(build["group_name"], member_ids, now)
                 active_group_id = group.id
                 created_group_id = group.id
+            self._bind_created_characters_to_group(created_ids, active_group_id)
             self.repository.activate(
                 group_id,
                 active_group_id,

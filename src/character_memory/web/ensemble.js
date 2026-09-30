@@ -44,8 +44,29 @@
     `;
   }
 
-  function openBuilder() {
+  async function openBuilder() {
     currentBuild = null;
+    CM.openDrawer("AI 建群", "正在检查上次保留的构建进度");
+    CM.dom.drawerBody.innerHTML = `
+      <div class="ensemble-loading">
+        <span class="ensemble-loading-mark">◎</span>
+        <strong>正在恢复上次进度…</strong>
+      </div>
+    `;
+    try {
+      const response = await CM.api("/v1/ensembles");
+      const build = response?.build;
+      if (build?.status === "READY") {
+        renderConfirmation(build);
+        return;
+      }
+      if (build?.status === "FAILED") {
+        renderBuildFailure(build);
+        return;
+      }
+    } catch (error) {
+      console.warn("ensemble.resume failed", error);
+    }
     CM.openDrawer("AI 建群", "一句话整理资料和成员草稿，确认一次后再真正创建群聊");
     CM.dom.drawerBody.innerHTML = introHtml();
   }
@@ -326,7 +347,7 @@
     }
   }
 
-  button.addEventListener("click", openBuilder);
+  button.addEventListener("click", () => { openBuilder().catch(console.error); });
 
   CM.dom.drawerBody.addEventListener("change", event => {
     if (event.target.closest("[data-ensemble-member]") && currentBuild) updateCapacity(currentBuild);
@@ -343,5 +364,5 @@
     if (event.target.closest("[data-ensemble-confirm]")) confirmBuild().catch(console.error);
   });
 
-  CM.registerFeature("ensemble", {open:openBuilder});
+  CM.registerFeature("ensemble", {open:() => openBuilder()});
 })();

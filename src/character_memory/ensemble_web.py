@@ -25,6 +25,7 @@ def attach_ensemble_routes(app):
         raise RuntimeError("create_api() must expose app.state.character_memory before ensemble routes attach")
 
     repository = EnsembleRepository(access.read_store)
+    repository.recover_interrupted()
     service = EnsembleBuilderService(access, repository)
     access.ensemble_repository = repository
     access.ensemble_service = service
@@ -37,6 +38,11 @@ def attach_ensemble_routes(app):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"群聊创建失败：{exc}") from exc
+
+    @app.get("/v1/ensembles")
+    def latest_resumable_ensemble():
+        build = repository.latest_resumable()
+        return {"build": service.payload(build) if build is not None else None}
 
     @app.post("/v1/ensembles/prepare")
     def prepare_ensemble(req: EnsembleStartRequest):

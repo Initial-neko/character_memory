@@ -51,6 +51,8 @@ class DeterministicPersonModel(PersonModel):
 
     def _reaction(self, context: str) -> PersonReaction:
         current = self._current_text(context)
+        if current.startswith("E2E_FAIL_DIRECT:"):
+            raise RuntimeError("E2E direct provider failure")
         if "# Group Conversation Contract" in context:
             message = f"E2E group reply: {current}"
         elif "TIME_TICK" in context or "手动唤醒后的主动判断" in context or "时间自然过去了一段" in context:

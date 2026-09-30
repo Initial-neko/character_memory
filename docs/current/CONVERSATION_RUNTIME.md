@@ -123,7 +123,7 @@ Direct Event 存在 core `events` 表中，以 `character_id` 区分人物，并
 
 不同 Character/Conversation 的 Provider 调用可以 overlap。
 
-Direct Character 如果 reaction 中产生 `GENERATE_IMAGE`，主 reaction 先完成；Visual Runtime 在后台生成并追加 IMAGE Event/SSE。
+Direct Character 如果 reaction 中产生 `GENERATE_IMAGE`，主 reaction 先完成；Visual Runtime 在后台生成并追加 IMAGE Event/SSE。生成产物以 `media_id` 引用 `/v1/media/{id}`；实时投影和 history 投影都使用该引用，人物图库的 `image_id` 仍使用图库 asset 路由。
 
 ## 6. Group chat
 
@@ -484,6 +484,7 @@ Durable user fact
 因此：
 
 - 用户 Event 一旦接受，不因 LLM 失败消失；
+- Direct 当前页面收到的 `reaction_error` 会保留到下一条已入队的用户事实，不被 idle 重绘或 history 对账清掉；这是页面内提示，不是 durable failure ledger，刷新页面不会恢复它；
 - outward action 合法时，辅助 candidate 的小格式错误应局部降级；
 - outward action 自己 malformed 时仍需要 repair/failure；
 - 一个 group member 失败不应该结束整个 room turn；

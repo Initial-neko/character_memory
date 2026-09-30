@@ -760,6 +760,11 @@ Image search providers normalize results into a shared result shape including：
 
 This keeps SSRF/download validation, avatar persistence and UI selection independent from a specific search vendor.
 
+Avatar and Space remote images share `RemoteMediaFetcher`. It rejects redirects,
+checks the image signature, and enforces the byte ceiling while streaming decoded
+response bytes. Missing `Content-Length`, chunked transfer and compressed responses
+do not bypass the limit; a rejected download closes the response immediately.
+
 `SearchProvider` is now shared infrastructure, not Avatar-owned infrastructure:
 
 ```text

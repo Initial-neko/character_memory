@@ -172,6 +172,8 @@ Research 只负责整理群体事实。成员 Persona 不再为每个人额外�
 
 ### Member failure isolation
 
+Group 当前页面收到的 group-level `reaction_error` 按群保留，不被后续 `idle` 或 history 对账重绘清掉；较新的 `queued` / `typing` 会清除旧提示，迟到的旧轮次错误不会覆盖新轮次。提示是页面内状态，刷新页面不会恢复，不改变 durable message/trace。
+
 一个成员 structured output/provider 失败：
 
 ```text

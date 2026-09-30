@@ -5,6 +5,8 @@
   let groups = [];
   let archivedGroups = [];
   const pending = new Set();
+  const reactionErrors = new Map();
+  const latestReactionWatermarks = new Map();
   let groupStream = null;
   let groupStreamId = null;
   let historyState = {groupId:null, messages:[], hasMore:false, nextBeforeId:null, loadingOlder:false};
@@ -225,6 +227,7 @@
         ? `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」正在构建成员。<br>确认人物后就可以直接开始聊天。</div>`
         : `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」还没有消息。<br>说第一句话，看看谁会接话。</div>`;
       if (pending.has(activeId())) appendPending("群成员正在输入…");
+      appendReactionError();
       return;
     }
     if (historyState.hasMore) {
@@ -246,6 +249,7 @@
       addMessage(entry);
     }
     if (pending.has(activeId())) appendPending("群成员正在输入…");
+    appendReactionError();
     if (preserveScroll) {
       requestAnimationFrame(() => {
         const delta = document.body.scrollHeight - beforeHeight;
@@ -260,6 +264,15 @@
     note.className = "group-pending-note";
     note.textContent = text;
     CM.dom.chat.appendChild(note);
+  }
+
+  function appendReactionError() {
+    const failure = reactionErrors.get(activeId());
+    if (!failure) return;
+    const box = document.createElement("div");
+    box.className = "error group-reaction-error";
+    box.textContent = `群聊生成失败：${failure.message || "未知错误"}`;
+    CM.dom.chat.appendChild(box);
   }
 
   function memberName(characterId) {
@@ -339,6 +352,12 @@
     source.addEventListener("reaction_status", event => {
       if (!CM.isGroupConversation() || groupId !== activeId()) return;
       const data = JSON.parse(event.data || "{}");
+      if (["queued", "typing"].includes(data.state)) {
+        const watermark = Number(data.watermark || 0);
+        latestReactionWatermarks.set(groupId, Math.max(latestReactionWatermarks.get(groupId) || 0, watermark));
+        const failure = reactionErrors.get(groupId);
+        if (failure && watermark > failure.watermark) reactionErrors.delete(groupId);
+      }
       if (["queued","typing","superseded"].includes(data.state)) pending.add(groupId);
       if (data.state === "idle") pending.delete(groupId);
       CM.updateHeader();
@@ -358,10 +377,10 @@
     source.addEventListener("reaction_error", event => {
       if (!CM.isGroupConversation() || groupId !== activeId()) return;
       const data = JSON.parse(event.data || "{}");
-      const box = document.createElement("div");
-      box.className = "error";
-      box.textContent = `群聊生成失败：${data.message || "未知错误"}`;
-      CM.dom.chat.appendChild(box);
+      const watermark = Number(data.watermark || 0);
+      if (watermark < (latestReactionWatermarks.get(groupId) || 0)) return;
+      reactionErrors.set(groupId, {...data, watermark});
+      renderHistory(historyState.messages);
     });
   }
 

@@ -1,6 +1,6 @@
 # ASR P0 Technical Report
 
-> Status: research baseline + acceptance input. The streaming architecture proposed here has since been implemented; target-machine model/resource acceptance is still pending.
+> Status: historical research baseline + acceptance input, not a current implementation audit or delivery plan. Read [VOICE_AND_TTS](../current/VOICE_AND_TTS.md) for current behavior and [DELIVERY_PLAN](../current/DELIVERY_PLAN.md) for outstanding acceptance. Model proposals below are not automatic commitments.
 >
 > Original research baseline: `main@3bff5afea674a12597581b4e1e59d796d19ba641`. Current implementation checkpoint: 2026-09-29 `main@38d400ac2ff459c851585d0045735c6b22eed636`.
 >
@@ -8,7 +8,7 @@
 
 ## 1. Executive conclusion
 
-> Implementation update: the shared Media Runtime streaming session, Sherpa Online Paraformer provider, browser AudioWorklet client, Dictation migration and Browser Call migration are now on `main`, with batch fallback retained. The benchmark/model-selection conclusions below remain open until the real target-machine corpus is measured. See [DELIVERY_PLAN.md](DELIVERY_PLAN.md).
+> Historical implementation checkpoint (2026-09-29): the shared Media Runtime streaming session, Sherpa Online Paraformer provider, browser AudioWorklet client, Dictation migration and Browser Call migration were on `main`, with batch fallback retained. The benchmark/model-selection conclusions below remain research until the real target-machine corpus is measured. See [DELIVERY_PLAN.md](../current/DELIVERY_PLAN.md).
 
 The original ASR problem was architectural as well as model-related.
 
@@ -43,11 +43,11 @@ The design intentionally accepts modest additional finalization latency in excha
 
 ---
 
-## 2. Current implementation audit
+## 2. Historical batch-baseline implementation audit
 
 ### 2.1 Dictation path
 
-Current browser implementation effectively does:
+At the original research baseline, browser Dictation did:
 
 ```
 getUserMedia
@@ -119,7 +119,7 @@ That contract should be replaced/extended rather than hiding a streaming impleme
 
 ---
 
-## 3. Current P0 failure risks
+## 3. Failure risks identified at the historical baseline
 
 ### P0-A: premature endpointing
 
@@ -560,7 +560,7 @@ A model with a slightly better average CER but significantly more deletions shou
 
 ---
 
-## 8. Migration order
+## 8. Original migration proposal (not current task instructions)
 
 ### Step 1 — contract
 

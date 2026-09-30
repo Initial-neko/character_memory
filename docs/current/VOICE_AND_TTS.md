@@ -581,7 +581,6 @@ Kokoro/Sherpa/CosyVoice 的音质横向试听应在 `:9002/tts` 做；正式 Bro
 
 - WebRTC full duplex
 - barge-in / user speech interrupting TTS
-- streaming ASR partials
 - streaming TTS chunks
 - sentence-level TTS pipeline
 - general-purpose automatic voice cloning outside the explicit VoiceDesign/template workflow
@@ -591,6 +590,12 @@ Kokoro/Sherpa/CosyVoice 的音质横向试听应在 `:9002/tts` 做；正式 Bro
 - persistent raw audio
 
 如果后续进入这些能力，应继续保持“Media 是渠道，Person 只有一个”的边界。
+
+Streaming ASR partial/final sessions are implemented as an optional provider
+path, not a non-goal. The canonical setup still prepares SenseVoice; streaming
+requires explicitly selected Paraformer assets and readiness reported by health.
+The original ASR research and design notes live under `docs/research/` and do not
+override this current runtime contract or imply target-machine acceptance.
 
 ## TTS Workbench / Provider Runtime
 

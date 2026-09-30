@@ -43,6 +43,15 @@ def _stylesheets(page: str) -> list[str]:
     return _LINK.findall((WEB / page).read_text(encoding="utf-8"))
 
 
+def test_datetime_renderers_do_not_prepend_a_second_date():
+    duplicate = re.compile(
+        r"CM\\.fmtDate\\([^\\n]+?\\)\\)\\}\\s+\\$\\{CM\\.escapeHtml\\(CM\\.fmtTime\\("
+    )
+    for name in ("app.js", "space.js", "search.js"):
+        script = (WEB / name).read_text(encoding="utf-8")
+        assert duplicate.search(script) is None, name
+
+
 def test_every_page_loads_the_shared_baseline_first():
     for page in PAGES:
         hrefs = _stylesheets(page)

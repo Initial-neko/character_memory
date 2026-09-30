@@ -497,6 +497,8 @@ Durable user fact
 
 SQLite 虽然 durable，但 pending reaction queue、SSE sequence 与 worker state 不跨进程共享。因此当前不要启用多个 Character Runtime app workers 期待自动获得正确 reaction scheduling。
 
+进程重启会丢失尚未完成的 reaction 工作及 transient image/frame payload；启动时没有自动扫描旧 User Event 并重新入队的恢复步骤。已接受的 User Event 仍可通过 history 查询，不能将 durable accept 理解为 restart-safe reaction job。当前 `Last-Event-ID` 重连可以补保留的通知，但不会重新执行丢失的 reaction。
+
 真正需要 multi-worker/remote deployment 时，再设计：
 
 - durable queue

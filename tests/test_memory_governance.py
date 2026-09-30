@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from character_memory.domain.models import Event, EventType, Memory
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -47,6 +49,24 @@ def test_memory_governance_pin_forget_restore_and_supersede(tmp_path):
     assert old.superseded_by == saved.id
     assert saved.active is True
     assert saved.pinned is True
+    with pytest.raises(ValueError, match="cannot be restored"):
+        store.set_memory_active(original.id, True)
+    with pytest.raises(ValueError, match="cannot be pinned"):
+        store.set_memory_pinned(original.id, True)
+    with pytest.raises(ValueError, match="cannot be corrected again"):
+        store.supersede_memory(original.id, replacement)
+    assert len(store.list_memories("momo", include_inactive=True)) == 2
+    assert store.get_memory(original.id).superseded_by == saved.id
+    assert [item.id for item in store.list_memories("momo")] == [saved.id]
+    # Inactive historical rows may still be safely deactivated/unpinned.
+    assert store.set_memory_active(original.id, False).active is False
+    assert store.set_memory_pinned(original.id, False).pinned is False
+    store.set_memory_active(saved.id, False)
+    assert store.set_memory_active(saved.id, True).active is True
+    newer = replacement.model_copy(update={"id": None, "content": "用户最喜欢白茶"})
+    previous, current = store.supersede_memory(saved.id, newer)
+    assert previous.superseded_by == current.id
+    assert [item.id for item in store.list_memories("momo")] == [current.id]
     assert "core/007-memory-governance" in store.list_schema_migrations()
     store.close()
 

@@ -66,6 +66,22 @@ def test_memory_governance_http_round_trip(tmp_path):
     assert payload["memory"]["pinned"] is True
     assert payload["memory"]["metadata"]["corrects_memory_id"] == memory.id
 
+    before = len(store.list_memories("momo", include_inactive=True))
+    for action, body in [
+        ("active", {"active": True}),
+        ("pin", {"pinned": True}),
+        ("correct", {"content": "另一个纠正版本"}),
+    ]:
+        rejected = client.post(
+            f"/v1/characters/momo/memories/{memory.id}/{action}", json=body,
+        )
+        assert rejected.status_code == 409
+        assert "superseded" in rejected.json()["detail"]
+    assert len(store.list_memories("momo", include_inactive=True)) == before
+    assert store.get_memory(memory.id).active is False
+    assert store.get_memory(memory.id).pinned is False
+    assert store.get_memory(memory.id).superseded_by == payload["memory"]["id"]
+
     forgotten = client.post(
         f"/v1/characters/momo/memories/{payload['memory']['id']}/active",
         json={"active": False},

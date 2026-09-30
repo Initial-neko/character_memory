@@ -566,6 +566,11 @@ class SQLiteStore:
 
     def set_memory_active(self, memory_id: int, active: bool) -> Memory | None:
         with self._lock:
+            existing = self.get_memory(memory_id)
+            if existing is None:
+                return None
+            if active and existing.superseded_by is not None:
+                raise ValueError("superseded memory cannot be restored")
             self.conn.execute(
                 "UPDATE memories SET active=?, pinned=CASE WHEN ?=0 THEN 0 ELSE pinned END WHERE id=?",
                 (int(bool(active)), int(bool(active)), int(memory_id)),
@@ -575,6 +580,11 @@ class SQLiteStore:
 
     def set_memory_pinned(self, memory_id: int, pinned: bool) -> Memory | None:
         with self._lock:
+            existing = self.get_memory(memory_id)
+            if existing is None:
+                return None
+            if pinned and existing.superseded_by is not None:
+                raise ValueError("superseded memory cannot be pinned")
             self.conn.execute(
                 "UPDATE memories SET pinned=?, active=CASE WHEN ?=1 THEN 1 ELSE active END WHERE id=?",
                 (int(bool(pinned)), int(bool(pinned)), int(memory_id)),
@@ -587,6 +597,8 @@ class SQLiteStore:
             old = self.get_memory(memory_id)
             if old is None:
                 return None
+            if old.superseded_by is not None:
+                raise ValueError("superseded memory cannot be corrected again")
             saved = self.add_memory(replacement)
             self.conn.execute(
                 "UPDATE memories SET active=0,pinned=0,superseded_by=? WHERE id=?",

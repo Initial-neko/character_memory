@@ -87,11 +87,16 @@ def check_impact(root: Path, changed: list[str], body: str) -> list[str]:
         errors.append("Docs-Reason must explain the actual contract change or why none is needed (20+ characters)")
     if impact == "updated":
         contracts = [item.strip().strip('`') for item in fields["Contracts"].split(",") if item.strip()]
-        maintained = {str(path.relative_to(root)) for path in maintained_files(root)}
+        # Compare POSIX forms on both sides: maintained paths come from the local
+        # filesystem (backslashes on Windows) while `changed` comes from
+        # `git diff --name-only` (always forward slashes). Without this every
+        # declaration reads as "not a maintained document" on Windows.
+        maintained = {path.relative_to(root).as_posix() for path in maintained_files(root)}
+        changed_paths = {Path(item).as_posix() for item in changed}
         if not contracts:
             errors.append("Docs-Contracts must name the updated maintained documents, separated by commas")
         for contract in contracts:
-            if contract not in maintained or contract not in changed:
+            if contract not in maintained or contract not in changed_paths:
                 errors.append(f"Docs-Contracts: {contract} must be a maintained document changed in this PR")
     return errors
 

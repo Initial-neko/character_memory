@@ -103,6 +103,7 @@
   const USAGE_PURPOSE_LABELS = Object.freeze({
     DIRECT_REACTION: "私聊回复",
     GROUP_REACTION: "群聊回复",
+    GROUP_AUTONOMY: "群聊自主发言",
     PROACTIVE_REACTION: "主动回复",
     SPACE_POST_PLAN: "发动态决策",
     SPACE_AUDIENCE: "动态受众互动",
@@ -122,6 +123,7 @@
     ENCOUNTER_PERSONA: "邂逅人物生成",
     AVATAR_SEARCH_INTENT: "头像搜索意图",
     VISUAL_PROMPT: "视觉提示词规划",
+    SCREEN_OBSERVATION_VISION: "周期屏幕观察",
     STICKER_AUTO_TAG: "表情包自动标注",
     LIFE_PLAN: "生活事件规划",
     LIFE_DIARY: "生活日记生成",

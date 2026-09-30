@@ -688,6 +688,28 @@ class SQLiteStore:
             rows = list(reversed(self.conn.execute(sql, args).fetchall()))
             return [self._event_from_row(r) for r in rows]
 
+    def latest_event_id(
+        self,
+        character_id: str,
+        *,
+        event_types: tuple[str, ...] | list[str] | None = None,
+    ) -> int:
+        """Return the newest insertion id for a character's durable events.
+
+        Event ids reflect write order, unlike event_time which may intentionally
+        represent simulated or backfilled world time.
+        """
+        with self._lock:
+            sql = "SELECT MAX(id) AS max_id FROM events WHERE character_id=?"
+            args: list = [character_id]
+            normalized = tuple(str(item) for item in (event_types or ()) if str(item))
+            if normalized:
+                placeholders = ",".join("?" for _ in normalized)
+                sql += f" AND event_type IN ({placeholders})"
+                args.extend(normalized)
+            row = self.conn.execute(sql, args).fetchone()
+        return int(row["max_id"] or 0) if row is not None else 0
+
     def list_chat_events(self, character_id: str, limit: int = 160) -> list[Event]:
         with self._lock:
             rows = self.conn.execute("SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL AND event_type IN (?,?) ORDER BY event_time_epoch DESC,id DESC LIMIT ?", (character_id, EventType.USER_MESSAGE.value, EventType.CHARACTER_MESSAGE.value, limit)).fetchall()

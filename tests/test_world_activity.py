@@ -469,6 +469,79 @@ def test_idle_browse_gate_skips_repeated_plan_without_new_character_signal(tmp_p
     store.close()
 
 
+def test_idle_browse_gate_uses_insertion_order_for_future_dated_signals(tmp_path):
+    store, access, model = make_access(tmp_path, count=1)
+    access.settings.world_browse_interval_minutes = 30
+    access.settings.world_pulse_enabled = False
+    model.browse = False
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+
+    scheduler.run_once(now=NOW)
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    assert len(_browsed(scheduler.run_once(now=NOW))) == 1
+    first = repo.latest_run("BROWSE", "c00")
+    assert first["details"]["signal_event_id"] == 0
+
+    future_world_time = NOW + timedelta(days=30)
+    store.append_event(
+        Event(
+            character_id="c00",
+            event_type=EventType.LIFE_EVENT,
+            event_time=future_world_time,
+            content="模拟生活里未来一天发生的事件。",
+            metadata={"channel": "LIFE"},
+        )
+    )
+
+    changed = NOW + timedelta(minutes=31)
+    assert scheduler._browse_plan_due("c00", changed, base_minutes=30) == (
+        True,
+        "NEW_CHARACTER_SIGNAL",
+    )
+    scheduler.force_due("BROWSE", "c00", now=changed)
+    assert len(_browsed(scheduler.run_once(now=changed))) == 1
+    assert _browse_plan_call_count(model) == 2
+
+    # The same future-dated semantic event has now been consumed by insertion
+    # watermark, so it cannot keep reopening the cost gate on every tick.
+    quiet = changed + timedelta(minutes=31)
+    assert scheduler._browse_plan_due("c00", quiet, base_minutes=30) == (
+        False,
+        "IDLE_NO_NEW_SIGNAL",
+    )
+    store.close()
+
+
+def test_idle_browse_gate_reopens_after_visual_observation(tmp_path):
+    store, access, model = make_access(tmp_path, count=1)
+    access.settings.world_browse_interval_minutes = 30
+    access.settings.world_pulse_enabled = False
+    model.browse = False
+    repo = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repo, poll_seconds=10)
+
+    scheduler.run_once(now=NOW)
+    scheduler.force_due("BROWSE", "c00", now=NOW)
+    assert len(_browsed(scheduler.run_once(now=NOW))) == 1
+
+    changed = NOW + timedelta(minutes=10)
+    store.append_event(
+        Event(
+            character_id="c00",
+            event_type=EventType.VISUAL_OBSERVATION,
+            event_time=changed,
+            content="共享屏幕出现了新的显著变化。",
+            metadata={"channel": "DIRECT"},
+        )
+    )
+    assert scheduler._browse_plan_due("c00", changed, base_minutes=30) == (
+        True,
+        "NEW_CHARACTER_SIGNAL",
+    )
+    store.close()
+
+
 def test_idle_browse_gate_reopens_immediately_after_new_character_event(tmp_path):
     store, access, model = make_access(tmp_path, count=1)
     access.settings.world_browse_interval_minutes = 30

@@ -1,5 +1,7 @@
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 
 import pytest
 import yaml
@@ -10,6 +12,118 @@ from character_memory.config import load_settings
 from character_memory.envfile import parse_env_file
 from character_memory.settings_server import create_settings_app
 from character_memory.settings_store import HOT_APPLY_FIELDS, SettingsStore, field_level
+
+
+def test_concurrent_settings_saves_preserve_both_updates(tmp_path: Path, monkeypatch):
+    """Atomic replacement alone must not turn concurrent saves into lost updates."""
+
+    config = tmp_path / "config.yaml"
+    config.write_text("chat_temperature: 0.85\nrecall_limit: 12\n", encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    import character_memory.settings_store as settings_store_module
+
+    real_atomic_write = settings_store_module._atomic_write
+    first_config_write = threading.Event()
+    second_config_write = threading.Event()
+    release_first = threading.Event()
+    counter_lock = threading.Lock()
+    config_writes = 0
+
+    def controlled_atomic_write(path, text):
+        nonlocal config_writes
+        if Path(path) == config:
+            with counter_lock:
+                config_writes += 1
+                write_number = config_writes
+            if write_number == 1:
+                first_config_write.set()
+                assert release_first.wait(timeout=5)
+            elif write_number == 2:
+                second_config_write.set()
+        return real_atomic_write(path, text)
+
+    monkeypatch.setattr(settings_store_module, "_atomic_write", controlled_atomic_write)
+
+    start = threading.Barrier(3)
+
+    def save(values):
+        start.wait(timeout=5)
+        return store.save_values(values)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        temperature = pool.submit(save, {"chat_temperature": 0.2})
+        recall = pool.submit(save, {"recall_limit": 30})
+        start.wait(timeout=5)
+        assert first_config_write.wait(timeout=5)
+        # Before the fix, the other request reaches its write from the same old
+        # file while the first is paused. The transaction lock keeps it outside.
+        assert second_config_write.wait(timeout=0.2) is False
+        release_first.set()
+        assert temperature.result(timeout=5)["changed"] is True
+        assert recall.result(timeout=5)["changed"] is True
+
+    settings = load_settings(str(config))
+    assert settings.chat_temperature == 0.2
+    assert settings.recall_limit == 30
+
+
+def test_concurrent_tts_patches_keep_runtime_apply_in_persistence_order(tmp_path: Path, monkeypatch):
+    """A slow GSV preload must not finish after a newer provider switch/unload."""
+
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        'tts_provider: "kokoro"\n'
+        'tts_voice: "zf_001"\n'
+        'tts_device: "cpu"\n',
+        encoding="utf-8",
+    )
+    preload_started = threading.Event()
+    release_preload = threading.Event()
+    unload_started = threading.Event()
+    completed_runtime_actions: list[str] = []
+
+    class SlowPreloadClient(_SettingsRuntimeClient):
+        def post(self, url, **kwargs):
+            if url.endswith("/v1/configure") and kwargs.get("json", {}).get("preload"):
+                preload_started.set()
+                assert release_preload.wait(timeout=5)
+                completed_runtime_actions.append("gsv-loaded")
+                return _RuntimeResponse({"ready": True, "loaded": True})
+            if url.endswith("/v1/unload"):
+                unload_started.set()
+                completed_runtime_actions.append("gsv-unloaded")
+                return _RuntimeResponse({"ready": True, "loaded": False})
+            return super().post(url, **kwargs)
+
+    app = create_settings_app(
+        str(config),
+        store=SettingsStore(str(config), str(tmp_path / ".env")),
+        runtime_http_client=SlowPreloadClient(),
+    )
+
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as pool:
+        select_gsv = pool.submit(
+            client.patch,
+            "/v1/settings",
+            json={"values": {"tts_provider": "gsv", "tts_voice": "murasame", "tts_device": "cuda"}},
+        )
+        assert preload_started.wait(timeout=5)
+        select_kokoro = pool.submit(
+            client.patch,
+            "/v1/settings",
+            json={"values": {"tts_provider": "kokoro", "tts_voice": "zf_001", "tts_device": "cpu"}},
+        )
+        # The second request must not persist/unload while the first request's
+        # runtime apply is still pending, or the older preload can win last.
+        assert unload_started.wait(timeout=0.2) is False
+        release_preload.set()
+        assert select_gsv.result(timeout=5).status_code == 200
+        assert select_kokoro.result(timeout=5).status_code == 200
+
+    assert load_settings(str(config)).tts_provider == "kokoro"
+    assert completed_runtime_actions == ["gsv-loaded", "gsv-unloaded"]
 
 
 def _clear_secret_env(monkeypatch):
@@ -1022,7 +1136,9 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
         for field in section["fields"]
         if field["level"] == "advanced"
     }
-    # Both other levels ship as real groups, so nothing is merely hidden.
+    # Both levels stay explicit in the schema even though the normal UI renders
+    # advanced controls and intentionally leaves diagnostic plumbing to the
+    # canonical config reference.
     assert {"advanced", "diagnostic"} <= set(levels)
 
 

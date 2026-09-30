@@ -28,14 +28,17 @@ real system environment > adjacent project .env > legacy config.yaml secret
 ## 2. Configuration levels
 
 Every schema field and every secret carries a **level** and non-empty **help text**, served in `GET /v1/settings`. Settings renders the help directly beneath editable fields and exposes it as the input tooltip/accessibility description; Secret rows likewise explain what the key unlocks. CI rejects schema fields or Secrets without help text.
-The page renders `common` inline and the other two as real, closed `<details>`
-groups, so what the first screen shows is decided by the schema and not by the
-frontend.
+The page renders `common` inline and `advanced` in real, closed `<details>`
+groups. Diagnostic field metadata remains in the API schema and every supported
+field remains documented in `config.example.yaml`, but low-level transport,
+path, ceiling and polling fields are deliberately not rendered as normal UI
+controls. Diagnostic Secrets remain in a closed group so a key can be entered
+before switching to the provider that needs it.
 
 ```text
 common      9 fields + the two keys a user must supply   -> first screen
-advanced   15 fields                                     -> one closed group
-diagnostic 29 fields                                     -> one closed group
+advanced   37 fields                                     -> closed groups by section
+diagnostic 36 fields                                     -> API schema + config.example.yaml
 ```
 
 Where a field goes:
@@ -56,11 +59,15 @@ A field without a `level` is served as `diagnostic`. The default is deliberately
 the *hidden* level: a new field that forgets to declare one is under-exposed
 rather than promoted onto the first screen the user opens on.
 
-Levels are a projection of the schema, not a claim that a hidden field is
-unsupported. Every field stays reachable by opening its group, and each group's
-summary names what is inside it (`高级设置（2 项）：Chat Model · Vision Model`) --
-never "更多设置". Secondary actions follow the same rule: `重新读取 / 刷新健康状态`
-is advanced, `迁移旧 config Key` is diagnostic, and `保存配置` is common.
+Levels are a projection of the schema, not a claim that an unrendered field is
+unsupported. Advanced groups name their contents
+(`高级设置（2 项）：Chat Model · Vision Model`) instead of saying only "更多设置".
+Diagnostic fields are edited deliberately through the canonical
+`config.example.yaml` contract and require the indicated Runtime restart; the
+Detailed Dev surface observes or temporarily exercises selected runtime paths,
+but is not a second persistent configuration editor. Secondary actions follow
+the same vocabulary: `保存配置` is common while lower-frequency reload/migration
+actions stay out of the primary path.
 
 ### 2.1 Secrets follow the selected providers
 
@@ -98,6 +105,12 @@ validate complete Settings model
 ```
 
 GSV runtime fields are updated in `.env` as one atomic multi-key edit. Unrelated variables are preserved. If the second persistence surface fails, Settings rolls the first surface back so one logical save does not leave `config.yaml` and `.env` describing different states.
+
+All Settings mutations are serialized per Settings Server process. The lock
+covers reading the previous state, validation, backup, `config.yaml` / `.env`
+persistence, GSV provisional runtime apply and rollback, and the response
+snapshot. Concurrent browser/API saves therefore apply in order instead of
+both patching the same old YAML and silently losing one successful update.
 
 Existing secrets are never returned to the browser. Secret status exposes only metadata such as `configured`, `source`, and `stored_in_env`.
 
@@ -184,7 +197,7 @@ proactive_intent_dedup_window_hours: 72
 
 The rest are not suggestions the model may exceed. The cooldown, the delay floor and the pending ceiling are enforced on the write and dispatch paths and are documented in `PERSON_RUNTIME.md` §10; the similarity threshold and the dedup window are the tuning knobs for the duplicate rule. Dispatch switches and the interval are advanced; the poll, the similarity threshold and the dedup window are diagnostic.
 
-None of these fields are hot-applied: like the Space and World scheduling values, they take effect after a restart. The dispatch loop reads `proactive_dispatch_enabled` on every tick, so turning it off is immediate even though turning it back on is not.
+None of these fields are hot-applied: like the Space and World scheduling values, they take effect after a Character Runtime restart. The dispatch loop rechecks `proactive_dispatch_enabled` on every tick, but it reads the same in-memory `Settings` object loaded at startup; a Settings Center disk save does not replace that object, so both disabling and re-enabling require the restart boundary.
 
 ### 3.5 Periodic Screen Observation
 

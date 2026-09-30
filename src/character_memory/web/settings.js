@@ -6,10 +6,10 @@
   const configPath = document.getElementById("configPath");
 
   // Levels come from the server (`level` on every field and secret). `common`
-  // renders straight into the card; the other two become real <details> groups,
-  // closed by default, so the first screen is the short list. A value this page
-  // does not recognise is treated as diagnostic: an unknown level must never
-  // promote a control onto the first screen.
+  // renders straight into the card and `advanced` becomes a closed <details>
+  // group. Diagnostic schema fields stay API/config-reference-only; diagnostic
+  // secrets remain reachable because a key must be entered before its provider
+  // can be selected. An unknown level must never reach the first screen.
   const LEVEL_ORDER = ["common", "advanced", "diagnostic"];
   const LEVEL_META = {
     advanced: {label: "高级设置", hint: "有合理默认，通常不用改"},

@@ -412,7 +412,18 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     )
                 if state_after:
                     self.store.set_mental_state(character_id, state_after, now, None)
-                for candidate, embedding in accepted_memories:
+                for candidate, embedding, decision in accepted_memories:
+                    duplicate_id, duplicate_similarity = runtime._active_memory_duplicate(
+                        character_id,
+                        now,
+                        candidate.content,
+                        embedding,
+                    )
+                    if duplicate_similarity is not None:
+                        decision["decision"] = "SKIP_DUPLICATE_AT_COMMIT"
+                        decision["duplicate_memory_id"] = duplicate_id
+                        decision["similarity"] = duplicate_similarity
+                        continue
                     saved = self.store.add_memory(
                         Memory(
                             character_id=character_id,

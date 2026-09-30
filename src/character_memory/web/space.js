@@ -335,7 +335,7 @@
         <div class="space-post-body">
           <div class="space-post-head">
             <div><strong class="space-author">${CM.escapeHtml(author.name || author.id)}</strong>${archived}</div>
-            <time class="space-time">${CM.escapeHtml(CM.fmtDate(post.created_at))} ${CM.escapeHtml(CM.fmtTime(post.created_at))}</time>
+            <time class="space-time">${CM.escapeHtml(CM.fmtTime(post.created_at))}</time>
           </div>
           ${post.content ? `<div class="space-content">${CM.escapeHtml(post.content)}</div>` : ""}
           ${mediaHtml(post)}

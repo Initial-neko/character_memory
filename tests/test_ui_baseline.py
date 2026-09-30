@@ -43,6 +43,17 @@ def _stylesheets(page: str) -> list[str]:
     return _LINK.findall((WEB / page).read_text(encoding="utf-8"))
 
 
+def test_datetime_renderers_do_not_prepend_a_second_date():
+    forbidden = {
+        "app.js": "CM.fmtDate(memory.event_time)",
+        "space.js": "CM.fmtDate(post.created_at)",
+        "search.js": "CM.fmtDate(item.event_time)",
+    }
+    for name, fragment in forbidden.items():
+        script = (WEB / name).read_text(encoding="utf-8")
+        assert fragment not in script, name
+
+
 def test_every_page_loads_the_shared_baseline_first():
     for page in PAGES:
         hrefs = _stylesheets(page)

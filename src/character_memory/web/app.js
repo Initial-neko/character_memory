@@ -587,7 +587,7 @@
       </summary>
       <div class="memory-card-body">
         <div class="memory-content">${CM.escapeHtml(memory.content)}</div>
-        <div class="memory-source"><span>${CM.escapeHtml(CM.memorySourceText(memory))}</span><span>${CM.escapeHtml(CM.fmtDate(memory.event_time))} ${CM.escapeHtml(CM.fmtTime(memory.event_time))}</span></div>
+        <div class="memory-source"><span>${CM.escapeHtml(CM.memorySourceText(memory))}</span><span>${CM.escapeHtml(CM.fmtTime(memory.event_time))}</span></div>
         ${sourceContent}
         <div class="memory-actions">${actions}</div>
       </div>

@@ -66,7 +66,7 @@
       const conversation = item.scope === "GROUP" ? item.conversation_name : item.conversation_name;
       const scopeLabel = item.scope === "GROUP" ? "群聊" : "单聊";
       return `<button type="button" class="search-result-item" data-search-result="${index}">
-        <span class="search-result-head"><strong>${CM.escapeHtml(conversation || "聊天")}</strong><span>${scopeLabel} · ${CM.escapeHtml(CM.fmtDate(item.event_time))} ${CM.escapeHtml(CM.fmtTime(item.event_time))}</span></span>
+        <span class="search-result-head"><strong>${CM.escapeHtml(conversation || "聊天")}</strong><span>${scopeLabel} · ${CM.escapeHtml(CM.fmtTime(item.event_time))}</span></span>
         <span class="search-result-actor">${CM.escapeHtml(item.actor_name || item.actor_id || "")}</span>
         <span class="search-result-preview">${highlight(item.preview, query)}</span>
       </button>`;

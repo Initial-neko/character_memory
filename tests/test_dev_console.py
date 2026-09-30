@@ -325,8 +325,10 @@ def test_llm_usage_explorer_localizes_feature_and_purpose_labels():
     assert 'SPACE: "空间"' in script
     assert 'WORLD: "世界活动"' in script
     assert 'GROUP_REACTION: "群聊回复"' in script
+    assert 'GROUP_AUTONOMY: "群聊自主发言"' in script
     assert 'SPACE_WORLD_EXPLORE: "发动态前世界探索"' in script
     assert 'WORLD_BROWSE_PLAN: "个人浏览决策"' in script
+    assert 'SCREEN_OBSERVATION_VISION: "周期屏幕观察"' in script
     assert "usageEnum(item.feature, USAGE_FEATURE_LABELS)" in script
     assert "usageEnum(item.purpose, USAGE_PURPOSE_LABELS)" in script
     assert "usageEnumPair(item.feature, item.purpose)" in script

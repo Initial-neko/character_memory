@@ -12,10 +12,10 @@
 | Character archive/delete/deferred direct chat | DONE | Manual edge checks pending | Exact-name delete, activity counts, generated characters do not automatically enter the private sidebar. |
 | Screen-share image quality | DONE | TARGET-MACHINE PENDING | DISPLAY accepted frames retain up to ~1440px long side; cheap change analysis remains 64px. |
 | Ensemble Persona V2 | DONE | Persona-quality soak pending | One structured group research call plus deterministic per-character projection; no N extra Persona calls. |
-| ASR server streaming | DONE | TARGET-MACHINE PENDING | Paraformer streaming session and WebSocket protocol are implemented. |
+| ASR server streaming | OPTIONAL | Not a release baseline | Paraformer streaming session and WebSocket protocol exist as manual opt-in; canonical setup remains SenseVoice batch. |
 | Shared browser AudioWorklet | DONE | Browser regression covered | PCM16 / 16k shared streaming client. |
-| Dictation streaming | DONE | TARGET-MACHINE PENDING | Streaming preferred, batch fallback retained. |
-| Browser Call streaming | DONE | TARGET-MACHINE PENDING | Streaming preferred; speak-over-reply, pending turns, visual frames and batch fallback retained. |
+| Dictation streaming | OPTIONAL | Not a release baseline | Streaming is used only when Media Runtime explicitly advertises it; canonical setup remains batch ASR. |
+| Browser Call streaming | OPTIONAL | Not a release baseline | Streaming is opt-in through Media Runtime capability; canonical setup remains batch ASR with the existing call behavior retained. |
 | LLM usage observability | DONE | Runtime soak pending | Feature/Purpose, request/logical ratio, chars, token coverage, retry/error/latency. |
 | World browse cost gate | DONE | Runtime soak pending | Repeated browse=false planning can be skipped until a new signal/recheck boundary. |
 | Space audience cost gate | DONE | Runtime soak pending | Public social ties prioritized; cold posts use at most two exploration audience slots. |

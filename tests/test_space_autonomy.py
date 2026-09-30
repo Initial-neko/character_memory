@@ -908,6 +908,30 @@ def test_space_audience_prioritizes_existing_public_social_ties(tmp_path):
     store.close()
 
 
+def test_space_audience_reserves_exploration_slot_when_warm_audience_is_full(tmp_path):
+    access, store, _ = _access(
+        tmp_path,
+        ids=("c00", "c01", "c02", "c03", "c04", "c05", "c06"),
+    )
+    access.settings.space_audience_size = 5
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    now = datetime(2026, 9, 21, 5, 0, tzinfo=timezone.utc)
+    earlier = now - timedelta(days=1)
+
+    old_post = repository.create_post("c00", "已有关系积累的旧动态", earlier)
+    for character_id in ("c01", "c02", "c03", "c04", "c05"):
+        repository.add_comment(old_post.id, character_id, f"{character_id} 留过评论", earlier)
+
+    new_post = repository.create_post("c00", "给新旧关系共同看到的新动态", now)
+    selected = service.select_audience(new_post.id, "c00")
+
+    assert len(selected) == 5
+    assert "c06" in selected
+    assert len(set(selected) & {"c01", "c02", "c03", "c04", "c05"}) == 4
+    store.close()
+
+
 def test_space_scheduler_persists_world_and_plan_observability(tmp_path):
     model = WorldSpaceModel()
     access, store, _ = _access(tmp_path, ids=("c00",), model=model)

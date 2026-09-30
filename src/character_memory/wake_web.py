@@ -48,8 +48,14 @@ def attach_wake_routes(app):
     thread: threading.Thread | None = None
 
     def ensure_character(character_id: str) -> None:
-        if not any(profile["id"] == character_id for profile in access.character_profiles()):
+        profile = next(
+            (item for item in access.character_profiles() if item["id"] == character_id),
+            None,
+        )
+        if profile is None:
             raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}")
+        if "archived_at" in profile:
+            raise HTTPException(status_code=409, detail=f"Archived character cannot wake: {character_id}")
 
     def publish(outcome: WakeOutcome) -> None:
         channel = direct_channel(outcome.character_id, outcome.conversation_id)
@@ -71,6 +77,9 @@ def attach_wake_routes(app):
         )
 
     def run_one(character_id: str, *, reason: str, at: datetime, conversation_id: str | None = None, force: bool = False):
+        # Re-check immediately before dispatch so an archive that races with a
+        # scheduler snapshot cannot still spend an LLM call or publish output.
+        ensure_character(character_id)
         outcome = service.wake(
             character_id,
             reason=reason,
@@ -101,6 +110,8 @@ def attach_wake_routes(app):
             for profile in access.character_profiles():
                 if stop.is_set():
                     break
+                if "archived_at" in profile:
+                    continue
                 character_id = str(profile["id"])
                 if not service.is_due(character_id, at):
                     continue

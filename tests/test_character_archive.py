@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 import yaml
 
 from character_memory.api import create_api
+from character_memory.async_web import attach_async_routes
 from character_memory.avatar_web import attach_avatar_routes
 from character_memory.config import (
     ARCHIVE_FILENAME,
@@ -33,6 +34,7 @@ from character_memory.domain.models import Event, EventType
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.group_web import attach_group_routes
 from character_memory.space_store import SpaceRepository
+from character_memory.wake_web import attach_wake_routes
 
 
 def _personas(tmp_path: Path) -> Path:
@@ -421,6 +423,19 @@ def test_archive_api_is_idempotent_and_refuses_unknown_characters(tmp_path: Path
 
         assert client.post("/v1/characters/nobody/archive").status_code == 404
         assert client.post("/v1/characters/nobody/restore").status_code == 404
+
+
+def test_archived_character_cannot_be_manually_woken(tmp_path: Path):
+    config = _config(tmp_path)
+    app = create_api(str(config))
+    attach_async_routes(app)
+    attach_wake_routes(app)
+
+    with TestClient(app) as client:
+        assert client.post("/v1/characters/momo/archive").status_code == 200
+        response = client.post("/v1/characters/momo/wake", json={})
+        assert response.status_code == 409
+        assert "Archived character cannot wake" in response.text
 
 
 def test_archive_refuses_to_hide_the_last_active_character(tmp_path: Path):

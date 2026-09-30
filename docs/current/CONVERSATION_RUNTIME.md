@@ -484,7 +484,7 @@ Durable user fact
 因此：
 
 - 用户 Event 一旦接受，不因 LLM 失败消失；
-- Direct 当前页面收到的 `reaction_error` 会保留到下一条已入队的用户事实，不被 idle 重绘或 history 对账清掉；这是页面内提示，不是 durable failure ledger，刷新页面不会恢复它；
+- Direct 当前页面收到的 `reaction_error` 会保留到较新的用户事实排队或开始处理，不被 idle 重绘或 history 对账清掉；这是页面内提示，不是 durable failure ledger，刷新页面不会恢复它；
 - outward action 合法时，辅助 candidate 的小格式错误应局部降级；
 - outward action 自己 malformed 时仍需要 repair/failure；
 - 一个 group member 失败不应该结束整个 room turn；

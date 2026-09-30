@@ -338,7 +338,7 @@
       const data = JSON.parse(event.data || "{}");
       if (["queued", "typing", "superseded"].includes(data.state)) CM.state.pendingCharacters.add(characterId);
       const error = CM.state.directErrors.get(characterId);
-      if (data.state === "queued" && error && Number(data.watermark) > Number(error.watermark)) CM.state.directErrors.delete(characterId);
+      if (["queued", "typing"].includes(data.state) && error && Number(data.watermark) > Number(error.watermark)) CM.state.directErrors.delete(characterId);
       if (data.state === "idle") CM.state.pendingCharacters.delete(characterId);
       CM.renderCharacterList();
       CM.updateHeader();

@@ -65,6 +65,11 @@ source.emit('reaction_status', {state:'queued', watermark:11});
 assert(!CM.dom.chat.children.some(row=>row.textContent?.includes('provider unavailable')));
 source.emit('reaction_status', {state:'idle', watermark:11});
 assert(!CM.state.pendingCharacters.has('rin'));
+// A newer user fact can queue before an older provider failure is reported.
+source.emit('reaction_status', {state:'queued', watermark:13});
+source.emit('reaction_error', {watermark:12, message:'older attempt failed'});
+source.emit('reaction_status', {state:'typing', watermark:13});
+assert(!CM.dom.chat.children.some(row=>row.textContent?.includes('older attempt failed')));
 ''')
 
 

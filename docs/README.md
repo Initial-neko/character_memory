@@ -47,4 +47,6 @@ Implementation plans, temporary handoffs and one-off acceptance logs belong in I
 ## Research and archive
 
 - [research/REFERENCES.md](research/REFERENCES.md) collects external references; research is not automatically a product contract.
+- [ASR P0 research](research/ASR_P0_TECHNICAL_REPORT.md) preserves the original batch-path audit, model comparisons and benchmark proposals. Its risks and migration steps describe that historical baseline, not current defects or new implementation instructions.
+- [ASR streaming design notes](research/ASR_STREAMING_ARCHITECTURE_DRAFT.md) preserve design rationale and proposed refinements. For current provider selection and runtime behavior, start with [VOICE_AND_TTS](current/VOICE_AND_TTS.md); for outstanding acceptance, use [DELIVERY_PLAN](current/DELIVERY_PLAN.md).
 - `archive/` preserves selected historical milestones and may contain obsolete ports/providers/non-goals.

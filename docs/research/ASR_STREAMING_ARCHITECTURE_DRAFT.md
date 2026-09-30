@@ -1,8 +1,10 @@
 # ASR Streaming Architecture Draft
 
-> Status: implementation baseline shipped; target-machine acceptance pending  
-> Scope: server streaming/session, shared Browser AudioWorklet client, Dictation migration and Browser Call migration are on `main`; batch fallback remains intentionally available  
-> Related: `docs/current/ASR_P0_TECHNICAL_REPORT.md`, `docs/current/DELIVERY_PLAN.md`
+> Status: research/design notes, not the current runtime contract.
+>
+> Current behavior and provider prerequisites: [VOICE_AND_TTS](../current/VOICE_AND_TTS.md). Outstanding target-machine proof: [DELIVERY_PLAN](../current/DELIVERY_PLAN.md).
+>
+> Related research: [ASR_P0_TECHNICAL_REPORT](ASR_P0_TECHNICAL_REPORT.md). Implementation checkpoints below are dated snapshots; proposals are not instructions to expand the current scope.
 
 ## 1. Purpose
 
@@ -18,7 +20,7 @@ That baseline made three different problems look like one ASR problem:
 
 The next implementation cycle should therefore **not start by replacing SenseVoice with another model**.
 
-The implemented baseline is now a **Streaming ASR Session** that makes these responsibilities explicit and observable. The architecture below remains the contract; the outstanding work is real-machine accuracy/resource acceptance and any measured final-pass refinement.
+The implemented baseline includes a **Streaming ASR Session** that makes these responsibilities explicit and observable. The architecture below records its design rationale and possible refinements. Current source/tests and `VOICE_AND_TTS.md` own the runtime contract; research proposals here do not establish implementation or acceptance status.
 
 ### Implementation checkpoint — 2026-09-29
 

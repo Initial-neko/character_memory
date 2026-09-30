@@ -354,6 +354,29 @@ def test_researched_interaction_styles_survive_local_persona_projection():
     assert "陪着沉默" in gentle.silence
 
 
+def test_persona_projection_clamps_interaction_styles_and_pads_boundaries():
+    long_style = "风格" * 200
+    draft = member_research_to_persona(
+        EnsembleMemberResearch(
+            name="BoundaryCase",
+            identity="边界测试人物",
+            description="这是一个用于验证长交互风格和边界数量兼容性的角色描述，长度足够通过研究模型校验。",
+            expression_style=long_style,
+            question_style=long_style,
+            silence_style=long_style,
+            initiative_style=long_style,
+            disagreement_style=long_style,
+            care_style=long_style,
+            boundaries=["保留这一条自定义边界"],
+        )
+    )
+
+    for field in ("expression", "questions", "silence", "initiative", "disagreement", "care"):
+        assert len(getattr(draft, field)) == 320
+    assert draft.boundaries[0] == "保留这一条自定义边界"
+    assert len(draft.boundaries) >= 2
+
+
 def test_prepare_failure_preserves_failed_build_for_retry(tmp_path):
     access, store, observer, _, _ = _access(tmp_path)
     observer.observe = lambda *args, **kwargs: {

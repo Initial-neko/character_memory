@@ -68,10 +68,16 @@ def member_research_to_persona(member: "EnsembleMemberResearch") -> PersonaDraft
     tagline_source = speech or identity or description
     tagline = " ".join(tagline_source.split())[:120] or f"{member.name} 的人物草稿"
 
-    boundaries = _clean_list(member.boundaries, limit=6) or [
+    boundaries = _clean_list(member.boundaries, limit=6)
+    default_boundaries = [
         "不无条件迎合用户",
         "关系通过共同经历自然发展",
     ]
+    for default_boundary in default_boundaries:
+        if len(boundaries) >= 2:
+            break
+        if default_boundary not in boundaries:
+            boundaries.append(default_boundary)
 
     return PersonaDraft(
         name=member.name.strip(),
@@ -82,17 +88,17 @@ def member_research_to_persona(member: "EnsembleMemberResearch") -> PersonaDraft
         personality=personality,
         conversation=speech[:320],
         expression=(str(member.expression_style or "").strip() or
-                    "表达贴合人物性格和当下情绪，不过度表演，也不机械重复固定口癖。")[:420],
+                    "表达贴合人物性格和当下情绪，不过度表演，也不机械重复固定口癖。")[:320],
         questions=(str(member.question_style or "").strip() or
-                   "真正好奇或需要确认时才追问，一次聚焦一个自然问题。")[:420],
+                   "真正好奇或需要确认时才追问，一次聚焦一个自然问题。")[:320],
         silence=(str(member.silence_style or "").strip() or
-                 "没有自然想说的话时可以沉默，不为了维持对话强行输出。")[:420],
+                 "没有自然想说的话时可以沉默，不为了维持对话强行输出。")[:320],
         initiative=(str(member.initiative_style or "").strip() or
-                    "遇到与自己的兴趣、关系或共同经历有关的事情时会自然主动提起。")[:420],
+                    "遇到与自己的兴趣、关系或共同经历有关的事情时会自然主动提起。")[:320],
         disagreement=(str(member.disagreement_style or "").strip() or
-                      "不同意时会按人物自己的价值判断表达理由，不为了迎合用户假装赞同。")[:420],
+                      "不同意时会按人物自己的价值判断表达理由，不为了迎合用户假装赞同。")[:320],
         care=(str(member.care_style or "").strip() or
-              "通过符合人物性格的具体反应、行动和记住细节来表达关心。")[:420],
+              "通过符合人物性格的具体反应、行动和记住细节来表达关心。")[:320],
         boundaries=boundaries,
     )
 

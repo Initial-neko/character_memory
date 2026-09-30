@@ -44,12 +44,14 @@ def _stylesheets(page: str) -> list[str]:
 
 
 def test_datetime_renderers_do_not_prepend_a_second_date():
-    duplicate = re.compile(
-        r"CM\\.fmtDate\\([^\\n]+?\\)\\)\\}\\s+\\$\\{CM\\.escapeHtml\\(CM\\.fmtTime\\("
-    )
-    for name in ("app.js", "space.js", "search.js"):
+    forbidden = {
+        "app.js": "CM.fmtDate(memory.event_time)",
+        "space.js": "CM.fmtDate(post.created_at)",
+        "search.js": "CM.fmtDate(item.event_time)",
+    }
+    for name, fragment in forbidden.items():
         script = (WEB / name).read_text(encoding="utf-8")
-        assert duplicate.search(script) is None, name
+        assert fragment not in script, name
 
 
 def test_every_page_loads_the_shared_baseline_first():

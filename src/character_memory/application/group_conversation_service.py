@@ -617,15 +617,34 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 raise SupersededGroupReaction(
                     f"autonomous group opportunity {source_event.id} superseded before {character_id}"
                 )
-            decision = self._react_member(
-                group=group,
-                source_event=source_event,
-                character_id=character_id,
-                commit_guard=current,
-                mentioned_ids=[],
-                autonomous=True,
-                autonomous_phase="FOLLOWUP",
-            )
+            try:
+                decision = self._react_member(
+                    group=group,
+                    source_event=source_event,
+                    character_id=character_id,
+                    commit_guard=current,
+                    mentioned_ids=[],
+                    autonomous=True,
+                    autonomous_phase="FOLLOWUP",
+                )
+            except SupersededGroupReaction:
+                raise
+            except Exception as exc:
+                # A starter has already spoken. A failed follower must not
+                # discard that fact or prevent the remaining members judging.
+                logger.exception(
+                    "group.autonomy member_failed conversation=%s turn=%s character=%s",
+                    group.id, source_event.turn_id, character_id,
+                )
+                decision = {
+                    "character_id": character_id,
+                    "actions": [],
+                    "emitted_event_ids": [],
+                    "emitted_events": [],
+                    "created_memory_ids": [],
+                    "autonomous": True,
+                    "error": str(exc),
+                }
             decisions.append(decision)
             if on_member is not None:
                 on_member(decision)

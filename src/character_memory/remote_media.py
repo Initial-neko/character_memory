@@ -92,23 +92,33 @@ class RemoteMediaFetcher:
 
     def fetch_image(self, url: str) -> RemoteMedia:
         ensure_public_http_url(url)
-        response = self.client.get(
+        with self.client.stream(
+            "GET",
             url,
             headers={"Accept": "image/*", "User-Agent": "character-memory/0.13 remote-media"},
             follow_redirects=False,
-        )
-        if 300 <= response.status_code < 400:
-            raise RuntimeError("remote image redirect was rejected for safety")
-        if response.is_error:
-            raise RuntimeError(f"remote image download failed with HTTP {response.status_code}")
+        ) as response:
+            if 300 <= response.status_code < 400:
+                raise RuntimeError("remote image redirect was rejected for safety")
+            if response.is_error:
+                raise RuntimeError(f"remote image download failed with HTTP {response.status_code}")
 
-        payload = bytes(response.content or b"")
+            header_mime = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+            if header_mime and header_mime not in _IMAGE_MIME:
+                raise ValueError(f"unsupported remote image content type: {header_mime}")
+            payload_buffer = bytearray()
+            # Count decoded bytes too: a compressed or chunked response must
+            # obey the same limit even when Content-Length is absent or small.
+            for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                if len(payload_buffer) + len(chunk) > self.max_bytes:
+                    raise ValueError(f"remote image exceeds the {self.max_bytes} byte limit")
+                payload_buffer.extend(chunk)
+            payload = bytes(payload_buffer)
         if not payload:
             raise RuntimeError("remote image download returned an empty body")
         if len(payload) > self.max_bytes:
             raise ValueError(f"remote image exceeds the {self.max_bytes} byte limit")
 
-        header_mime = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
         sniffed = _sniff_image_mime(payload)
         if sniffed is None:
             raise ValueError(f"unsupported remote image content type: {header_mime or '<missing>'}")

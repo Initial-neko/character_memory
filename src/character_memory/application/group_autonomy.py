@@ -61,8 +61,16 @@ class GroupAutonomyService:
             return lock
 
     def _latest_user_id(self, conversation_id: str) -> int | None:
-        event = self.repository.latest_user_event(conversation_id)
-        return int(event.id) if event is not None and event.id is not None else None
+        # Match ReactionScheduler's Group watermark: durable arrival order wins
+        # even when a client submits an older `at`. The quiet-time query remains
+        # timestamp-based because it answers a different question.
+        with self.repository.store._lock:
+            row = self.repository.store.conn.execute(
+                "SELECT id FROM conversation_events WHERE conversation_id=? "
+                "AND actor_type='USER' ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        return int(row["id"]) if row is not None else None
 
     def user_quiet(self, conversation_id: str, now: datetime) -> tuple[bool, float | None]:
         latest = self.repository.latest_user_event(conversation_id)
@@ -183,8 +191,11 @@ class GroupAutonomyService:
         def current() -> bool:
             return self._latest_user_id(conversation_id) == start_user_id
 
+        completed_decisions: list[dict] = []
+
         def on_member(decision: dict) -> None:
             decision["conversation_id"] = conversation_id
+            completed_decisions.append(decision)
             self._publish_member(decision, turn_id=turn_id, watermark=watermark)
 
         try:
@@ -197,6 +208,12 @@ class GroupAutonomyService:
                     on_member=on_member,
                 )
         except SupersededGroupReaction:
+            # Supersession only rejects not-yet-committed member work. Earlier
+            # messages remain durable and must be counted by the run ledger.
+            committed = [
+                event for event in self.repository.list_turn_events(conversation_id, turn_id)
+                if event.actor_type == "CHARACTER"
+            ]
             if hub is not None:
                 hub.publish(
                     channel,
@@ -214,10 +231,25 @@ class GroupAutonomyService:
                 "reason": "new user fact arrived",
                 "turn_id": turn_id,
                 "source_event_id": source_event.id,
-                "message_count": 0,
-                "events": [],
-                "decisions": [],
+                "message_count": len(committed),
+                "events": committed,
+                "decisions": completed_decisions,
             }
+        except Exception as exc:
+            if hub is not None:
+                hub.publish(
+                    channel,
+                    "reaction_error",
+                    {"watermark": watermark, "turn_id": turn_id, "autonomous": True, "message": str(exc)},
+                )
+                hub.publish(
+                    channel,
+                    "reaction_status",
+                    {"state": "idle", "watermark": watermark, "turn_id": turn_id, "autonomous": True},
+                )
+            # The scheduler owns FAILED persistence; the manual HTTP route owns
+            # its 502. Neither may turn a provider failure into NO_CHAT.
+            raise
 
         message_count = int(result.get("message_count") or 0)
         status = "CHATTED" if message_count else "NO_CHAT"

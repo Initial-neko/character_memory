@@ -224,6 +224,10 @@ hard cap 1..4 visible character messages
 - V1 允许 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / 已有 IMAGE；
 - V1 主动群聊明确不允许 GENERATE_IMAGE，避免复用“最新 User watermark”生图 stale contract 时产生语义冲突；
 - 新 User Event 可以在模型生成期间持久化，commit guard 会把过时的自主结果标为 `SUPERSEDED`；
+- 自主机会与用户轮次使用相同的提交 ID 顺序判断新 User fact；客户端 `at` 比旧消息更早，也会打断旧生成。quiet guard 仍按消息时间判断间隔；
+- seed 失败时本次机会失败，不换人强行开场；发布 `reaction_error` 后回到 `idle`，正式调度记录 `FAILED`，手动入口返回错误；
+- seed 已发言后，某个 follow-up 成员失败只在该成员 decision 中记录错误，其他成员继续判断，且失败不消耗可见消息上限；
+- `SUPERSEDED` 只撤销未提交结果；已提交成员消息保留，返回结果和调度记录的 `message_count` 仍计入这些消息；
 - 归档 Character 不参与新的自主交流；归档 Group 不参与调度；
 - `GROUP_OPPORTUNITY` 是 hidden provenance，不进入正常历史、搜索或人物 Recent Events；
 - 自主 Character message 仍通过现有 `group_character_event` SSE 推送；

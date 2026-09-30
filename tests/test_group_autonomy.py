@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from character_memory.application.async_conversation import ConversationEventHub, group_channel
+
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_autonomy import (
     GroupAutonomyScheduler,
@@ -410,3 +412,174 @@ def test_group_autonomy_schema_migration_and_dev_console_contract(tmp_path):
     ]:
         assert token in script
         assert token in server
+
+
+def test_backdated_user_arrival_supersedes_autonomous_commit(tmp_path):
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    access, store, model, _ = _access(tmp_path, now=now)
+    repo = GroupRepository(store)
+    group = _group(store, ("c00", "c01"), now)
+    old = repo.append_event(GroupEvent(
+        conversation_id=group.id, turn_id="previous", actor_type="USER",
+        actor_id="user", event_type="USER_MESSAGE", event_time=now, content="previous",
+    ))
+
+    def interrupt():
+        repo.append_event(old.model_copy(update={
+            "id": None, "turn_id": "new-arrival", "event_time": now - timedelta(hours=1),
+            "content": "new arrival with older timestamp",
+        }))
+
+    model.on_call = interrupt
+    model.actions_by_character = {"c00": [ActionDecision(type=ActionType.MESSAGE, message="stale")]}
+    try:
+        outcome = GroupAutonomyService(access, repo).run_opportunity(group.id, now=now)
+        assert outcome["status"] == "SUPERSEDED"
+        assert repo.list_turn_traces(group.id, outcome["turn_id"]) == []
+        assert not any(event.actor_type == "CHARACTER" for event in repo.list_events(group.id))
+    finally:
+        store.close()
+
+
+class FailingAutonomyModel(AutonomousGroupModel):
+    def __init__(self, failed_ids, actions_by_character=None):
+        super().__init__(actions_by_character)
+        self.failed_ids = set(failed_ids)
+
+    def _reaction(self, context, session_id):
+        reaction = super()._reaction(context, session_id)
+        if self.calls[-1] in self.failed_ids:
+            raise RuntimeError("provider unavailable")
+        return reaction
+
+
+def test_autonomy_follower_failure_keeps_committed_seed_and_continues(tmp_path):
+    ids = ("c00", "c01", "c02")
+    model = FailingAutonomyModel({"c01"}, {
+        cid: [ActionDecision(type=ActionType.MESSAGE, message=cid)] for cid in ids
+    })
+    access, store, _, _ = _access(tmp_path, ids=ids, model=model)
+    access.stream_hub = ConversationEventHub()
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    repo = GroupRepository(store)
+    group = _group(store, ids, now)
+    try:
+        outcome = GroupAutonomyService(access, repo).run_opportunity(group.id, now=now)
+        assert outcome["status"] == "CHATTED"
+        assert model.calls == list(ids)
+        assert [event.actor_id for event in outcome["events"]] == ["c00", "c02"]
+        assert outcome["message_count"] == 2
+        assert outcome["decisions"][1]["error"] == "provider unavailable"
+        assert [item["character_id"] for item in repo.list_turn_traces(group.id, outcome["turn_id"])] == ["c00", "c02"]
+        notifications = list(access.stream_hub._channel(group_channel(group.id)).events)
+        assert notifications[-1][2]["state"] == "idle"
+    finally:
+        access.stream_hub.close()
+        store.close()
+
+
+def test_failed_autonomy_seed_publishes_error_then_idle_and_durable_failed_run(tmp_path):
+    model = FailingAutonomyModel({"c00"})
+    access, store, _, _ = _access(tmp_path, model=model)
+    access.stream_hub = ConversationEventHub()
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    repo = GroupRepository(store)
+    group = _group(store, ("c00", "c01"), now)
+    scheduler = GroupAutonomyScheduler(access, repo)
+    try:
+        scheduler.force_due(group.id, now=now)
+        assert scheduler.run_once(now) == []
+        assert repo.list_autonomy_runs(conversation_id=group.id)[0]["status"] == "FAILED"
+        assert model.calls == ["c00"]  # failed seed must not manufacture a starter
+        notifications = list(access.stream_hub._channel(group_channel(group.id)).events)
+        assert [(kind, data.get("state")) for _, kind, data in notifications] == [
+            ("reaction_status", "typing"), ("reaction_error", None), ("reaction_status", "idle"),
+        ]
+        assert notifications[1][2]["message"] == "provider unavailable"
+        assert repo.list_event_page(group.id).events == []
+    finally:
+        access.stream_hub.close()
+        store.close()
+
+
+def test_superseded_autonomy_reports_already_committed_messages(tmp_path):
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    ids = ("c00", "c01")
+    model = AutonomousGroupModel({
+        cid: [ActionDecision(type=ActionType.MESSAGE, message=cid)] for cid in ids
+    })
+    access, store, _, _ = _access(tmp_path, ids=ids, model=model)
+    repo = GroupRepository(store)
+    group = _group(store, ids, now)
+    original_reaction = model._reaction
+
+    def interrupt_second(context, session_id):
+        if session_id.endswith(":c01"):
+            repo.append_event(GroupEvent(
+                conversation_id=group.id, turn_id="interrupt", actor_type="USER",
+                actor_id="user", event_type="USER_MESSAGE", event_time=now, content="interrupt",
+            ))
+        return original_reaction(context, session_id)
+
+    model._reaction = interrupt_second
+    scheduler = GroupAutonomyScheduler(access, repo)
+    try:
+        scheduler.force_due(group.id, now=now)
+        outcome = scheduler.run_once(now)[0]
+        assert outcome["status"] == "SUPERSEDED"
+        assert outcome["message_count"] == 1
+        assert [event.actor_id for event in outcome["events"]] == ["c00"]
+        assert repo.list_autonomy_runs(conversation_id=group.id)[0]["message_count"] == 1
+        assert [trace["character_id"] for trace in repo.list_turn_traces(group.id, outcome["turn_id"])] == ["c00"]
+    finally:
+        store.close()
+
+
+def test_manual_autonomy_failure_returns_502_and_clears_typing(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from character_memory.background_services import BackgroundServices
+    from character_memory.group_autonomy_web import attach_group_autonomy_routes
+
+    access, store, _, _ = _access(tmp_path, model=FailingAutonomyModel({"c00"}))
+    access.stream_hub = ConversationEventHub()
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    group = _group(store, ("c00", "c01"), now)
+    app = FastAPI()
+    app.state.character_memory = access
+    app.state.background_services = BackgroundServices()
+    attach_group_autonomy_routes(app)
+    client = TestClient(app)  # no lifespan: exercise the manual route only
+    try:
+        response = client.post(f"/v1/group-autonomy/opportunity/{group.id}")
+        assert response.status_code == 502
+        assert "provider unavailable" in response.json()["detail"]
+        notifications = list(access.stream_hub._channel(group_channel(group.id)).events)
+        assert notifications[-2][1] == "reaction_error"
+        assert notifications[-1][2]["state"] == "idle"
+    finally:
+        client.close()
+        access.stream_hub.close()
+        store.close()
+
+
+def test_failed_run_cadence_survives_database_reopen(tmp_path):
+    now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    access, store, _, _ = _access(tmp_path, model=FailingAutonomyModel({"c00"}), now=now)
+    repo = GroupRepository(store)
+    group = _group(store, ("c00", "c01"), now)
+    scheduler = GroupAutonomyScheduler(access, repo)
+    scheduler.force_due(group.id, now=now)
+    scheduler.run_once(now)
+    next_due = repo.get_autonomy_state(group.id)["next_opportunity_at"]
+    store.close()
+
+    access, reopened, model, _ = _access(tmp_path, now=now)
+    repo = GroupRepository(reopened)
+    try:
+        assert repo.get_autonomy_state(group.id)["next_opportunity_at"] == next_due
+        assert repo.list_autonomy_runs(conversation_id=group.id)[0]["status"] == "FAILED"
+        assert GroupAutonomyScheduler(access, repo).run_once(now + timedelta(minutes=1)) == []
+        assert model.calls == []
+    finally:
+        reopened.close()

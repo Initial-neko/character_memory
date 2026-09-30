@@ -446,6 +446,13 @@ class GroupRepository:
                 ).fetchall()
         return [self._group_from_row(row) for row in rows]
 
+    def append_user_event(self, event: GroupEvent) -> GroupEvent:
+        """Atomically accept a live user fact only while the group is active."""
+        with self.store.transaction():
+            if self.get_group(event.conversation_id) is None:
+                raise KeyError(f"unknown group: {event.conversation_id}")
+            return self.append_event(event)
+
     def append_event(self, event: GroupEvent) -> GroupEvent:
         stamp = epoch_us(event.event_time)
         with self.store._lock:

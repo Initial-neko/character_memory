@@ -34,6 +34,7 @@ BROWSE_RECONSIDER_EVENT_TYPES = (
     EventType.SPACE_POST_SEEN,
     EventType.SPACE_COMMENT_RECEIVED,
     EventType.WORLD_OBSERVATION,
+    EventType.VISUAL_OBSERVATION,
     EventType.PROACTIVE_INTENT,
 )
 
@@ -1108,21 +1109,24 @@ class WorldActivityScheduler:
         )
         return max(60.0, min(360.0, base * 4.0))
 
+    def _browse_signal_event_id(self, character_id: str) -> int:
+        return self.access.read_store.latest_event_id(
+            character_id,
+            event_types=[item.value for item in BROWSE_RECONSIDER_EVENT_TYPES],
+        )
+
     def _has_browse_reconsideration_signal(
         self,
         character_id: str,
         *,
+        since_event_id: int,
         since_epoch: int,
     ) -> bool:
-        store = self.access.read_store
-        for event_type in BROWSE_RECONSIDER_EVENT_TYPES:
-            events = store.list_events(
-                character_id,
-                limit=1,
-                event_type=event_type.value,
-            )
-            if events and epoch_us(events[-1].event_time) > since_epoch:
-                return True
+        # Durable event ids are insertion-order watermarks. They deliberately
+        # avoid comparing simulated/backfilled event_time values with the real
+        # scheduler clock, which are two different timelines.
+        if self._browse_signal_event_id(character_id) > since_event_id:
+            return True
         return self.group_repository.has_character_activity_since(
             character_id,
             since_epoch,
@@ -1140,8 +1144,15 @@ class WorldActivityScheduler:
             return True, "FIRST_OPPORTUNITY"
         if str(last.get("status") or "").upper() != "OK":
             return True, "RETRY_AFTER_FAILURE"
-        if (last.get("details") or {}).get("browsed") is not False:
+        last_details = last.get("details") or {}
+        if last_details.get("browsed") is not False:
             return True, "LAST_PLAN_BROWSED"
+
+        # Runs written before insertion-order watermarks existed replan once so
+        # the next quiet decision can establish a trustworthy baseline.
+        signal_event_id = last_details.get("signal_event_id")
+        if signal_event_id is None:
+            return True, "SIGNAL_WATERMARK_INIT"
 
         last_epoch = int(
             last.get("completed_at_epoch")
@@ -1155,6 +1166,7 @@ class WorldActivityScheduler:
             return True, "IDLE_RECHECK_ELAPSED"
         if self._has_browse_reconsideration_signal(
             character_id,
+            since_event_id=int(signal_event_id),
             since_epoch=last_epoch,
         ):
             return True, "NEW_CHARACTER_SIGNAL"
@@ -1194,6 +1206,9 @@ class WorldActivityScheduler:
                 subject_id,
                 exc,
             )
+        if kind == "BROWSE" and status == "OK":
+            details = dict(details or {})
+            details["signal_event_id"] = self._browse_signal_event_id(subject_id)
         completed = now
         next_minutes = self._next_interval(
             base_minutes,

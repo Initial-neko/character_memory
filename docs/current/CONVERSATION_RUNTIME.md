@@ -308,7 +308,7 @@ Character 生命周期一律是**旁挂标记**，不写进 `persona.yaml`：整
 删除范围（不可逆）——移除的是**定义**，保留的是**历史**：
 
 - 移除：persona 目录（含 `voice.yaml`）、头像文件、语音引用、在所有群聊里的成员身份、运行时注册；
-- 保留：`events`（聊天）、`memories`、`runtime_traces`、`space_posts` / `space_comments`。归档提示里"聊天、Memory、Trace、头像和空间动态都仍然保留"这条承诺对删除同样成立。
+- 保留：`events`（聊天）、`memories`、`runtime_traces`、`space_posts` / `space_comments`。归档保留头像和人物定义；删除则移除头像和人物定义，只保留聊天、Memory、Trace、空间动态与历史媒体事实。两者的保留范围不能混用。
 
 群成员身份有一条硬约束：`remove_member` 不允许把群降到 2 人以下，而 `GET /v1/groups` 与群归档抽屉都会过滤掉成员数 <2 的群。绕开这条下限不会留下"小群"，而是留下一个用户**既看不见、也无法恢复**的群。所以删除改为**拒绝并点名**那些只有 2 人的群，让用户先归档它。
 

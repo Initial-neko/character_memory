@@ -36,6 +36,7 @@ src/character_memory/
 ### `application/`
 
 - `chat_service.py` — direct application service / per-character lock。
+- `voice_message_materializer.py` / `voice_message_service.py` — durable Voice Message 的正式 TTS 请求、ready/failed 状态和事件更新。
 - `async_conversation.py` — ReactionScheduler、watermark、SSE hub。
 - `group_conversation_service.py` — group member ordering、shared-room reaction、member fault isolation、autonomous channel contract。
 - `action_materialization.py` — Direct/Group 共用：模型 action → 持久化事件（MESSAGE / EMOJI / VOICE_MESSAGE / STICKER / IMAGE 的唯一物料化门禁）。
@@ -48,6 +49,8 @@ src/character_memory/
 ### `domain/`
 
 - `models.py` — `Event / Memory / PersonReaction / ActionDecision / ...`。
+
+`llm/usage.py` 拥有调用归因 scope 与 durable request 计量；Runtime Trace 保留模型 I/O，两者通过 logical call id 关联。
 
 这里是 LLM structured-output 的主要 contract 边界。修改 action 语义时优先从这里看，而不是只改 Prompt。
 
@@ -88,6 +91,8 @@ async_web.py            async message accept + SSE routes
 group_web.py            group HTTP surface
 group_autonomy_web.py   autonomous Group status/config/manual opportunity HTTP surface
 history_web.py          history APIs
+ensemble_web.py         prompt/research/candidate/confirm HTTP surface
+encounter_web.py        temporary candidate/trial/accept/dismiss HTTP surface
 message_projection.py   shared message projection for history/group HTTP surfaces
 memory_web.py           minimal Memory Inspector / pin / forget / correct APIs
 search_web.py           durable message search APIs
@@ -136,6 +141,10 @@ tts_lab.py                  :9002 TTS Provider Runtime + Workbench
 tts_registry.py             formal realtime TTS provider metadata/ids/defaults
 voices.py                   per-persona voice.yaml registry contract
 gsv_tts_experiment.py       isolated :9014 GSV sidecar adapter/runtime
+character_onboarding.py     shared first avatar / voice selection / creation provenance
+ensemble_builder.py         Ensemble build persistence, research and confirmation
+encounter.py / encounter_store.py temporary candidates, trial replies and scheduler
+background_services.py      lifecycle ownership for long-lived workers
 config.py                   Settings model + character discovery
 envfile.py                  .env read/write + precedence/atomic multi-key helpers
 settings_store.py           config/env persistence + migration/backup
@@ -225,6 +234,8 @@ app.js                  conversation/composer core
 groups.js               group UX
 realtime_reconcile.js   realtime reconciliation
 persona.js              character UI
+ensemble.js             prompt/research/candidate confirmation
+encounter.js           temporary encounter feed/trial/accept/dismiss
 mentions.js             @ mention
 group_settings.js       group settings
 stickers.js             sticker UI/import
@@ -274,6 +285,9 @@ message_content.js      Direct/Group shared message body renderer
 | --- | --- |
 | LLM 回复/structured output | `domain/models.py` → `llm/client.py` → `runtime/person_runtime.py` |
 | Direct async/SSE | `application/async_conversation.py` → `async_web.py` → `web/app.js` |
+| Ensemble / 角色创建 | `ensemble_web.py` → `ensemble_builder.py` → `api_character_service.py` → `character_onboarding.py` → `web/ensemble.js` |
+| Random Encounter | `encounter_web.py` → `encounter.py` / `encounter_store.py` → `web/encounter.js` |
+| LLM Usage | `llm/usage.py` → 调用方的 `llm_usage_scope` → `dev_server.py` → `web/dev.js` |
 | Group chat | `group_store.py` → `application/group_conversation_service.py` → `group_web.py` → `web/groups.js` |
 | Autonomous Group Chat | `group_store.py` → `application/group_autonomy.py` → `group_autonomy_web.py` → existing Group SSE/UI |
 | Character Space | `space_store.py` → `space_autonomy.py` → `space_media_executor.py` / `world_observation.py` → `space_web.py` → `web/space.js` |

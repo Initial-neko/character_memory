@@ -187,16 +187,7 @@ canonical Message projection
 
 Space/World planning 继续共享 `PersonContextBuilder`，但还没有完全进入 `ReactionEngine`；这个差异是已登记的后续 cognition convergence，而不是用 Group/Direct schema 强行套住 Space。
 
-当前 outward primitives：
-
-- `MESSAGE`
-- `EMOJI`
-- `STICKER`
-- `IMAGE`
-
-内部工具意图：
-
-- `GENERATE_IMAGE`
+对外表达与内部工具 Action 的完整 contract 由 [PERSON_RUNTIME.md](PERSON_RUNTIME.md) §2 维护；枚举和 materialization 边界以 [domain/models.py](../../src/character_memory/domain/models.py) 为准。此处只描述执行关系，不维护第二份能力清单。
 
 `GENERATE_IMAGE` 本身不直接显示为消息；Direct 与 Group 都复用现有 VisualPromptPlanner / Provider / MediaStorage，在主 reaction 提交之后异步追加真正的 `IMAGE` Event。
 
@@ -449,11 +440,7 @@ Settings Center 会迁移已知 legacy plaintext Secret，普通 config save 会
 
 ## 14. TTS Provider Runtime + Lab
 
-`:9002` 当前 Workbench 暴露：
-
-- Kokoro 82M v1.1 zh；
-- Sherpa（通过 `:8001/v1/providers/sherpa/tts`）；
-- optional CosyVoice sidecar `:9012`。
+`:9002` 同时承担正式 Provider Runtime 和 Workbench 试听/工具编排。完整 Provider 与 VoiceDesign 能力归 [VOICE_AND_TTS.md](VOICE_AND_TTS.md)；正式 Provider 元数据来自 [tts_registry.py](../../src/character_memory/tts_registry.py)，Workbench adapter 装配来自 [tts_lab.py](../../src/character_memory/tts_lab.py) 的 `TtsLabRuntime`。不在架构概览重复维护试听 Provider 名单。
 
 Lab 下拉选择只用于试听/benchmark，不会自动改变正式 TTS 默认值。正式 provider/voice 由 Settings Center / `config.yaml` 决定。
 

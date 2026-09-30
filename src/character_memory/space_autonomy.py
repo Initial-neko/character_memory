@@ -634,11 +634,10 @@ Sources:
 
         warm.sort()
         cold.sort()
-        selected = [item[2] for item in warm[:size]]
-        remaining = size - len(selected)
-        if remaining > 0:
-            explorers = min(remaining, MAX_COLD_AUDIENCE_EXPLORERS)
-            selected.extend(item[1] for item in cold[:explorers])
+        explorers = min(MAX_COLD_AUDIENCE_EXPLORERS, len(cold), size)
+        warm_slots = max(0, size - explorers)
+        selected = [item[2] for item in warm[:warm_slots]]
+        selected.extend(item[1] for item in cold[:explorers])
         return selected
 
     def _comment_actor_name(self, comment) -> str:

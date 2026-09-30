@@ -82,7 +82,10 @@ def attach_memory_routes(app) -> None:
         existing = store.get_memory(memory_id)
         if existing is None or existing.character_id != character_id:
             raise HTTPException(status_code=404, detail="memory not found")
-        updated = store.set_memory_active(memory_id, req.active)
+        try:
+            updated = store.set_memory_active(memory_id, req.active)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"memory": _memory_payload(store, updated)}
 
     @app.post("/v1/characters/{character_id}/memories/{memory_id}/pin")
@@ -92,7 +95,10 @@ def attach_memory_routes(app) -> None:
         existing = store.get_memory(memory_id)
         if existing is None or existing.character_id != character_id:
             raise HTTPException(status_code=404, detail="memory not found")
-        updated = store.set_memory_pinned(memory_id, req.pinned)
+        try:
+            updated = store.set_memory_pinned(memory_id, req.pinned)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"memory": _memory_payload(store, updated)}
 
     @app.post("/v1/characters/{character_id}/memories/{memory_id}/correct")
@@ -102,6 +108,8 @@ def attach_memory_routes(app) -> None:
         existing = store.get_memory(memory_id)
         if existing is None or existing.character_id != character_id:
             raise HTTPException(status_code=404, detail="memory not found")
+        if existing.superseded_by is not None:
+            raise HTTPException(status_code=409, detail="superseded memory cannot be corrected again")
 
         content = " ".join(req.content.split()).strip()
         if not content:
@@ -134,7 +142,10 @@ def attach_memory_routes(app) -> None:
             metadata=metadata,
             embedding=embedding,
         )
-        result = store.supersede_memory(memory_id, replacement)
+        try:
+            result = store.supersede_memory(memory_id, replacement)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if result is None:
             raise HTTPException(status_code=404, detail="memory not found")
         old, saved = result

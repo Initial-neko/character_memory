@@ -21,11 +21,22 @@ class EncounterRepository:
         # EncounterService is instantiated both for HTTP routes and the
         # scheduler. Keep lifecycle serialization on their shared repository so
         # those callers cannot accept/dismiss/reopen one candidate concurrently.
-        self._lifecycle_locks = tuple(threading.RLock() for _ in range(64))
+        # A stable lock per durable candidate prevents an unrelated candidate
+        # from blocking on a slow character creator due to modulo collisions.
+        # Keep entries strongly owned: callers hold a raw RLock and eviction
+        # without tracking waiters could hand out two locks for one candidate.
+        self._lifecycle_guard = threading.Lock()
+        self._lifecycle_locks: dict[int, threading.RLock] = {}
         self._init_schema()
 
     def lifecycle_lock(self, candidate_id: int) -> threading.RLock:
-        return self._lifecycle_locks[int(candidate_id) % len(self._lifecycle_locks)]
+        key = int(candidate_id)
+        with self._lifecycle_guard:
+            lock = self._lifecycle_locks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                self._lifecycle_locks[key] = lock
+            return lock
 
     def _init_schema(self) -> None:
         now = datetime.now().astimezone()

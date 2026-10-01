@@ -68,6 +68,31 @@ def test_concurrent_settings_saves_preserve_both_updates(tmp_path: Path, monkeyp
     assert settings.recall_limit == 30
 
 
+def test_settings_snapshot_does_not_wait_for_a_mutation_transaction(tmp_path: Path):
+    """Slow provider apply must not make read-only Settings requests queue behind it."""
+
+    config = tmp_path / "config.yaml"
+    config.write_text('tts_provider: "kokoro"\nrecall_limit: 12\n', encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+    transaction_held = threading.Event()
+    release_transaction = threading.Event()
+
+    def hold_transaction():
+        with store.transaction():
+            transaction_held.set()
+            assert release_transaction.wait(timeout=10)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        holder = pool.submit(hold_transaction)
+        assert transaction_held.wait(timeout=5)
+        reader = pool.submit(store.snapshot)
+        snapshot = reader.result(timeout=2)
+        assert snapshot["values"]["tts_provider"] == "kokoro"
+        assert snapshot["values"]["recall_limit"] == 12
+        release_transaction.set()
+        holder.result(timeout=5)
+
+
 def test_concurrent_tts_patches_keep_runtime_apply_in_persistence_order(tmp_path: Path, monkeypatch):
     """A slow GSV preload must not finish after a newer provider switch/unload."""
 

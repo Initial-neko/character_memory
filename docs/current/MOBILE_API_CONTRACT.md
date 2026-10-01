@@ -21,7 +21,7 @@ Use Tailscale **on both devices**; Tailscale is the private transport, **not** t
 
 Do **not** use the Android device's own `127.0.0.1:8000/8001`. The existing `scripts/mobile-start.sh` and `scripts/mobile-check.sh` set up and verify this routing. Settings `:8003`, Dev `:8002` and TTS Workbench `:9002` are deliberately PC-local. Do not expose them wholesale to make the App work. A future one-origin gateway is OPTIONAL; it does not exist in V1.
 
-All paths below are relative to the noted base. JSON request/response is default **except** SSE, WAV upload, TTS audio and media assets. Exact runtime OpenAPI documents are `CORE/openapi.json` and `MEDIA/openapi.json`; consult those for full generated models.
+All paths below are relative to the noted base. JSON request/response is default **except** SSE, WAV upload, TTS audio and media assets. Exact runtime OpenAPI documents are `CORE/openapi.json` and `MEDIA/openapi.json`; consult those for full generated models. A source-checked, machine-readable **route subset inventory** is maintained at [docs/contracts/android-v1-route-inventory.json](../contracts/android-v1-route-inventory.json). It records 19 V1 paths and their source files, but does **not** replace generated OpenAPI or runtime schema tests.
 
 ## 2. API compatibility and error contract
 

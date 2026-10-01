@@ -15,7 +15,7 @@ from character_memory.space_web import attach_space_routes
 from character_memory.storage.sqlite import SQLiteStore
 
 
-def _config(tmp_path: Path, count: int = 12) -> Path:
+def _config(tmp_path: Path, count: int = 12, *, video_enabled: bool = False) -> Path:
     personas = tmp_path / "personas"
     for index in range(count):
         character_id = f"c{index:02d}"
@@ -29,19 +29,22 @@ def _config(tmp_path: Path, count: int = 12) -> Path:
             ),
             encoding="utf-8",
         )
-    config = tmp_path / "config.yaml"
-    config.write_text(
-        "\n".join(
+    lines = [
+        'api_key: ""',
+        'embedding_provider: "deterministic"',
+        f'db_path: "{(tmp_path / "space.db").as_posix()}"',
+        f'media_dir: "{(tmp_path / "media").as_posix()}"',
+        f'persona_path: "{(personas / "c00" / "persona.yaml").as_posix()}"',
+    ]
+    if video_enabled:
+        lines.extend(
             [
-                'api_key: ""',
-                'embedding_provider: "deterministic"',
-                f'db_path: "{(tmp_path / "space.db").as_posix()}"',
-                f'media_dir: "{(tmp_path / "media").as_posix()}"',
-                f'persona_path: "{(personas / "c00" / "persona.yaml").as_posix()}"',
+                "space_video_generation_enabled: true",
+                "space_video_daily_budget_cny: 3.0",
             ]
-        ),
-        encoding="utf-8",
-    )
+        )
+    config = tmp_path / "config.yaml"
+    config.write_text("\n".join(lines), encoding="utf-8")
     return config
 
 
@@ -653,6 +656,78 @@ def test_uploaded_image_media_is_inline_for_space_lightbox(tmp_path: Path):
         assert response.headers.get("content-disposition", "").startswith("inline;")
 
 
+
+
+def test_space_dev_media_can_request_a_video_and_reports_the_missing_provider(tmp_path: Path):
+    """GENERATE_VIDEO has to be reachable from the explicit-media entry point.
+
+    A video intent carries its own fields, so a request model that cannot hold
+    ``video_prompt`` makes the whole video path unreachable except by waiting
+    for the planner to choose it on its own -- which is not something a
+    paid capability can be accepted through.
+    """
+    config = _config(tmp_path, count=1, video_enabled=True)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        # A video intent without a prompt is still rejected on purpose.
+        missing = client.post(
+            "/v1/space/dev/media/c00",
+            json={"type": "GENERATE_VIDEO", "content": "测试"},
+        )
+        assert missing.status_code == 400
+        assert "video_prompt" in missing.text
+
+        # So is a video with no words beside it: the manual entry point may not
+        # publish a post the autonomous planner is forbidden from planning.
+        wordless = client.post(
+            "/v1/space/dev/media/c00",
+            json={"type": "GENERATE_VIDEO", "video_prompt": "雨夜街道，镜头缓慢跟随。"},
+        )
+        assert wordless.status_code == 400
+        assert "requires content" in wordless.text
+
+        # With a prompt the request reaches the executor, so the remaining
+        # failure is the absent provider rather than the request shape.
+        reached = client.post(
+            "/v1/space/dev/media/c00",
+            json={
+                "type": "GENERATE_VIDEO",
+                "content": "测试",
+                "video_prompt": "雨夜里向前走，镜头缓慢跟随。",
+                "duration_seconds": 5,
+            },
+        )
+        assert reached.status_code == 502
+        assert "video generation provider is unavailable" in reached.text
+
+
+def test_space_dev_video_smoke_answers_without_reaching_the_provider(tmp_path: Path):
+    """The provider-level check has to be free to run, or nobody runs it."""
+
+    config = _config(tmp_path, count=1, video_enabled=True)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/space/dev/video-smoke/c00",
+            json={"prompt": "雨夜里向前走", "duration_seconds": 5, "dry_run": True},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dry_run"] is True
+    assert body["kind"] == "video-smoke"
+    assert body["space_video_generation_enabled"] is True
+    # This config carries no provider key, which is exactly what the dry run is
+    # for: report it instead of discovering it through a failed generation.
+    assert body["api_key_present"] is False
+    assert body["provider_available"] is False
+    assert body["daily_max_generations"] == 3
+    assert body["generations_today"] == 0
+    assert "media_id" not in body
 
 
 def test_space_dev_status_summarizes_the_ledger_and_one_run_still_returns_the_raw_output(tmp_path: Path):

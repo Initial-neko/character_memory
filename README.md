@@ -174,6 +174,8 @@ Playwright Python runtime 已进入 canonical `all` extra，因为 World Observa
 
 **当前实现以源码为最终事实源。** 当前文档集中在 [`docs/current/`](docs/current/)：
 
+- [Android / External Client API Contract](docs/current/MOBILE_API_CONTRACT.md) — Core-owned CURRENT/PROPOSED API 清单，供 [Android 客户端](https://github.com/Initial-neko/character_memory_android) 使用。
+- [Mobile Access — Tailscale Serve](docs/current/MOBILE_ACCESS.md)
 - [Architecture](docs/current/ARCHITECTURE.md)
 - [Product Design](docs/current/DESIGN.md)
 - [Codebase Layout](docs/current/CODEBASE_LAYOUT.md)

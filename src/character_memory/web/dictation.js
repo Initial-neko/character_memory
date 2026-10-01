@@ -2,8 +2,19 @@
   const CM = window.CM;
   if (!CM) return;
 
-  const MEDIA_BASE_KEY = "character-memory:media-base-url";
-  const mediaBase = () => localStorage.getItem(MEDIA_BASE_KEY) || "http://127.0.0.1:8001";
+  const mediaAudio = CM.mediaAudio;
+  if (!mediaAudio) {
+    console.error("Shared media audio module is unavailable");
+    const button = document.getElementById("voiceInputButton");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "⚠";
+      button.title = "语音模块加载失败，请刷新页面";
+      button.setAttribute("aria-label", "语音模块加载失败，请刷新页面");
+    }
+    return;
+  }
+  const {mediaBase, concatChunks, downsample, wavBlob} = mediaAudio;
   const button = document.getElementById("voiceInputButton");
   const callButton = document.getElementById("voiceCallButton");
   const state = {
@@ -59,72 +70,19 @@
     return health;
   }
 
-  function concatChunks(chunks) {
-    const length = chunks.reduce((sum, item) => sum + item.length, 0);
-    const result = new Float32Array(length);
-    let offset = 0;
-    for (const chunk of chunks) {
-      result.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return result;
-  }
-
-  function downsample(samples, sourceRate, targetRate = 16000) {
-    if (sourceRate === targetRate) return samples;
-    const ratio = sourceRate / targetRate;
-    const outLength = Math.max(1, Math.round(samples.length / ratio));
-    const out = new Float32Array(outLength);
-    for (let i = 0; i < outLength; i += 1) {
-      const pos = i * ratio;
-      const left = Math.floor(pos);
-      const right = Math.min(samples.length - 1, left + 1);
-      const frac = pos - left;
-      out[i] = samples[left] * (1 - frac) + samples[right] * frac;
-    }
-    return out;
-  }
-
-  function wavBlob(samples, sampleRate) {
-    const buffer = new ArrayBuffer(44 + samples.length * 2);
-    const view = new DataView(buffer);
-    const writeString = (offset, value) => {
-      for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i));
-    };
-    writeString(0, "RIFF");
-    view.setUint32(4, 36 + samples.length * 2, true);
-    writeString(8, "WAVE");
-    writeString(12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, "data");
-    view.setUint32(40, samples.length * 2, true);
-    let offset = 44;
-    for (let i = 0; i < samples.length; i += 1) {
-      const value = Math.max(-1, Math.min(1, samples[i]));
-      view.setInt16(offset, value < 0 ? value * 32768 : value * 32767, true);
-      offset += 2;
-    }
-    return new Blob([buffer], {type:"audio/wav"});
-  }
-
   function releaseAudioCapture() {
-    state.processor?.disconnect?.();
-    state.sourceNode?.disconnect?.();
-    state.stream?.getTracks?.().forEach(track => track.stop());
-    const context = state.audioContext;
+    mediaAudio.closeCapture({
+      stream:state.stream,
+      context:state.audioContext,
+      source:state.sourceNode,
+      processor:state.processor,
+    });
     state.stream = null;
     state.audioContext = null;
     state.sourceNode = null;
     state.processor = null;
     state.recording = false;
     state.chunks = [];
-    if (context) context.close().catch(() => {});
   }
 
   function resetStreamingState() {
@@ -242,18 +200,14 @@
         setButton("idle");
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
-      });
+      const stream = await mediaAudio.requestMicrophone();
       if (generation !== wantedGeneration || callOwnsMicrophone()) {
-        stream.getTracks().forEach(track => track.stop());
+        mediaAudio.releaseStream(stream);
         setButton("idle");
         return;
       }
 
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      const context = new AudioContextClass();
-      const source = context.createMediaStreamSource(stream);
+      const {context, source} = mediaAudio.createCapture(stream);
       state.stream = stream;
       state.audioContext = context;
       state.sourceNode = source;

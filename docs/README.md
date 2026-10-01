@@ -2,6 +2,8 @@
 
 The maintained documentation is intentionally organized by **stable domain**, not by every individual feature. Source code and tests remain the final implementation authority; `docs/current/` explains the current contract.
 
+- [Android / External Client API Contract](current/MOBILE_API_CONTRACT.md) — source-verified Core APIs and proposed gaps; [Android consumer repository](https://github.com/Initial-neko/character_memory_android).
+
 ## Layout
 
 ```text

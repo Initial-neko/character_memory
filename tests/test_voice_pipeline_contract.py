@@ -37,9 +37,10 @@ def test_voice_pipeline_keeps_capture_independent_from_playback_phase():
     assert 'if (replyInFlight())' in source
     assert '已听到' in source
     assert 'async function flushPendingTurns()' in source
-    assert 'echoCancellation:true' in source
-    assert 'noiseSuppression:true' in source
-    assert 'autoGainControl:true' in source
+    shared = (ROOT / "src" / "character_memory" / "web" / "media_audio.js").read_text(encoding="utf-8")
+    assert 'echoCancellation:true' in shared
+    assert 'noiseSuppression:true' in shared
+    assert 'autoGainControl:true' in shared
 
 
 def test_media_asr_route_is_sync_so_blocking_inference_uses_threadpool():

@@ -97,13 +97,23 @@ class DevGroupAutonomyConfigRequest(BaseModel):
 
 
 class DevSpaceMediaRequest(BaseModel):
-    type: str = Field(pattern=r"^(SEARCH_IMAGE|GENERATE_IMAGE|VOICE)$")
+    type: str = Field(pattern=r"^(SEARCH_IMAGE|GENERATE_IMAGE|GENERATE_VIDEO|VOICE)$")
     content: str = Field(default="", max_length=4000)
     count: int = Field(default=1, ge=1, le=9)
     query: str = Field(default="", max_length=300)
     purpose: str = Field(default="SCENE", pattern=r"^(SELFIE|SCENE)$")
     visual_intent: str = Field(default="", max_length=800)
+    video_prompt: str = Field(default="", max_length=1200)
+    duration_seconds: int = Field(default=5, ge=5, le=15)
+    video_ratio: str = Field(default="16:9", max_length=16)
     voice_text: str = Field(default="", max_length=4000)
+
+
+class DevVideoSmokeRequest(BaseModel):
+    prompt: str = Field(default="雨夜里向前走，镜头缓慢跟随。", max_length=1200)
+    duration_seconds: int = Field(default=5, ge=5, le=15)
+    resolution: str = Field(default="", max_length=8)
+    dry_run: bool = True
 
 
 class DevWorldFetchRequest(BaseModel):
@@ -513,12 +523,33 @@ def create_dev_app(
     @app.post("/v1/dev/space/media/{character_id}")
     def dev_space_media(character_id: str, req: DevSpaceMediaRequest):
         safe_id = quote(character_id, safe="")
+        # A video intent waits out the provider's async task inside the request,
+        # so the image-sized budget would cut it off long before the provider's
+        # own timeout does.
+        if req.type == "GENERATE_VIDEO":
+            budget = float(getattr(cfg, "video_generation_timeout_seconds", 900.0))
+        else:
+            budget = float(getattr(cfg, "image_generation_timeout_seconds", 180.0))
         return request_character(
             "POST",
             f"/v1/space/dev/media/{safe_id}",
             operation="space-media",
             json=req.model_dump(),
-            timeout=max(120.0, float(getattr(cfg, "image_generation_timeout_seconds", 180.0)) + 60.0),
+            timeout=max(120.0, budget + 60.0),
+        )
+
+    @app.post("/v1/dev/space/video-smoke/{character_id}")
+    def dev_video_smoke(character_id: str, req: DevVideoSmokeRequest):
+        safe_id = quote(character_id, safe="")
+        timeout = 30.0 if req.dry_run else max(
+            120.0, float(getattr(cfg, "video_generation_timeout_seconds", 900.0)) + 60.0
+        )
+        return request_character(
+            "POST",
+            f"/v1/space/dev/video-smoke/{safe_id}",
+            operation="video-smoke",
+            json=req.model_dump(),
+            timeout=timeout,
         )
 
     @app.post("/v1/dev/space/audience/{post_id}")

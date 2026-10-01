@@ -166,6 +166,8 @@ Research 只负责整理群体事实。成员 Persona 不再为每个人额外�
 
 `/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。
 
+READY build 是可跨请求保留的 research 快照，不是提交时的角色注册表快照。再次打开 AI 建群会恢复最近一条 READY / FAILED build；服务重启时遗留的 BUILDING 会转成可重试的 FAILED，而不是永久卡在整理中。confirm 会重新按当前 active Character 匹配每位成员；research 后被删除/归档的旧 ID 不会写进新群，期间新建的同名 active Character 可以直接复用。同一 build 的重复/并发 confirm 只提交一次；成功 re-key 到真实 group id 后，原 build id 仍作为幂等别名接受响应重试。批量容量先用于确认页预测，真正创建每个 Character 时仍在共享 registry lock 下重查硬上限，防止头像/声音 onboarding 释放锁期间有其它创建插入。新角色的 `creation.json.group_id` 在真实 GroupConversation 创建后改写为最终 group id，不保留已经被 re-key 掉的临时 build id。
+
 可选 `use_voice_design=true` 只在用户显式勾选后生效。它要求用户已经手动启动 Qwen3 VoiceDesign sidecar；群聊和 Character 核心 commit 完成后，后台才按角色 identity/personality/speech style 逐个尝试 VoiceDesign + freeze。VoiceDesign 未启动、不可用或单个角色生成失败都只记日志并保留现有默认/回退 voice，绝不回滚 Character 或 Group。
 
 模型调用量级因此从“1 次群体 research + 每名成员 1 次 Persona structured call”收敛为主要的群体 research 调用；成员 Persona projection 为本地确定性转换。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。

@@ -1,0 +1,156 @@
+{
+  "kind": "CharacterMemoryAndroidV1EndpointInventory",
+  "status": "source-verified route inventory; not generated OpenAPI / not authorization enforcement",
+  "verified_at": "2026-10-01",
+  "canonical_document": "docs/current/MOBILE_API_CONTRACT.md",
+  "openapi_runtime": [
+    "CORE/openapi.json",
+    "MEDIA/openapi.json"
+  ],
+  "transport": {
+    "CORE": "https://<node>.<tailnet>.ts.net",
+    "MEDIA": "https://<node>.<tailnet>.ts.net:8443"
+  },
+  "routes": [
+    {
+      "service": "CORE",
+      "method": "GET",
+      "path": "/v1/characters",
+      "source": "src/character_memory/core_character_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/characters/draft",
+      "source": "src/character_memory/core_character_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/characters",
+      "source": "src/character_memory/core_character_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "GET",
+      "path": "/v1/chat/history-page",
+      "source": "src/character_memory/history_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/chat/messages",
+      "source": "src/character_memory/async_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "GET",
+      "path": "/v1/events/stream",
+      "source": "src/character_memory/async_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "GET",
+      "path": "/v1/groups",
+      "source": "src/character_memory/group_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/groups",
+      "source": "src/character_memory/group_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/groups/{conversation_id}/messages",
+      "source": "src/character_memory/async_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/ensembles/prepare",
+      "source": "src/character_memory/ensemble_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/ensembles/{group_id}/confirm",
+      "source": "src/character_memory/ensemble_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "GET",
+      "path": "/v1/space/posts",
+      "source": "src/character_memory/space_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/space/posts/{post_id}/comments",
+      "source": "src/character_memory/space_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/characters/{character_id}/images/generate",
+      "source": "src/character_memory/visual_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/visual/direct/messages",
+      "source": "src/character_memory/visual_capture_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/visual/groups/{conversation_id}/messages",
+      "source": "src/character_memory/visual_capture_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/visual/direct/observations",
+      "source": "src/character_memory/visual_capture_web.py"
+    },
+    {
+      "service": "MEDIA",
+      "method": "POST",
+      "path": "/v1/asr",
+      "source": "src/character_memory/media_server.py"
+    },
+    {
+      "service": "MEDIA",
+      "method": "POST",
+      "path": "/v1/tts",
+      "source": "src/character_memory/media_server.py"
+    }
+  ],
+  "proposed": [
+    {
+      "name": "device pairing/scoped tokens",
+      "implemented": false
+    },
+    {
+      "name": "canonical Direct conversation id/migration",
+      "implemented": false
+    },
+    {
+      "name": "cross-device read state",
+      "implemented": false
+    },
+    {
+      "name": "device health",
+      "implemented": false
+    },
+    {
+      "name": "push delivery",
+      "implemented": false
+    },
+    {
+      "name": "multipart upload",
+      "implemented": false
+    }
+  ]
+}

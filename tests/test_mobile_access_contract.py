@@ -9,8 +9,9 @@ def test_mobile_access_resolver_loads_before_voice_clients() -> None:
     index = (WEB / "index.html").read_text(encoding="utf-8")
     assert '<script src="/static/mobile_access.js" defer></script>' in index
     assert index.index('/static/app.js') < index.index('/static/mobile_access.js')
-    assert index.index('/static/mobile_access.js') < index.index('/static/voice.js')
-    assert index.index('/static/mobile_access.js') < index.index('/static/dictation.js')
+    assert index.index('/static/mobile_access.js') < index.index('/static/media_audio.js')
+    assert index.index('/static/media_audio.js') < index.index('/static/voice.js')
+    assert index.index('/static/media_audio.js') < index.index('/static/dictation.js')
     assert '<link rel="stylesheet" href="/static/mobile_access.css">' in index
 
 
@@ -32,12 +33,17 @@ def test_remote_tailscale_page_hides_pc_only_settings_link() -> None:
     assert 'if (tailscalePage) document.getElementById("settingsLink")?.classList.add("hidden")' in script
 
 
-def test_existing_voice_clients_share_the_same_media_override_key() -> None:
+def test_voice_clients_share_one_media_audio_resolver() -> None:
+    shared = (WEB / "media_audio.js").read_text(encoding="utf-8")
     voice = (WEB / "voice.js").read_text(encoding="utf-8")
     dictation = (WEB / "dictation.js").read_text(encoding="utf-8")
     key = 'character-memory:media-base-url'
-    assert key in voice
-    assert key in dictation
+    assert key in shared
+    assert "CM.mobileAccess?.mediaBase?.()" in shared
+    assert "CM.mediaAudio" in voice
+    assert "CM.mediaAudio" in dictation
+    assert key not in voice
+    assert key not in dictation
 
 
 def test_tailscale_serve_helper_keeps_backends_private() -> None:

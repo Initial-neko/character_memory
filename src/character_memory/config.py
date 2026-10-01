@@ -159,6 +159,10 @@ class Settings(BaseModel):
     space_video_resolution: str = Field(default="2K", pattern=r"^(768P|2K)$")
     space_video_max_duration_seconds: int = Field(default=5, ge=5, le=15)
     space_video_daily_budget_cny: float = Field(default=3.0, ge=0.0, le=10000.0)
+    # A count ceiling as well as a money ceiling: the money guard silently
+    # loosens whenever the provider changes price, while "at most N a day" stays
+    # legible. 0 blocks video jobs, matching the budget field above.
+    space_video_daily_max_generations: int = Field(default=3, ge=0, le=100)
     space_video_cost_cny_per_second_768p: float = Field(default=0.09, ge=0.0, le=1000.0)
     space_video_cost_cny_per_second_2k: float = Field(default=0.15, ge=0.0, le=1000.0)
     space_video_max_bytes: int = Field(default=64 * 1024 * 1024, ge=1024 * 1024, le=256 * 1024 * 1024)

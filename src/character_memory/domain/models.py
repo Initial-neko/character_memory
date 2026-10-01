@@ -547,6 +547,19 @@ class SpacePostPlan(BaseModel):
                 video_seen = True
             normalized.append(intent)
         self.media_intents = normalized
+        # A video is the one attachment nobody downstream can read for itself.
+        # The audience gets a one-line summary of the post -- text, plus a
+        # caption such as "附一段 5 秒视频" -- so a video with no words beside it
+        # reaches every other character as an empty post they cannot answer.
+        # Raising here is the cheapest possible failure: the plan is rejected
+        # before the executor reserves budget and calls the paid provider, so a
+        # malformed plan costs nothing. Images and voice do not need this: an
+        # image still carries the text's meaning, and a voice post has its
+        # transcript surfaced to the audience.
+        if self.social_post is None and any(
+            intent.type == SpaceMediaIntentType.GENERATE_VIDEO for intent in self.media_intents
+        ):
+            raise ValueError("GENERATE_VIDEO requires social_post: a video post needs words beside it")
         return self
 
 

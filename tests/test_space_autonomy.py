@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from character_memory.domain.models import (
     ActionDecision,
@@ -637,6 +638,83 @@ def test_space_audience_receives_voice_transcript_as_shared_visible_fact(tmp_pat
     store.close()
 
 
+def test_space_audience_receives_the_video_shot_as_a_shared_visible_fact(tmp_path):
+    """A video is bytes nobody in the prompt can watch.
+
+    The voice post above carries its transcript for exactly this reason; a
+    video post that carried only "附一段 5 秒视频" reached every other character
+    as something they had no way to answer.
+    """
+
+    model = ListeningSpaceModel()
+    access, store, _ = _access(tmp_path, ids=("c00", "c01"), model=model)
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    now = datetime(2026, 9, 22, 10, 30, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "楼下的猫今天肯让我摸了。", now, media_id="video-asset-2")
+    service.media_repository.replace_for_post(
+        post.id,
+        [
+            {
+                "media_id": "video-asset-2",
+                "media_type": "VIDEO",
+                "source_type": "GENERATED",
+                "metadata": {
+                    "prompt": "橘猫在午后窗台上伸懒腰，镜头缓慢推近。",
+                    "duration_seconds": 5,
+                },
+            }
+        ],
+        now,
+    )
+
+    outcomes = service.process_audience(post.id, now=now)
+
+    assert len(outcomes) == 1
+    assert any(
+        "附一段5 秒视频，画面是：“橘猫在午后窗台上伸懒腰，镜头缓慢推近。”" in context
+        for context in model.reaction_contexts
+    )
+    store.close()
+
+
+def test_a_video_plan_without_its_own_words_is_rejected_before_the_provider(tmp_path):
+    """The cheapest place to fail is before the plan can reserve budget.
+
+    ``create_post`` only ever required *text or media*, so a video with nothing
+    beside it used to publish -- and then reached the audience as a post they
+    could not respond to. Rejecting the plan means the paid provider is never
+    called and no reservation is recorded.
+    """
+
+    with pytest.raises(ValidationError, match="GENERATE_VIDEO requires social_post"):
+        SpacePostPlan(
+            social_post=None,
+            media_intents=[
+                SpaceMediaIntent(
+                    type="GENERATE_VIDEO",
+                    video_prompt="橘猫在窗台上伸懒腰。",
+                    duration_seconds=5,
+                )
+            ],
+        )
+
+
+def test_a_video_plan_is_accepted_once_it_has_words_beside_it():
+    plan = SpacePostPlan(
+        social_post="楼下的猫今天肯让我摸了。",
+        media_intents=[
+            SpaceMediaIntent(
+                type="GENERATE_VIDEO",
+                video_prompt="橘猫在窗台上伸懒腰。",
+                duration_seconds=5,
+            )
+        ],
+    )
+
+    assert plan.social_post == "楼下的猫今天肯让我摸了。"
+
+
 def test_space_media_failure_does_not_block_text_post(tmp_path):
     access, store, _ = _access(tmp_path, ids=("c00",), model=FailingMediaModel())
     repository = SpaceRepository(store)
@@ -735,6 +813,33 @@ def test_space_prompt_states_the_media_capability_without_policing_it(tmp_path):
     store.close()
 
 
+def test_space_prompt_asks_a_video_for_words_and_for_this_character_look(tmp_path):
+    """A video needs a caption and a face.
+
+    Nobody downstream can watch the bytes: the audience gets a one-line
+    summary, so a video post with nothing beside it arrives as something no
+    other character can answer. And unlike image generation -- which compiles
+    its prompt through ``VisualPromptPlanner`` with the persona and an identity
+    policy -- a video prompt goes to the provider verbatim, so the only place
+    the character's own look can be asked for is here.
+    """
+
+    access, store, model = _access(tmp_path, ids=("c00",))
+    access.settings.space_video_generation_enabled = True
+    access.settings.metaso_minimax_api_key = "mk-test-key"
+    access.settings.space_video_daily_budget_cny = 3.0
+    service = SpaceAutonomyService(access, SpaceRepository(store))
+
+    service.run_opportunity("c00", now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc), source="DEV")
+
+    prompt = model.prompts[0]
+    assert "GENERATE_VIDEO 当前可用" in prompt
+    assert "选择了视频就必须同时写 social_post" in prompt
+    assert "贴合这个人物自己的视觉身份" in prompt
+    assert "可爱" in prompt
+    store.close()
+
+
 def test_daily_post_ceiling_skips_without_moving_the_next_opportunity(tmp_path):
     """A spent publishing budget pauses scheduling; it never reschedules it.
 
@@ -821,6 +926,16 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="runWorldFetch"',
         'id="spaceMediaType"',
         'id="runSpaceMedia"',
+        # The two video checks live in their own card, outside every folding
+        # surface, because a check you cannot see is a check that does not run.
+        'id="videoGenerationCard"',
+        'id="videoSmokePrompt"',
+        'id="videoSmokeDryRun"',
+        'id="runVideoSmoke"',
+        'id="videoPostPrompt"',
+        'id="runVideoPost"',
+        'id="videoSmokeReport"',
+        'id="videoPostReport"',
         'id="spaceAudienceSize"',
         'id="spacePollSeconds"',
         'id="applySpaceConfig"',
@@ -833,6 +948,13 @@ def test_dev_console_exposes_space_autonomy_controls():
         'data-minutes="60"',
     ]:
         assert token in html
+
+    # "Visible" is exactly the property that was broken, so assert it
+    # structurally rather than trusting the markup to stay unfolded: the video
+    # card must not carry either of the surfaces dev.css hides in Simple mode.
+    video_card = html.split('id="videoGenerationCard"', 1)[1].split("</article>", 1)[0]
+    assert "data-dev-surface" not in video_card
+    assert "level-group" not in video_card
 
     # A console that lost its script renders the markup's placeholder values and
     # looks alive while nothing responds. The page has to say so, and dev.js has

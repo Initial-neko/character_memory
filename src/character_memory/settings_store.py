@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from functools import wraps
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
+import threading
 from typing import Any
 
 import yaml
@@ -116,12 +119,25 @@ HOT_APPLY_FIELDS = {
     *GSV_RUNTIME_FIELDS,
 }
 
+
+def _serialized_store_access(method):
+    """Keep each read or mutation coherent across config.yaml and .env."""
+
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        with self._mutation_lock:
+            return method(self, *args, **kwargs)
+
+    return guarded
+
+
 # Settings are served in three levels. `common` is the short list a user has to
 # decide for the stack to work at all and is the only one the first screen
 # shows; `advanced` has a defensible default and is opened deliberately;
 # `diagnostic` is transport/path/poll plumbing and is where troubleshooting
-# starts. Every level survives as a real collapsed group in the page, so nothing
-# is unreachable -- it is only out of the way.
+# starts. Advanced fields survive as a collapsed group in the page. Diagnostic
+# fields remain in the API schema and config.example.yaml, but the normal UI
+# deliberately leaves that backend plumbing out of its editable controls.
 SETTING_LEVELS = ("common", "advanced", "diagnostic")
 # A field that forgets its level must not land on the first screen. The page's
 # contract is "common is the short list", so an unlabelled field is hidden
@@ -581,6 +597,16 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "help": "整个 Character Space 每个本地自然日的视频估算花费上限。0 = 禁止产生付费视频任务。",
             },
             {
+                "name": "space_video_daily_max_generations",
+                "label": "Video Daily Count Limit",
+                "type": "number",
+                "min": 0,
+                "max": 100,
+                "step": 1,
+                "level": "advanced",
+                "help": "每个本地自然日最多提交多少条视频任务。条数上限比金额上限更直观，且不会因为服务商改价而悄悄放松；0 = 禁止产生付费视频任务。",
+            },
+            {
                 "name": "space_world_observation_enabled",
                 "label": "World Observation",
                 "type": "checkbox",
@@ -958,6 +984,18 @@ class SettingsStore:
         self.config_path = Path(config_path)
         self.env_path = Path(env_path) if env_path else self.config_path.parent / ".env"
         self.last_migration: dict[str, Any] | None = None
+        # A save is a read/validate/patch/backup/write transaction, sometimes
+        # spanning both config.yaml and .env. Atomic replacement protects one
+        # file write, but without this lock two individually successful saves
+        # can both patch the same old text and silently lose one update.
+        self._mutation_lock = threading.RLock()
+
+    @contextmanager
+    def transaction(self):
+        """Serialize a larger Settings operation that calls store methods."""
+
+        with self._mutation_lock:
+            yield
 
     def _raw_config(self) -> dict[str, Any]:
         if not self.config_path.is_file():
@@ -979,6 +1017,7 @@ class SettingsStore:
         _atomic_write(backup, text)
         return backup
 
+    @_serialized_store_access
     def migrate_legacy_secrets(self) -> dict[str, Any]:
         raw = self._raw_config()
         original_text = self._config_text()
@@ -1031,6 +1070,7 @@ class SettingsStore:
         self.last_migration = result
         return result
 
+    @_serialized_store_access
     def save_values(self, values: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(values, dict) or not values:
             return {"changed": False, "backup": None, "updated": [], "restart_required": []}
@@ -1096,6 +1136,7 @@ class SettingsStore:
             "restart_required": restart_required,
         }
 
+    @_serialized_store_access
     def save_secret(self, name: str, value: str) -> dict[str, Any]:
         if name not in SECRET_NAMES:
             raise ValueError(f"unsupported secret: {name}")
@@ -1113,6 +1154,7 @@ class SettingsStore:
             "restart_required": True,
         }
 
+    @_serialized_store_access
     def delete_secret(self, name: str) -> dict[str, Any]:
         if name not in SECRET_NAMES:
             raise ValueError(f"unsupported secret: {name}")

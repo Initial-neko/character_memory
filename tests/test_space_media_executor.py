@@ -144,6 +144,7 @@ def _access(tmp_path, *, max_items=3):
         space_video_resolution="2K",
         space_video_max_duration_seconds=5,
         space_video_daily_budget_cny=1.0,
+        space_video_daily_max_generations=3,
         space_video_cost_cny_per_second_768p=0.09,
         space_video_cost_cny_per_second_2k=0.15,
         space_video_max_bytes=64 * 1024 * 1024,
@@ -432,5 +433,113 @@ def test_space_generated_video_stops_before_provider_when_daily_budget_would_be_
     assert provider.calls == []
     assert result["errors"][0]["type"] == "GENERATE_VIDEO"
     assert "daily budget exceeded" in result["errors"][0]["error"]
+    assert store.conn.execute("SELECT COUNT(*) FROM video_generation_usage").fetchone()[0] == 0
+    store.close()
+
+
+def test_space_video_daily_count_limit_stops_before_the_provider(tmp_path):
+    """A count ceiling, not only a money ceiling.
+
+    The money guard silently loosens whenever the provider changes price; "at
+    most N a day" is the limit an operator can actually reason in.
+    """
+
+    access, store = _access(tmp_path)
+    access.settings.space_video_daily_budget_cny = 100.0
+    access.settings.space_video_daily_max_generations = 1
+    provider = FakeVideoProvider()
+    executor = SpaceMediaExecutor(access, video_provider=provider)
+    now = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
+    intent = SpaceMediaIntent(
+        type="GENERATE_VIDEO", video_prompt="五秒钟的动作镜头", duration_seconds=5
+    )
+
+    first = executor.execute("c00", [intent], now=now)
+    second = executor.execute("c00", [intent], now=now)
+
+    assert first["errors"] == []
+    assert len(provider.calls) == 1
+    assert second["relations"] == []
+    assert len(provider.calls) == 1
+    assert "daily generation limit reached" in second["errors"][0]["error"]
+    store.close()
+
+
+def test_video_smoke_dry_run_reports_what_this_runtime_resolved_for_free(tmp_path):
+    """The usual question is whether this runtime got the key and the switch."""
+
+    access, store = _access(tmp_path)
+    provider = FakeVideoProvider()
+    executor = SpaceMediaExecutor(access, video_provider=provider)
+    now = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
+
+    report = executor.video_smoke(
+        character_id="c00", prompt="雨夜街道，角色撑伞向前走。", dry_run=True, now=now
+    )
+
+    assert report["dry_run"] is True
+    assert report["space_video_generation_enabled"] is True
+    assert report["provider_available"] is True
+    assert report["resolution"] == "2K"
+    assert report["duration_seconds"] == 5
+    assert report["estimated_cost_cny"] == 0.75
+    assert report["spent_today_cny"] == 0.0
+    assert report["daily_max_generations"] == 3
+    assert report["generations_today"] == 0
+    assert "media_id" not in report
+    # A dry run answers the question without spending anything.
+    assert provider.calls == []
+    assert store.conn.execute("SELECT COUNT(*) FROM video_generation_usage").fetchone()[0] == 0
+    store.close()
+
+
+def test_video_smoke_run_uses_the_provider_and_returns_a_playable_asset(tmp_path):
+    access, store = _access(tmp_path)
+    provider = FakeVideoProvider()
+    executor = SpaceMediaExecutor(access, video_provider=provider)
+    now = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
+
+    report = executor.video_smoke(
+        character_id="c00",
+        prompt="雨夜街道，角色撑伞向前走。",
+        duration_seconds=5,
+        resolution="768P",
+        dry_run=False,
+        now=now,
+    )
+
+    assert report["ok"] is True
+    assert report["task_id"] == "task-video-1"
+    assert report["mime_type"] == "video/mp4"
+    assert report["bytes"] == len(MP4)
+    assert report["media_url"] == f"/v1/media/{report['media_id']}"
+    assert report["estimated_cost_cny"] == 0.45
+    assert report["spent_today_cny"] == 0.45
+    assert len(provider.calls) == 1
+    asset = store.get_media_asset(report["media_id"])
+    assert asset.source == "DEV_VIDEO_SMOKE"
+    assert access.media_storage.asset_path(asset).read_bytes() == MP4
+    usage = store.conn.execute(
+        "SELECT status,task_id FROM video_generation_usage"
+    ).fetchone()
+    assert tuple(usage) == ("SUCCEEDED", "task-video-1")
+    store.close()
+
+
+def test_video_smoke_reports_an_unavailable_provider_without_spending(tmp_path):
+    access, store = _access(tmp_path)
+    provider = FakeVideoProvider()
+    provider.available = lambda: False
+    executor = SpaceMediaExecutor(access, video_provider=provider)
+    now = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
+
+    report = executor.video_smoke(
+        character_id="c00", prompt="雨夜街道，角色撑伞向前走。", dry_run=False, now=now
+    )
+
+    assert report["ok"] is False
+    assert report["provider_available"] is False
+    assert "unavailable" in report["error"]
+    assert provider.calls == []
     assert store.conn.execute("SELECT COUNT(*) FROM video_generation_usage").fetchone()[0] == 0
     store.close()

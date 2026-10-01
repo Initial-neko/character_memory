@@ -12,7 +12,12 @@ import uuid
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from character_memory.domain.models import DailyLifePlan, DiaryResult, PersonReaction
+from character_memory.domain.models import (
+    DailyLifePlan,
+    DiaryResult,
+    PersonReaction,
+    SpacePostPlan,
+)
 from character_memory.llm.usage import (
     LlmUsageRecorder,
     current_llm_usage_context,
@@ -533,6 +538,18 @@ class OpenAICompatibleModel(PersonModel):
                 "actions 必须是 0~3 个动作，每个动作必须用 type 字段，不要用 action 字段；MESSAGE/EMOJI/SPACE_COMMENT 的文本必须放在 message 字段，不要用 text；"
                 "如果原输入的 Behavioral Contract 是 Space 场景，只能保留它允许的 SPACE_LIKE / SPACE_COMMENT，不要修成普通 MESSAGE；"
                 "STICKER 需要 sticker_id，IMAGE 需要 image_id；memory_candidates 和 intent_candidates 必须是数组。只返回修正后的 JSON。"
+            )
+
+        if schema is SpacePostPlan:
+            # The generic repair below says "empty a field when in doubt", which
+            # is the opposite of the fix here: a plan that chose a video without
+            # words has to *add* text, not drop the video.
+            return (
+                "上一份 JSON 不符合 SpacePostPlan。只修正结构，不扩写内容："
+                "顶层字段是 social_post（字符串或 null）和 media_intents（数组）。"
+                "如果 media_intents 里有 GENERATE_VIDEO，social_post 必须是一句这个人物真会公开发出的短动态，不能为 null；"
+                "不想写正文时就不要选 GENERATE_VIDEO，改用图片或只发文字。"
+                "video_prompt 必须是可拍摄的短镜头描述；不要返回 JSON 之外的解释，只返回修正后的 JSON。"
             )
 
         fields = ", ".join(schema.model_fields.keys()) or "目标字段"

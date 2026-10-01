@@ -212,6 +212,10 @@ class SpaceAutonomyService:
             f"GENERATE_VIDEO 当前可用：默认/最高 {video_max_duration} 秒、{video_resolution}。"
             "视频是付费能力，只在动作、过程、镜头变化或时间推进确实比静态图片更能表达时使用；"
             "video_prompt 要直接描述可拍摄的短镜头、主体动作、环境与镜头运动，单条动态最多一个视频。"
+            "选择了视频就必须同时写 social_post：视频本身对别人是看不见的，"
+            "没有配文，这条动态在别人眼里就是一段无法回应的空白。"
+            "video_prompt 还要贴合这个人物自己的视觉身份与生活质感，保持一贯的可爱、柔软、"
+            "有生活气息的调性；不要写成与人物无关的通用电影感空镜。"
             if video_enabled
             else "GENERATE_VIDEO 当前不可用，不要选择它。"
         )
@@ -542,23 +546,33 @@ Sources:
             voice_transcript = str(
                 (voice_relations[0].get("metadata") or {}).get("transcript") or ""
             ).strip()
+        # The character's own record of the post has to name what the video
+        # showed, or every later recall of "I posted that video" is a memory of
+        # a duration. Same reason the voice branch above carries its transcript.
+        video_shot = ""
+        if video_relations:
+            video_metadata = video_relations[0].get("metadata") or {}
+            video_shot = str(video_metadata.get("prompt") or "").strip()
+            video_duration = int(video_metadata.get("duration_seconds") or 0)
+            video_label = f"{video_duration} 秒视频" if video_duration > 0 else "视频"
         if content and voice_transcript:
             event_content = f"{content}\n[语音] {voice_transcript}"
+        elif content and video_shot:
+            event_content = f"{content}\n[视频 · {video_label}] {video_shot}"
         elif content:
             event_content = content
         elif voice_transcript:
             event_content = f"[语音动态] {voice_transcript}"
+        elif video_shot:
+            event_content = f"[视频动态 · {video_label}] {video_shot}"
         elif image_relations:
             event_content = f"[图片动态 · {len(image_relations)} 张]"
         elif video_relations:
-            duration = int((video_relations[0].get("metadata") or {}).get("duration_seconds") or 0)
-            event_content = f"[视频动态 · {duration} 秒]" if duration > 0 else "[视频动态]"
+            event_content = f"[视频动态 · {video_label}]"
         else:
             event_content = "[媒体动态]"
         try:
-            # Use the repository's connection for both durable records. The
-            # runtime store may be a separate SQLiteStore for the same file, in
-            # which case wrapping access.store() would not cover create_post().
+            # Both records must commit through the same SQLite connection.
             with self.repository.store.transaction():
                 source_event = self.repository.store.append_event(
                     Event(
@@ -573,6 +587,7 @@ Sources:
                             "media_types": [item["media_type"] for item in relations],
                             "media_sources": [item["source_type"] for item in relations],
                             "voice_transcript": voice_transcript or None,
+                            "video_shot": video_shot or None,
                         },
                     )
                 )
@@ -841,8 +856,20 @@ Sources:
             if image_count:
                 visible_parts.append(f"附 {image_count} 张图片")
             if video_items:
-                duration = int((video_items[0].metadata or {}).get("duration_seconds") or 0)
-                visible_parts.append(f"附一段 {duration} 秒视频" if duration > 0 else "附一段视频")
+                # Whatever the viewer cannot see has to be said. A video is
+                # stored as bytes nobody in this prompt can watch, so a bare
+                # "附一段 5 秒视频" left every other character with nothing to
+                # answer -- the same reason a voice post carries its transcript
+                # above. The shot description is already in the relation
+                # metadata; surface it instead of the bare duration.
+                metadata = video_items[0].metadata or {}
+                duration = int(metadata.get("duration_seconds") or 0)
+                shot = str(metadata.get("prompt") or "").strip()
+                label = f"{duration} 秒视频" if duration > 0 else "视频"
+                if shot:
+                    visible_parts.append(f"附一段{label}，画面是：“{shot[:600]}”")
+                else:
+                    visible_parts.append(f"附一段{label}")
             visible_summary = "；".join(visible_parts) or "[媒体动态]"
             result = runtime.handle(
                 Event(

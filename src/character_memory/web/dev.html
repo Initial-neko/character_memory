@@ -183,7 +183,7 @@
               <label>Post Text<input id="spaceMediaPostText" type="text" value="随手分享一下。" / title="本次媒体测试动态的正文；会创建测试动态，但不是系统配置。"></label>
               <button class="secondary" id="runSpaceMedia" type="button" title="真实执行选中的 Space 媒体能力并发布一条测试动态；不移动正式 Scheduler。">测试媒体动态</button>
             </div>
-            <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE / VOICE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图；Voice Text 会走正式 :8001/v1/tts。</p>
+            <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE / VOICE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图；Voice Text 会走正式 :8001/v1/tts。视频走下面「视频生成」卡片，那里把「服务商链路」和「Space 是否发得出去」拆成了两个独立检查。</p>
           </div>
 
           <div class="field-group">
@@ -221,6 +221,61 @@
           <summary>原始执行结果（调试用）</summary>
           <pre id="spaceResult" class="result">等待测试...</pre>
         </details>
+      </article>
+
+      <!-- Declared `common` on purpose. A control with no declaring ancestor
+           resolves to `diagnostic` and gets swept into a closed group, which is
+           exactly the folding this card exists to undo: a paid capability whose
+           check cannot be seen is a check that never runs. -->
+      <article class="card wide" id="videoGenerationCard" data-level="common">
+        <div class="card-title-row">
+          <div>
+            <h2>视频生成</h2>
+            <p class="subtle">两个互相独立的检查，都直接出现在这里、不折叠。① 只验服务商链路本身；② 走完整 Space 链路发一条带视频的动态。视频是付费能力，两者都受每日条数与金额上限约束。</p>
+          </div>
+          <span class="pill">paid</span>
+        </div>
+
+        <div class="field-group">
+          <span class="field-group-label">① 生成自检 · 只验服务商，不经过 Space 角色链路</span>
+          <div class="visual-provider-row">
+            <label>Prompt<input id="videoSmokePrompt" type="text" value="雨夜里向前走，镜头缓慢跟随。" / title="直接送给服务商的镜头描述。"></label>
+            <label>Resolution
+              <select id="videoSmokeResolution" title="本次使用的分辨率；留空则用 Settings 当前值。">
+                <option value="">跟随 Settings</option>
+                <option value="768P">768P</option>
+                <option value="2K">2K</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions">
+            <button class="secondary" id="runVideoSmoke" type="button" title="Dry Run 勾选时只回报本 Runtime 实际解析到的配置，不调用服务商、不花钱。">生成自检</button>
+            <label class="visual-check"><input id="videoSmokeDryRun" type="checkbox" checked / title="勾选时只回报本 Runtime 实际解析到的配置（key 是否读到、开关、当日用量），不调用服务商、不花钱。"> Dry Run</label>
+          </div>
+          <p class="subtle">先保持 Dry Run 勾选跑一次：它回报 <code>api_key_present</code>、<code>space_video_generation_enabled</code>、<code>provider_available</code>、当日已用条数/金额与上限。这三项就是「进程有没有读到配置」的答案，且免费。确认无误后再取消勾选真跑。</p>
+          <p id="videoSmokeSummary" class="schedule-summary">等待测试…</p>
+          <details class="debug-output">
+            <summary>原始自检结果（调试用）</summary>
+            <pre id="videoSmokeReport" class="result">等待测试...</pre>
+          </details>
+        </div>
+
+        <div class="field-group">
+          <span class="field-group-label">② 发一条视频动态 · 走完整 Space 链路并发布</span>
+          <div class="visual-provider-row">
+            <label>Prompt<input id="videoPostPrompt" type="text" value="雨夜里向前走，镜头缓慢跟随。" / title="作为 GENERATE_VIDEO 意图的镜头描述；会经过 Space 媒体执行器。"></label>
+            <label>Post Text<input id="videoPostText" type="text" value="随手分享一下。" / title="这条视频动态的正文。"></label>
+          </div>
+          <div class="actions">
+            <button class="secondary" id="runVideoPost" type="button" title="通过 Space 媒体执行器生成视频并发布一条测试动态；不移动正式 Scheduler。">发视频动态</button>
+          </div>
+          <p class="subtle">这一条回答的是「Space 会不会真的发出去」：它经过媒体执行器的能力开关与预算守卫，失败时报的是 <code>Space video generation is disabled</code> 或 <code>daily ... limit</code> 这类<em>策略</em>原因，而不是服务商错误。成功后 Space feed 里会出现可播放的视频动态。时长与分辨率都取 Settings 当前值（<code>space_video_max_duration_seconds</code> / <code>space_video_resolution</code>），因为这条要验的正是正式链路，而不是一个特调参数。</p>
+          <p id="videoPostSummary" class="schedule-summary">等待测试…</p>
+          <details class="debug-output">
+            <summary>原始发布结果（调试用）</summary>
+            <pre id="videoPostReport" class="result">等待测试...</pre>
+          </details>
+        </div>
       </article>
 
       <article class="card wide" id="worldActivityCard">

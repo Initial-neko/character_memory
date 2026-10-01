@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from functools import wraps
 import os
 from pathlib import Path
 import time
@@ -71,6 +72,16 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
     }
     owns_client = runtime_http_client is None
     client = runtime_http_client or httpx.Client(timeout=3.0)
+
+    def serialized_settings_transaction(method):
+        """Keep runtime pre-apply, persistence, rollback and response ordered."""
+
+        @wraps(method)
+        def guarded(*args, **kwargs):
+            with settings_store.transaction():
+                return method(*args, **kwargs)
+
+        return guarded
 
     def tts_inventory() -> dict[str, Any]:
         providers: list[dict[str, Any]] = []
@@ -346,6 +357,7 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
             raise HTTPException(status_code=500, detail=f"读取配置失败：{exc}") from exc
 
     @app.patch("/v1/settings")
+    @serialized_settings_transaction
     def patch_settings(req: SettingsPatch):
         raw_values = dict(req.values)
         before = settings_store.snapshot()["values"]

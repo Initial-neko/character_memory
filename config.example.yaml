@@ -228,6 +228,10 @@ space_video_max_duration_seconds: 5
 # Account-wide hard ceiling per local day, in CNY. 0 blocks every video job.
 space_video_daily_budget_cny: 3.0
 
+# Account-wide count ceiling per local day. A count limit stays meaningful when
+# the provider changes price, which a CNY ceiling does not. 0 blocks every video job.
+space_video_daily_max_generations: 3
+
 # Estimated CNY per generated second at 768P, used by the budget guard.
 space_video_cost_cny_per_second_768p: 0.09
 

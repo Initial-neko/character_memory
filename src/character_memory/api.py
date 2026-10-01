@@ -294,8 +294,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         }
 
     def dispatch_proactive_once() -> list[dict]:
-        # The switch is read here rather than at thread start so a settings change
-        # takes effect on the next tick instead of the next restart.
+        # Re-check the in-memory switch on every tick so an in-process owner can
+        # stop dispatch before the next attempt. Settings Center persistence does
+        # not replace this startup Settings object; disk changes still require a
+        # Character Runtime restart.
         if not getattr(settings, "proactive_dispatch_enabled", True):
             return []
         if not getattr(settings, "api_key", ""):

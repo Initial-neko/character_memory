@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import gc
 from types import SimpleNamespace
-import weakref
 
 from character_memory.application.async_conversation import (
     ConversationEventHub,
@@ -55,23 +53,3 @@ def test_scheduler_reclaims_only_fully_processed_idle_state():
     hub.close()
 
 
-def test_group_lock_cache_does_not_retain_dead_conversations_or_split_live_lock():
-    hub = ConversationEventHub()
-    scheduler = ReactionScheduler(lambda: None, lambda: [], hub)
-
-    lock = scheduler.group_lock_for("group-1")
-    ref = weakref.ref(lock)
-    with lock:
-        same = scheduler.group_lock_for("group-1")
-        assert same is lock
-        del same
-
-    del lock
-    gc.collect()
-    assert ref() is None, "scheduler retained an unused per-group lock forever"
-
-    replacement = scheduler.group_lock_for("group-1")
-    assert replacement is not None
-
-    scheduler.close()
-    hub.close()

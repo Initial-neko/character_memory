@@ -21,7 +21,7 @@ from character_memory.voices import TEMPLATE_FILE_SUFFIX, VoiceProfileError, loa
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL_MEDIA_ORIGINS = ("http://127.0.0.1:8000", "http://localhost:8000")
-#: The sidecar's default template name (``gsv_tts_experiment.DEFAULT_VOICE``).
+#: The sidecar's default template name (``gsv_tts_runtime.DEFAULT_VOICE``).
 #: Spelled out rather than imported: the launcher must not pull the sidecar's
 #: torch/numpy-side module, and this value is part of the env contract either way.
 DEFAULT_GSV_VOICE = "murasame"
@@ -327,7 +327,7 @@ def main() -> None:
             (
                 "GSV-TTS-Lite Runtime",
                 "http://127.0.0.1:9014/health",
-                [str(gsv_python), "-m", "character_memory.gsv_tts_experiment"],
+                [str(gsv_python), "-m", "character_memory.gsv_tts_runtime"],
                 gsv_env,
             ),
         )

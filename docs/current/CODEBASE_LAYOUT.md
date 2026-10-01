@@ -140,7 +140,7 @@ media_server.py             Media Runtime FastAPI + formal TTS router
 tts_lab.py                  :9002 TTS Provider Runtime + Workbench
 tts_registry.py             formal realtime TTS provider metadata/ids/defaults
 voices.py                   per-persona voice.yaml registry contract
-gsv_tts_experiment.py       isolated :9014 GSV sidecar adapter/runtime
+gsv_tts_runtime.py          isolated :9014 formal GSV sidecar adapter/runtime
 character_onboarding.py     shared first avatar / voice selection / creation provenance
 ensemble_builder.py         Ensemble build persistence, research and confirmation
 encounter.py / encounter_store.py temporary candidates, trial replies and scheduler
@@ -294,7 +294,7 @@ message_content.js      Direct/Group shared message body renderer
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
 | Memory/Recall/Governance | `runtime/person_context.py` → `memory/recall.py` → `storage/sqlite.py` → `memory_web.py` → `web/app.js` |
 | Formal TTS registry/routing | `tts_registry.py` → `settings_server.py` / `media_server.py` → `tts_lab.py` |
-| Character GSV voice | `voices.py` → `gsv_tts_experiment.py` → `tts_lab.py` VoiceDesign freeze |
+| Character GSV voice | `voices.py` → `gsv_tts_runtime.py` → `tts_lab.py` VoiceDesign freeze |
 | Sticker | `stickers.py` → `runtime/sticker_retrieval.py` → `web/stickers.js` |
 | 用户图片/Vision | `media.py` → `api.py/async_web.py` → `web/images.js` |
 | Camera/Screen Vision | `visual_capture_web.py` → `web/visual_capture.js` / `web/voice.js` |

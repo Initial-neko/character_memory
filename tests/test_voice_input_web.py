@@ -50,7 +50,7 @@ def test_shared_audio_cleanup_closes_partial_context_and_ignores_stop_errors(tmp
     script = r"""
 const fs = require("fs");
 const vm = require("vm");
-const source = fs.readFileSync(process.argv[2], "utf8");
+const source = fs.readFileSync(process.argv[1], "utf8");
 let closes = 0;
 let stops = 0;
 const sandbox = {

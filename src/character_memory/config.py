@@ -273,21 +273,21 @@ def load_settings(path: str = "config.yaml") -> Settings:
 
 
 def resolve_media_dir(settings: Settings) -> Path:
-    configured = str(getattr(settings, "media_dir", "") or "").strip()
+    configured = str(settings.media_dir or "").strip()
     if configured:
         return Path(configured)
     return Path(settings.db_path).parent / "media"
 
 
 def resolve_sticker_dir(settings: Settings) -> Path:
-    configured = str(getattr(settings, "sticker_dir", "") or "").strip()
+    configured = str(settings.sticker_dir or "").strip()
     if configured:
         return Path(configured)
     return Path(settings.db_path).parent / "stickers"
 
 
 def resolve_avatar_dir(settings: Settings) -> Path:
-    configured = str(getattr(settings, "avatar_dir", "") or "").strip()
+    configured = str(settings.avatar_dir or "").strip()
     if configured:
         return Path(configured)
     return Path(settings.db_path).parent / "avatars"

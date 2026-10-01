@@ -375,6 +375,8 @@ def test_duplicate_concurrent_confirmation_commits_once_and_keeps_build_alias(tm
     assert created == ["okabe"]
     assert len(GroupRepository(store).list_groups()) == 1
     assert repository.get(started["group_id"])["group_id"] == first_result["group_id"]
+    assert service._confirm_locks == {}
+    assert service._confirm_lock_users == {}
     store.close()
 
 

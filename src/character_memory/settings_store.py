@@ -1112,7 +1112,6 @@ class SettingsStore:
             "restart_required": True,
         }
 
-    @_serialized_store_access
     def editable_values(self) -> dict[str, Any]:
         """The current value of every field this page may edit."""
 
@@ -1123,7 +1122,6 @@ class SettingsStore:
             values[name] = effective_env_value(name, self.env_path, fallback)
         return values
 
-    @_serialized_store_access
     def secret_statuses(self, values: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         current = self.editable_values() if values is None else values
         file_values = parse_env_file(self.env_path)
@@ -1151,7 +1149,6 @@ class SettingsStore:
         statuses.sort(key=lambda item: (level_rank.get(item["level"], 9), 0 if item["configured"] else 1))
         return statuses
 
-    @_serialized_store_access
     def snapshot(self) -> dict[str, Any]:
         values = self.editable_values()
         return {

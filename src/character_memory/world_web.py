@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 from pydantic import BaseModel, Field
 
+from character_memory.config import runtime_setting
 from character_memory.web_lifecycle import background_services
 from character_memory.world_activity import WorldActivityScheduler, WorldPulseRepository
 
@@ -38,26 +39,26 @@ def attach_world_routes(app) -> None:
     activity_scheduler = WorldActivityScheduler(
         access,
         pulse_repository,
-        poll_seconds=float(settings.world_activity_poll_seconds),
+        poll_seconds=float(runtime_setting(settings, "world_activity_poll_seconds", 60.0)),
     )
     access.world_activity_scheduler = activity_scheduler
 
     @app.get("/v1/world/status")
     def world_status():
         return {
-            "enabled": bool(settings.space_world_observation_enabled),
-            "search_provider": str(settings.search_provider or ""),
-            "search_configured": bool(settings.search_api_key),
+            "enabled": bool(runtime_setting(settings, "space_world_observation_enabled", True)),
+            "search_provider": str(runtime_setting(settings, "search_provider", "") or ""),
+            "search_configured": bool(runtime_setting(settings, "search_api_key", "")),
             "browser": "playwright-chromium",
-            "browser_channel": str(settings.web_browser_channel or "auto"),
-            "timeout_seconds": float(settings.web_browser_timeout_seconds),
-            "render_wait_ms": int(settings.web_browser_render_wait_ms),
-            "max_pages": int(settings.space_world_max_pages),
-            "max_chars_per_page": int(settings.space_world_max_chars_per_page),
-            "activity_enabled": bool(settings.world_activity_enabled),
-            "pulse_enabled": bool(settings.world_pulse_enabled),
-            "browse_enabled": bool(settings.world_browse_enabled),
-            "pulse_sources": list(settings.world_pulse_sources),
+            "browser_channel": str(runtime_setting(settings, "web_browser_channel", "auto") or "auto"),
+            "timeout_seconds": float(runtime_setting(settings, "web_browser_timeout_seconds", 20.0)),
+            "render_wait_ms": int(runtime_setting(settings, "web_browser_render_wait_ms", 700)),
+            "max_pages": int(runtime_setting(settings, "space_world_max_pages", 2)),
+            "max_chars_per_page": int(runtime_setting(settings, "space_world_max_chars_per_page", 6000)),
+            "activity_enabled": bool(runtime_setting(settings, "world_activity_enabled", True)),
+            "pulse_enabled": bool(runtime_setting(settings, "world_pulse_enabled", True)),
+            "browse_enabled": bool(runtime_setting(settings, "world_browse_enabled", True)),
+            "pulse_sources": list(runtime_setting(settings, "world_pulse_sources", [])),
         }
 
     @app.post("/v1/world/dev/fetch")
@@ -94,7 +95,7 @@ def attach_world_routes(app) -> None:
     def world_pulse(limit: int = 20):
         return {
             "topics": pulse_repository.list_topics(limit=max(1, min(limit, 100))),
-            "sources": list(settings.world_pulse_sources),
+            "sources": list(runtime_setting(settings, "world_pulse_sources", [])),
         }
 
     @app.get("/v1/world/activity/status")

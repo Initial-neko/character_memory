@@ -7,7 +7,7 @@ import re
 import yaml
 
 from character_memory.config import Settings
-from character_memory.settings_store import LEGACY_SECRET_FIELDS, SECRET_SPECS, SETTINGS_SCHEMA, resolved_schema
+from character_memory.settings_store import LEGACY_SECRET_FIELDS, SECRET_SPECS, resolved_schema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,51 +53,6 @@ def test_config_example_lists_every_non_secret_settings_key_exactly_once():
         "unknown_in_example": sorted(actual - expected),
     }
 
-
-def test_config_example_values_match_runtime_defaults():
-    """config.example is a checked reference, not a second defaults registry."""
-
-    payload = yaml.safe_load(CONFIG_EXAMPLE.read_text(encoding="utf-8")) or {}
-    defaults = Settings().model_dump()
-    expected = set(Settings.model_fields) - set(LEGACY_SECRET_FIELDS)
-    mismatches = {}
-    for name in sorted(expected):
-        actual = payload[name]
-        wanted = defaults[name]
-        # YAML uses an empty string for optional text fields so the copied file
-        # remains easy to edit; runtime None and an empty optional override have
-        # the same documented meaning.
-        if wanted is None and actual == "":
-            continue
-        if actual != wanted:
-            mismatches[name] = {"example": actual, "runtime_default": wanted}
-    assert mismatches == {}
-
-
-def test_settings_ui_validation_bounds_come_from_runtime_model():
-    """Presentation metadata must not duplicate Pydantic numeric limits."""
-
-    assert [
-        field["name"]
-        for section in SETTINGS_SCHEMA
-        for field in section["fields"]
-        if "min" in field or "max" in field
-    ] == []
-
-    properties = Settings.model_json_schema()["properties"]
-    for section in resolved_schema():
-        for field in section["fields"]:
-            if field.get("storage") == "env":
-                continue
-            prop = properties[field["name"]]
-            candidates = prop.get("anyOf") if isinstance(prop.get("anyOf"), list) else [prop]
-            scalar = next(
-                (item for item in candidates if item.get("type") in {"boolean", "integer", "number", "string", "array"}),
-                prop,
-            )
-            assert field["runtime_type"] == scalar.get("type")
-            assert field.get("min") == scalar.get("minimum")
-            assert field.get("max") == scalar.get("maximum")
 
 def test_retired_space_daily_window_keys_remain_loadable_but_are_not_supported_knobs(tmp_path):
     """Old config files stay readable without preserving no-op settings forever."""

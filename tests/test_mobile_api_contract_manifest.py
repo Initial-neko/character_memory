@@ -63,7 +63,9 @@ def test_android_v1_route_manifest_matches_registered_source_routes() -> None:
         assert relative_source.parts[:2] == ("src", "character_memory")
         source = ROOT / relative_source
         assert source.is_file(), f"source moved without contract update: {relative_source}"
-        found = file_routes.setdefault(source, _decorated_routes(source))
+        if source not in file_routes:
+            file_routes[source] = _decorated_routes(source)
+        found = file_routes[source]
         assert (method, path) in found, (
             f"Android contract drift: {key} was removed, renamed or method-changed in {relative_source}"
         )

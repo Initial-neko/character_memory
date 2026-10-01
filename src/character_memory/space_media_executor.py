@@ -18,6 +18,11 @@ from character_memory.visual_generation import (
     VisualPurpose,
     visual_aspect_ratio,
 )
+from character_memory.video_generation import (
+    MetasoMiniMaxVideoProvider,
+    VideoGenerationBudget,
+    VideoGenerationRequest,
+)
 
 
 logger = logging.getLogger("character_memory.space_media_executor")
@@ -27,7 +32,7 @@ class SpaceMediaExecutor:
     """Execute optional Space media intents into durable MediaAssets.
 
     The planner decides whether media is natural for the post. This class does
-    not make social decisions; it executes SEARCH_IMAGE / GENERATE_IMAGE / VOICE
+    not make social decisions; it executes SEARCH_IMAGE / GENERATE_IMAGE / GENERATE_VIDEO / VOICE
     and returns ordered Space attachment relations. Every intent is fail-soft so
     text publication is never coupled to an external media or TTS provider.
     """
@@ -39,6 +44,7 @@ class SpaceMediaExecutor:
         search_provider=None,
         remote_fetcher: RemoteMediaFetcher | None = None,
         image_providers: dict[str, Any] | None = None,
+        video_provider=None,
         tts_client=None,
         media_base: str | None = None,
     ):
@@ -46,6 +52,9 @@ class SpaceMediaExecutor:
         self.settings = access.settings
         self._search_provider = search_provider
         self._image_providers = image_providers
+        self._video_provider = video_provider
+        self._owns_video_provider = False
+        self._video_budget = None
         self._remote_fetcher = remote_fetcher
         self._tts_client = tts_client
         self._owns_tts_client = False
@@ -78,6 +87,40 @@ class SpaceMediaExecutor:
         services = getattr(self.access, "services", None)
         return getattr(services, "image_generation_providers", {}) or {}
 
+    def _video(self):
+        if self._video_provider is None:
+            self._video_provider = MetasoMiniMaxVideoProvider(
+                str(getattr(self.settings, "metaso_minimax_api_key", "") or ""),
+                base_url=str(
+                    getattr(
+                        self.settings,
+                        "metaso_minimax_base_url",
+                        "https://metaso.cn/api/minimax",
+                    )
+                    or "https://metaso.cn/api/minimax"
+                ),
+                model=str(
+                    getattr(self.settings, "metaso_minimax_video_model", "MiniMax-H3")
+                    or "MiniMax-H3"
+                ),
+                timeout_seconds=float(
+                    getattr(self.settings, "video_generation_timeout_seconds", 900.0)
+                ),
+                poll_interval_seconds=float(
+                    getattr(self.settings, "video_generation_poll_interval_seconds", 8.0)
+                ),
+                max_bytes=int(
+                    getattr(self.settings, "space_video_max_bytes", 64 * 1024 * 1024)
+                ),
+            )
+            self._owns_video_provider = True
+        return self._video_provider
+
+    def _budget(self) -> VideoGenerationBudget:
+        if self._video_budget is None:
+            self._video_budget = VideoGenerationBudget(self.access.store())
+        return self._video_budget
+
     @staticmethod
     def _extension(mime_type: str) -> str:
         return {
@@ -85,7 +128,9 @@ class SpaceMediaExecutor:
             "image/png": "png",
             "image/gif": "gif",
             "image/webp": "webp",
-        }.get(str(mime_type or "").lower(), "png")
+            "video/mp4": "mp4",
+            "video/webm": "webm",
+        }.get(str(mime_type or "").lower(), "bin")
 
     def _save_asset(
         self,
@@ -96,6 +141,7 @@ class SpaceMediaExecutor:
         now: datetime,
         source: str,
         label: str,
+        max_bytes: int | None = None,
     ):
         extension = self._extension(mime_type)
         asset = self.access.media_storage.save_bytes(
@@ -104,6 +150,7 @@ class SpaceMediaExecutor:
             payload=payload,
             created_at=now,
             source=source,
+            max_bytes=max_bytes,
         )
         try:
             self.access.store().add_media_asset(asset)
@@ -371,6 +418,101 @@ class SpaceMediaExecutor:
             )
         return relations
 
+    def _generate_video(
+        self,
+        character_id: str,
+        intent: SpaceMediaIntent,
+        *,
+        now: datetime,
+    ) -> list[dict[str, Any]]:
+        if not bool(getattr(self.settings, "space_video_generation_enabled", False)):
+            raise RuntimeError("Space video generation is disabled")
+
+        provider = self._video()
+        if provider is None or not provider.available():
+            raise RuntimeError("video generation provider is unavailable")
+
+        max_duration = max(
+            5,
+            min(15, int(getattr(self.settings, "space_video_max_duration_seconds", 5))),
+        )
+        duration = min(max_duration, int(intent.duration_seconds or 5))
+        resolution = str(getattr(self.settings, "space_video_resolution", "2K") or "2K")
+        ratio = str(intent.video_ratio or "16:9").strip() or "16:9"
+        prompt = str(intent.video_prompt or "").strip()
+        if not prompt:
+            raise ValueError("Space GENERATE_VIDEO requires video_prompt")
+
+        if resolution == "768P":
+            rate = float(
+                getattr(self.settings, "space_video_cost_cny_per_second_768p", 0.09)
+            )
+        else:
+            rate = float(
+                getattr(self.settings, "space_video_cost_cny_per_second_2k", 0.15)
+            )
+        estimated_cost = round(max(0.0, rate) * duration, 4)
+        daily_budget = float(
+            getattr(self.settings, "space_video_daily_budget_cny", 0.0)
+        )
+        usage_id = self._budget().reserve(
+            character_id=character_id,
+            provider=str(getattr(provider, "provider_id", "video-provider")),
+            model=str(getattr(provider, "model", "unknown")),
+            resolution=resolution,
+            duration_seconds=duration,
+            estimated_cost_cny=estimated_cost,
+            daily_budget_cny=daily_budget,
+            now=now,
+        )
+
+        try:
+            result = provider.generate(
+                VideoGenerationRequest(
+                    prompt=prompt,
+                    resolution=resolution,
+                    duration_seconds=duration,
+                    ratio=ratio,
+                )
+            )
+        except Exception:
+            self._budget().finish(usage_id, status="FAILED")
+            raise
+
+        self._budget().finish(
+            usage_id,
+            status="SUCCEEDED",
+            task_id=str(getattr(result, "task_id", "") or ""),
+        )
+        asset = self._save_asset(
+            character_id,
+            result.payload,
+            mime_type=result.mime_type,
+            now=now,
+            source="SPACE_GENERATED_VIDEO",
+            label="space-generated-video",
+            max_bytes=int(
+                getattr(self.settings, "space_video_max_bytes", 64 * 1024 * 1024)
+            ),
+        )
+        return [
+            {
+                "media_id": asset.id,
+                "media_type": "VIDEO",
+                "source_type": "GENERATED",
+                "metadata": {
+                    "provider": result.provider,
+                    "model": result.model,
+                    "task_id": result.task_id,
+                    "prompt": prompt,
+                    "duration_seconds": result.duration_seconds,
+                    "resolution": result.resolution,
+                    "ratio": result.ratio,
+                    "estimated_cost_cny": estimated_cost,
+                },
+            }
+        ]
+
     def execute(
         self,
         character_id: str,
@@ -403,6 +545,12 @@ class SpaceMediaExecutor:
                         now=now,
                         remaining=remaining,
                         runtime=runtime,
+                    )
+                elif intent.type == SpaceMediaIntentType.GENERATE_VIDEO:
+                    created = self._generate_video(
+                        character_id,
+                        intent,
+                        now=now,
                     )
                 elif intent.type == SpaceMediaIntentType.VOICE:
                     created = self._synthesize_voice(
@@ -445,3 +593,7 @@ class SpaceMediaExecutor:
             self._tts_client.close()
             self._tts_client = None
             self._owns_tts_client = False
+        if self._owns_video_provider and self._video_provider is not None:
+            self._video_provider.close()
+            self._video_provider = None
+            self._owns_video_provider = False

@@ -217,9 +217,11 @@ def test_legacy_space_media_backfill_reads_the_kind_from_the_asset_mime(tmp_path
 
     _legacy_asset(store, "legacy-voice", "audio/wav")
     _legacy_asset(store, "legacy-photo", "image/png")
+    _legacy_asset(store, "legacy-video", "video/mp4")
     _legacy_asset(store, "legacy-unknown", "application/octet-stream")
     voice = posts.create_post("c00", "旧的语音动态", now, media_id="legacy-voice")
     photo = posts.create_post("c00", "旧的图片动态", now, media_id="legacy-photo")
+    video = posts.create_post("c00", "旧的视频动态", now, media_id="legacy-video")
     unknown = posts.create_post("c00", "旧的其他附件", now, media_id="legacy-unknown")
     dangling = posts.create_post("c00", "资产已丢失", now, media_id="missing-asset")
 
@@ -228,11 +230,13 @@ def test_legacy_space_media_backfill_reads_the_kind_from_the_asset_mime(tmp_path
         item.media_id: (item.media_type, item.source_type)
         for item in media.list_for_post(voice.id)
         + media.list_for_post(photo.id)
+        + media.list_for_post(video.id)
         + media.list_for_post(unknown.id)
         + media.list_for_post(dangling.id)
     }
     assert kinds["legacy-voice"] == ("VOICE", "LEGACY")
     assert kinds["legacy-photo"] == ("IMAGE", "LEGACY")
+    assert kinds["legacy-video"] == ("VIDEO", "LEGACY")
     assert kinds["legacy-unknown"] == ("IMAGE", "LEGACY")
     assert kinds["missing-asset"] == ("IMAGE", "LEGACY")
 
@@ -240,11 +244,12 @@ def test_legacy_space_media_backfill_reads_the_kind_from_the_asset_mime(tmp_path
     # next construction rather than staying wrong for the life of the database.
     with store._lock:
         store.conn.execute(
-            "UPDATE space_post_media SET media_type='IMAGE' WHERE media_id='legacy-voice'"
+            "UPDATE space_post_media SET media_type='IMAGE' WHERE media_id IN ('legacy-voice','legacy-video')"
         )
         store._maybe_commit()
     repaired = SpacePostMediaRepository(store)
     assert repaired.list_for_post(voice.id)[0].media_type == "VOICE"
+    assert repaired.list_for_post(video.id)[0].media_type == "VIDEO"
     assert repaired.list_for_post(photo.id)[0].media_type == "IMAGE"
     store.close()
 
@@ -261,6 +266,7 @@ def test_space_media_relation_migrates_legacy_media_and_caps_ordered_items(tmp_p
         ("legacy-image", "IMAGE", "LEGACY", 0)
     ]
     assert "space/004-post-media" in store.list_schema_migrations()
+    assert "space/005-video-media" in store.list_schema_migrations()
 
     items = [
         {

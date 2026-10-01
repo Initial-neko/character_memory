@@ -84,6 +84,15 @@ class Settings(BaseModel):
     periodic_visual_observation_interval_seconds: float = Field(default=30.0, ge=10.0, le=600.0)
     periodic_visual_observation_max_per_hour: int = Field(default=6, ge=0, le=120)
 
+    # Provider-neutral video generation entry point. The first concrete provider
+    # is MetaSo's MiniMax-H3 compatible API; credentials remain in .env.
+    video_generation_provider: str = Field(default="metaso-minimax-h3", pattern=r"^metaso-minimax-h3$")
+    metaso_minimax_api_key: str = ""
+    metaso_minimax_base_url: str = "https://metaso.cn/api/minimax"
+    metaso_minimax_video_model: str = "MiniMax-H3"
+    video_generation_timeout_seconds: float = Field(default=900.0, ge=30.0, le=3600.0)
+    video_generation_poll_interval_seconds: float = Field(default=8.0, ge=1.0, le=60.0)
+
     db_path: str = "data/character-memory.db"
     media_dir: str = ""
     media_max_bytes: int = Field(default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)
@@ -144,6 +153,15 @@ class Settings(BaseModel):
     space_media_max_items: int = Field(default=3, ge=0, le=9)
     space_image_search_enabled: bool = True
     space_image_generation_enabled: bool = True
+    # Video is deliberately opt-in because every generation is a paid async job.
+    # A server-side daily budget is enforced before the provider is called.
+    space_video_generation_enabled: bool = False
+    space_video_resolution: str = Field(default="2K", pattern=r"^(768P|2K)$")
+    space_video_max_duration_seconds: int = Field(default=5, ge=5, le=15)
+    space_video_daily_budget_cny: float = Field(default=3.0, ge=0.0, le=10000.0)
+    space_video_cost_cny_per_second_768p: float = Field(default=0.09, ge=0.0, le=1000.0)
+    space_video_cost_cny_per_second_2k: float = Field(default=0.15, ge=0.0, le=1000.0)
+    space_video_max_bytes: int = Field(default=64 * 1024 * 1024, ge=1024 * 1024, le=256 * 1024 * 1024)
     # External-world exploration is a separate optional cognition phase. Search
     # only discovers candidate URLs; page content is rendered by headless Chromium.
     space_world_observation_enabled: bool = True
@@ -251,6 +269,11 @@ def load_settings(path: str = "config.yaml") -> Settings:
     legacy_msimg = str(data.get("msimg_api_key", "") or "")
     modelscope_fallback = effective_env_value("MODELSCOPE_API_TOKEN", env_path, legacy_msimg)
     data["msimg_api_key"] = effective_env_value("MSIMG_API_KEY", env_path, modelscope_fallback)
+    data["metaso_minimax_api_key"] = effective_env_value(
+        "METASO_MINIMAX_API_KEY",
+        env_path,
+        str(data.get("metaso_minimax_api_key", "") or ""),
+    )
     data["db_path"] = os.getenv("CHARACTER_MEMORY_DB_PATH", data.get("db_path", "data/character-memory.db"))
     return Settings.model_validate(data)
 

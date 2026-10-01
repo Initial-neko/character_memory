@@ -375,11 +375,17 @@
     const current = Array.from(feed.querySelectorAll("[data-space-post]"))
       .find(node => node.dataset.spacePost === String(postId));
     const draft = current?.querySelector(".space-comment-input");
-    // Delayed background replies must never discard a second, unsent comment
-    // or interrupt the input method's composition/focus. The next scheduled
-    // read (or the next submitted comment) will reconcile the card.
-    if (draft && (draft.value.trim() || current.contains(document.activeElement))) return;
+    // Never replace a card containing unsent text. The submit handler will
+    // reconcile the card after the next comment. An empty, focused composer is
+    // safe to refresh, provided we restore focus after the replacement.
+    if (draft?.value.trim()) return;
+    const restoreFocus = draft && document.activeElement === draft;
     replacePost(data.post);
+    if (restoreFocus) {
+      const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
+        .find(node => node.dataset.spacePost === String(postId));
+      updated?.querySelector(".space-comment-input")?.focus();
+    }
   }
 
   function scheduleCommentReconciliation(postId) {

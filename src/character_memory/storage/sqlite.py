@@ -710,6 +710,98 @@ class SQLiteStore:
             row = self.conn.execute(sql, args).fetchone()
         return int(row["max_id"] or 0) if row is not None else 0
 
+    def latest_direct_event_id(
+        self,
+        character_id: str,
+        conversation_id: str,
+        *,
+        event_types: tuple[str, ...] | list[str],
+    ) -> int | None:
+        """Newest inserted direct-conversation fact matching the supplied event types.
+
+        Direct conversation identity is stored in event metadata. Keeping the JSON
+        query here prevents application schedulers from depending on SQLite layout.
+        """
+        normalized = tuple(str(item) for item in event_types if str(item))
+        if not normalized:
+            return None
+        placeholders = ",".join("?" for _ in normalized)
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT id FROM events WHERE character_id=? "
+                f"AND event_type IN ({placeholders}) "
+                "AND json_extract(metadata_json,'$.conversation_id')=? "
+                "ORDER BY id DESC LIMIT 1",
+                [character_id, *normalized, conversation_id],
+            ).fetchone()
+        return int(row["id"]) if row is not None else None
+
+    def list_character_response_events(
+        self,
+        character_id: str,
+        source_event_id: int,
+    ) -> list[Event]:
+        """Character messages durably derived from one source event, in insertion order."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM events WHERE character_id=? AND event_type=? "
+                "AND CAST(json_extract(metadata_json,'$.source_event_id') AS INTEGER)=? "
+                "ORDER BY id",
+                (
+                    character_id,
+                    EventType.CHARACTER_MESSAGE.value,
+                    int(source_event_id),
+                ),
+            ).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    def memory_operational_metrics(self, since: datetime) -> dict[str, Any]:
+        """Small storage-owned Memory growth view used by runtime diagnostics."""
+        cutoff = epoch_us(since)
+        with self._lock:
+            totals = self.conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN active=1 THEN 1 ELSE 0 END) AS active_total,
+                    SUM(CASE WHEN active=0 THEN 1 ELSE 0 END) AS inactive_total,
+                    SUM(CASE WHEN pinned=1 THEN 1 ELSE 0 END) AS pinned_total,
+                    SUM(CASE WHEN superseded_by IS NOT NULL THEN 1 ELSE 0 END) AS superseded_total
+                FROM memories
+                """
+            ).fetchone()
+            rows = self.conn.execute(
+                """
+                SELECT e.event_type,e.metadata_json
+                FROM memories m
+                LEFT JOIN events e ON e.id=m.source_event_id
+                WHERE m.event_time_epoch>=?
+                ORDER BY m.event_time_epoch DESC,m.id DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+
+        by_channel = {"DIRECT": 0, "GROUP": 0, "SPACE": 0, "WORLD": 0, "OTHER": 0}
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}") if row["metadata_json"] else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                metadata = {}
+            channel = str(metadata.get("channel") or "").strip().upper()
+            if not channel and str(row["event_type"] or "").upper() == EventType.WORLD_OBSERVATION.value:
+                channel = "WORLD"
+            if channel not in by_channel:
+                channel = "OTHER"
+            by_channel[channel] += 1
+
+        return {
+            "active_total": int((totals["active_total"] if totals else 0) or 0),
+            "inactive_total": int((totals["inactive_total"] if totals else 0) or 0),
+            "pinned_total": int((totals["pinned_total"] if totals else 0) or 0),
+            "superseded_total": int((totals["superseded_total"] if totals else 0) or 0),
+            "created_last_24h": len(rows),
+            "created_last_24h_by_channel": by_channel,
+        }
+
     def list_chat_events(self, character_id: str, limit: int = 160) -> list[Event]:
         with self._lock:
             rows = self.conn.execute("SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL AND event_type IN (?,?) ORDER BY event_time_epoch DESC,id DESC LIMIT ?", (character_id, EventType.USER_MESSAGE.value, EventType.CHARACTER_MESSAGE.value, limit)).fetchall()

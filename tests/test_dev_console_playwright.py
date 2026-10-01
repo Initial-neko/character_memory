@@ -161,3 +161,35 @@ def test_the_markup_was_complete_enough_that_nothing_needed_rescuing(page, dev_c
     page.set_viewport_size({"width": 1440, "height": 900})
     _load(page, dev_console_url)
     assert page.evaluate("() => window.CMDevLevels.lastSweep") == []
+
+
+def test_detailed_mode_reveals_detailed_tools_without_changing_first_screen_contract(page, dev_console_url):
+    page.set_viewport_size({"width": 1440, "height": 900})
+    _load(page, dev_console_url)
+
+    body = page.locator("body")
+    assert body.get_attribute("data-dev-mode") == "simple"
+    assert page.locator("#llmSmokeCard").evaluate("(el) => getComputedStyle(el).display") == "none"
+
+    page.locator("#devModeToggle").click()
+    assert body.get_attribute("data-dev-mode") == "detailed"
+    assert page.locator("#llmSmokeCard").evaluate("(el) => getComputedStyle(el).display") != "none"
+
+    page.locator("#devModeToggle").click()
+    assert body.get_attribute("data-dev-mode") == "simple"
+    assert page.locator("#llmSmokeCard").evaluate("(el) => getComputedStyle(el).display") == "none"
+
+
+def test_space_runtime_override_is_rendered_as_temporary_not_persistent_config(page, dev_console_url):
+    page.set_viewport_size({"width": 1440, "height": 900})
+    _load(page, dev_console_url)
+
+    group = page.locator("details:has(#spaceIntervalMinutes)").first
+    assert group.get_attribute("open") is None
+    group.locator("summary").click()
+
+    page.locator("#spaceIntervalMinutes").wait_for(state="visible")
+    text = group.inner_text()
+    assert "Session Override（仅当前 Runtime）" in text
+    assert "不写 config.yaml" in text
+    assert "正式配置在 Settings" in text

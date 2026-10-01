@@ -98,7 +98,8 @@ class ConversationEventHub:
             with self._guard:
                 channel.subscribers = max(0, channel.subscribers - 1)
                 channel.last_activity = time.monotonic()
-                self._prune_idle_locked(channel.last_activity)
+                # Other channels are pruned on the next activity (or explicit
+                # prune_idle()). This channel has just become idle, not stale.
 
     def publish(self, key: str, event_type: str, data: dict) -> int:
         channel = self._channel(key)

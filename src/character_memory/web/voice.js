@@ -41,6 +41,8 @@
     queue: [],
     pendingTurns: [],
     playing: false,
+    recoveryPending: false,
+    recoveryGeneration: 0,
     ttsTail: Promise.resolve(),
     turnStartedAt: 0,
     lastMetrics: {},
@@ -848,7 +850,7 @@
   // window -- dispatched, no audio playing yet -- so the status writers below must not overwrite
   // it while it holds, or a refused transcript mid-reply would re-open direct dispatch.
   function replyInFlight() {
-    return voice.playing || voice.queue.length > 0 || voice.phase === "waiting";
+    return voice.recoveryPending || voice.playing || voice.queue.length > 0 || voice.phase === "waiting";
   }
 
   // Deliberately not replyInFlight(): this is the call that ends that window, so asking whether
@@ -1040,8 +1042,14 @@
         }
       }
       voice.ttsTail = Promise.resolve();
+      // Hold the dispatch gate during error recovery: new speech must join the
+      // previously heard turn, not overtake it while the 1200ms timer is pending.
+      // The generation also cancels stale timers after hangup/restart.
+      voice.recoveryPending = true;
+      const recoveryGeneration = ++voice.recoveryGeneration;
       setTimeout(() => {
-        if (!voice.active) return;
+        if (!voice.active || recoveryGeneration !== voice.recoveryGeneration) return;
+        voice.recoveryPending = false;
         if (voice.pendingTurns.length) flushPendingTurns().catch(error => {
           if (voice.active) setPhase("error", `语音失败：${error.message}`);
         });
@@ -1232,6 +1240,8 @@
       voice.queue = [];
       voice.pendingTurns = [];
       voice.playing = false;
+      voice.recoveryPending = false;
+      voice.recoveryGeneration += 1;
       voice.ttsTail = Promise.resolve();
       voice.currentAudio = null;
       voice.currentSpeakerId = null;
@@ -1270,6 +1280,8 @@
 
   async function stopCall() {
     voice.active = false;
+    voice.recoveryPending = false;
+    voice.recoveryGeneration += 1;
     stopPeriodicVisualObservation();
     voice.minimized = false;
     voice.eventSource?.close?.();

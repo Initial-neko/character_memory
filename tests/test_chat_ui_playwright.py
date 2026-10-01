@@ -351,3 +351,59 @@ def test_message_meta_text_clears_wcag_aa(chat):
     high, low = sorted((luminance(values["text"]), luminance(values["background"])), reverse=True)
     ratio = (high + 0.05) / (low + 0.05)
     assert ratio >= 4.5, f"the timestamp renders at {ratio:.2f}:1"
+
+
+def test_voice_call_mobile_layout_is_viewport_bounded_and_scrollable(chat):
+    page = chat
+    page.set_viewport_size({"width": 390, "height": 844})
+
+    report = page.evaluate(
+        """() => {
+          const overlay = document.querySelector('#voiceCallOverlay');
+          const card = overlay.querySelector('.voice-call-card');
+          const log = overlay.querySelector('.voice-call-log');
+          const transcript = overlay.querySelector('.voice-call-transcript');
+          const actions = overlay.querySelector('.voice-call-actions');
+          overlay.classList.remove('hidden');
+
+          log.replaceChildren();
+          for (let i = 0; i < 80; i += 1) {
+            const row = document.createElement('div');
+            row.className = 'voice-call-line assistant';
+            row.textContent = 'long call history row ' + i;
+            log.appendChild(row);
+          }
+          transcript.textContent = Array.from({length: 30}, (_, i) => 'transcript line ' + i).join('\n');
+
+          const rect = el => {
+            const r = el.getBoundingClientRect();
+            return {top:r.top, left:r.left, right:r.right, bottom:r.bottom, width:r.width, height:r.height};
+          };
+          return {
+            viewport:{width:innerWidth, height:innerHeight},
+            card:rect(card),
+            actions:rect(actions),
+            log:{
+              clientHeight:log.clientHeight,
+              scrollHeight:log.scrollHeight,
+              overflowY:getComputedStyle(log).overflowY,
+              touchAction:getComputedStyle(log).touchAction,
+            },
+            transcript:{
+              clientHeight:transcript.clientHeight,
+              scrollHeight:transcript.scrollHeight,
+              overflowY:getComputedStyle(transcript).overflowY,
+            },
+          };
+        }"""
+    )
+
+    assert report["card"]["width"] <= report["viewport"]["width"] + 1
+    assert report["card"]["height"] <= report["viewport"]["height"] + 1
+    assert report["card"]["top"] >= -1 and report["card"]["bottom"] <= report["viewport"]["height"] + 1
+    assert report["log"]["overflowY"] in {"auto", "scroll"}
+    assert report["log"]["scrollHeight"] > report["log"]["clientHeight"]
+    assert report["log"]["touchAction"] == "pan-y"
+    assert report["transcript"]["overflowY"] in {"auto", "scroll"}
+    assert report["transcript"]["scrollHeight"] > report["transcript"]["clientHeight"]
+    assert report["actions"]["bottom"] <= report["viewport"]["height"] + 1

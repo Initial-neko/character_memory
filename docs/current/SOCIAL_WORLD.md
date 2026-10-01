@@ -522,7 +522,7 @@ A few characters may independently evaluate a topic. Uninterested characters rem
 
 Pulse comments are **not** Character Space comments. They belong to the shared Pulse topic.
 
-When a character chooses to comment, the shared Pulse comment and that person's `WORLD_OBSERVATION` event are committed together on the World repository connection. If either insert fails, neither projection remains; the per-topic/character uniqueness rule can then support a real retry instead of hiding a comment whose personal event was lost.
+When a character chooses to comment, the shared Pulse comment and that person's `WORLD_OBSERVATION` event are committed together on the World repository connection. If either insert fails, neither projection remains. On upgrades from the older split-commit version, an already-stored comment that lacks its personal observation is backfilled from its original durable text without a second model call or a duplicate event; ordinary already-complete comments remain single-write.
 
 #### Personal Browse
 

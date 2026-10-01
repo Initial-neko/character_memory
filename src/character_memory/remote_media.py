@@ -116,14 +116,9 @@ class RemoteMediaFetcher:
             payload = bytes(payload_buffer)
         if not payload:
             raise RuntimeError("remote image download returned an empty body")
-        if len(payload) > self.max_bytes:
-            raise ValueError(f"remote image exceeds the {self.max_bytes} byte limit")
-
         sniffed = _sniff_image_mime(payload)
         if sniffed is None:
             raise ValueError(f"unsupported remote image content type: {header_mime or '<missing>'}")
-        if header_mime and header_mime not in _IMAGE_MIME:
-            raise ValueError(f"unsupported remote image content type: {header_mime}")
         return RemoteMedia(payload=payload, content_type=sniffed, source_url=url)
 
     def close(self) -> None:

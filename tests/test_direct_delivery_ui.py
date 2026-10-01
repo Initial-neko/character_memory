@@ -12,11 +12,34 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
 class Element {
-  constructor() { this.children = []; this.dataset = {}; }
+  constructor() { this.children = []; this.dataset = {}; this.parent = null; this.className = ''; this.textContent = ''; }
   set innerHTML(value) { this.html = value; this.children = []; }
   get innerHTML() { return this.html || ''; }
-  appendChild(child) { this.children.push(child); }
-  querySelector() { return null; }
+  appendChild(child) { child.parent = this; this.children.push(child); }
+  querySelector(selector) {
+    if (selector === '[data-direct-error]') return this.children.find(child => child.dataset?.directError) || null;
+    if (selector === '.typing-row') return this.children.find(child => String(child.className || '').split(/\s+/).includes('typing-row')) || null;
+    return null;
+  }
+  querySelectorAll(selector) {
+    if (selector === '.message-row[data-message-id]') {
+      return this.children.filter(child => String(child.className || '').split(/\s+/).includes('message-row') && child.dataset?.messageId);
+    }
+    return [];
+  }
+  replaceWith(next) {
+    if (!this.parent) return;
+    const index = this.parent.children.indexOf(this);
+    if (index < 0) return;
+    this.parent.children[index] = next;
+    next.parent = this.parent;
+    this.parent = null;
+  }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter(child => child !== this);
+    this.parent = null;
+  }
 }
 const elements = new Map();
 global.document = {
@@ -89,3 +112,32 @@ const library = CM.directEventToMessage({id:13, character_id:'rin',
 assert.equal(library.image.url, '/v1/images/rin/library/asset');
 assert.equal(library.image.label, '海边');
 ''')
+
+
+def test_direct_incremental_append_and_replacement_keep_unaffected_nodes():
+    """The production merge path preserves row identity and replaces only one row."""
+
+    run_js(r"""
+CM.fmtDate = () => 'today';
+CM.scrollToBottom = () => {};
+CM.createMessageRow = m => {
+  const row = new Element();
+  row.className = 'message-row ' + m.role;
+  row.dataset.messageId = String(m.id);
+  row.textContent = m.content;
+  return row;
+};
+CM.state.directHistory.messages = [
+  {id:1,role:'user',content:'persisted',event_time:'2026-10-01T12:00:00Z'}
+];
+const first = CM.createMessageRow(CM.state.directHistory.messages[0]);
+CM.dom.chat.appendChild(first);
+CM.mergeDirectMessage({id:2,role:'assistant',content:'incremental',event_time:'2026-10-01T12:01:00Z'});
+assert.strictEqual(CM.dom.chat.children[0], first, 'append rebuilt existing DOM');
+const second = CM.messageRowForId(2);
+assert.equal(second.textContent, 'incremental');
+CM.mergeDirectMessage({id:2,content:'enriched',event_time:'2026-10-01T12:01:00Z'});
+assert.strictEqual(CM.dom.chat.children[0], first, 'replace rebuilt unrelated DOM');
+assert.notStrictEqual(CM.messageRowForId(2), second);
+assert.equal(CM.messageRowForId(2).textContent, 'enriched');
+""")

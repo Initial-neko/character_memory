@@ -128,8 +128,7 @@
     });
   };
 
-  CM.addMessage = message => {
-    const d = CM.dom;
+  CM.createMessageRow = message => {
     const row = document.createElement("article");
     row.className = `message-row ${message.role}`;
     row.dataset.messageId = message.id ?? "";
@@ -142,22 +141,33 @@
     const proactive = message.proactive || message.action === "PROACTIVE_MESSAGE";
     row.innerHTML = `<div class="avatar">${CM.escapeHtml(avatar)}</div><div class="bubble-wrap">${contentHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${proactive ? '<span class="proactive-badge">主动消息</span>' : ""}${thought}${trace}</div></div>`;
     CM.bindMessageContent(row);
-    d.chat.appendChild(row);
     return row;
   };
+
+  CM.addMessage = message => {
+    const row = CM.createMessageRow(message);
+    CM.dom.chat.appendChild(row);
+    return row;
+  };
+
+  CM.directHistorySignature = messages =>
+    `${CM.state.characterId}|${CM.state.directHistory.hasMore}|${CM.state.directHistory.loadingOlder}|` +
+    messages.map(m => `${m.id}:${m.event_time}:${m.content}:${m.sticker_id || ""}:${m.image_id || m.media_id || ""}:${m.voice_status || ""}:${m.voice_media_id || ""}`).join("|");
 
   CM.renderHistory = (messages, {preserveScroll = false} = {}) => {
     const d = CM.dom;
     const beforeHeight = document.body.scrollHeight;
     const beforeY = window.scrollY;
-    const signature = `${CM.state.characterId}|${CM.state.directHistory.hasMore}|${CM.state.pendingCharacters.has(CM.state.characterId)}|` + messages.map(m => `${m.id}:${m.event_time}:${m.content}:${m.sticker_id || ""}:${m.image_id || m.media_id || ""}:${m.voice_status || ""}:${m.voice_media_id || ""}`).join("|");
-    if (signature === CM.state.lastRenderedSignature && d.chat.children.length) return;
+    const signature = CM.directHistorySignature(messages);
+    if (signature === CM.state.lastRenderedSignature && d.chat.children.length) {
+      CM.syncDirectEphemeralUi();
+      return;
+    }
     d.chat.innerHTML = "";
     if (!messages.length) {
       d.chat.innerHTML = `<div class="empty">还没有和 ${CM.escapeHtml(CM.currentProfile().name || CM.state.characterId)} 的聊天记录。<br>从第一句话开始认识彼此。</div>`;
       CM.state.lastRenderedSignature = signature;
-      if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
-      CM.renderDirectError();
+      CM.syncDirectEphemeralUi();
       return;
     }
     if (CM.state.directHistory.hasMore) {
@@ -178,9 +188,8 @@
       }
       CM.addMessage(message);
     }
-    if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
-    CM.renderDirectError();
     CM.state.lastRenderedSignature = signature;
+    CM.syncDirectEphemeralUi();
     if (preserveScroll) {
       requestAnimationFrame(() => {
         const delta = document.body.scrollHeight - beforeHeight;
@@ -196,6 +205,7 @@
     if (!error) return;
     const box = document.createElement("div");
     box.className = "error";
+    box.dataset.directError = "true";
     box.textContent = `生成失败：${error.message || "未知错误"}`;
     CM.dom.chat.appendChild(box);
   };
@@ -205,6 +215,41 @@
     const typing = CM.dom.typingTemplate.content.cloneNode(true);
     typing.querySelector(".avatar").textContent = CM.initialFor(CM.currentProfile());
     CM.dom.chat.appendChild(typing);
+  };
+
+  CM.clearDirectEphemeralUi = () => {
+    CM.dom.chat.querySelector(".typing-row")?.remove();
+    CM.dom.chat.querySelector("[data-direct-error]")?.remove();
+  };
+
+  CM.syncDirectEphemeralUi = () => {
+    CM.clearDirectEphemeralUi();
+    if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
+    CM.renderDirectError();
+  };
+
+  CM.messageRowForId = id =>
+    [...CM.dom.chat.querySelectorAll(".message-row[data-message-id]")]
+      .find(row => row.dataset.messageId === String(id)) || null;
+
+  CM.appendDirectMessageIncrementally = (message, previousLast) => {
+    const renderedRows = CM.dom.chat.querySelectorAll(".message-row[data-message-id]");
+    if (!renderedRows.length || !previousLast) return false;
+
+    CM.clearDirectEphemeralUi();
+
+    const previousDate = CM.fmtDate(previousLast.event_time);
+    const nextDate = CM.fmtDate(message.event_time);
+    if (nextDate !== previousDate) {
+      const separator = document.createElement("div");
+      separator.className = "date-separator";
+      separator.textContent = `── ${nextDate} ──`;
+      CM.dom.chat.appendChild(separator);
+    }
+    CM.addMessage(message);
+    CM.syncDirectEphemeralUi();
+    CM.scrollToBottom(false);
+    return true;
   };
   CM.scrollToBottom = (smooth = true) => window.scrollTo({top: document.body.scrollHeight, behavior: smooth ? "smooth" : "auto"});
 
@@ -281,12 +326,37 @@
 
   CM.mergeDirectMessage = message => {
     if (!message || message.id == null) return;
-    const index = CM.state.directHistory.messages.findIndex(item => item.id === message.id);
-    if (index >= 0) CM.state.directHistory.messages[index] = {...CM.state.directHistory.messages[index], ...message};
-    else CM.state.directHistory.messages.push(message);
-    CM.state.directHistory.messages.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+    const messages = CM.state.directHistory.messages;
+    const index = messages.findIndex(item => item.id === message.id);
+
+    if (index >= 0) {
+      const before = messages[index];
+      const merged = {...before, ...message};
+      messages[index] = merged;
+      const row = CM.messageRowForId(message.id);
+      if (row && CM.fmtDate(before.event_time) === CM.fmtDate(merged.event_time)) {
+        row.replaceWith(CM.createMessageRow(merged));
+        CM.state.lastRenderedSignature = CM.directHistorySignature(messages);
+        CM.syncDirectEphemeralUi();
+        return;
+      }
+    } else {
+      const previousLast = messages.length ? messages[messages.length - 1] : null;
+      messages.push(message);
+      messages.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+      if (
+        messages[messages.length - 1] === message &&
+        CM.appendDirectMessageIncrementally(message, previousLast)
+      ) {
+        CM.state.lastRenderedSignature = CM.directHistorySignature(messages);
+        return;
+      }
+    }
+
+    // Initial load, out-of-order reconciliation, or a date-boundary update:
+    // rebuild deliberately because separators/history pagination may change.
     CM.state.lastRenderedSignature = "";
-    CM.renderHistory(CM.state.directHistory.messages);
+    CM.renderHistory(messages);
   };
 
   CM.directEventToMessage = raw => {
@@ -342,8 +412,7 @@
       if (data.state === "idle") CM.state.pendingCharacters.delete(characterId);
       CM.renderCharacterList();
       CM.updateHeader();
-      CM.state.lastRenderedSignature = "";
-      CM.renderHistory(CM.state.directHistory.messages);
+      CM.syncDirectEphemeralUi();
     });
     source.addEventListener("character_event", event => {
       if (CM.isGroupConversation() || characterId !== CM.state.characterId) return;
@@ -355,8 +424,7 @@
       if (CM.isGroupConversation() || characterId !== CM.state.characterId) return;
       const data = JSON.parse(event.data || "{}");
       CM.state.directErrors.set(characterId, data);
-      CM.state.lastRenderedSignature = "";
-      CM.renderHistory(CM.state.directHistory.messages);
+      CM.syncDirectEphemeralUi();
     });
   };
 

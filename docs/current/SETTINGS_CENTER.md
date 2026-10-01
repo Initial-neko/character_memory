@@ -108,9 +108,16 @@ GSV runtime fields are updated in `.env` as one atomic multi-key edit. Unrelated
 
 All Settings mutations are serialized per Settings Server process. The lock
 covers reading the previous state, validation, backup, `config.yaml` / `.env`
-persistence, GSV provisional runtime apply and rollback, and the response
-snapshot. Concurrent browser/API saves therefore apply in order instead of
-both patching the same old YAML and silently losing one successful update.
+persistence, GSV provisional runtime apply and rollback, and the mutation
+response snapshot. Concurrent browser/API saves therefore apply in order
+instead of both patching the same old YAML and silently losing one successful
+update.
+
+Read-only Settings snapshots deliberately do **not** acquire that mutation lock.
+A slow GSV preload must not make `GET /v1/settings` wait for the full runtime
+apply window. Each backing file is still replaced atomically, but a read racing
+a multi-surface mutation is not guaranteed to observe `config.yaml` and
+`.env` from one transaction boundary.
 
 Existing secrets are never returned to the browser. Secret status exposes only metadata such as `configured`, `source`, and `stored_in_env`.
 

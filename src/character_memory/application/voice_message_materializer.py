@@ -93,11 +93,30 @@ class VoiceMessageMaterializer:
             created_at=event_time,
             source="VOICE_MESSAGE",
         )
-        store.add_media_asset(asset)
+        try:
+            store.add_media_asset(asset)
+        except Exception:
+            # The file is written before its DB row. A failed insert must not
+            # leave an unaddressable media file behind.
+            self.media_storage.delete(asset)
+            raise
         return asset
+
+    def _discard(self, store, asset) -> None:
+        """Remove a synthesized asset that could not be attached to its event."""
+
+        try:
+            store.delete_media_asset(asset.id)
+        except Exception:
+            logger.exception("voice_message.discard_db_failed media_id=%s", asset.id)
+        try:
+            self.media_storage.delete(asset)
+        except Exception:
+            logger.exception("voice_message.discard_file_failed media_id=%s", asset.id)
 
     def materialize_direct(self, event, *, conversation_id: str) -> None:
         store = self.store_provider()
+        asset = None
         try:
             response = self._synthesize(character_id=event.character_id, text=event.content)
             asset = self._save(
@@ -107,7 +126,7 @@ class VoiceMessageMaterializer:
                 event_time=event.event_time,
                 response=response,
             )
-            mark_voice_message_ready(
+            updated = mark_voice_message_ready(
                 store,
                 self.hub,
                 int(event.id),
@@ -116,8 +135,12 @@ class VoiceMessageMaterializer:
                 media_id=asset.id,
                 duration_ms=self._duration_ms(response),
             )
+            if not updated:
+                self._discard(store, asset)
         except Exception as exc:
             logger.exception("voice_message.materialize_direct_failed event_id=%s", event.id)
+            if asset is not None:
+                self._discard(store, asset)
             mark_voice_message_failed(
                 store,
                 self.hub,
@@ -134,6 +157,7 @@ class VoiceMessageMaterializer:
         event_id = int(raw_event["id"])
         conversation_id = str(raw_event["conversation_id"])
         character_id = str(raw_event["actor_id"])
+        asset = None
         try:
             response = self._synthesize(character_id=character_id, text=str(raw_event.get("content") or ""))
             from datetime import datetime
@@ -153,13 +177,25 @@ class VoiceMessageMaterializer:
             })
         except Exception as exc:
             logger.exception("voice_message.materialize_group_failed event_id=%s", event_id)
+            if asset is not None:
+                self._discard(store, asset)
+                asset = None
             metadata.update({
                 VOICE_STATUS: "failed",
                 VOICE_MEDIA_ID: None,
                 VOICE_DURATION_MS: None,
                 VOICE_ERROR: str(exc)[:400],
             })
-        if not repo.update_event_metadata(event_id, metadata):
+        try:
+            updated = repo.update_event_metadata(event_id, metadata)
+        except Exception:
+            logger.exception("voice_message.update_group_failed event_id=%s", event_id)
+            if asset is not None:
+                self._discard(store, asset)
+            return
+        if not updated:
+            if asset is not None:
+                self._discard(store, asset)
             return
         updated = {**raw_event, "metadata": metadata}
         self.hub.publish(group_channel(conversation_id), "group_character_event", updated)

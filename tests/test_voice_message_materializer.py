@@ -154,6 +154,50 @@ def test_direct_voice_message_failure_keeps_text_and_marks_failed(tmp_path):
     assert saved.metadata["voice_media_id"] is None
 
 
+def test_media_db_failure_removes_the_audio_file_before_marking_failed(tmp_path):
+    store = SQLiteStore(tmp_path / "voice.db")
+    hub = _Hub()
+    event = store.append_event(Event(
+        character_id="momo",
+        event_type=EventType.CHARACTER_MESSAGE,
+        event_time=datetime(2026, 9, 21, tzinfo=timezone.utc),
+        content="这段音频不能成为孤儿文件。",
+        metadata={"action":"VOICE_MESSAGE","conversation_id":"c1",**voice_pending_fields()},
+    ))
+
+    def fail_insert(_asset):
+        raise RuntimeError("simulated media_assets insert failure")
+
+    store.add_media_asset = fail_insert
+    _materializer(tmp_path, store, hub, _Client()).materialize_direct(event, conversation_id="c1")
+
+    assert list((tmp_path / "media").glob("*")) == []
+    assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
+    saved = store.get_event(event.id)
+    assert saved.metadata["voice_status"] == "failed"
+    assert "simulated media_assets insert failure" in saved.metadata["voice_error"]
+
+
+def test_late_direct_result_discards_audio_when_the_event_no_longer_exists(tmp_path):
+    store = SQLiteStore(tmp_path / "voice.db")
+    hub = _Hub()
+    event = store.append_event(Event(
+        character_id="momo",
+        event_type=EventType.CHARACTER_MESSAGE,
+        event_time=datetime(2026, 9, 21, tzinfo=timezone.utc),
+        content="删除后的晚到结果不能留下孤儿资产。",
+        metadata={"action":"VOICE_MESSAGE","conversation_id":"c1",**voice_pending_fields()},
+    ))
+    with store.conn:
+        store.conn.execute("DELETE FROM events WHERE id=?", (event.id,))
+
+    _materializer(tmp_path, store, hub, _Client()).materialize_direct(event, conversation_id="c1")
+
+    assert list((tmp_path / "media").glob("*")) == []
+    assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
+    assert hub.published == []
+
+
 def test_group_voice_message_updates_the_same_group_event(tmp_path):
     store = SQLiteStore(tmp_path / "voice.db")
     repo = GroupRepository(store)
@@ -184,6 +228,43 @@ def test_group_voice_message_updates_the_same_group_event(tmp_path):
     assert saved.metadata["voice_status"] == "ready"
     assert hub.published[-1][1] == "group_character_event"
     assert hub.published[-1][2]["id"] == event.id
+
+
+def test_late_group_result_discards_audio_when_the_event_no_longer_exists(tmp_path):
+    store = SQLiteStore(tmp_path / "voice.db")
+    repo = GroupRepository(store)
+    now = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    group = repo.create_group("群", ["momo", "rin"], now)
+    event = repo.append_event(GroupEvent(
+        conversation_id=group.id,
+        turn_id="t1",
+        actor_type="CHARACTER",
+        actor_id="momo",
+        event_type="CHARACTER_MESSAGE",
+        event_time=now,
+        content="删除后的群聊结果也不能留下孤儿资产。",
+        metadata={"action": "VOICE_MESSAGE", **voice_pending_fields()},
+    ))
+    raw = {
+        "id": event.id,
+        "conversation_id": group.id,
+        "turn_id": "t1",
+        "actor_type": "CHARACTER",
+        "actor_id": "momo",
+        "event_type": "CHARACTER_MESSAGE",
+        "event_time": now.isoformat(),
+        "content": event.content,
+        "metadata": event.metadata,
+    }
+    with store.conn:
+        store.conn.execute("DELETE FROM conversation_events WHERE id=?", (event.id,))
+    hub = _Hub()
+
+    _materializer(tmp_path, store, hub, _Client()).materialize_group(raw)
+
+    assert list((tmp_path / "media").glob("*")) == []
+    assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
+    assert hub.published == []
 
 
 def test_voice_message_frontend_has_native_shared_bubble_not_audio_controls():

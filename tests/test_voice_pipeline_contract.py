@@ -33,7 +33,7 @@ def test_voice_pipeline_keeps_capture_independent_from_playback_phase():
     # behaviour is pinned by test_voice_v0_web.py; this pins that the predicate still
     # covers the window where the model is thinking but nothing is playing yet.
     assert 'function replyInFlight()' in source
-    assert 'return voice.playing || voice.queue.length > 0 || voice.phase === "waiting";' in source
+    assert 'return voice.recoveryPending || voice.playing || voice.queue.length > 0 || voice.phase === "waiting";' in source
     assert 'if (replyInFlight())' in source
     assert '已听到' in source
     assert 'async function flushPendingTurns()' in source

@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 import threading
-import weakref
 from uuid import uuid4
 
 from character_memory.application.async_conversation import group_channel
@@ -37,7 +36,7 @@ class GroupAutonomyService:
         self.access = access
         self.repository = repository
         self._fallback_locks_guard = threading.Lock()
-        self._fallback_locks: weakref.WeakValueDictionary[str, threading.RLock] = weakref.WeakValueDictionary()
+        self._fallback_locks: dict[str, threading.RLock] = {}
 
     def _profiles(self) -> dict[str, dict]:
         return {item["id"]: item for item in self.access.character_profiles()}

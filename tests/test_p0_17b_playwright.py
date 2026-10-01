@@ -243,6 +243,59 @@ def test_direct_generation_error_survives_idle_and_history_reconcile(page, realt
     expect(page.locator("#chat .error")).to_have_count(0)
 
 
+
+def test_direct_sse_updates_preserve_existing_message_dom(page, realtime_server):
+    """New Direct facts/status should not rebuild every already-rendered row."""
+
+    _open(page, realtime_server)
+    marker = f"incremental-{uuid4().hex[:8]}"
+    page.locator("#messageInput").fill(marker)
+    page.locator("#sendButton").click()
+    expect(page.locator(".message-row.assistant .bubble", has_text=f"E2E reply: {marker}")).to_be_visible()
+
+    probe = page.evaluate(
+        """() => {
+          const row = document.querySelector('.message-row[data-message-id]');
+          if (!row) throw new Error('expected an existing direct message row');
+          row.dataset.renderProbe = 'keep';
+          const maxId = Math.max(0, ...CM.state.directHistory.messages.map(item => Number(item.id || 0)));
+          return {id: row.dataset.messageId, nextId: maxId + 1000000};
+        }"""
+    )
+
+    page.evaluate(
+        """({nextId}) => CM.state.directStream.dispatchEvent(new MessageEvent('character_event', {
+          data: JSON.stringify({
+            id: nextId,
+            character_id: CM.state.characterId,
+            event_time: new Date().toISOString(),
+            content: 'incremental SSE reply',
+            metadata: {action:'MESSAGE', source_event_id:nextId - 1}
+          })
+        }))""",
+        probe,
+    )
+    expect(page.locator(f'[data-message-id="{probe["nextId"]}"] .bubble', has_text="incremental SSE reply")).to_be_visible()
+    assert page.locator(f'[data-message-id="{probe["id"]}"]').get_attribute("data-render-probe") == "keep"
+
+    page.evaluate(
+        """({nextId}) => CM.state.directStream.dispatchEvent(new MessageEvent('reaction_status', {
+          data: JSON.stringify({state:'queued', watermark:nextId + 1})
+        }))""",
+        probe,
+    )
+    expect(page.locator(".typing-row")).to_be_visible()
+    assert page.locator(f'[data-message-id="{probe["id"]}"]').get_attribute("data-render-probe") == "keep"
+
+    page.evaluate(
+        """({nextId}) => CM.state.directStream.dispatchEvent(new MessageEvent('reaction_status', {
+          data: JSON.stringify({state:'idle', watermark:nextId + 1})
+        }))""",
+        probe,
+    )
+    expect(page.locator(".typing-row")).to_have_count(0)
+    assert page.locator(f'[data-message-id="{probe["id"]}"]').get_attribute("data-render-probe") == "keep"
+
 def test_direct_generated_media_event_renders_without_history_reload(page, realtime_server):
     _open(page, realtime_server)
     # The provider and binary asset are mocked; the production SSE listener,

@@ -5,7 +5,7 @@ import logging
 from typing import Any, Callable
 from character_memory.avatars import AvatarSearchService, AvatarStore
 from character_memory.browser_web import HeadlessBrowserWebFetcher
-from character_memory.config import resolve_avatar_dir
+from character_memory.config import Settings, resolve_avatar_dir
 from character_memory.search import BraveSearchProvider, SearchApiProvider, SearchProvider
 from character_memory.visual_generation import ImageGenerationProvider, build_image_providers
 from character_memory.world_observation import WorldObservationService
@@ -14,7 +14,7 @@ from character_memory.world_observation import WorldObservationService
 logger = logging.getLogger("character_memory.runtime_services")
 
 
-def build_search_provider(settings) -> SearchProvider | None:
+def build_search_provider(settings: Settings) -> SearchProvider | None:
     """Build the shared external-search infrastructure once at composition time.
 
     Avatar search, autonomous Space image search and World Observation are
@@ -22,13 +22,13 @@ def build_search_provider(settings) -> SearchProvider | None:
     No HTTP route owns this provider.
     """
 
-    provider_name = str(getattr(settings, "search_provider", "searchapi") or "searchapi").strip().lower()
+    provider_name = str(settings.search_provider or "searchapi").strip().lower()
     provider_kwargs = {
-        "country": getattr(settings, "search_country", "jp"),
-        "language": getattr(settings, "search_language", "zh-cn"),
-        "safe_search": getattr(settings, "search_safe_search", "strict"),
+        "country": settings.search_country,
+        "language": settings.search_language,
+        "safe_search": settings.search_safe_search,
     }
-    api_key = getattr(settings, "search_api_key", "")
+    api_key = settings.search_api_key
     if provider_name in {"searchapi", "searchapi.io", "search_api"}:
         return SearchApiProvider(api_key, **provider_kwargs)
     if provider_name == "brave":
@@ -87,7 +87,7 @@ class CharacterRuntimeAccess:
     probing with getattr(access, name, None).
     """
 
-    settings: Any
+    settings: Settings
     get_bundle: Callable[[], Any]
     require_bundle: Callable[[], Any]
     store: Callable[[], Any]
@@ -145,18 +145,18 @@ class CharacterRuntimeAccess:
     def world_observer(self):
         return self.services.world_observer
 
-def build_runtime_services(settings) -> RuntimeServices:
+def build_runtime_services(settings: Settings) -> RuntimeServices:
     search_provider = build_search_provider(settings)
     avatar_store = AvatarStore(
         resolve_avatar_dir(settings),
-        max_bytes=int(getattr(settings, "avatar_max_bytes", 8 * 1024 * 1024)),
+        max_bytes=int(settings.avatar_max_bytes),
     )
     avatar_search = AvatarSearchService(search_provider, avatar_store)
     image_generation_providers = build_image_providers(settings)
     world_fetcher = HeadlessBrowserWebFetcher(
-        timeout_seconds=float(getattr(settings, "web_browser_timeout_seconds", 20.0)),
-        render_wait_ms=int(getattr(settings, "web_browser_render_wait_ms", 700)),
-        channel=str(getattr(settings, "web_browser_channel", "auto") or "auto"),
+        timeout_seconds=float(settings.web_browser_timeout_seconds),
+        render_wait_ms=int(settings.web_browser_render_wait_ms),
+        channel=str(settings.web_browser_channel or "auto"),
     )
     world_observer = WorldObservationService(search_provider, world_fetcher)
     return RuntimeServices(

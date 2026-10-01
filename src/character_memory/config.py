@@ -272,22 +272,41 @@ def load_settings(path: str = "config.yaml") -> Settings:
     return Settings.model_validate(data)
 
 
+_LEGACY_SETTING_MISSING = object()
+
+
+def runtime_setting(settings, name: str, legacy_default=_LEGACY_SETTING_MISSING):
+    """Read formal Settings strictly while keeping lightweight adapters usable.
+
+    Production composition passes Settings. For that type a typo/retired
+    field must raise immediately instead of silently reviving an old default.
+    Tests and embedding adapters may intentionally pass a settings-like
+    SimpleNamespace; those may opt into an explicit legacy default.
+    """
+
+    if isinstance(settings, Settings):
+        return getattr(settings, name)
+    if legacy_default is _LEGACY_SETTING_MISSING:
+        return getattr(settings, name)
+    return getattr(settings, name, legacy_default)
+
+
 def resolve_media_dir(settings: Settings) -> Path:
-    configured = str(settings.media_dir or "").strip()
+    configured = str(runtime_setting(settings, "media_dir", "") or "").strip()
     if configured:
         return Path(configured)
     return Path(settings.db_path).parent / "media"
 
 
 def resolve_sticker_dir(settings: Settings) -> Path:
-    configured = str(settings.sticker_dir or "").strip()
+    configured = str(runtime_setting(settings, "sticker_dir", "") or "").strip()
     if configured:
         return Path(configured)
     return Path(settings.db_path).parent / "stickers"
 
 
 def resolve_avatar_dir(settings: Settings) -> Path:
-    configured = str(settings.avatar_dir or "").strip()
+    configured = str(runtime_setting(settings, "avatar_dir", "") or "").strip()
     if configured:
         return Path(configured)
     return Path(settings.db_path).parent / "avatars"

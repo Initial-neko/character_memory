@@ -2,9 +2,11 @@ import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+import pytest
 
 from character_memory.config import Settings
-from character_memory.dev_server import create_dev_app
+from character_memory.dev_server import DevSpaceMediaRequest, create_dev_app
 
 
 class FakeResponse:
@@ -335,4 +337,22 @@ def test_llm_usage_explorer_localizes_feature_and_purpose_labels():
 
     # Raw enum values remain discoverable for log/debug correlation.
     assert "if (spec.title) cell.title = String(spec.title)" in script
+
+
+def test_dev_space_media_accepts_a_video_intent_without_opening_the_whitelist():
+    """A paid capability that no test surface can reach is not testable."""
+
+    video = DevSpaceMediaRequest(
+        type="GENERATE_VIDEO",
+        video_prompt="雨夜里向前走，镜头缓慢跟随。",
+        duration_seconds=5,
+    )
+    assert video.type == "GENERATE_VIDEO"
+    assert video.duration_seconds == 5
+    assert video.video_ratio == "16:9"
+
+    # The type stays a closed set: widening it to ask for video must not turn
+    # the field into a free-form string.
+    with pytest.raises(ValidationError):
+        DevSpaceMediaRequest(type="GENERATE_AUDIO")
 

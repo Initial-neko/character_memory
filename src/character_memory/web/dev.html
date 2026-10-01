@@ -167,6 +167,7 @@
                 <select id="spaceMediaType" title="选择这一次媒体 Smoke 的类型；只影响本次测试动态，不修改正式能力开关。">
                   <option value="SEARCH_IMAGE">SEARCH_IMAGE · 互联网图片</option>
                   <option value="GENERATE_IMAGE">GENERATE_IMAGE · AI 生图</option>
+                  <option value="GENERATE_VIDEO">GENERATE_VIDEO · AI 短视频</option>
                   <option value="VOICE">VOICE · 语音动态</option>
                 </select>
               </label>
@@ -180,10 +181,12 @@
               <label>Search Query<input id="spaceMediaQuery" type="text" value="Tokyo night street photography" / title="SEARCH_IMAGE 测试使用的搜索词；只用于本次请求。"></label>
               <label>Visual Intent<input id="spaceMediaVisualIntent" type="text" value="夜晚街道的自然生活氛围" / title="GENERATE_IMAGE 测试的自然语言视觉意图；只用于本次请求。"></label>
               <label>Voice Text<input id="spaceMediaVoiceText" type="text" value="今天不想打字，就直接说一句。" / title="VOICE 测试交给正式 TTS 合成的文本；只用于本次请求。"></label>
+              <label>Video Prompt<input id="spaceMediaVideoPrompt" type="text" value="雨夜里向前走，镜头缓慢跟随。" / title="GENERATE_VIDEO 的可拍摄短镜头描述；只用于本次请求。真钱调用，受每日预算硬上限约束。"></label>
+              <label>Video Seconds<input id="spaceMediaDuration" type="number" min="5" max="15" step="1" value="5" / title="GENERATE_VIDEO 请求的时长秒数；服务端会再压到 Settings 的上限。"></label>
               <label>Post Text<input id="spaceMediaPostText" type="text" value="随手分享一下。" / title="本次媒体测试动态的正文；会创建测试动态，但不是系统配置。"></label>
               <button class="secondary" id="runSpaceMedia" type="button" title="真实执行选中的 Space 媒体能力并发布一条测试动态；不移动正式 Scheduler。">测试媒体动态</button>
             </div>
-            <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE / VOICE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图；Voice Text 会走正式 :8001/v1/tts。</p>
+            <p class="subtle">媒体测试直接执行 SEARCH_IMAGE / GENERATE_IMAGE / GENERATE_VIDEO / VOICE 并发布一条测试动态，不消耗、不移动正式 Scheduler。Search Query 仅用于搜图；Visual Intent + Purpose 仅用于 AI 生图；Voice Text 会走正式 :8001/v1/tts。GENERATE_VIDEO 会真实调用付费视频接口，需要 METASO_MINIMAX_API_KEY 且 space_video_generation_enabled 为 true，一次最长等 900 秒。</p>
           </div>
 
           <div class="field-group">

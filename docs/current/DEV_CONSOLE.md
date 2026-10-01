@@ -125,11 +125,13 @@ LLM Smoke 属于 **Detailed Dev**：通过服务端配置的 OpenAI-compatible P
 - `立即手动触发一次`：立即跑一次完整 Space Opportunity，不改变正式 next time；
 - `让选中角色立即到期`：把 next opportunity 设为现在，用真实后台 Scheduler 验证；
 - 指定 Post ID 后 `再次模拟 Audience`；
-- 强制执行一条 `SEARCH_IMAGE` 或 `GENERATE_IMAGE` 测试动态，不移动正式 Scheduler；
-- 测试 1..9 张媒体上限、Search Query、SELFIE/SCENE Visual Intent；
+- 强制执行一条 `SEARCH_IMAGE` / `GENERATE_IMAGE` / `GENERATE_VIDEO` / `VOICE` 测试动态，不移动正式 Scheduler；
+- 测试 1..9 张媒体上限、Search Query、SELFIE/SCENE Visual Intent、Video Prompt 与 Video Seconds；
 - 测试 World Observation：Search Provider 发现 URL 后，用 Playwright 无头 Chromium 真正打开并执行 JS，返回抽取后的 WorldObservation；
 - 无头浏览器打开 URL：只验证一个公开 URL 的渲染/正文抽取，不触发角色记忆或 Space 发帖；
 - 查看每个人的 last/next opportunity、last status，以及最近 opportunity run history。
+
+媒体测试里的 `GENERATE_VIDEO` 是唯一真花钱的选项：它需要 `METASO_MINIMAX_API_KEY`，且 `space_video_generation_enabled` 为 true、每日预算大于 0（两者都只在 Settings Center 持久化，改完要重启 Character Runtime）。它同步等待服务商的异步任务，所以代理超时按 `video_generation_timeout_seconds` 而不是生图的预算放宽，一次最长 900 秒；校验与预算拒付都发生在调用服务商之前。
 
 这里的 Space / Group Autonomy Session Override 只热应用到当前 Character Runtime，不写 `config.yaml`；正式值由 Settings Center 保存，重启 Character Runtime 后回到正式值。它们被刻意移出首屏，避免 Dev 变成第二个配置中心。测试时可在 Detailed Dev 临时设为 1H 后让 stack 连续运行过夜，第二天从状态/动态/运行历史检查效果。
 

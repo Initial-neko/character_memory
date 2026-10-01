@@ -87,6 +87,13 @@ class SpaceDevMediaRequest(BaseModel):
     query: str | None = Field(default=None, max_length=300)
     purpose: str | None = Field(default="SCENE", max_length=16)
     visual_intent: str | None = Field(default=None, max_length=800)
+    # GENERATE_VIDEO is a first-class intent, so the same explicit-media entry
+    # point has to be able to carry its fields. Without them the intent cannot
+    # be constructed and the only way to reach the video path is to wait for
+    # the planner to choose it on its own.
+    video_prompt: str | None = Field(default=None, max_length=1200)
+    duration_seconds: int | None = Field(default=None, ge=5, le=15)
+    video_ratio: str | None = Field(default=None, max_length=16)
     voice_text: str | None = Field(default=None, max_length=4000)
 
 

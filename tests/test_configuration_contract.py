@@ -54,6 +54,25 @@ def test_config_example_lists_every_non_secret_settings_key_exactly_once():
     }
 
 
+def test_retired_space_daily_window_keys_remain_loadable_but_are_not_supported_knobs(tmp_path):
+    """Old config files stay readable without preserving no-op settings forever."""
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "space_daily_window_start_hour: 18\n"
+        "space_daily_window_end_hour: 22\n",
+        encoding="utf-8",
+    )
+
+    from character_memory.config import load_settings
+
+    settings = load_settings(str(config))
+    assert "space_daily_window_start_hour" not in Settings.model_fields
+    assert "space_daily_window_end_hour" not in Settings.model_fields
+    assert not hasattr(settings, "space_daily_window_start_hour")
+    assert not hasattr(settings, "space_daily_window_end_hour")
+
+
 def test_every_config_example_key_has_an_explanation_comment():
     """The example is a reference manual, not merely a copyable value dump."""
 

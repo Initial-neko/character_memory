@@ -284,7 +284,13 @@ def attach_async_routes(app):
             sticker=selected_sticker,
             mentions=mentions,
         )
-        event = repository.append_event(event)
+        try:
+            event = repository.append_user_event(event)
+        except KeyError as exc:
+            if selected_image is not None:
+                store.delete_media_asset(asset.id)
+                access.media_storage.delete(asset)
+            raise HTTPException(status_code=404, detail="group not found") from exc
         scheduler.enqueue_group(conversation_id, event, image_data_url=image_data_url)
         logger.info("async.accept group conversation=%s event_id=%s mentions=%s", conversation_id, event.id, mentions)
         return {

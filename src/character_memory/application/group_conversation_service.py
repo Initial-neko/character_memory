@@ -198,7 +198,7 @@ class GroupConversationService:
             sticker=sticker,
             mentions=resolved_mentions,
         )
-        stored = self.repo.append_event(event)
+        stored = self.repo.append_user_event(event)
         logger.info("group.persist conversation=%s turn=%s event_id=%s mentions=%s", conversation_id, stored.turn_id, stored.id, resolved_mentions)
         return stored
 

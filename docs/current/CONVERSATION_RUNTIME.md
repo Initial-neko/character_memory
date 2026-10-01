@@ -290,6 +290,8 @@ archived_at_epoch
 
 Archive 与 group reaction 使用同一 per-group lock，避免形成半提交状态。
 
+文本、图片和 Visual Capture 的 User 消息入口在同一 SQLite 事务内重查群聊活跃状态并写入事实。若归档已在请求校验后完成，入口返回 404，不写入 User Event、不进入 reaction 调度；本次请求新上传但未被接受的图片也清理 MediaAsset 和文件。消息接收不等待 reaction 的 per-group lock，使新 User 事实仍可及时 supersede 正在计算的 reaction。归档前已经接受的事实继续保留。
+
 ### Character Lifecycle：归档 / 删除 / 延迟私聊
 
 Character 生命周期一律是**旁挂标记**，不写进 `persona.yaml`：整个 persona 文档会原样交给模型，UI 状态不能进 prompt。标记文件的存在与否就是 flag，内容里的时间戳只是装饰。

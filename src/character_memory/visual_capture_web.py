@@ -327,7 +327,10 @@ def attach_visual_capture_routes(app):
         )
         event.content = f"{event.content}\n[实时视觉：本轮同时提供 {len(frame_urls)} 张按时间顺序采集的摄像头/屏幕关键帧，请结合图像本体理解。]".strip()
         event.metadata["visual_capture"] = visual_metadata
-        event = repository.append_event(event)
+        try:
+            event = repository.append_user_event(event)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="group not found") from exc
         scheduler().enqueue_group(conversation_id, event, image_data_urls=frame_urls)
         logger.info(
             "visual.capture group conversation=%s event_id=%s frames=%d sources=%s mentions=%s",

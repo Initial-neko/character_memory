@@ -396,6 +396,6 @@ def build_image_providers(settings: Settings) -> dict[str, ImageGenerationProvid
         "msimg": MsimgProvider(
             settings.msimg_api_key,
             models=settings.msimg_models,
-            timeout_seconds=getattr(settings, "image_generation_timeout_seconds", 180.0),
+            timeout_seconds=settings.image_generation_timeout_seconds,
         ),
     }

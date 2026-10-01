@@ -252,12 +252,6 @@ space_audience_size: 5
 # Space scheduler polling latency only; it does not change opportunity frequency.
 space_scheduler_poll_seconds: 60
 
-# Legacy V2 compatibility field. Current interval scheduler no longer consumes it.
-space_daily_window_start_hour: 18
-
-# Legacy V2 compatibility field. Current interval scheduler no longer consumes it.
-space_daily_window_end_hour: 22
-
 # -----------------------------------------------------------------------------
 # World Activity
 # -----------------------------------------------------------------------------

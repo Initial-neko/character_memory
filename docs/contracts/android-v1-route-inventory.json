@@ -151,6 +151,10 @@
     {
       "name": "multipart upload",
       "implemented": false
+    },
+    {
+      "name": "native capture session binding",
+      "implemented": false
     }
   ]
 }

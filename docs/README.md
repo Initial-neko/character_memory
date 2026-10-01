@@ -36,6 +36,7 @@ Historical material never overrides current code or `docs/current/`.
 | [EVALS](current/EVALS.md) | Behavior/regression evaluation contract. |
 | [TECH_DEBT](current/TECH_DEBT.md) | Debt that still exists on current main. |
 | [MOBILE_ACCESS](current/MOBILE_ACCESS.md) | Private mobile web access through Tailscale Serve. |
+| [MOBILE_API_CONTRACT](current/MOBILE_API_CONTRACT.md) | Core-owned CURRENT/PROPOSED API contract for Android and other external clients. |
 | [RELEASES](current/RELEASES.md) | Branch/tag/version/release promotion policy. |
 
 ## Ownership rule

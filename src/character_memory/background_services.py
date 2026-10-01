@@ -55,15 +55,25 @@ class BackgroundServices:
         return [name for name, _, _ in self._workers]
 
     def start_all(self) -> None:
+        """Start every worker, rolling the composed runtime back on failure.
+
+        Feature modules construct schedulers and other closeable resources
+        before application startup.  A later worker may fail after an earlier
+        worker has started, so cleanup has to cover every registration rather
+        than only the entries whose ``start`` callback returned.  Stop
+        callbacks are required to tolerate a resource that never started; the
+        normal shutdown path already relies on the same property for optional
+        and lazily started workers.
+        """
+
         for name, start, _ in self._workers:
             if start is None:
                 continue
             try:
                 start()
             except Exception:
-                # A worker that cannot start leaves the runtime half-composed,
-                # so surface it instead of continuing to the next one.
                 logger.exception("background_services start_failed worker=%s", name)
+                self.stop_all()
                 raise
 
     def stop_all(self) -> None:

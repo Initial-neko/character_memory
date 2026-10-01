@@ -86,6 +86,13 @@ Character Runtime's long-lived workers register with one `BackgroundServices` ow
 
 That removes what the name list got wrong: `WorldActivityScheduler` had no shutdown hook of its own, `SpaceAutonomyScheduler` and `GroupAutonomyScheduler` were stopped twice, and `EncounterScheduler` was stopped only after the core had already closed the shared store. Workers now stop newest-first, so a producer goes down before the worker it feeds, and every stop runs before `services.close()`.
 
+Startup uses the same ownership boundary. If any worker's `start` callback
+fails, `BackgroundServices` stops every composed resource newest-first before
+re-raising the original error. This includes stop-only/lazily started resources
+and workers registered after the failure point: feature modules construct them
+before application startup, and their stop callbacks are therefore required to
+tolerate a resource that never started.
+
 ## High priority / semantic architecture
 
 ### Channel-specific cognition still exists above shared Person context

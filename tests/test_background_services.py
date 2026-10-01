@@ -154,6 +154,44 @@ def test_a_worker_that_cannot_start_does_not_leave_the_rest_silently_unstarted()
     assert started == []
 
 
+def test_a_worker_that_cannot_start_rolls_back_every_composed_resource():
+    services = BackgroundServices()
+    events: list[str] = []
+
+    def failing_start() -> None:
+        events.append("start:failing")
+        raise RuntimeError("start failed")
+
+    services.register(
+        "started",
+        start=lambda: events.append("start:started"),
+        stop=lambda: events.append("stop:started"),
+    )
+    services.register("lazy", stop=lambda: events.append("stop:lazy"))
+    services.register(
+        "failing",
+        start=failing_start,
+        stop=lambda: events.append("stop:failing"),
+    )
+    services.register(
+        "later",
+        start=lambda: events.append("start:later"),
+        stop=lambda: events.append("stop:later"),
+    )
+
+    with pytest.raises(RuntimeError):
+        services.start_all()
+
+    assert events == [
+        "start:started",
+        "start:failing",
+        "stop:later",
+        "stop:failing",
+        "stop:lazy",
+        "stop:started",
+    ]
+
+
 def test_an_empty_or_duplicate_registration_is_rejected():
     services = BackgroundServices()
 

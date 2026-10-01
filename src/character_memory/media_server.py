@@ -17,7 +17,7 @@ except ImportError:  # create_media_app will raise the API-extra error first
 
 from character_memory.web_lifecycle import on_app_event
 from character_memory.asr_capture import AsrCaptureStore
-from character_memory.config import DEFAULT_VOICE_SILENCE_MS, load_settings
+from character_memory.config import DEFAULT_VOICE_SILENCE_MS, load_settings, runtime_setting
 from character_memory.media_runtime import MediaRuntime, build_media_runtime_from_env
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_SET, provider_spec
 
@@ -177,11 +177,11 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         # Voice-call capture parameters. The browser already fetches /health
         # before it opens the microphone, so serving them here costs no extra
         # round trip and keeps one source of truth for the endpointing
-        # threshold. getattr, because several callers stub load_settings with a
-        # bare namespace that predates this field.
+        # threshold. Formal Settings reads are strict; the explicit legacy
+        # default only supports settings-like adapters that predate this field.
         status["voice_capture"] = {
             "silence_ms": int(
-                getattr(current_settings(), "voice_silence_ms", DEFAULT_VOICE_SILENCE_MS)
+                runtime_setting(current_settings(), "voice_silence_ms", DEFAULT_VOICE_SILENCE_MS)
             ),
         }
         return {"ok": True, **status}

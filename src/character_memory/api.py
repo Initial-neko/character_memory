@@ -27,6 +27,7 @@ from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.application.proactive_service import ProactiveService
 from character_memory.background_services import BackgroundServices
 from character_memory.config import (
+    runtime_setting,
     load_persona,
     load_settings,
     resolve_media_dir,
@@ -98,7 +99,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     read_store = bundle.store if bundle is not None else SQLiteStore(settings.db_path)
     media_storage = MediaStorage(
         resolve_media_dir(settings),
-        max_bytes=int(getattr(settings, "media_max_bytes", 8 * 1024 * 1024)),
+        max_bytes=int(runtime_setting(settings, "media_max_bytes", 8 * 1024 * 1024)),
     )
     services = build_runtime_services(settings)
     # Every long-lived worker registers here, so one list owns the start and

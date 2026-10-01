@@ -716,6 +716,26 @@ class GroupRepository:
             rows = self.store.conn.execute(sql, args).fetchall()
         return [dict(row) for row in rows]
 
+    def latest_user_event_id_by_insertion(self, conversation_id: str) -> int | None:
+        """Newest durable User fact by insertion order, regardless of caller event time."""
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT id FROM conversation_events "
+                "WHERE conversation_id=? AND actor_type='USER' ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        return int(row["id"]) if row is not None else None
+
+    def user_turn_index(self, conversation_id: str, source_event_id: int) -> int:
+        """1-based count of User events persisted up to the source event id."""
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) AS n FROM conversation_events "
+                "WHERE conversation_id=? AND actor_type='USER' AND id<=?",
+                (conversation_id, int(source_event_id)),
+            ).fetchone()
+        return int(row["n"] if row else 0)
+
     def latest_user_event(self, conversation_id: str) -> GroupEvent | None:
         with self.store._lock:
             row = self.store.conn.execute(

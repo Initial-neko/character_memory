@@ -5,6 +5,13 @@
   const mediaAudio = CM.mediaAudio;
   if (!mediaAudio) {
     console.error("Shared media audio module is unavailable");
+    const button = document.getElementById("voiceCallButton");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "⚠";
+      button.title = "语音模块加载失败，请刷新页面";
+      button.setAttribute("aria-label", "语音模块加载失败，请刷新页面");
+    }
     return;
   }
   const {mediaBase, concatChunks, downsample, wavBlob} = mediaAudio;

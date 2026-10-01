@@ -404,6 +404,10 @@ class EnsembleBuilderService:
         self.groups = GroupRepository(access.store())
         self._confirm_locks_guard = threading.Lock()
         self._confirm_locks: dict[str, threading.Lock] = {}
+        # Count the owner plus queued waiters for each keyed lock. A lock may
+        # only be removed after the last user exits; deleting it when the owner
+        # finishes would let a new caller race a waiter on a different lock.
+        self._confirm_lock_users: dict[str, int] = {}
         self.voice_design_lab_base = str(
             getattr(
                 access,
@@ -850,14 +854,25 @@ Content:
         # resolves the original build id through its active-group alias.
         with self._confirm_locks_guard:
             lock = self._confirm_locks.setdefault(group_id, threading.Lock())
-        with lock:
-            return self._confirm_once(
-                group_id,
-                selected_indices,
-                confirm_over_soft_limit=confirm_over_soft_limit,
-                use_voice_design=use_voice_design,
-                now=now,
-            )
+            self._confirm_lock_users[group_id] = self._confirm_lock_users.get(group_id, 0) + 1
+        try:
+            with lock:
+                return self._confirm_once(
+                    group_id,
+                    selected_indices,
+                    confirm_over_soft_limit=confirm_over_soft_limit,
+                    use_voice_design=use_voice_design,
+                    now=now,
+                )
+        finally:
+            with self._confirm_locks_guard:
+                remaining = self._confirm_lock_users.get(group_id, 1) - 1
+                if remaining <= 0:
+                    self._confirm_lock_users.pop(group_id, None)
+                    if self._confirm_locks.get(group_id) is lock:
+                        self._confirm_locks.pop(group_id, None)
+                else:
+                    self._confirm_lock_users[group_id] = remaining
 
     def _confirm_once(
         self,

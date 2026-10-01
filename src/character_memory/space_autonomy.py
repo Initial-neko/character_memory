@@ -21,6 +21,7 @@ from character_memory.domain.models import (
 from character_memory.space_media import SpacePostMediaRepository
 from character_memory.space_media_executor import SpaceMediaExecutor
 from character_memory.space_store import SpaceRepository
+from character_memory.time_utils import epoch_us
 
 
 logger = logging.getLogger("character_memory.space_autonomy")

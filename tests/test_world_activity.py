@@ -709,3 +709,36 @@ def test_idle_browse_gate_periodically_rechecks_even_without_new_events(tmp_path
     assert _browse_plan_call_count(model) == 2
     assert scheduler.status()["browse_idle_recheck_minutes"] == 120
     store.close()
+
+
+def test_legacy_world_pulse_comment_repairs_missing_person_event_once(tmp_path):
+    """Older comment-only rows self-heal without another model take or duplicates."""
+
+    store, access, model = make_access(tmp_path, count=1)
+    repo = WorldPulseRepository(store)
+    topic = repo.upsert_topic(
+        WorldPulseTopicDraft(
+            title="迁移前的历史话题",
+            summary="公开评论已有记录，但角色的观察事实丢失。",
+            category="technology",
+            source_indexes=[1],
+        ),
+        ["https://example.com/legacy"],
+        NOW,
+    )
+    original = repo.add_comment(topic["id"], "c00", "原先已经公开说过的话", NOW)
+    service = WorldActivityService(access, repo)
+
+    first = service.discuss_topic(topic["id"], now=NOW, character_ids=["c00"])
+    assert first["outcomes"][0]["comment"]["id"] == original["id"]
+    assert first["outcomes"][0]["reason"] == "restored_missing_pulse_observation"
+    assert not model.calls, "Recovery must not ask the model to rewrite existing comments"
+    events = [e for e in store.list_events("c00") if e.metadata.get("channel") == "WORLD_PULSE"]
+    assert len(events) == 1
+    assert "原先已经公开说过的话" in events[0].content
+
+    second = service.discuss_topic(topic["id"], now=NOW, character_ids=["c00"])
+    assert second["outcomes"] == []
+    assert len([e for e in store.list_events("c00") if e.metadata.get("channel") == "WORLD_PULSE"]) == 1
+    assert len(repo.list_comments(topic["id"])) == 1
+    store.close()

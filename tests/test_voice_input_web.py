@@ -43,6 +43,75 @@ def test_audio_scripts_are_valid_javascript_when_node_is_available():
         assert checked.returncode == 0, f"{path}: {checked.stderr}"
 
 
+def test_shared_audio_cleanup_closes_partial_context_and_ignores_stop_errors(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        return
+    script = r"""
+const fs = require("fs");
+const vm = require("vm");
+const source = fs.readFileSync(process.argv[2], "utf8");
+let closes = 0;
+let stops = 0;
+const sandbox = {
+  console,
+  localStorage: {getItem: () => null},
+  navigator: {mediaDevices: {getUserMedia() { throw new Error("unused"); }}},
+  CM: {},
+  AudioContext: class AudioContext {
+    createMediaStreamSource() { throw new Error("source failed"); }
+    close() { closes += 1; return Promise.resolve(); }
+  },
+  Blob,
+  ArrayBuffer,
+  DataView,
+  Float32Array,
+  Promise,
+};
+sandbox.window = sandbox;
+vm.runInNewContext(source, sandbox, {filename: "media_audio.js"});
+const firstStream = {getTracks: () => [{stop() { stops += 1; }}]};
+try {
+  sandbox.CM.mediaAudio.createCapture(firstStream);
+} catch (error) {
+  if (error.message !== "source failed") throw error;
+}
+const secondStream = {getTracks: () => [{stop() { throw new Error("stop failed"); }}]};
+(async () => {
+  await sandbox.CM.mediaAudio.closeCapture({
+    stream: secondStream,
+    context: {close() { closes += 1; return Promise.resolve(); }},
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  process.stdout.write(JSON.stringify({closes, stops}));
+})().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    path = Path("src/character_memory/web/media_audio.js")
+    completed = subprocess.run(
+        [node, "-e", script, str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == {"closes": 2, "stops": 1}
+
+
+def test_voice_clients_show_a_visible_failure_when_shared_audio_does_not_load():
+    voice = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
+    dictation = Path("src/character_memory/web/dictation.js").read_text(encoding="utf-8")
+    for source, button_id in (
+        (voice, "voiceCallButton"),
+        (dictation, "voiceInputButton"),
+    ):
+        assert button_id in source
+        assert 'button.textContent = "⚠"' in source
+        assert "语音模块加载失败，请刷新页面" in source
+
+
 IDLE_BUTTON = {"disabled": False, "text": "🎤", "recording": False, "transcribing": False}
 
 

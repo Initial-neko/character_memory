@@ -2,6 +2,8 @@
 
 Status: V1 supported deployment path for private Android/iOS access.
 
+> Android 原生客户端的正式业务接口清单见 [MOBILE_API_CONTRACT.md](MOBILE_API_CONTRACT.md)；移动端项目及阶段验收见 [character_memory_android](https://github.com/Initial-neko/character_memory_android)。本文件只规定 Tailscale Serve 的部署/安全边界，不等于设备配对或 App 业务 API 已经实现。
+
 ## 1. Boundary
 
 Mobile access uses **Tailscale + Tailscale Serve** only.

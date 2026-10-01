@@ -195,7 +195,7 @@
       }
       const stream = await mediaAudio.requestMicrophone();
       if (generation !== wantedGeneration || callOwnsMicrophone()) {
-        stream.getTracks().forEach(track => track.stop());
+        mediaAudio.releaseStream(stream);
         setButton("idle");
         return;
       }

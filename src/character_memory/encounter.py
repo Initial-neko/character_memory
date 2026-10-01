@@ -584,8 +584,11 @@ class EncounterScheduler:
                 # A backlog larger than one drain keeps the worker awake rather
                 # than waiting out the full polling interval.
                 self._wake.set()
-            self._wake.wait(self.poll_seconds())
+            # Clear before sleeping so a concurrent enqueue cannot be
+            # silently erased between wait() returning and clear().
             self._wake.clear()
+            if not self.pending_reply_count():
+                self._wake.wait(self.poll_seconds())
         logger.info("encounter.scheduler stop")
 
     def start(self) -> None:

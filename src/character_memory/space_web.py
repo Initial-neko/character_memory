@@ -558,6 +558,12 @@ def attach_space_routes(app):
         now = datetime.now().astimezone()
         try:
             intent = SpaceMediaIntent.model_validate(req.model_dump())
+            # The same rule the autonomous planner is held to: a video post
+            # with no words reaches every other character as something they
+            # cannot answer. Enforced here too so the manual entry point cannot
+            # produce a post the autonomous path is forbidden from making.
+            if intent.type == SpaceMediaIntentType.GENERATE_VIDEO and not req.content.strip():
+                raise ValueError("GENERATE_VIDEO requires content: a video post needs words beside it")
             runtime = None
             if intent.type == SpaceMediaIntentType.GENERATE_IMAGE:
                 bundle = access.require_bundle()

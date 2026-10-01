@@ -145,21 +145,14 @@ class GroupConversationService:
         return str(profile.get("name") or actor_id)
 
     def _latest_user_event_id(self, conversation_id: str) -> int | None:
-        with self.store._lock:
-            row = self.store.conn.execute(
-                "SELECT id FROM conversation_events WHERE conversation_id=? AND actor_type='USER' "
-                "AND event_time_epoch IS NOT NULL ORDER BY event_time_epoch DESC,id DESC LIMIT 1",
-                (conversation_id,),
-            ).fetchone()
-        return int(row["id"]) if row else None
+        event = self.repo.latest_user_event(conversation_id)
+        return int(event.id) if event is not None and event.id is not None else None
+
+    def latest_user_insertion_id(self, conversation_id: str) -> int | None:
+        return self.repo.latest_user_event_id_by_insertion(conversation_id)
 
     def _user_turn_index(self, conversation_id: str, source_event_id: int) -> int:
-        with self.store._lock:
-            row = self.store.conn.execute(
-                "SELECT COUNT(*) AS n FROM conversation_events WHERE conversation_id=? AND actor_type='USER' AND id<=?",
-                (conversation_id, int(source_event_id)),
-            ).fetchone()
-        return int(row["n"] if row else 0)
+        return self.repo.user_turn_index(conversation_id, source_event_id)
 
     def create_group(self, name: str, member_ids: list[str], *, at: datetime | None = None):
         unique = []

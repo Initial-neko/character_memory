@@ -321,13 +321,11 @@ class ReactionScheduler:
         # Supersession follows durable arrival order, not caller-controlled event
         # timestamps. A later persisted message with an older `at` value must
         # still supersede an in-flight generation for an earlier Event.
-        with store._lock:
-            row = store.conn.execute(
-                "SELECT id FROM events WHERE character_id=? AND event_type='USER_MESSAGE' "
-                "AND json_extract(metadata_json,'$.conversation_id')=? ORDER BY id DESC LIMIT 1",
-                (character_id, conversation_id),
-            ).fetchone()
-        return int(row["id"]) if row else None
+        return store.latest_direct_event_id(
+            character_id,
+            conversation_id,
+            event_types=("USER_MESSAGE",),
+        )
 
     @staticmethod
     def _latest_direct_visual_source_id(store, character_id: str, conversation_id: str) -> int | None:
@@ -336,24 +334,15 @@ class ReactionScheduler:
         A later user message always wins. A later visual observation also makes
         the older screen reaction stale. Ordinary character output does neither.
         """
-        with store._lock:
-            row = store.conn.execute(
-                "SELECT id FROM events WHERE character_id=? "
-                "AND event_type IN ('USER_MESSAGE','VISUAL_OBSERVATION') "
-                "AND json_extract(metadata_json,'$.conversation_id')=? ORDER BY id DESC LIMIT 1",
-                (character_id, conversation_id),
-            ).fetchone()
-        return int(row["id"]) if row else None
+        return store.latest_direct_event_id(
+            character_id,
+            conversation_id,
+            event_types=("USER_MESSAGE", "VISUAL_OBSERVATION"),
+        )
 
     @staticmethod
     def _direct_response_events(store, character_id: str, source_event_id: int):
-        with store._lock:
-            rows = store.conn.execute(
-                "SELECT * FROM events WHERE character_id=? AND event_type='CHARACTER_MESSAGE' "
-                "AND CAST(json_extract(metadata_json,'$.source_event_id') AS INTEGER)=? ORDER BY id",
-                (character_id, int(source_event_id)),
-            ).fetchall()
-        return [store._event_from_row(row) for row in rows]
+        return store.list_character_response_events(character_id, source_event_id)
 
     def publish_direct_responses(
         self,
@@ -474,12 +463,7 @@ class ReactionScheduler:
 
     @staticmethod
     def _latest_group_user_id(service: GroupConversationService, conversation_id: str) -> int | None:
-        with service.store._lock:
-            row = service.store.conn.execute(
-                "SELECT id FROM conversation_events WHERE conversation_id=? AND actor_type='USER' ORDER BY id DESC LIMIT 1",
-                (conversation_id,),
-            ).fetchone()
-        return int(row["id"]) if row else None
+        return service.latest_user_insertion_id(conversation_id)
 
     def _run_group(self, channel: str, state: _PendingState, conversation_id: str) -> None:
         while not self._closed.is_set():

@@ -67,7 +67,10 @@ def test_group_watermark_uses_persisted_arrival_order_not_event_time(tmp_path):
     scheduler = ReactionScheduler(lambda: None, lambda: [], hub)
 
     assert second.id > first.id
-    assert scheduler._latest_group_user_id(SimpleNamespace(store=store), group.id) == second.id
+    service = SimpleNamespace(
+        latest_user_insertion_id=repo.latest_user_event_id_by_insertion
+    )
+    assert scheduler._latest_group_user_id(service, group.id) == second.id
 
     scheduler.close()
     hub.close()

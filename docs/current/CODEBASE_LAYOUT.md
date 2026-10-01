@@ -79,6 +79,8 @@ src/character_memory/
 
 ```text
 api.py                  Character Runtime composition root + lifecycle only
+background_services.py  shared worker start/rollback/stop ownership and ordering
+web_lifecycle.py        feature-route adapter to the shared lifecycle owner
 api_contracts.py        legacy/core HTTP request + character-capacity contracts
 api_route_access.py     explicit dependency adapter for core route modules
 api_character_service.py character registry/capacity/filesystem mutation helper
@@ -285,6 +287,7 @@ message_content.js      Direct/Group shared message body renderer
 | --- | --- |
 | LLM 回复/structured output | `domain/models.py` → `llm/client.py` → `runtime/person_runtime.py` |
 | Direct async/SSE | `application/async_conversation.py` → `async_web.py` → `web/app.js` |
+| Shared worker lifecycle | `background_services.py` → `web_lifecycle.py` → `api.py` / `server.py` → `tests/test_background_services.py` |
 | Ensemble / 角色创建 | `ensemble_web.py` → `ensemble_builder.py` → `api_character_service.py` → `character_onboarding.py` → `web/ensemble.js` |
 | Random Encounter | `encounter_web.py` → `encounter.py` / `encounter_store.py` → `web/encounter.js` |
 | LLM Usage | `llm/usage.py` → 调用方的 `llm_usage_scope` → `dev_server.py` → `web/dev.js` |

@@ -236,7 +236,7 @@ def _runtime_field_contract(name: str) -> dict[str, Any]:
 
     schema = _SETTINGS_JSON_PROPERTIES.get(name)
     if not isinstance(schema, dict):
-        return {}
+        raise KeyError(f"Settings Center field {name!r} is not declared in runtime Settings")
 
     candidates = schema.get("anyOf")
     if not isinstance(candidates, list):

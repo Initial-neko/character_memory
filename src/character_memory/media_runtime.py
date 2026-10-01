@@ -3,14 +3,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import asdict, dataclass
-import io
 import os
 from pathlib import Path
 import threading
 import time
-import wave
 
 import numpy as np
+
+from character_memory.audio_wav import float_audio_to_wav, read_pcm16_wav
 
 
 @dataclass(frozen=True)
@@ -81,43 +81,6 @@ class UnavailableTextToSpeechProvider(TextToSpeechProvider):
 
     def status(self) -> dict:
         return {"ready": False, "provider": "unconfigured", "reason": self.reason}
-
-
-def read_pcm16_wav(payload: bytes) -> tuple[np.ndarray, int]:
-    """Decode the narrow Voice V0 WAV contract without ffmpeg/soundfile."""
-    if not payload:
-        raise ValueError("empty audio")
-    try:
-        with wave.open(io.BytesIO(payload), "rb") as wav:
-            channels = wav.getnchannels()
-            sample_width = wav.getsampwidth()
-            sample_rate = wav.getframerate()
-            frames = wav.readframes(wav.getnframes())
-    except (wave.Error, EOFError) as exc:
-        raise ValueError(f"invalid WAV: {exc}") from exc
-    if sample_width != 2:
-        raise ValueError("Voice V0 accepts 16-bit PCM WAV only")
-    if channels not in {1, 2}:
-        raise ValueError("Voice V0 accepts mono or stereo WAV only")
-    if sample_rate < 8000 or sample_rate > 96000:
-        raise ValueError(f"unsupported sample rate: {sample_rate}")
-    raw = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
-    if channels == 2:
-        raw = raw.reshape(-1, 2).mean(axis=1)
-    return np.ascontiguousarray(raw, dtype=np.float32), int(sample_rate)
-
-
-def float_audio_to_wav(samples: np.ndarray, sample_rate: int) -> bytes:
-    values = np.asarray(samples, dtype=np.float32).reshape(-1)
-    pcm = np.clip(values, -1.0, 1.0)
-    pcm = (pcm * 32767.0).astype("<i2")
-    out = io.BytesIO()
-    with wave.open(out, "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(int(sample_rate))
-        wav.writeframes(pcm.tobytes())
-    return out.getvalue()
 
 
 def resample_linear(samples: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:

@@ -26,7 +26,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from character_memory.config import Settings
-from character_memory.gsv_tts_experiment import GsvTtsRuntime, create_gsv_tts_app
+from character_memory.gsv_tts_runtime import GsvTtsRuntime, create_gsv_tts_app
 from character_memory.tts_lab import (
     GsvVoiceReloader,
     Qwen3VoiceDesignSidecar,

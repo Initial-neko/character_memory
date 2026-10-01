@@ -3,17 +3,16 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import importlib.util
-import io
 import os
 import threading
 import time
-import wave
 from typing import Any, Callable
 from urllib.parse import quote
 
 import numpy as np
 from pydantic import BaseModel, Field
 
+from character_memory.audio_wav import float_audio_to_wav
 from character_memory.web_lifecycle import on_app_event
 
 DEFAULT_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
@@ -58,19 +57,6 @@ class Qwen3TtsRequest(BaseModel):
     ref_audio: str | None = Field(default=None, max_length=2048)
     ref_text: str | None = Field(default=None, max_length=4000)
     x_vector_only_mode: bool | None = None
-
-
-def float_audio_to_wav(samples: np.ndarray, sample_rate: int) -> bytes:
-    values = np.asarray(samples, dtype=np.float32).reshape(-1)
-    values = np.nan_to_num(values, nan=0.0, posinf=1.0, neginf=-1.0)
-    pcm = (np.clip(values, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
-    output = io.BytesIO()
-    with wave.open(output, "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(int(sample_rate))
-        wav.writeframes(pcm)
-    return output.getvalue()
 
 
 class Qwen3TtsRuntime:

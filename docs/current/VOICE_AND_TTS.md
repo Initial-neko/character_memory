@@ -984,7 +984,7 @@ decoder noise (`GPT_SoVITS/SoVITS/models.py:404`) both. The sidecar therefore ca
 
 **It must run inside the sidecar's `RLock`.** Seeding outside the lock lets another
 thread consume the RNG state between the seed and the inference, which silently
-restores the non-determinism it was meant to remove. `tests/test_gsv_tts_experiment.py`
+restores the non-determinism it was meant to remove. `tests/test_gsv_tts_runtime.py`
 pins this ordering, not just the seed's existence.
 
 `GSV_TTS_SEED` (default `1234`) sets the runtime default. `"none"`, `"off"`, `"random"`

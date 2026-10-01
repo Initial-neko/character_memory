@@ -12,7 +12,7 @@ import yaml
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from character_memory.gsv_tts_experiment import (
+from character_memory.gsv_tts_runtime import (
     DEFAULT_SEED,
     GsvRuntimeConfigRequest,
     GsvTtsRequest,
@@ -22,6 +22,14 @@ from character_memory.gsv_tts_experiment import (
     create_gsv_tts_app,
 )
 from character_memory.voices import VoiceProfile
+
+
+def test_legacy_gsv_module_reexports_formal_runtime():
+    import character_memory.gsv_tts_experiment as legacy
+    import character_memory.gsv_tts_runtime as formal
+
+    assert legacy.GsvTtsRuntime is formal.GsvTtsRuntime
+    assert legacy.create_gsv_tts_app is formal.create_gsv_tts_app
 
 
 class RecordingTorch:

@@ -170,7 +170,7 @@ CHARACTER_VOICE_FILENAME = "voice.yaml"
 def template_root(configured: str | Path | None = None) -> Path:
     """Resolve the templates directory, preferring the argument over the env.
 
-    Mirrors ``gsv_tts_experiment._persona_root``: a relative glob resolves
+    Mirrors ``gsv_tts_runtime._persona_root``: a relative glob resolves
     against the *cwd*, which the sidecar does not control, so the start script
     and the dev stack pin an absolute path through ``GSV_TTS_VOICES_ROOT``.
     """

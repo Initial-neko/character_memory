@@ -8,7 +8,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from character_memory.gsv_tts_experiment import GsvTtsRuntime, create_gsv_tts_app
+from character_memory.gsv_tts_runtime import GsvTtsRuntime, create_gsv_tts_app
 
 
 def _template(root: Path, name: str) -> None:

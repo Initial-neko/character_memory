@@ -32,7 +32,7 @@ from character_memory.media_runtime import (
     TranscriptionResult,
     SynthesisResult,
 )
-from character_memory.settings_store import SETTINGS_SCHEMA
+from character_memory.settings_store import SETTINGS_SCHEMA, resolved_schema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,7 +103,7 @@ def test_voice_silence_ms_rejects_out_of_range_values(value):
 def test_settings_schema_exposes_voice_silence_ms_as_a_number():
     """Settings Center has to render it, or the setting is unreachable."""
 
-    voice_section = next(section for section in SETTINGS_SCHEMA if section.get("id") == "voice")
+    voice_section = next(section for section in resolved_schema() if section.get("id") == "voice")
     field = next(
         (item for item in voice_section["fields"] if item["name"] == "voice_silence_ms"),
         None,

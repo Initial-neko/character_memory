@@ -209,12 +209,6 @@ class Settings(BaseModel):
     encounter_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
     encounter_max_pending: int = Field(default=3, ge=1, le=10)
 
-    # Legacy V2 fields remain loadable so existing config.yaml files do not need
-    # a destructive migration. The interval scheduler no longer consumes them.
-    space_daily_window_start_hour: int = Field(default=18, ge=0, le=23)
-    space_daily_window_end_hour: int = Field(default=22, ge=1, le=24)
-
-
 def load_settings(path: str = "config.yaml") -> Settings:
     p = Path(path)
     env_path = p.resolve().parent / ".env"

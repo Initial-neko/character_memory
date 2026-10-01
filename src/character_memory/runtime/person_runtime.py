@@ -107,6 +107,31 @@ class PersonRuntime:
         self.sticker_retriever = StickerRetriever(embeddings)
         self.context_builder = PersonContextBuilder(store, recall, persona)
 
+    def _active_memory_duplicate(self, character_id: str, event_time, content: str, embedding):
+        """Return the current exact/near duplicate at the durable write boundary."""
+        exact_finder = getattr(self.store, "find_active_memory_by_content", None)
+        if callable(exact_finder):
+            exact = exact_finder(character_id, content, at=event_time)
+            if exact is not None:
+                return exact.id, 1.0
+
+        candidate_loader = getattr(self.store, "list_memory_candidates", None)
+        if callable(candidate_loader):
+            existing = candidate_loader(character_id, at=event_time)
+        else:
+            existing = self.store.list_memories(character_id)
+        normalized = content.strip().casefold()
+        for memory in existing:
+            if _aware(memory.event_time) > _aware(event_time):
+                continue
+            if normalized == memory.content.strip().casefold():
+                return memory.id, 1.0
+            if memory.embedding:
+                similarity = _cosine(embedding, memory.embedding)
+                if similarity is not None and similarity >= _MEMORY_DUPLICATE_SIMILARITY:
+                    return memory.id, round(similarity, 4)
+        return None, None
+
     def _last_chat_before(self, character_id: str, event_time, *, exclude_event_id: int | None = None):
         candidates = []
         for event_type in (EventType.USER_MESSAGE, EventType.CHARACTER_MESSAGE):
@@ -208,7 +233,7 @@ class PersonRuntime:
                 decisions.append(decision)
                 continue
 
-            accepted.append((candidate, embedding))
+            accepted.append((candidate, embedding, decision))
             comparison.append((None, normalized, embedding))
             decisions.append(decision)
 
@@ -539,7 +564,18 @@ class PersonRuntime:
                 if state_after:
                     self.store.set_mental_state(event.character_id, state_after, event.event_time, event.id)
 
-                for candidate, embedding in candidate_embeddings:
+                for candidate, embedding, decision in candidate_embeddings:
+                    duplicate_id, duplicate_similarity = self._active_memory_duplicate(
+                        event.character_id,
+                        event.event_time,
+                        candidate.content,
+                        embedding,
+                    )
+                    if duplicate_similarity is not None:
+                        decision["decision"] = "SKIP_DUPLICATE_AT_COMMIT"
+                        decision["duplicate_memory_id"] = duplicate_id
+                        decision["similarity"] = duplicate_similarity
+                        continue
                     saved = self.store.add_memory(Memory(character_id=event.character_id, content=candidate.content.strip(), memory_type=candidate.memory_type, event_time=event.event_time, importance=candidate.importance, source_event_id=event.id, embedding=embedding))
                     if saved.id is not None:
                         created_memory_ids.append(saved.id)

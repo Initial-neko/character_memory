@@ -30,13 +30,17 @@ def test_dictation_and_call_do_not_capture_microphone_together():
     assert 'recognize:false' in script
 
 
-def test_dictation_script_is_valid_javascript_when_node_is_available():
+def test_audio_scripts_are_valid_javascript_when_node_is_available():
     node = shutil.which("node")
     if not node:
         return
-    path = Path("src/character_memory/web/dictation.js")
-    checked = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
-    assert checked.returncode == 0, checked.stderr
+    for path in (
+        Path("src/character_memory/web/media_audio.js"),
+        Path("src/character_memory/web/dictation.js"),
+        Path("src/character_memory/web/voice.js"),
+    ):
+        checked = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+        assert checked.returncode == 0, f"{path}: {checked.stderr}"
 
 
 IDLE_BUTTON = {"disabled": False, "text": "🎤", "recording": False, "transcribing": False}

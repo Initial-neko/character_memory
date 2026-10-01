@@ -126,3 +126,31 @@ def test_open_comment_panel_re_reads_scheduler_replies(page, space_server):
     # A cold CI runner may finish the POST after the first scheduled refresh.
     # Only the eventual visibility is a stable product contract.
     expect(post.get_by_text("后台稍后写入的公开回复", exact=True)).to_be_visible(timeout=6000)
+
+
+def test_delayed_reconcile_preserves_comment_draft_and_focus(page, space_server):
+    """Background replies must not erase text typed after a comment is sent."""
+
+    page.set_default_timeout(15000)
+    response = page.request.post(
+        f"{space_server}/v1/space/posts",
+        data={"character_id": "rin", "content": "第二条草稿保护测试"},
+    )
+    assert response.ok
+    post_id = str(response.json()["post"]["id"])
+    page.goto(space_server, wait_until="domcontentloaded")
+    page.locator(".space-nav-button").click()
+    post = page.locator(f'[data-space-post="{post_id}"]')
+    expect(post).to_be_visible()
+    post.locator("[data-space-comments-panel-toggle]").click()
+    post.locator(".space-comment-input").fill("第一条评论")
+    post.locator(".space-comment-submit").click()
+    expect(post.get_by_text("第一条评论", exact=True)).to_be_visible()
+
+    input_box = post.locator(".space-comment-input")
+    input_box.fill("准备发送的第二条评论，不应被刷新清空")
+    input_box.focus()
+    # Exercise the actual first 2.5s delayed background reconciliation.
+    page.wait_for_timeout(3100)
+    assert input_box.input_value() == "准备发送的第二条评论，不应被刷新清空"
+    assert input_box.evaluate("(node) => document.activeElement === node")

@@ -190,6 +190,25 @@
           </div>
 
           <div class="field-group">
+            <span class="field-group-label">视频自检（不经过 Space 角色链路）</span>
+            <div class="visual-provider-row">
+              <label>Check Prompt<input id="videoSmokePrompt" type="text" value="雨夜里向前走，镜头缓慢跟随。" / title="视频自检直接送给服务商的镜头描述；不经过 Space 规划器，也不创建动态。"></label>
+              <label>Seconds<input id="videoSmokeDuration" type="number" min="5" max="15" step="1" value="5" / title="本次自检请求的时长秒数；服务端会再压到 Settings 上限。"></label>
+              <label>Resolution
+                <select id="videoSmokeResolution" title="本次自检使用的分辨率；留空则用 Settings 的当前值。">
+                  <option value="">跟随 Settings</option>
+                  <option value="768P">768P</option>
+                  <option value="2K">2K</option>
+                </select>
+              </label>
+              <label>Dry Run<input id="videoSmokeDryRun" type="checkbox" checked title="勾选时只回报本 Runtime 实际解析到的配置（key 是否读到、开关、预算余额），不调用服务商、不花钱。"></label>
+              <button class="secondary" id="runVideoSmoke" type="button" title="直接调用视频服务商，绕过 Space 规划器与角色决策；用于区分「视频链路本身不通」和「Space 层没走到」。">视频自检</button>
+              <label>Result URL<input id="videoSmokeResult" type="text" readonly placeholder="真跑成功后这里给出可播放的 /v1/media/... 地址" / title="视频自检真实生成成功后返回的媒体地址；复制到浏览器即可播放。"></label>
+            </div>
+            <p class="subtle">这个自检<b>不经过 Space 角色链路</b>：不选发帖意图、不发布动态、不移动 Scheduler。取消 Dry Run 会真实调用付费接口并把结果存成一个媒体资源（返回可播放的 media_url），仍受每日预算硬上限约束。先跑 Dry Run 看本 Runtime 到底读到了什么，再决定要不要真跑。</p>
+          </div>
+
+          <div class="field-group">
             <span class="field-group-label">世界观察测试</span>
             <div class="visual-provider-row">
               <label>World Query<input id="worldQuery" type="text" value="AI agent memory systems latest research" / title="World Observation 测试使用的搜索主题；只用于本次公网观察。"></label>

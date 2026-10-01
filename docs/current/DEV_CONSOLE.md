@@ -127,6 +127,7 @@ LLM Smoke 属于 **Detailed Dev**：通过服务端配置的 OpenAI-compatible P
 - 指定 Post ID 后 `再次模拟 Audience`；
 - 强制执行一条 `SEARCH_IMAGE` / `GENERATE_IMAGE` / `GENERATE_VIDEO` / `VOICE` 测试动态，不移动正式 Scheduler；
 - 测试 1..9 张媒体上限、Search Query、SELFIE/SCENE Visual Intent、Video Prompt 与 Video Seconds；
+- **视频自检**：绕开 Space 规划器与角色决策，直接调用视频服务商。它回答的是"这条链路本身通不通"，而媒体测试回答的是"Space 会不会选它"。默认 **Dry Run**，只回报本 Runtime 实际解析到的配置——key 是否读到、开关是否打开、当日已用条数/金额与上限、本次预估花费——不调用服务商也不花钱；取消 Dry Run 才真跑，成功会存成媒体资源并给出可播放的 `media_url`。视频链路出问题时先跑 Dry Run，能立刻区分"Runtime 根本没读到配置"和"服务商调用失败"；
 - 测试 World Observation：Search Provider 发现 URL 后，用 Playwright 无头 Chromium 真正打开并执行 JS，返回抽取后的 WorldObservation；
 - 无头浏览器打开 URL：只验证一个公开 URL 的渲染/正文抽取，不触发角色记忆或 Space 发帖；
 - 查看每个人的 last/next opportunity、last status，以及最近 opportunity run history。

@@ -581,6 +581,16 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "help": "整个 Character Space 每个本地自然日的视频估算花费上限。0 = 禁止产生付费视频任务。",
             },
             {
+                "name": "space_video_daily_max_generations",
+                "label": "Video Daily Count Limit",
+                "type": "number",
+                "min": 0,
+                "max": 100,
+                "step": 1,
+                "level": "advanced",
+                "help": "每个本地自然日最多提交多少条视频任务。条数上限比金额上限更直观，且不会因为服务商改价而悄悄放松；0 = 禁止产生付费视频任务。",
+            },
+            {
                 "name": "space_world_observation_enabled",
                 "label": "World Observation",
                 "type": "checkbox",

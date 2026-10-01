@@ -694,6 +694,33 @@ def test_space_dev_media_can_request_a_video_and_reports_the_missing_provider(tm
         assert "video generation provider is unavailable" in reached.text
 
 
+def test_space_dev_video_smoke_answers_without_reaching_the_provider(tmp_path: Path):
+    """The provider-level check has to be free to run, or nobody runs it."""
+
+    config = _config(tmp_path, count=1, video_enabled=True)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/space/dev/video-smoke/c00",
+            json={"prompt": "雨夜里向前走", "duration_seconds": 5, "dry_run": True},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dry_run"] is True
+    assert body["kind"] == "video-smoke"
+    assert body["space_video_generation_enabled"] is True
+    # This config carries no provider key, which is exactly what the dry run is
+    # for: report it instead of discovering it through a failed generation.
+    assert body["api_key_present"] is False
+    assert body["provider_available"] is False
+    assert body["daily_max_generations"] == 3
+    assert body["generations_today"] == 0
+    assert "media_id" not in body
+
+
 def test_space_dev_status_summarizes_the_ledger_and_one_run_still_returns_the_raw_output(tmp_path: Path):
     """The polling status stays light; one decision is still readable in full.
 

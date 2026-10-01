@@ -109,6 +109,13 @@ class DevSpaceMediaRequest(BaseModel):
     voice_text: str = Field(default="", max_length=4000)
 
 
+class DevVideoSmokeRequest(BaseModel):
+    prompt: str = Field(default="雨夜里向前走，镜头缓慢跟随。", max_length=1200)
+    duration_seconds: int = Field(default=5, ge=5, le=15)
+    resolution: str = Field(default="", max_length=8)
+    dry_run: bool = True
+
+
 class DevWorldFetchRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
     max_chars: int = Field(default=6000, ge=500, le=16000)
@@ -529,6 +536,20 @@ def create_dev_app(
             operation="space-media",
             json=req.model_dump(),
             timeout=max(120.0, budget + 60.0),
+        )
+
+    @app.post("/v1/dev/space/video-smoke/{character_id}")
+    def dev_video_smoke(character_id: str, req: DevVideoSmokeRequest):
+        safe_id = quote(character_id, safe="")
+        timeout = 30.0 if req.dry_run else max(
+            120.0, float(getattr(cfg, "video_generation_timeout_seconds", 900.0)) + 60.0
+        )
+        return request_character(
+            "POST",
+            f"/v1/space/dev/video-smoke/{safe_id}",
+            operation="video-smoke",
+            json=req.model_dump(),
+            timeout=timeout,
         )
 
     @app.post("/v1/dev/space/audience/{post_id}")

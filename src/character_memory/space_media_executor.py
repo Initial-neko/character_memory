@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import time
 from typing import Any
 
 import httpx
@@ -418,6 +419,153 @@ class SpaceMediaExecutor:
             )
         return relations
 
+    def video_smoke(
+        self,
+        *,
+        character_id: str,
+        prompt: str,
+        duration_seconds: int = 5,
+        resolution: str = "",
+        dry_run: bool = True,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Exercise the video provider on its own, without the Space layer.
+
+        A failure inside a Space post says nothing about *why*: the capability
+        switch, the planner never choosing video, the per-post media ceiling and
+        the daily budget all sit in front of the provider. This runs the
+        provider directly and first reports what this runtime actually resolved
+        -- key present, switch on, budget left -- so "the pipeline is broken"
+        and "the Space layer never got that far" can be told apart.
+
+        ``dry_run`` is the default on purpose: it costs nothing and answers the
+        question that is usually the real one.
+        """
+
+        now = now or datetime.now().astimezone()
+        provider = self._video()
+        effective_resolution = (
+            str(resolution or "").strip().upper()
+            or str(getattr(self.settings, "space_video_resolution", "2K") or "2K")
+        )
+        max_duration = max(
+            5,
+            min(15, int(getattr(self.settings, "space_video_max_duration_seconds", 5))),
+        )
+        duration = max(5, min(max_duration, int(duration_seconds or 5)))
+        rate = (
+            float(getattr(self.settings, "space_video_cost_cny_per_second_768p", 0.09))
+            if effective_resolution == "768P"
+            else float(getattr(self.settings, "space_video_cost_cny_per_second_2k", 0.15))
+        )
+
+        report: dict[str, Any] = {
+            "kind": "video-smoke",
+            "dry_run": bool(dry_run),
+            "character_id": character_id,
+            "space_media_enabled": self.enabled(),
+            "space_video_generation_enabled": bool(
+                getattr(self.settings, "space_video_generation_enabled", False)
+            ),
+            "api_key_present": bool(
+                str(getattr(self.settings, "metaso_minimax_api_key", "") or "").strip()
+            ),
+            "provider": str(getattr(provider, "provider_id", "video-provider")),
+            "provider_available": bool(provider is not None and provider.available()),
+            "model": str(getattr(provider, "model", "unknown")),
+            "base_url": str(getattr(provider, "base_url", "")),
+            "resolution": effective_resolution,
+            "duration_seconds": duration,
+            "max_duration_seconds": max_duration,
+            "daily_budget_cny": float(
+                getattr(self.settings, "space_video_daily_budget_cny", 0.0)
+            ),
+            "daily_max_generations": int(
+                getattr(self.settings, "space_video_daily_max_generations", 0)
+            ),
+            "estimated_cost_cny": round(max(0.0, rate) * duration, 4),
+            "spent_today_cny": round(float(self._budget().spent_today(now=now)), 4),
+            "generations_today": int(self._budget().generations_today(now=now)),
+        }
+        if dry_run:
+            return report
+
+        prompt_text = str(prompt or "").strip()
+        if not prompt_text:
+            report.update({"ok": False, "error": "GENERATE_VIDEO requires video_prompt"})
+            return report
+        if not report["provider_available"]:
+            report.update(
+                {"ok": False, "error": "video generation provider is unavailable"}
+            )
+            return report
+
+        started = time.perf_counter()
+        try:
+            usage_id = self._budget().reserve(
+                character_id=character_id,
+                provider=report["provider"],
+                model=report["model"],
+                resolution=effective_resolution,
+                duration_seconds=duration,
+                estimated_cost_cny=report["estimated_cost_cny"],
+                daily_budget_cny=report["daily_budget_cny"],
+                now=now,
+                daily_max_generations=report["daily_max_generations"],
+            )
+        except RuntimeError as exc:
+            # A refused reservation is a diagnosis, not a server fault.
+            report.update({"ok": False, "error": str(exc)})
+            return report
+        report["usage_id"] = usage_id
+        try:
+            result = provider.generate(
+                VideoGenerationRequest(
+                    prompt=prompt_text,
+                    resolution=effective_resolution,
+                    duration_seconds=duration,
+                    ratio="16:9",
+                )
+            )
+        except Exception as exc:
+            self._budget().finish(usage_id, status="FAILED")
+            report.update(
+                {
+                    "ok": False,
+                    "error": str(exc)[:600],
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+                }
+            )
+            return report
+
+        self._budget().finish(
+            usage_id, status="SUCCEEDED", task_id=str(getattr(result, "task_id", "") or "")
+        )
+        asset = self._save_asset(
+            character_id,
+            result.payload,
+            mime_type=result.mime_type,
+            now=now,
+            source="DEV_VIDEO_SMOKE",
+            label="dev-video-smoke",
+            max_bytes=int(
+                getattr(self.settings, "space_video_max_bytes", 64 * 1024 * 1024)
+            ),
+        )
+        report.update(
+            {
+                "ok": True,
+                "task_id": str(getattr(result, "task_id", "") or ""),
+                "mime_type": asset.mime_type,
+                "bytes": len(result.payload),
+                "media_id": asset.id,
+                "media_url": f"/v1/media/{asset.id}",
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+                "spent_today_cny": round(float(self._budget().spent_today(now=now)), 4),
+            }
+        )
+        return report
+
     def _generate_video(
         self,
         character_id: str,
@@ -464,6 +612,9 @@ class SpaceMediaExecutor:
             estimated_cost_cny=estimated_cost,
             daily_budget_cny=daily_budget,
             now=now,
+            daily_max_generations=int(
+                getattr(self.settings, "space_video_daily_max_generations", 0)
+            ),
         )
 
         try:

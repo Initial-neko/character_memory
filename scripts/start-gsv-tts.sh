@@ -79,4 +79,4 @@ if (( ${#missing[@]} > 0 )); then
   printf '  - %s\n' "${missing[@]}" >&2
 fi
 
-exec "$PY" -m character_memory.gsv_tts_experiment "$@"
+exec "$PY" -m character_memory.gsv_tts_runtime "$@"

@@ -448,8 +448,6 @@
           query: $("spaceMediaQuery").value,
           purpose: $("spaceMediaPurpose").value,
           visual_intent: $("spaceMediaVisualIntent").value,
-          video_prompt: $("spaceMediaVideoPrompt").value,
-          duration_seconds: Number($("spaceMediaDuration").value || 5),
           voice_text: $("spaceMediaVoiceText").value,
           content: $("spaceMediaPostText").value,
         }),
@@ -463,14 +461,33 @@
     }
   }
 
+  // A check's answer is a sentence, not a payload: the raw JSON stays one
+  // click away in the card's debug block, and these lines are what a person
+  // reads to decide whether the video path works. `yes/no` rather than
+  // `true/false` because the three booleans are the whole point of the dry run.
+  function videoSmokeSummary(data) {
+    const yesNo = value => (value ? "是" : "否");
+    if (data.ok === false) return `失败：${data.error || "服务商拒绝了这次自检"}`;
+    const ceiling = `${data.generations_today}/${data.daily_max_generations} 条，` +
+      `¥${Number(data.spent_today_cny || 0).toFixed(2)}/¥${Number(data.daily_budget_cny || 0).toFixed(2)}`;
+    if (data.dry_run) {
+      return `Dry Run · 读到 API Key：${yesNo(data.api_key_present)} · ` +
+        `开关：${data.space_video_generation_enabled ? "on" : "off"} · ` +
+        `provider 可用：${yesNo(data.provider_available)} · ` +
+        `${data.resolution}/${data.duration_seconds}s（单次约 ¥${Number(data.estimated_cost_cny || 0).toFixed(2)}）· 今日 ${ceiling}`;
+    }
+    return `已生成 · ${data.provider}/${data.model} · ${data.bytes} bytes · ` +
+      `用时 ${data.elapsed_ms} ms · 今日 ${ceiling} · ${data.media_url}`;
+  }
+
   async function runVideoSmoke() {
     const button = $("runVideoSmoke");
     const characterId = $("spaceCharacter").value;
     const dryRun = $("videoSmokeDryRun").checked;
     button.disabled = true;
-    $("spaceResult").textContent = dryRun
-      ? "正在读取本 Runtime 的视频配置（Dry Run，不调用服务商）..."
-      : "正在真实调用视频服务商，最长可能等 900 秒...";
+    $("videoSmokeSummary").textContent = dryRun
+      ? "正在读取本 Runtime 的视频配置（Dry Run，不调用服务商）…"
+      : "正在真实调用视频服务商，最长可能等 900 秒…";
     try {
       const data = await jsonFetch(
         `/v1/dev/space/video-smoke/${encodeURIComponent(characterId)}`,
@@ -479,16 +496,49 @@
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
             prompt: $("videoSmokePrompt").value,
-            duration_seconds: Number($("videoSmokeDuration").value || 5),
             resolution: $("videoSmokeResolution").value,
             dry_run: dryRun,
           }),
         },
       );
-      $("spaceResult").textContent = pretty(data);
-      if (data.media_url) $("videoSmokeResult").value = data.media_url;
+      $("videoSmokeSummary").textContent = videoSmokeSummary(data);
+      $("videoSmokeReport").textContent = pretty(data);
     } catch (error) {
-      $("spaceResult").textContent = `ERROR: ${error.message}`;
+      $("videoSmokeSummary").textContent = `失败：${error.message}`;
+      $("videoSmokeReport").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runVideoPost() {
+    const button = $("runVideoPost");
+    const characterId = $("spaceCharacter").value;
+    button.disabled = true;
+    $("videoPostSummary").textContent = "正在走 Space 媒体执行器生成视频并发布动态，最长可能等 900 秒…";
+    try {
+      const data = await jsonFetch(`/v1/dev/space/media/${encodeURIComponent(characterId)}`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          type: "GENERATE_VIDEO",
+          // Duration and resolution come from Settings: this check exists to
+          // exercise the real Space path, not a hand-tuned parameter set.
+          video_prompt: $("videoPostPrompt").value,
+          content: $("videoPostText").value,
+        }),
+      });
+      const media = data.post?.media;
+      $("videoPostSummary").textContent = media?.available
+        ? `已发布动态 #${data.post.id} · ${media.media_type} · ${media.url}`
+        : `动态 #${data.post?.id ?? "?"} 已创建，但没有可用媒体：${pretty(data.errors)}`;
+      $("videoPostReport").textContent = pretty(data);
+      // The published post is the evidence; hand its id to the audience pane so
+      // the same post can be inspected without hunting for it.
+      if (data.post?.id) $("spacePostId").value = String(data.post.id);
+    } catch (error) {
+      $("videoPostSummary").textContent = `失败：${error.message}`;
+      $("videoPostReport").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;
     }
@@ -977,6 +1027,7 @@
   $("runSpaceAudience").addEventListener("click", runSpaceAudience);
   $("runSpaceMedia").addEventListener("click", runSpaceMedia);
   $("runVideoSmoke").addEventListener("click", runVideoSmoke);
+  $("runVideoPost").addEventListener("click", runVideoPost);
   $("runWorldSearch").addEventListener("click", runWorldSearch);
   $("runWorldFetch").addEventListener("click", runWorldFetch);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);

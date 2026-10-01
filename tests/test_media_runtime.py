@@ -849,6 +849,7 @@ const fs = require("fs");
 const vm = require("vm");
 
 const source = fs.readFileSync(process.argv[2], "utf8");
+const mediaAudioSource = fs.readFileSync(process.argv[3], "utf8");
 const CHARACTER_ID = "haru";
 
 const ttsCalls = [];
@@ -977,7 +978,9 @@ const sandbox = {
   queueMicrotask,
 };
 
-vm.runInContext(source, vm.createContext(sandbox), {filename: "voice.js"});
+const context = vm.createContext(sandbox);
+vm.runInContext(mediaAudioSource, context, {filename: "media_audio.js"});
+vm.runInContext(source, context, {filename: "voice.js"});
 
 async function main() {
   const feature = CM.features.voice;
@@ -1021,8 +1024,9 @@ def test_browser_voice_call_sends_character_voice_provider_neutral_and_leaves_sp
     harness = tmp_path / "voice_call_harness.cjs"
     harness.write_text(VOICE_CALL_HARNESS, encoding="utf-8")
     script = Path("src/character_memory/web/voice.js").resolve()
+    media_audio = Path("src/character_memory/web/media_audio.js").resolve()
     completed = subprocess.run(
-        [node, str(harness), str(script)],
+        [node, str(harness), str(script), str(media_audio)],
         capture_output=True,
         text=True,
         encoding="utf-8",

@@ -358,3 +358,27 @@ def test_the_chat_panel_opens_with_a_transition_and_re_reads_for_the_reply():
     # Bounded re-reads, and only while the panel is still open.
     assert "for (const delay of [2500, 6500])" in script
     assert "data-encounter-panel]:not(.hidden)" in script
+
+
+def test_encounter_lifecycle_locks_do_not_collide_across_candidates(tmp_path):
+    """A slow accept on candidate 1 must not block candidate 65."""
+
+    store = SQLiteStore(str(tmp_path / "lock.db"))
+    repo = EncounterRepository(store)
+    first = repo.lifecycle_lock(1)
+    assert first is repo.lifecycle_lock(1)
+    unrelated = repo.lifecycle_lock(65)
+    assert unrelated is not first
+
+    acquired = threading.Event()
+
+    def claim_unrelated():
+        with repo.lifecycle_lock(65):
+            acquired.set()
+
+    with first:
+        worker = threading.Thread(target=claim_unrelated)
+        worker.start()
+        assert acquired.wait(timeout=1), "unrelated candidate shares a lifecycle lock"
+    worker.join(timeout=2)
+    store.close()

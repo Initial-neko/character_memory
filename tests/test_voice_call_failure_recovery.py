@@ -10,10 +10,13 @@ VOICE_TTS_FAILURE_HARNESS = r"""
 const fs = require("fs");
 const vm = require("vm");
 const source = fs.readFileSync(process.argv[2], "utf8");
+const sharedAudioSource = fs.readFileSync(process.argv[3], "utf8");
+const scenario = process.argv[4] || "single";
 
 const sources = [];
 const chatCalls = [];
 const revoked = [];
+const delayedTimers = [];
 const silent = () => {};
 
 function element() {
@@ -100,7 +103,7 @@ const sandbox = {
   performance:{now:() => Date.now()},
   alert:silent,
   console:{debug:silent, warn:silent, log:silent, error:silent, info:silent},
-  setTimeout:fn => { Promise.resolve().then(fn); return 1; },
+  setTimeout:(fn, delay) => { if (delay === 1200) delayedTimers.push(fn); else Promise.resolve().then(fn); return 1; },
   clearTimeout:silent,
   setInterval:() => 1,
   clearInterval:silent,
@@ -122,7 +125,9 @@ sandbox.window.clearTimeout = sandbox.clearTimeout;
 sandbox.window.setInterval = sandbox.setInterval;
 sandbox.window.clearInterval = sandbox.clearInterval;
 
-vm.runInContext(source, vm.createContext(sandbox), {filename:"voice.js"});
+const context = vm.createContext(sandbox);
+vm.runInContext(sharedAudioSource, context, {filename:"media_audio.js"});
+vm.runInContext(source, context, {filename:"voice.js"});
 
 async function main() {
   const feature = CM.features.voice;
@@ -134,6 +139,17 @@ async function main() {
   sources[0].emit("character_event", {
     id:2, character_id:"haru", content:"同一轮排队的第二段回答", metadata:{action:"MESSAGE"},
   });
+  for (let attempt = 0; attempt < 100 && delayedTimers.length === 0; attempt += 1) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  if (!delayedTimers.length) throw new Error("expected TTS failure recovery timer");
+  if (scenario === "overlap") {
+    // A second recognized utterance during error recovery must join the first
+    // pending turn, not overtake it with a separate simultaneous request.
+    feature.state.pendingTurns.push({text:"第二句话", visualFrames:[], asrMs:8});
+    if (!feature.state.recoveryPending) throw new Error("recovery gate already released");
+  }
+  delayedTimers.shift()();
   for (let attempt = 0; attempt < 100 && chatCalls.length === 0; attempt += 1) {
     await new Promise(resolve => setImmediate(resolve));
   }
@@ -143,6 +159,7 @@ async function main() {
     queueLength:feature.state.queue.length,
     phase:feature.state.phase,
     revoked,
+    recoveryPending:feature.state.recoveryPending,
   }));
 }
 main().catch(error => { process.stderr.write(String(error.stack || error)); process.exit(1); });
@@ -158,7 +175,7 @@ def test_tts_failure_releases_the_reply_queue_and_flushes_heard_user_turn(tmp_pa
     harness.write_text(VOICE_TTS_FAILURE_HARNESS, encoding="utf-8")
     script = Path("src/character_memory/web/voice.js").resolve()
     completed = subprocess.run(
-        [node, str(harness), str(script)],
+        [node, str(harness), str(script), str(script.with_name("media_audio.js")), "single"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -176,3 +193,31 @@ def test_tts_failure_releases_the_reply_queue_and_flushes_heard_user_turn(tmp_pa
             "conversation_id": "direct:haru",
         }
     ]
+
+
+def test_tts_failure_recovery_merges_speech_heard_during_timeout(tmp_path):
+    """Recovery keeps the dispatch gate closed until pending turns are flushed."""
+
+    node = shutil.which("node")
+    assert node, "Node is required for the production voice/media-audio contract"
+    harness = tmp_path / "voice_tts_overlap.cjs"
+    harness.write_text(VOICE_TTS_FAILURE_HARNESS, encoding="utf-8")
+    script = Path("src/character_memory/web/voice.js").resolve()
+    completed = subprocess.run(
+        [node, str(harness), str(script), str(script.with_name("media_audio.js")), "overlap"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["chatCalls"] == [
+        {
+            "message": "别漏掉我刚才说的\\n第二句话",
+            "character_id": "haru",
+            "conversation_id": "direct:haru",
+        }
+    ]
+    assert payload["pendingTurns"] == 0
+    assert payload["recoveryPending"] is False

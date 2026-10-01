@@ -5,6 +5,7 @@ import logging
 import threading
 from typing import Callable
 
+from character_memory.config import runtime_setting
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType
 from character_memory.visual_generation import (
     ImageGenerationRequest,
@@ -32,7 +33,7 @@ class DirectVisualRuntime:
         self.settings = access.settings
 
     def _provider(self):
-        name = str(self.settings.image_generation_provider or "agnes").strip().lower()
+        name = str(runtime_setting(self.settings, "image_generation_provider", "agnes") or "agnes").strip().lower()
         services = getattr(self.access, "services", None)
         providers = getattr(services, "image_generation_providers", {}) if services is not None else {}
         # Legacy test adapters may still inject the provider map directly.

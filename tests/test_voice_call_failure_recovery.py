@@ -214,7 +214,7 @@ def test_tts_failure_recovery_merges_speech_heard_during_timeout(tmp_path):
     payload = json.loads(completed.stdout)
     assert payload["chatCalls"] == [
         {
-            "message": "别漏掉我刚才说的\\n第二句话",
+            "message": "别漏掉我刚才说的\n第二句话",
             "character_id": "haru",
             "conversation_id": "direct:haru",
         }

@@ -164,7 +164,7 @@ GENERATE_VIDEO
   -> space_post_media(type=VIDEO, source=GENERATED, task + cost metadata)
 ```
 
-Video generation is deliberately opt-in and paid. Before a provider task is created, the executor reserves an estimated CNY cost in the durable `video_generation_usage` ledger and rejects work that would exceed `space_video_daily_budget_cny`. Reservations remain counted when a provider task fails because an accepted remote task may still be billable. The per-second 768P/2K rates are configuration inputs rather than provider constants, so pricing can be updated without code changes. The first implementation keeps one generated video per post and caps requested duration server-side.
+Video generation is deliberately opt-in and paid. Two independent ceilings guard it, and both are checked before the provider task is created: `space_video_daily_max_generations` bounds how many jobs the account submits per local day, and `space_video_daily_budget_cny` bounds the estimated spend. They are not redundant — a CNY ceiling silently loosens whenever the provider reprices, while a count ceiling stays legible, so a count limit is the one to reach for when the goal is "at most N a day". Either being `0` blocks video jobs entirely. Both reservations are recorded in the durable `video_generation_usage` ledger, and a reservation stays counted when a provider task fails because an accepted remote task may still be billable. The per-second 768P/2K rates are configuration inputs rather than provider constants, so pricing can be updated without code changes. The first implementation keeps one generated video per post and caps requested duration server-side.
 
 Image-search providers are composition-neutral. Avatar-specific aspect-ratio filtering stays inside `AvatarSearchService`, so Space may search landscapes, screenshots or other wide/tall imagery without changing avatar behavior.
 
@@ -272,6 +272,7 @@ space_video_generation_enabled
 space_video_resolution
 space_video_max_duration_seconds
 space_video_daily_budget_cny
+space_video_daily_max_generations
 space_world_observation_enabled
 space_world_max_pages
 space_world_max_chars_per_page

@@ -269,20 +269,13 @@ class VideoGenerationBudget:
             )
             self.store._maybe_commit()
 
-    def reserve(
-        self,
-        *,
-        character_id: str,
-        provider: str,
-        model: str,
-        resolution: str,
-        duration_seconds: int,
-        estimated_cost_cny: float,
-        daily_budget_cny: float,
-        now: datetime,
-    ) -> int:
-        if daily_budget_cny <= 0:
-            raise RuntimeError("Space video daily budget is zero")
+    def spent_today(self, *, now: datetime) -> float:
+        """Sum of every reserved attempt for the local day, any status.
+
+        Read-only, and the cheapest way to tell "the budget guard refused" apart
+        from "nothing was ever attempted".
+        """
+
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=1)
         with self.store._lock:
@@ -294,7 +287,64 @@ class VideoGenerationBudget:
                 """,
                 (epoch_us(start), epoch_us(end)),
             ).fetchone()
-            spent = float(row[0] or 0.0)
+        return float(row[0] or 0.0)
+
+    def generations_today(self, *, now: datetime) -> int:
+        """How many attempts this local day already reserved, any status."""
+
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+        with self.store._lock:
+            row = self.store.conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM video_generation_usage
+                WHERE created_at_epoch>=? AND created_at_epoch<?
+                """,
+                (epoch_us(start), epoch_us(end)),
+            ).fetchone()
+        return int(row[0] or 0)
+
+    def reserve(
+        self,
+        *,
+        character_id: str,
+        provider: str,
+        model: str,
+        resolution: str,
+        duration_seconds: int,
+        estimated_cost_cny: float,
+        daily_budget_cny: float,
+        now: datetime,
+        daily_max_generations: int | None = None,
+    ) -> int:
+        if daily_budget_cny <= 0:
+            raise RuntimeError("Space video daily budget is zero")
+        if daily_max_generations is not None and int(daily_max_generations) <= 0:
+            raise RuntimeError("Space video daily generation limit is zero")
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+        with self.store._lock:
+            row = self.store.conn.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(estimated_cost_cny),0)
+                FROM video_generation_usage
+                WHERE created_at_epoch>=? AND created_at_epoch<?
+                """,
+                (epoch_us(start), epoch_us(end)),
+            ).fetchone()
+            used = int(row[0] or 0)
+            spent = float(row[1] or 0.0)
+            # The count ceiling is checked before the money ceiling: it is the
+            # one the operator actually reasons in.
+            if (
+                daily_max_generations is not None
+                and used + 1 > int(daily_max_generations)
+            ):
+                raise RuntimeError(
+                    f"Space video daily generation limit reached: "
+                    f"used {used}, next 1, limit {int(daily_max_generations)}"
+                )
             if spent + estimated_cost_cny > daily_budget_cny + 1e-9:
                 raise RuntimeError(
                     f"Space video daily budget exceeded: spent ¥{spent:.2f}, "

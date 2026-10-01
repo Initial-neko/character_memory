@@ -463,6 +463,37 @@
     }
   }
 
+  async function runVideoSmoke() {
+    const button = $("runVideoSmoke");
+    const characterId = $("spaceCharacter").value;
+    const dryRun = $("videoSmokeDryRun").checked;
+    button.disabled = true;
+    $("spaceResult").textContent = dryRun
+      ? "正在读取本 Runtime 的视频配置（Dry Run，不调用服务商）..."
+      : "正在真实调用视频服务商，最长可能等 900 秒...";
+    try {
+      const data = await jsonFetch(
+        `/v1/dev/space/video-smoke/${encodeURIComponent(characterId)}`,
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            prompt: $("videoSmokePrompt").value,
+            duration_seconds: Number($("videoSmokeDuration").value || 5),
+            resolution: $("videoSmokeResolution").value,
+            dry_run: dryRun,
+          }),
+        },
+      );
+      $("spaceResult").textContent = pretty(data);
+      if (data.media_url) $("videoSmokeResult").value = data.media_url;
+    } catch (error) {
+      $("spaceResult").textContent = `ERROR: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function runWorldSearch() {
     const button = $("runWorldSearch");
     button.disabled = true;
@@ -945,6 +976,7 @@
   });
   $("runSpaceAudience").addEventListener("click", runSpaceAudience);
   $("runSpaceMedia").addEventListener("click", runSpaceMedia);
+  $("runVideoSmoke").addEventListener("click", runVideoSmoke);
   $("runWorldSearch").addEventListener("click", runWorldSearch);
   $("runWorldFetch").addEventListener("click", runWorldFetch);
   $("refreshSpaceStatus").addEventListener("click", refreshSpaceStatus);

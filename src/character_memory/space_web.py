@@ -97,6 +97,15 @@ class SpaceDevMediaRequest(BaseModel):
     voice_text: str | None = Field(default=None, max_length=4000)
 
 
+class SpaceDevVideoSmokeRequest(BaseModel):
+    """Provider-level video check: no Space plan, no character decision."""
+
+    prompt: str = Field(default="雨夜里向前走，镜头缓慢跟随。", max_length=1200)
+    duration_seconds: int = Field(default=5, ge=5, le=15)
+    resolution: str = Field(default="", max_length=8)
+    dry_run: bool = True
+
+
 def attach_space_routes(app):
     """Attach Character Space without initializing the LLM runtime."""
 
@@ -579,6 +588,32 @@ def attach_space_routes(app):
                 "errors": result["errors"],
                 "post": post_payload(repository, post),
             }
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/v1/space/dev/video-smoke/{character_id}")
+    def space_dev_video_smoke(character_id: str, req: SpaceDevVideoSmokeRequest):
+        """Run the video provider directly; the Space layer is not involved.
+
+        The media test above goes through the Space executor, so its failures
+        mix provider problems with Space policy. This one answers the narrower
+        question -- does the video path work at all in this runtime -- and
+        defaults to a free dry run that only reports what was resolved.
+        """
+        require_known(character_id, active=True)
+        try:
+            return autonomy.media_executor.video_smoke(
+                character_id=character_id,
+                prompt=req.prompt,
+                duration_seconds=req.duration_seconds,
+                resolution=req.resolution,
+                dry_run=req.dry_run,
+                now=datetime.now().astimezone(),
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

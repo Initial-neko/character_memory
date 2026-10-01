@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 import threading
+import weakref
 from uuid import uuid4
 
 from character_memory.application.async_conversation import group_channel
@@ -36,7 +37,7 @@ class GroupAutonomyService:
         self.access = access
         self.repository = repository
         self._fallback_locks_guard = threading.Lock()
-        self._fallback_locks: dict[str, threading.RLock] = {}
+        self._fallback_locks: weakref.WeakValueDictionary[str, threading.RLock] = weakref.WeakValueDictionary()
 
     def _profiles(self) -> dict[str, dict]:
         return {item["id"]: item for item in self.access.character_profiles()}
@@ -64,13 +65,7 @@ class GroupAutonomyService:
         # Match ReactionScheduler's Group watermark: durable arrival order wins
         # even when a client submits an older `at`. The quiet-time query remains
         # timestamp-based because it answers a different question.
-        with self.repository.store._lock:
-            row = self.repository.store.conn.execute(
-                "SELECT id FROM conversation_events WHERE conversation_id=? "
-                "AND actor_type='USER' ORDER BY id DESC LIMIT 1",
-                (conversation_id,),
-            ).fetchone()
-        return int(row["id"]) if row is not None else None
+        return self.repository.latest_user_event_id_by_insertion(conversation_id)
 
     def user_quiet(self, conversation_id: str, now: datetime) -> tuple[bool, float | None]:
         latest = self.repository.latest_user_event(conversation_id)

@@ -34,12 +34,17 @@
       releaseStream(stream);
       throw new Error("当前浏览器不支持 Web Audio");
     }
+    let context = null;
     try {
-      const context = new AudioContextClass();
+      context = new AudioContextClass();
       const source = context.createMediaStreamSource(stream);
       return {stream, context, source};
     } catch (error) {
-      releaseStream(stream);
+      try {
+        const closing = context?.close?.();
+        closing?.catch?.(() => {});
+      } catch (_) {}
+      try { releaseStream(stream); } catch (_) {}
       throw error;
     }
   }
@@ -47,7 +52,7 @@
   async function closeCapture({stream = null, context = null, source = null, processor = null} = {}) {
     try { processor?.disconnect?.(); } catch (_) {}
     try { source?.disconnect?.(); } catch (_) {}
-    releaseStream(stream);
+    try { releaseStream(stream); } catch (_) {}
     try { await context?.close?.(); } catch (_) {}
   }
 

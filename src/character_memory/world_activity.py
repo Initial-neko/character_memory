@@ -834,32 +834,40 @@ Summary: {topic["summary"]}
             comment = None
             event_id = None
             if take.interested and take.comment:
-                comment = self.repository.add_comment(
-                    topic_id,
-                    character_id,
-                    take.comment,
-                    now,
-                )
-                if comment is not None:
-                    event = self.access.store().append_event(
-                        Event(
-                            character_id=character_id,
-                            event_type=EventType.WORLD_OBSERVATION,
-                            event_time=now,
-                            content=(
-                                f"看到 World Pulse 话题「{topic['title']}」："
-                                f"{topic['summary']}\n我的公开评论：{take.comment}"
-                            ),
-                            metadata={
-                                "channel": "WORLD_PULSE",
-                                "topic_id": topic_id,
-                                "category": topic.get("category") or "",
-                                "sources": topic.get("source_urls") or [],
-                                "conversation_id": f"world-pulse:{topic_id}:{character_id}",
-                            },
+                # The public take and the person's durable observation are two
+                # projections of one decision. Keep them on the repository
+                # connection so a failed event insert does not strand a comment
+                # that the unique constraint would then prevent us from retrying.
+                with self.repository.store.transaction():
+                    if self.repository.has_comment(topic_id, character_id):
+                        comment = None
+                    else:
+                        comment = self.repository.add_comment(
+                            topic_id,
+                            character_id,
+                            take.comment,
+                            now,
                         )
-                    )
-                    event_id = event.id
+                    if comment is not None:
+                        event = self.repository.store.append_event(
+                            Event(
+                                character_id=character_id,
+                                event_type=EventType.WORLD_OBSERVATION,
+                                event_time=now,
+                                content=(
+                                    f"看到 World Pulse 话题「{topic['title']}」："
+                                    f"{topic['summary']}\n我的公开评论：{take.comment}"
+                                ),
+                                metadata={
+                                    "channel": "WORLD_PULSE",
+                                    "topic_id": topic_id,
+                                    "category": topic.get("category") or "",
+                                    "sources": topic.get("source_urls") or [],
+                                    "conversation_id": f"world-pulse:{topic_id}:{character_id}",
+                                },
+                            )
+                        )
+                        event_id = event.id
 
             outcomes.append(
                 {
@@ -1074,6 +1082,7 @@ class WorldActivityScheduler:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
+        self._run_lock = threading.Lock()
 
     def enabled(self) -> bool:
         return bool(
@@ -1240,6 +1249,17 @@ class WorldActivityScheduler:
         }
 
     def run_once(self, *, now: datetime | None = None) -> list[dict]:
+        # The background loop and the Dev endpoint share this scheduler. A Dev
+        # trigger landing while the loop is between due() and complete_state()
+        # must not start the same paid work a second time.
+        if not self._run_lock.acquire(blocking=False):
+            return []
+        try:
+            return self._run_once_unlocked(now=now)
+        finally:
+            self._run_lock.release()
+
+    def _run_once_unlocked(self, *, now: datetime | None = None) -> list[dict]:
         now = now or datetime.now().astimezone()
         if not self.enabled():
             return []

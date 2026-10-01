@@ -95,6 +95,17 @@ class FakeImageProvider:
         )
 
 
+class SecondImageFailsProvider(FakeImageProvider):
+    def __init__(self):
+        self.calls = 0
+
+    def generate(self, request):
+        self.calls += 1
+        if self.calls == 2:
+            raise RuntimeError("second image failed")
+        return super().generate(request)
+
+
 class FakeVideoProvider:
     provider_id = "fake-video"
     model = "fake-video-1"
@@ -265,6 +276,39 @@ def test_space_generated_image_uses_existing_visual_provider_and_media_store(tmp
     assert asset is not None
     assert asset.source == "SPACE_GENERATED_SCENE"
     assert access.media_storage.asset_path(asset) is not None
+    store.close()
+
+
+def test_failed_multi_image_intent_discards_assets_created_before_failure(tmp_path):
+    access, store = _access(tmp_path)
+    runtime = SimpleNamespace(
+        store=store,
+        model=FakeVisualModel(),
+        persona="A persistent fictional character with stable visual identity.",
+    )
+    executor = SpaceMediaExecutor(
+        access,
+        image_providers={"fake": SecondImageFailsProvider()},
+    )
+
+    result = executor.execute(
+        "c00",
+        [
+            SpaceMediaIntent(
+                type="GENERATE_IMAGE",
+                purpose="SCENE",
+                visual_intent="两张雨夜街道照片",
+                count=2,
+            )
+        ],
+        now=datetime(2026, 9, 22, 8, 5, tzinfo=timezone.utc),
+        runtime=runtime,
+    )
+
+    assert result["relations"] == []
+    assert "second image failed" in result["errors"][0]["error"]
+    assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
+    assert list((tmp_path / "media").rglob("*.*")) == []
     store.close()
 
 

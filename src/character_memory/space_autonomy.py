@@ -556,29 +556,33 @@ Sources:
         else:
             event_content = "[媒体动态]"
         try:
-            source_event = self.access.store().append_event(
-                Event(
-                    character_id=character_id,
-                    event_type=EventType.SOCIAL_POST,
-                    event_time=now,
-                    content=event_content,
-                    metadata={
-                        "channel": "SPACE",
-                        "source": source,
-                        "media_count": len(relations),
-                        "media_types": [item["media_type"] for item in relations],
-                        "media_sources": [item["source_type"] for item in relations],
-                        "voice_transcript": voice_transcript or None,
-                    },
+            # Use the repository's connection for both durable records. The
+            # runtime store may be a separate SQLiteStore for the same file, in
+            # which case wrapping access.store() would not cover create_post().
+            with self.repository.store.transaction():
+                source_event = self.repository.store.append_event(
+                    Event(
+                        character_id=character_id,
+                        event_type=EventType.SOCIAL_POST,
+                        event_time=now,
+                        content=event_content,
+                        metadata={
+                            "channel": "SPACE",
+                            "source": source,
+                            "media_count": len(relations),
+                            "media_types": [item["media_type"] for item in relations],
+                            "media_sources": [item["source_type"] for item in relations],
+                            "voice_transcript": voice_transcript or None,
+                        },
+                    )
                 )
-            )
-            post = self.repository.create_post(
-                character_id,
-                content,
-                now,
-                media_id=relations[0]["media_id"] if relations else None,
-                source_event_id=source_event.id,
-            )
+                post = self.repository.create_post(
+                    character_id,
+                    content,
+                    now,
+                    media_id=relations[0]["media_id"] if relations else None,
+                    source_event_id=source_event.id,
+                )
         except Exception:
             self.media_executor.discard(relations)
             raise

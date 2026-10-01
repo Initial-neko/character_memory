@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+import threading
+
+import pytest
 
 from character_memory.config import Settings
 from character_memory.domain.models import Event, EventType, WorldObservation
@@ -186,6 +189,62 @@ def test_world_pulse_repository_deduplicates_topics_and_character_comments(tmp_p
     assert duplicate["id"] == comment["id"]
     assert repo.list_comments(first["id"])[0]["content"] == "我会继续看看。"
     assert WorldPulseRepository.MIGRATION in store.list_schema_migrations()
+    store.close()
+
+
+def test_world_pulse_comment_rolls_back_when_person_event_fails(tmp_path, monkeypatch):
+    store, access, _ = make_access(tmp_path, count=1)
+    repository = WorldPulseRepository(store)
+    topic = repository.upsert_topic(
+        WorldPulseTopicDraft(
+            title="需要原子提交的话题",
+            summary="角色公开评论与个人 World 事件必须一起持久化。",
+            category="technology",
+            source_indexes=[1],
+        ),
+        ["https://example.com/atomic"],
+        NOW,
+    )
+
+    def fail_event(_event):
+        raise RuntimeError("event insert failed")
+
+    monkeypatch.setattr(store, "append_event", fail_event)
+    service = WorldActivityService(access, repository)
+    with pytest.raises(RuntimeError, match="event insert failed"):
+        service.discuss_topic(topic["id"], now=NOW, character_ids=["c00"])
+
+    assert repository.list_comments(topic["id"]) == []
+    assert store.list_events("c00") == []
+    store.close()
+
+
+def test_world_scheduler_coalesces_concurrent_due_runs(tmp_path, monkeypatch):
+    store, access, _ = make_access(tmp_path, count=1)
+    access.settings.world_browse_enabled = False
+    repository = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repository)
+    repository.force_due("PULSE", "global", NOW)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_refresh(*, now):
+        entered.set()
+        release.wait(timeout=2)
+        return {"refreshed": True, "topics": [], "errors": []}
+
+    monkeypatch.setattr(scheduler.service, "refresh_pulse", slow_refresh)
+    first_result = []
+
+    first = threading.Thread(target=lambda: first_result.extend(scheduler.run_once(now=NOW)))
+    first.start()
+    assert entered.wait(timeout=1)
+    assert scheduler.run_once(now=NOW) == []
+    release.set()
+    first.join(timeout=2)
+
+    assert [item["kind"] for item in first_result] == ["PULSE"]
+    assert len([item for item in repository.recent_runs() if item["kind"] == "PULSE"]) == 1
     store.close()
 
 

@@ -179,48 +179,52 @@ class SpaceMediaExecutor:
         seen_urls: set[str] = set()
         errors: list[str] = []
 
-        for candidate in results:
-            if len(relations) >= target:
-                break
-            urls = [candidate.image_url, candidate.thumbnail_url]
-            remote = None
-            for raw_url in urls:
-                url = str(raw_url or "").strip()
-                if not url or url in seen_urls:
-                    continue
-                seen_urls.add(url)
-                try:
-                    remote = self._fetcher().fetch_image(url)
+        try:
+            for candidate in results:
+                if len(relations) >= target:
                     break
-                except (RuntimeError, ValueError) as exc:
-                    errors.append(str(exc))
-            if remote is None:
-                continue
+                urls = [candidate.image_url, candidate.thumbnail_url]
+                remote = None
+                for raw_url in urls:
+                    url = str(raw_url or "").strip()
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    try:
+                        remote = self._fetcher().fetch_image(url)
+                        break
+                    except (RuntimeError, ValueError) as exc:
+                        errors.append(str(exc))
+                if remote is None:
+                    continue
 
-            asset = self._save_asset(
-                character_id,
-                remote.payload,
-                mime_type=remote.content_type,
-                now=now,
-                source="SPACE_SEARCH_IMAGE",
-                label="space-search",
-            )
-            relations.append(
-                {
-                    "media_id": asset.id,
-                    "media_type": "IMAGE",
-                    "source_type": "SEARCH",
-                    "metadata": {
-                        "query": query,
-                        "title": candidate.title,
-                        "source_page_url": candidate.source_page_url,
-                        "source_image_url": remote.source_url,
-                        "source_domain": candidate.source_domain,
-                        "width": candidate.width,
-                        "height": candidate.height,
+                asset = self._save_asset(
+                    character_id,
+                    remote.payload,
+                    mime_type=remote.content_type,
+                    now=now,
+                    source="SPACE_SEARCH_IMAGE",
+                    label="space-search",
+                )
+                relations.append(
+                    {
+                        "media_id": asset.id,
+                        "media_type": "IMAGE",
+                        "source_type": "SEARCH",
+                        "metadata": {
+                            "query": query,
+                            "title": candidate.title,
+                            "source_page_url": candidate.source_page_url,
+                            "source_image_url": remote.source_url,
+                            "source_domain": candidate.source_domain,
+                            "width": candidate.width,
+                            "height": candidate.height,
+                        },
                     },
-                }
-            )
+                )
+        except Exception:
+            self.discard(relations)
+            raise
 
         if not relations:
             detail = errors[-1] if errors else "search returned no downloadable images"
@@ -384,38 +388,42 @@ class SpaceMediaExecutor:
 
         target = min(remaining, max(1, int(intent.count)))
         relations: list[dict[str, Any]] = []
-        for index in range(target):
-            result = provider.generate(
-                ImageGenerationRequest(
-                    prompt=prompt,
-                    aspect_ratio=visual_aspect_ratio(purpose),
-                    size="1K",
-                    reference_images=[reference] if reference else [],
+        try:
+            for index in range(target):
+                result = provider.generate(
+                    ImageGenerationRequest(
+                        prompt=prompt,
+                        aspect_ratio=visual_aspect_ratio(purpose),
+                        size="1K",
+                        reference_images=[reference] if reference else [],
+                    )
                 )
-            )
-            asset = self._save_asset(
-                character_id,
-                result.payload,
-                mime_type=result.mime_type,
-                now=now,
-                source=f"SPACE_GENERATED_{purpose.value}",
-                label=f"space-generated-{purpose.value.lower()}-{index + 1}",
-            )
-            relations.append(
-                {
-                    "media_id": asset.id,
-                    "media_type": "IMAGE",
-                    "source_type": "GENERATED",
-                    "metadata": {
-                        "purpose": purpose.value,
-                        "visual_intent": intent.visual_intent,
-                        "provider": result.provider,
-                        "model": result.model,
-                        "prompt": prompt,
-                        "used_avatar_reference": bool(reference),
+                asset = self._save_asset(
+                    character_id,
+                    result.payload,
+                    mime_type=result.mime_type,
+                    now=now,
+                    source=f"SPACE_GENERATED_{purpose.value}",
+                    label=f"space-generated-{purpose.value.lower()}-{index + 1}",
+                )
+                relations.append(
+                    {
+                        "media_id": asset.id,
+                        "media_type": "IMAGE",
+                        "source_type": "GENERATED",
+                        "metadata": {
+                            "purpose": purpose.value,
+                            "visual_intent": intent.visual_intent,
+                            "provider": result.provider,
+                            "model": result.model,
+                            "prompt": prompt,
+                            "used_avatar_reference": bool(reference),
+                        },
                     },
-                }
-            )
+                )
+        except Exception:
+            self.discard(relations)
+            raise
         return relations
 
     def _generate_video(

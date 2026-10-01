@@ -222,13 +222,49 @@ def field_level(field: dict[str, Any]) -> str:
     return level if level in SETTING_LEVELS else DEFAULT_SETTING_LEVEL
 
 
-def resolved_schema() -> list[dict[str, Any]]:
-    """``SETTINGS_SCHEMA`` with each field's level and restart policy filled in.
+_SETTINGS_JSON_PROPERTIES = Settings.model_json_schema().get("properties", {})
 
-    The page must not have to infer either. A field's level decides which
-    collapsed group it renders into, and ``restart_required`` is what the
-    per-field marker next to its label reads, so both are part of the served
-    contract rather than something the browser guesses from field names.
+
+def _runtime_field_contract(name: str) -> dict[str, Any]:
+    """Validation metadata owned by the Pydantic Settings model.
+
+    Settings Center keeps presentation choices (section, label, level, widget,
+    step and select options), but numeric bounds must come from the same model
+    that validates config.yaml. This prevents a UI range from drifting away
+    from what the runtime actually accepts.
+    """
+
+    schema = _SETTINGS_JSON_PROPERTIES.get(name)
+    if not isinstance(schema, dict):
+        return {}
+
+    candidates = schema.get("anyOf")
+    if not isinstance(candidates, list):
+        candidates = [schema]
+    scalar = next(
+        (
+            item
+            for item in candidates
+            if isinstance(item, dict)
+            and item.get("type") in {"boolean", "integer", "number", "string", "array"}
+        ),
+        schema,
+    )
+    result: dict[str, Any] = {"runtime_type": scalar.get("type")}
+    if "minimum" in scalar:
+        result["min"] = scalar["minimum"]
+    if "maximum" in scalar:
+        result["max"] = scalar["maximum"]
+    return result
+
+
+def resolved_schema() -> list[dict[str, Any]]:
+    """Presentation metadata enriched by the authoritative runtime contract.
+
+    SETTINGS_SCHEMA owns only UI concerns. Runtime type/bounds come from
+    Settings, restart policy comes from HOT_APPLY_FIELDS, and help falls back
+    to SETTING_HELP. The browser therefore never carries its own copy of
+    validation semantics.
     """
 
     schema: list[dict[str, Any]] = []
@@ -239,10 +275,11 @@ def resolved_schema() -> list[dict[str, Any]]:
             item["level"] = field_level(field)
             item["restart_required"] = item["name"] not in HOT_APPLY_FIELDS
             item["help"] = str(item.get("help") or SETTING_HELP.get(item["name"], "")).strip()
+            if item.get("storage") != "env":
+                item.update(_runtime_field_contract(item["name"]))
             fields.append(item)
         schema.append({**section, "fields": fields})
     return schema
-
 
 SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
@@ -253,8 +290,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
             {"name": "base_url", "label": "LLM Base URL", "type": "text", "level": "diagnostic"},
             {"name": "chat_model", "label": "Chat Model", "type": "text", "level": "advanced"},
             {"name": "vision_model", "label": "Vision Model", "type": "text", "level": "advanced", "placeholder": "留空时复用 Chat Model"},
-            {"name": "chat_temperature", "label": "Temperature", "type": "number", "min": 0, "max": 2, "step": 0.05, "level": "common"},
-            {"name": "llm_attempts", "label": "LLM Attempts", "type": "number", "min": 1, "max": 4, "step": 1, "level": "diagnostic"},
+            {"name": "chat_temperature", "label": "Temperature", "type": "number", "step": 0.05, "level": "common"},
+            {"name": "llm_attempts", "label": "LLM Attempts", "type": "number", "step": 1, "level": "diagnostic"},
             {"name": "embedding_provider", "label": "Embedding Provider", "type": "text", "level": "diagnostic"},
             {"name": "embedding_model", "label": "Embedding Model", "type": "text", "level": "diagnostic"},
             {"name": "embedding_base_url", "label": "Embedding Base URL", "type": "text", "level": "diagnostic"},
@@ -286,7 +323,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                     for voice in item.voices
                 ],
             },
-            {"name": "tts_speed", "label": "TTS Speed", "type": "number", "min": 0.5, "max": 2, "step": 0.05, "level": "common"},
+            {"name": "tts_speed", "label": "TTS Speed", "type": "number", "step": 0.05, "level": "common"},
             {
                 "name": "tts_device",
                 "label": "TTS Device (where supported)",
@@ -305,8 +342,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "voice_silence_ms",
                 "label": "Voice Call Pause (ms)",
                 "type": "number",
-                "min": 200,
-                "max": 3000,
                 "step": 50,
                 "level": "advanced",
                 "help": "语音通话里停顿多久算说完。调大=更容忍思考中的停顿，调小=接话更快。",
@@ -387,8 +422,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 ],
                 "help": "World Observation 真正打开网页时使用的无头浏览器。",
             },
-            {"name": "web_browser_timeout_seconds", "label": "World Browser Timeout (s)", "type": "number", "min": 3, "max": 90, "step": 1, "level": "diagnostic"},
-            {"name": "web_browser_render_wait_ms", "label": "JS Render Wait (ms)", "type": "number", "min": 0, "max": 5000, "step": 100, "level": "diagnostic"},
+            {"name": "web_browser_timeout_seconds", "label": "World Browser Timeout (s)", "type": "number", "step": 1, "level": "diagnostic"},
+            {"name": "web_browser_render_wait_ms", "label": "JS Render Wait (ms)", "type": "number", "step": 100, "level": "diagnostic"},
             {
                 "name": "image_generation_provider",
                 "label": "ImageGen Provider",
@@ -399,7 +434,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                     {"value": "msimg", "label": "msimg / ModelScope"},
                 ],
             },
-            {"name": "image_generation_timeout_seconds", "label": "ImageGen Timeout (s)", "type": "number", "min": 10, "max": 600, "step": 5, "level": "diagnostic"},
+            {"name": "image_generation_timeout_seconds", "label": "ImageGen Timeout (s)", "type": "number", "step": 5, "level": "diagnostic"},
             {"name": "agnes_base_url", "label": "Agnes Base URL", "type": "text", "level": "diagnostic"},
             {"name": "agnes_image_model", "label": "Agnes Model", "type": "text", "level": "diagnostic"},
             {"name": "msimg_models", "label": "msimg Models", "type": "text", "level": "diagnostic"},
@@ -413,8 +448,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "periodic_visual_observation_interval_seconds",
                 "label": "Screen Observation Interval (s)",
                 "type": "number",
-                "min": 10,
-                "max": 600,
                 "step": 5,
                 "level": "advanced",
             },
@@ -422,8 +455,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "periodic_visual_observation_max_per_hour",
                 "label": "Screen Observations / Hour",
                 "type": "number",
-                "min": 0,
-                "max": 120,
                 "step": 1,
                 "level": "advanced",
             },
@@ -434,9 +465,9 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "title": "Behavior / Memory",
         "description": "角色唤醒与召回参数。",
         "fields": [
-            {"name": "recall_limit", "label": "Recall Limit", "type": "number", "min": 1, "max": 32, "step": 1, "level": "advanced"},
+            {"name": "recall_limit", "label": "Recall Limit", "type": "number", "step": 1, "level": "advanced"},
             {"name": "proactive_wake_enabled", "label": "Proactive Wake", "type": "checkbox", "level": "common"},
-            {"name": "proactive_wake_minutes", "label": "Wake Interval (min)", "type": "number", "min": 1, "max": 1440, "step": 1, "level": "advanced"},
+            {"name": "proactive_wake_minutes", "label": "Wake Interval (min)", "type": "number", "step": 1, "level": "advanced"},
         ],
     },
     {
@@ -449,8 +480,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "proactive_min_dispatch_interval_minutes",
                 "label": "Min Dispatch Interval (min)",
                 "type": "number",
-                "min": 1,
-                "max": 1440,
                 "step": 1,
                 "level": "advanced",
                 "help": "同一角色两次主动派发之间的最小间隔。沉默的轮次也会消耗它——那次 LLM 调用已经花掉了。",
@@ -459,8 +488,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "proactive_intent_min_delay_minutes",
                 "label": "Intent Min Delay (min)",
                 "type": "number",
-                "min": 0,
-                "max": 1440,
                 "step": 1,
                 "level": "advanced",
                 "help": "新意图 earliest_at 的服务端下限。0 表示不设下限。",
@@ -469,8 +496,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "proactive_max_pending_intents",
                 "label": "Max Pending Intents",
                 "type": "number",
-                "min": 0,
-                "max": 200,
                 "step": 1,
                 "level": "advanced",
                 "help": "每角色 PENDING 意图上限。0 表示不限制。",
@@ -480,8 +505,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "proactive_intent_duplicate_similarity",
                 "label": "Duplicate Similarity",
                 "type": "number",
-                "min": 0.5,
-                "max": 1,
                 "step": 0.01,
                 "level": "diagnostic",
             },
@@ -489,12 +512,10 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "proactive_intent_dedup_window_hours",
                 "label": "Duplicate Window (h)",
                 "type": "number",
-                "min": 1,
-                "max": 720,
                 "step": 1,
                 "level": "diagnostic",
             },
-            {"name": "proactive_poll_seconds", "label": "Dispatch Poll (s)", "type": "number", "min": 10, "max": 3600, "step": 5, "level": "diagnostic"},
+            {"name": "proactive_poll_seconds", "label": "Dispatch Poll (s)", "type": "number", "step": 5, "level": "diagnostic"},
         ],
     },
     {
@@ -507,8 +528,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_opportunity_interval_minutes",
                 "label": "Opportunity Interval (min)",
                 "type": "number",
-                "min": 10,
-                "max": 10080,
                 "step": 10,
                 "level": "advanced",
                 "help": "同一角色两次正式 Space Opportunity 的最小间隔。1440=24H，60=1H，30=30min，10=10min。",
@@ -517,8 +536,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_max_posts_per_day",
                 "label": "Max Posts / Day",
                 "type": "number",
-                "min": 0,
-                "max": 200,
                 "step": 1,
                 "level": "diagnostic",
                 "help": "每个角色每天最多发布几条自主动态。0 = 不限。它只是上限，不会强制发帖；角色判断不发时不消耗额度。",
@@ -534,8 +551,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_media_max_items",
                 "label": "Max Media / Post",
                 "type": "number",
-                "min": 0,
-                "max": 9,
                 "step": 1,
                 "level": "diagnostic",
                 "help": "单条自主动态最多执行多少张图片。0 = 禁用媒体；存储层硬上限仍为 9。",
@@ -564,8 +579,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_video_max_duration_seconds",
                 "label": "Max Video Duration (s)",
                 "type": "number",
-                "min": 5,
-                "max": 15,
                 "step": 1,
                 "level": "advanced",
                 "help": "服务端硬上限；模型即使请求更长，也会被压到这里。",
@@ -574,8 +587,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_video_daily_budget_cny",
                 "label": "Video Daily Budget (CNY)",
                 "type": "number",
-                "min": 0,
-                "max": 10000,
                 "step": 0.1,
                 "level": "advanced",
                 "help": "整个 Character Space 每个本地自然日的视频估算花费上限。0 = 禁止产生付费视频任务。",
@@ -591,8 +602,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_world_max_pages",
                 "label": "World Pages / Opportunity",
                 "type": "number",
-                "min": 1,
-                "max": 4,
                 "step": 1,
                 "level": "diagnostic",
             },
@@ -600,8 +609,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_world_max_chars_per_page",
                 "label": "World Text / Page",
                 "type": "number",
-                "min": 500,
-                "max": 16000,
                 "step": 500,
                 "level": "diagnostic",
             },
@@ -609,8 +616,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_audience_size",
                 "label": "Autonomous Audience",
                 "type": "number",
-                "min": 0,
-                "max": 10,
                 "step": 1,
                 "level": "diagnostic",
                 "help": "每条自主动态最多让多少个其他角色实际看到并判断是否互动；0 表示不自动分发。",
@@ -619,8 +624,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "space_scheduler_poll_seconds",
                 "label": "Scheduler Poll (s)",
                 "type": "number",
-                "min": 10,
-                "max": 3600,
                 "step": 10,
                 "level": "diagnostic",
                 "help": "后台检查 next opportunity 是否到期的周期。只影响检查延迟，不改变 Opportunity Interval。",
@@ -645,8 +648,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_pulse_refresh_minutes",
                 "label": "Pulse Refresh (min)",
                 "type": "number",
-                "min": 10,
-                "max": 10080,
                 "step": 10,
                 "level": "advanced",
             },
@@ -654,8 +655,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_pulse_discussion_interval_minutes",
                 "label": "Pulse Discussion (min)",
                 "type": "number",
-                "min": 10,
-                "max": 10080,
                 "step": 10,
                 "level": "advanced",
             },
@@ -663,8 +662,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_pulse_max_topics",
                 "label": "Max Pulse Topics",
                 "type": "number",
-                "min": 1,
-                "max": 12,
                 "step": 1,
                 "level": "advanced",
             },
@@ -672,8 +669,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_pulse_commenter_count",
                 "label": "Pulse Commenter Candidates",
                 "type": "number",
-                "min": 0,
-                "max": 10,
                 "step": 1,
                 "level": "advanced",
                 "help": "只是候选人数；每个角色仍可独立判断保持沉默。",
@@ -683,8 +678,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_browse_interval_minutes",
                 "label": "Personal Browse Interval (min)",
                 "type": "number",
-                "min": 10,
-                "max": 10080,
                 "step": 10,
                 "level": "advanced",
                 "help": "每个活跃角色独立的上网机会基准间隔；当前基线 30 分钟。实际执行会带少量抖动，不等于每 30 分钟必定浏览。",
@@ -693,8 +686,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_browse_daily_max",
                 "label": "Max Browses / Day",
                 "type": "number",
-                "min": 0,
-                "max": 200,
                 "step": 1,
                 "level": "advanced",
                 "help": "每个活跃角色每天最多浏览几次。每次浏览都要花掉一次付费搜索额度，而所有角色共用同一个 key，所以间隔本身不构成上限（30 分钟 = 48 次/天）。0 = 不限。它只是上限，不会强制浏览；未到期的角色不消耗额度。",
@@ -703,8 +694,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_pulse_source_max_chars",
                 "label": "Pulse Text / Source",
                 "type": "number",
-                "min": 1000,
-                "max": 20000,
                 "step": 500,
                 "level": "diagnostic",
             },
@@ -712,8 +701,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_browse_max_pages",
                 "label": "Browse Pages / Opportunity",
                 "type": "number",
-                "min": 1,
-                "max": 4,
                 "step": 1,
                 "level": "diagnostic",
             },
@@ -721,8 +708,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "world_activity_poll_seconds",
                 "label": "World Scheduler Poll (s)",
                 "type": "number",
-                "min": 10,
-                "max": 3600,
                 "step": 10,
                 "level": "diagnostic",
             },
@@ -738,8 +723,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "group_autonomy_interval_minutes",
                 "label": "Opportunity Interval (min)",
                 "type": "number",
-                "min": 10,
-                "max": 10080,
                 "step": 10,
                 "level": "advanced",
                 "help": "同一群聊两次正式自主交流机会的间隔。默认 360=6H；测试可改 10/30/60。",
@@ -748,8 +731,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "group_autonomy_max_messages",
                 "label": "Max Messages / Opportunity",
                 "type": "number",
-                "min": 1,
-                "max": 4,
                 "step": 1,
                 "level": "diagnostic",
                 "help": "一次自主机会最多提交多少条角色消息。每个角色最多说一次，避免群聊无限自循环。",
@@ -758,8 +739,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "group_autonomy_user_quiet_minutes",
                 "label": "User Quiet Guard (min)",
                 "type": "number",
-                "min": 0,
-                "max": 1440,
                 "step": 5,
                 "level": "diagnostic",
                 "help": "用户刚在群里说过话时不抢话；0 = 关闭该保护。",
@@ -768,8 +747,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "group_autonomy_poll_seconds",
                 "label": "Scheduler Poll (s)",
                 "type": "number",
-                "min": 10,
-                "max": 3600,
                 "step": 10,
                 "level": "diagnostic",
                 "help": "后台检查到期机会的周期，只影响检查延迟。",
@@ -785,8 +762,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "group_max_speakers_per_turn",
                 "label": "Max Speakers / Turn",
                 "type": "number",
-                "min": 1,
-                "max": 12,
                 "step": 1,
                 "level": "advanced",
                 "help": "默认 5。这是后端成本与噪音的形状旋钮，不改变持久化语义；设为 12 恢复“每个成员都被问到”的旧行为。",
@@ -803,8 +778,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "encounter_interval_minutes",
                 "label": "Encounter Interval (min)",
                 "type": "number",
-                "min": 10,
-                "max": 10080,
                 "step": 10,
                 "level": "advanced",
                 "help": "两次正式随机邂逅机会之间的间隔。1440=24H；Dev Console 可手动触发而不修改这里。",
@@ -813,8 +786,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "encounter_web_probability",
                 "label": "Web Encounter Probability",
                 "type": "number",
-                "min": 0,
-                "max": 1,
                 "step": 0.05,
                 "level": "advanced",
                 "help": "AUTO 模式选择真实互联网资料来源的概率；剩余概率走系统生成。",
@@ -823,8 +794,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "encounter_max_pending",
                 "label": "Max Pending Candidates",
                 "type": "number",
-                "min": 1,
-                "max": 10,
                 "step": 1,
                 "level": "diagnostic",
                 "help": "未处理候选达到上限后，Scheduler 暂停继续堆积新邂逅。",
@@ -833,8 +802,6 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "name": "encounter_poll_seconds",
                 "label": "Scheduler Poll (s)",
                 "type": "number",
-                "min": 10,
-                "max": 3600,
                 "step": 10,
                 "level": "diagnostic",
                 "help": "后台检查是否到期的周期，只影响检查延迟。",

@@ -798,6 +798,8 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="runWorldSearch"',
         'id="runWorldFetch"',
         'id="spaceMediaType"',
+        'id="spaceMediaVideoPrompt"',
+        'id="spaceMediaDuration"',
         'id="runSpaceMedia"',
         'id="spaceAudienceSize"',
         'id="spacePollSeconds"',

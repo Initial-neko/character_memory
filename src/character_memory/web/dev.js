@@ -448,6 +448,8 @@
           query: $("spaceMediaQuery").value,
           purpose: $("spaceMediaPurpose").value,
           visual_intent: $("spaceMediaVisualIntent").value,
+          video_prompt: $("spaceMediaVideoPrompt").value,
+          duration_seconds: Number($("spaceMediaDuration").value || 5),
           voice_text: $("spaceMediaVoiceText").value,
           content: $("spaceMediaPostText").value,
         }),

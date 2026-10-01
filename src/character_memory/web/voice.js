@@ -1022,7 +1022,31 @@
     voice.currentSpeakerId = null;
     renderCallIdentity();
     if (failed) {
-      setTimeout(() => voice.active && resumeInputState(), 1200);
+      // A failure in the current item used to leave the remaining reply items
+      // in the queue forever. That kept replyInFlight() true and also stranded
+      // speech already recognised while the reply was running. Retire every
+      // prefetched item before reopening dispatch, revoking any URL that may
+      // finish after the queue is abandoned.
+      const abandoned = voice.queue.splice(0);
+      for (const item of abandoned) {
+        if (item.audioUrl) {
+          URL.revokeObjectURL(item.audioUrl);
+          item.audioUrl = null;
+        } else if (item.audioPromise) {
+          item.audioPromise.then(url => {
+            URL.revokeObjectURL(url);
+            item.audioUrl = null;
+          }).catch(() => null);
+        }
+      }
+      voice.ttsTail = Promise.resolve();
+      setTimeout(() => {
+        if (!voice.active) return;
+        if (voice.pendingTurns.length) flushPendingTurns().catch(error => {
+          if (voice.active) setPhase("error", `语音失败：${error.message}`);
+        });
+        else resumeInputState();
+      }, 1200);
       return;
     }
     voice.lastMetrics.total = voice.turnStartedAt ? performance.now() - voice.turnStartedAt + Number(voice.lastMetrics.asr || 0) : null;

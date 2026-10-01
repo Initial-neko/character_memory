@@ -448,6 +448,102 @@ def test_configured_edge_tts_routes_mp3_through_media_runtime(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize(
+    ("provider", "configured_voice"),
+    [
+        ("kokoro", "zf_001"),
+        ("edge", "zh-CN-XiaoxiaoNeural"),
+    ],
+)
+def test_character_id_voice_is_only_a_gsv_registry_key(
+    monkeypatch,
+    provider,
+    configured_voice,
+):
+    """The browser's provider-neutral ``voice`` value is a character id.
+
+    GSV resolves that id through the character/template registry. Kokoro and
+    Edge instead require one of their formal provider voice ids, so forwarding
+    ``haru`` to either provider makes the normal browser request fail even when
+    Settings contains a healthy voice.
+    """
+
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(
+            tts_provider=provider,
+            tts_voice=configured_voice,
+            tts_speed=1.0,
+            tts_device="cpu",
+        ),
+    )
+    provider_client = _SwitchingProviderClient()
+
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        response = client.post(
+            "/v1/tts",
+            json={"text": "你好", "voice": "haru", "speaker_id": 2},
+        )
+
+    assert response.status_code == 200
+    assert provider_client.post_calls == [
+        (
+            "http://127.0.0.1:9002/v1/tts",
+            {
+                "json": {
+                    "provider": provider,
+                    "text": "你好",
+                    "voice": configured_voice,
+                    "speed": 1.0,
+                }
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("provider", "configured_voice", "explicit_voice"),
+    [
+        ("kokoro", "zf_001", "zf_002"),
+        ("edge", "zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"),
+    ],
+)
+def test_formal_provider_voice_id_remains_an_explicit_override(
+    monkeypatch,
+    provider,
+    configured_voice,
+    explicit_voice,
+):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    runtime = MediaRuntime(FakeAsr(), FakeTts(ready=False))
+    monkeypatch.setattr(media_server, "build_media_runtime_from_env", lambda: runtime)
+    monkeypatch.setattr(
+        media_server,
+        "load_settings",
+        lambda _path: SimpleNamespace(
+            tts_provider=provider,
+            tts_voice=configured_voice,
+            tts_speed=1.0,
+            tts_device="cpu",
+        ),
+    )
+    provider_client = _SwitchingProviderClient()
+
+    with TestClient(media_server.create_media_app(provider_http_client=provider_client)) as client:
+        response = client.post("/v1/tts", json={"text": "你好", "voice": explicit_voice})
+
+    assert response.status_code == 200
+    assert provider_client.post_calls[-1][1]["json"]["voice"] == explicit_voice
+
+
 def test_configured_gsv_health_uses_provider_runtime(monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

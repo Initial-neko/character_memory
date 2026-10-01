@@ -420,8 +420,8 @@ Browser Voice 的 ASR transcript 在创建聊天事实前先做最小有效性�
 trim 后空字符串        -> reject
 纯符号/标点             -> reject
 任意汉字                 -> accept
-ASCII Latin/digit >= 2  -> accept
-其它                     -> reject
+纯英文、数字或其组合     -> reject
+其它不含汉字的内容       -> reject
 ```
 
 无效 transcript 不会发送 chat message，也不会因为当前通话开启了 Camera/Screen 而上传 Visual Capture frame；UI 回到 listening。
@@ -558,6 +558,8 @@ pending
 ```
 
 A failed TTS provider never removes the message text. The failure reason carried by the provider chain is preserved in `voice_error` and surfaced by the browser bubble.
+
+Media registration and the event transition form the materializer's commit boundary: if the MediaAsset row cannot be inserted, or the original event disappears before `pending -> ready` commits, the synthesized file and any MediaAsset row are discarded. The canonical text event remains the source of truth.
 
 ### Direct and Group
 

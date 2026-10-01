@@ -380,8 +380,19 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         if configured_routing and selected in {"kokoro", "edge", "gsv"}:
             # :9002 is both the audition UI and the provider service in V1.
             # Media Runtime remains the stable browser-facing endpoint.
-            default_voice = provider_spec(selected).default_voice
-            voice = explicit_voice or str(settings.tts_voice or default_voice)
+            spec = provider_spec(selected)
+            configured_voice = str(settings.tts_voice or spec.default_voice)
+            # The stable browser contract carries a Character id in ``voice``.
+            # Only GSV owns a Character -> template registry. Kokoro and Edge
+            # require one of their provider voice ids, so a Character id must
+            # fall back to the voice selected in Settings. Keep explicit formal
+            # voice ids working for provider-level callers and the Workbench.
+            if selected == "gsv":
+                voice = explicit_voice or configured_voice
+            elif explicit_voice in spec.voices:
+                voice = explicit_voice
+            else:
+                voice = configured_voice
             speed = float(req.speed if explicit_voice and req.speed is not None else settings.tts_speed)
             try:
                 response = provider_client.post(

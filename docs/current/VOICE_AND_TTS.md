@@ -263,6 +263,8 @@ Browser
 
 正式 Browser 不需要知道 provider-specific URL，也不需要增加新的跨 origin TTS contract。
 
+Browser 和 durable Voice Message 都把 Character id 放在稳定请求的 `voice` 字段中；这个值是 provider-neutral identity，不是 Kokoro/Edge 的音色名。Media Runtime 仅在 GSV 路由把它交给角色到模板的 registry；Kokoro/Edge 路由使用 Settings 中选定的 provider voice。Provider 级调用显式传入 registry 已知的 Kokoro/Edge voice id 时仍会保留该覆盖。Sherpa 则优先使用数值 voice、Browser 的稳定 speaker hash，最后才是配置的数值默认值。
+
 #### Edge TTS
 
 当 `tts_provider: edge`，`:8001` 通过 `:9002` 调用 Edge TTS。它是在线 Provider，无需 API Key，但 synthesis 依赖公网。默认 voice 为 `zh-CN-XiaoxiaoNeural`。Edge 原生 MP3 会以 `audio/mpeg` 原样返回，Browser 当前 Blob/Audio 播放链可直接处理，不做额外 WAV 转码。

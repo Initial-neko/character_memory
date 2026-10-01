@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import json
 import logging
 import threading
 import time
+import weakref
 from typing import Callable
 
 from character_memory.application.group_conversation_service import (
@@ -34,6 +36,8 @@ class _HubChannel:
     # high cursor from suppressing the new process's events 1, 2, 3, ... .
     next_id: int = field(default_factory=time.time_ns)
     events: deque = field(default_factory=lambda: deque(maxlen=256))
+    subscribers: int = 0
+    last_activity: float = field(default_factory=time.monotonic)
 
 
 class ConversationEventHub:
@@ -43,18 +47,59 @@ class ConversationEventHub:
     notifications; reconnecting clients can always reconcile from history APIs.
     """
 
-    def __init__(self):
+    def __init__(self, *, idle_seconds: float = 900.0):
         self._guard = threading.Lock()
         self._channels: dict[str, _HubChannel] = {}
         self._closed = threading.Event()
+        self.idle_seconds = max(1.0, float(idle_seconds))
+
+    def _prune_idle_locked(self, now: float) -> int:
+        stale = [
+            key
+            for key, channel in self._channels.items()
+            if channel.subscribers <= 0
+            and now - channel.last_activity >= self.idle_seconds
+        ]
+        for key in stale:
+            self._channels.pop(key, None)
+        return len(stale)
+
+    def prune_idle(self, *, now: float | None = None) -> int:
+        """Drop inactive ephemeral SSE channels; durable facts remain in SQLite."""
+        with self._guard:
+            return self._prune_idle_locked(time.monotonic() if now is None else float(now))
 
     def _channel(self, key: str) -> _HubChannel:
+        now = time.monotonic()
         with self._guard:
+            self._prune_idle_locked(now)
             value = self._channels.get(key)
             if value is None:
-                value = _HubChannel()
+                value = _HubChannel(last_activity=now)
                 self._channels[key] = value
+            else:
+                value.last_activity = now
             return value
+
+    @contextmanager
+    def channel_lease(self, key: str):
+        """Keep one channel alive while a stream is subscribed to it."""
+        now = time.monotonic()
+        with self._guard:
+            self._prune_idle_locked(now)
+            channel = self._channels.get(key)
+            if channel is None:
+                channel = _HubChannel(last_activity=now)
+                self._channels[key] = channel
+            channel.subscribers += 1
+            channel.last_activity = now
+        try:
+            yield channel
+        finally:
+            with self._guard:
+                channel.subscribers = max(0, channel.subscribers - 1)
+                channel.last_activity = time.monotonic()
+                self._prune_idle_locked(channel.last_activity)
 
     def publish(self, key: str, event_type: str, data: dict) -> int:
         channel = self._channel(key)
@@ -66,23 +111,23 @@ class ConversationEventHub:
             return seq
 
     def stream(self, key: str, *, after_id: int = 0):
-        channel = self._channel(key)
-        cursor = max(0, int(after_id or 0))
-        yield "retry: 1500\n\n"
-        while not self._closed.is_set():
-            batch = []
-            with channel.condition:
-                batch = [item for item in channel.events if item[0] > cursor]
-                if not batch:
-                    channel.condition.wait(timeout=15.0)
+        with self.channel_lease(key) as channel:
+            cursor = max(0, int(after_id or 0))
+            yield "retry: 1500\n\n"
+            while not self._closed.is_set():
+                batch = []
+                with channel.condition:
                     batch = [item for item in channel.events if item[0] > cursor]
-            if not batch:
-                yield ": ping\n\n"
-                continue
-            for seq, event_type, data in batch:
-                cursor = seq
-                payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-                yield f"id: {seq}\nevent: {event_type}\ndata: {payload}\n\n"
+                    if not batch:
+                        channel.condition.wait(timeout=15.0)
+                        batch = [item for item in channel.events if item[0] > cursor]
+                if not batch:
+                    yield ": ping\n\n"
+                    continue
+                for seq, event_type, data in batch:
+                    cursor = seq
+                    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+                    yield f"id: {seq}\nevent: {event_type}\ndata: {payload}\n\n"
 
     def close(self) -> None:
         self._closed.set()
@@ -103,6 +148,7 @@ class _PendingState:
     pending_since: float | None = None
     last_submit_at: float = 0.0
     active: bool = False
+    last_activity: float = field(default_factory=time.monotonic)
 
 
 class ReactionScheduler:
@@ -122,6 +168,7 @@ class ReactionScheduler:
         quiet_seconds: float = 0.5,
         max_burst_seconds: float = 1.5,
         voice_materializer=None,
+        idle_seconds: float = 900.0,
     ):
         self.get_bundle = get_bundle
         self.character_profiles = character_profiles
@@ -131,8 +178,12 @@ class ReactionScheduler:
         self.voice_materializer = voice_materializer
         self._guard = threading.Lock()
         self._states: dict[str, _PendingState] = {}
-        self._group_locks: dict[str, threading.RLock] = {}
+        # Weak ownership is safe for locks: a holder/waiter keeps a strong local
+        # reference, so the entry cannot disappear while serialization matters.
+        # Once nobody can possibly acquire the old lock again, GC may remove it.
+        self._group_locks: weakref.WeakValueDictionary[str, threading.RLock] = weakref.WeakValueDictionary()
         self._closed = threading.Event()
+        self.idle_seconds = max(1.0, float(idle_seconds))
 
     def group_lock_for(self, conversation_id: str) -> threading.RLock:
         with self._guard:
@@ -142,12 +193,36 @@ class ReactionScheduler:
                 self._group_locks[conversation_id] = lock
             return lock
 
-    def _state(self, key: str) -> _PendingState:
+    def _prune_idle_states_locked(self, now: float) -> int:
+        stale = []
+        for key, state in self._states.items():
+            latest_id = int(state.latest_event.id) if state.latest_event is not None else state.processed_id
+            if (
+                not state.active
+                and latest_id <= state.processed_id
+                and not state.image_urls
+                and not state.mention_by_event
+                and now - state.last_activity >= self.idle_seconds
+            ):
+                stale.append(key)
+        for key in stale:
+            self._states.pop(key, None)
+        return len(stale)
+
+    def prune_idle(self, *, now: float | None = None) -> int:
         with self._guard:
+            return self._prune_idle_states_locked(time.monotonic() if now is None else float(now))
+
+    def _state(self, key: str) -> _PendingState:
+        now = time.monotonic()
+        with self._guard:
+            self._prune_idle_states_locked(now)
             state = self._states.get(key)
             if state is None:
-                state = _PendingState()
+                state = _PendingState(last_activity=now)
                 self._states[key] = state
+            else:
+                state.last_activity = now
             return state
 
     def status_snapshot(self, key: str) -> dict:
@@ -159,6 +234,8 @@ class ReactionScheduler:
         """
         with self._guard:
             state = self._states.get(key)
+            if state is not None:
+                state.last_activity = time.monotonic()
         if state is None:
             return {"state": "idle", "watermark": 0}
         with state.condition:
@@ -222,6 +299,7 @@ class ReactionScheduler:
             if state.pending_since is None:
                 state.pending_since = now
             state.last_submit_at = now
+            state.last_activity = now
             queued_watermark = int(state.latest_event.id) if state.latest_event is not None else incoming_id
             if not state.active and queued_watermark > state.processed_id:
                 state.active = True
@@ -385,6 +463,7 @@ class ReactionScheduler:
             latest_id = int(state.latest_event.id) if state.latest_event is not None else state.processed_id
             if latest_id <= state.processed_id:
                 state.active = False
+                state.last_activity = time.monotonic()
                 return True
             if state.pending_since is None:
                 state.pending_since = time.monotonic()

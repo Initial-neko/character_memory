@@ -184,6 +184,11 @@ def test_space_runtime_override_is_rendered_as_temporary_not_persistent_config(p
     page.set_viewport_size({"width": 1440, "height": 900})
     _load(page, dev_console_url)
 
+    # Runtime override controls intentionally live behind Detailed Dev;
+    # reveal that surface the same way an operator does before opening the group.
+    page.locator("#devModeToggle").click()
+    assert page.locator("body").get_attribute("data-dev-mode") == "detailed"
+
     group = page.locator("details:has(#spaceIntervalMinutes)").first
     assert group.get_attribute("open") is None
     group.locator("summary").click()

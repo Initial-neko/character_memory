@@ -7,7 +7,6 @@ import json
 import logging
 import threading
 import time
-import weakref
 from typing import Callable
 
 from character_memory.application.group_conversation_service import (
@@ -178,10 +177,10 @@ class ReactionScheduler:
         self.voice_materializer = voice_materializer
         self._guard = threading.Lock()
         self._states: dict[str, _PendingState] = {}
-        # Weak ownership is safe for locks: a holder/waiter keeps a strong local
-        # reference, so the entry cannot disappear while serialization matters.
-        # Once nobody can possibly acquire the old lock again, GC may remove it.
-        self._group_locks: weakref.WeakValueDictionary[str, threading.RLock] = weakref.WeakValueDictionary()
+        # Group locks stay strongly owned because a raw RLock has no explicit
+        # waiter lifecycle we can safely observe. Channel/state caches below are
+        # the unbounded ephemeral structures; group IDs are durable resources.
+        self._group_locks: dict[str, threading.RLock] = {}
         self._closed = threading.Event()
         self.idle_seconds = max(1.0, float(idle_seconds))
 

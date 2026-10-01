@@ -26,7 +26,7 @@ The current implementation provides:
 - ordered `space_post_media` attachment relations backed by the existing MediaAsset/MediaStorage layer;
 - text-only posts, legacy single-media posts, and posts containing up to 9 persisted media assets;
 - browser rendering for 1 large image, 2-4 image grids, and 5-9 image nine-grid layouts;
-- autonomous image search, AI-generated Space images, and one autonomous Space voice attachment through the same media contract;
+- autonomous image search, AI-generated Space images, one autonomous Space voice attachment, and opt-in budgeted short-video generation through the same media contract;
 - optional public-web World Observation through Playwright headless Chromium before the final Space decision;
 - explicit seen/like/comment state;
 - browser users can add durable comments directly in the feed, reply to any comment/reply, and expand/collapse Bilibili/Xiaohongshu-style two-level reply threads;
@@ -65,7 +65,7 @@ space_posts
 
 `space_posts.media_id` is intentionally retained as a compatibility pointer to the first attachment. Existing rows are migrated into `space_post_media` with `source_type=LEGACY`, and old clients may still submit one `media_id`.
 
-The migrated `media_type` is read from the asset's own `media_assets.mime_type` (`audio/*` becomes `VOICE`, otherwise `IMAGE`); it is never assumed to be an image, because the media store also holds voice clips. The migration key is `UNIQUE(post_id, media_id)` behind an `INSERT OR IGNORE`, so a row is written once and never reconsidered — which is why the same pass also repairs `LEGACY` rows an earlier build wrote as `IMAGE` when the asset is audio. An asset that is missing, or neither image nor audio, still lands as `IMAGE`: `SPACE_MEDIA_TYPES` has no neutral value to fall back to.
+The migrated `media_type` is read from the asset's own `media_assets.mime_type` (`audio/*` becomes `VOICE`, `video/*` becomes `VIDEO`, otherwise `IMAGE`); it is never assumed to be an image, because the media store also holds voice clips and videos. The migration key is `UNIQUE(post_id, media_id)` behind an `INSERT OR IGNORE`, so a row is written once and never reconsidered — which is why the same pass also repairs `LEGACY` rows an earlier build wrote as `IMAGE` when the asset is audio. An asset that is missing, or is not recognized as image/audio/video, still lands as `IMAGE` as a legacy compatibility fallback.
 
 New clients should use:
 
@@ -92,6 +92,7 @@ Current persisted media types are prepared for:
 ```text
 IMAGE
 VOICE
+VIDEO
 LINK_PREVIEW
 ```
 
@@ -127,6 +128,11 @@ SpacePostPlan
     VOICE
       voice_text
       count: 1
+    GENERATE_VIDEO
+      video_prompt
+      duration_seconds
+      video_ratio
+      count: 1
 ```
 
 The character may choose text only, image only, voice only, text + media, or silence. A Space post may contain at most one VOICE intent; its `voice_text` is the complete public spoken expression and is stored as attachment metadata for transcript/provenance. Media is never a quota. `SpaceMediaExecutor` executes the optional intents after the character has decided they are natural:
@@ -149,7 +155,16 @@ VOICE
   -> configured character voice/provider
   -> MediaStorage / MediaAsset (WAV or MP3)
   -> space_post_media(type=VOICE, source=GENERATED, transcript + duration metadata)
+
+GENERATE_VIDEO
+  -> MetaSo MiniMax-H3 POST /v2/video_generation
+  -> bounded GET /v2/query/video_generation/{task_id} polling
+  -> validate the returned public video URL without forwarding provider credentials
+  -> MediaStorage / MediaAsset (MP4 or WebM)
+  -> space_post_media(type=VIDEO, source=GENERATED, task + cost metadata)
 ```
+
+Video generation is deliberately opt-in and paid. Before a provider task is created, the executor reserves an estimated CNY cost in the durable `video_generation_usage` ledger and rejects work that would exceed `space_video_daily_budget_cny`. Reservations remain counted when a provider task fails because an accepted remote task may still be billable. The per-second 768P/2K rates are configuration inputs rather than provider constants, so pricing can be updated without code changes. The first implementation keeps one generated video per post and caps requested duration server-side.
 
 Image-search providers are composition-neutral. Avatar-specific aspect-ratio filtering stays inside `AvatarSearchService`, so Space may search landscapes, screenshots or other wide/tall imagery without changing avatar behavior.
 
@@ -253,6 +268,10 @@ space_media_enabled
 space_media_max_items
 space_image_search_enabled
 space_image_generation_enabled
+space_video_generation_enabled
+space_video_resolution
+space_video_max_duration_seconds
+space_video_daily_budget_cny
 space_world_observation_enabled
 space_world_max_pages
 space_world_max_chars_per_page

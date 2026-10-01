@@ -101,6 +101,22 @@ agnes_image_model: "agnes-image-2.1-flash"
 # Comma-separated msimg/ModelScope model aliases. Multiple entries enable failover.
 msimg_models: "qwen"
 
+# Provider used for opt-in Space short-video generation. Only metaso-minimax-h3
+# is implemented; the bearer token lives only in METASO_MINIMAX_API_KEY (.env).
+video_generation_provider: "metaso-minimax-h3"
+
+# MetaSo MiniMax-compatible API root.
+metaso_minimax_base_url: "https://metaso.cn/api/minimax"
+
+# Video model id sent to the provider.
+metaso_minimax_video_model: "MiniMax-H3"
+
+# Maximum seconds allowed for one video provider request (create + poll + download).
+video_generation_timeout_seconds: 900
+
+# Seconds between async task status polls while a video job is running.
+video_generation_poll_interval_seconds: 8
+
 # Allow periodic AI observations only while the user explicitly shares a screen
 # inside a direct voice call. Camera and group-call autoplay are intentionally excluded.
 periodic_visual_observation_enabled: true
@@ -199,6 +215,27 @@ space_image_search_enabled: true
 
 # Whether Space may use the configured AI ImageGen provider.
 space_image_generation_enabled: true
+
+# Whether Space may spend money on generated short video. Off by default.
+space_video_generation_enabled: false
+
+# Requested video resolution forwarded to the provider: 768P | 2K.
+space_video_resolution: "2K"
+
+# Server-side ceiling for one generated video, in seconds. Valid range 5..15.
+space_video_max_duration_seconds: 5
+
+# Account-wide hard ceiling per local day, in CNY. 0 blocks every video job.
+space_video_daily_budget_cny: 3.0
+
+# Estimated CNY per generated second at 768P, used by the budget guard.
+space_video_cost_cny_per_second_768p: 0.09
+
+# Estimated CNY per generated second at 2K, used by the budget guard.
+space_video_cost_cny_per_second_2k: 0.15
+
+# Maximum accepted bytes for one downloaded generated video.
+space_video_max_bytes: 67108864
 
 # Whether one Space opportunity may explore public web context before deciding.
 space_world_observation_enabled: true

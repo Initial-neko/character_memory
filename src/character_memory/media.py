@@ -17,6 +17,8 @@ _MIME_TO_EXT = {
     "image/webp": ".webp",
     "audio/wav": ".wav",
     "audio/mpeg": ".mp3",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
 }
 
 
@@ -32,7 +34,7 @@ class MediaAsset(BaseModel):
 
 
 class MediaStorage:
-    """Small local media store for chat and generated visual assets (images and voice clips).
+    """Small local media store for chat and generated visual assets (images, voice clips and short videos).
 
     The browser sends a base64 data URL so FastAPI does not need multipart
     dependencies. Generated provider bytes are normalized through the same gate.
@@ -61,6 +63,12 @@ class MediaStorage:
             return "audio/mpeg"
         if len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
             return "audio/mpeg"
+        # ISO Base Media File Format (MP4/MOV family). MiniMax H3 returns MP4.
+        if len(data) >= 12 and data[4:8] == b"ftyp":
+            return "video/mp4"
+        # WebM/Matroska EBML signature.
+        if data.startswith(b"\x1a\x45\xdf\xa3"):
+            return "video/webm"
         return None
 
     def save_bytes(
@@ -71,15 +79,17 @@ class MediaStorage:
         payload: bytes,
         created_at: datetime,
         source: str = "GENERATED",
+        max_bytes: int | None = None,
     ) -> MediaAsset:
         data = bytes(payload or b"")
         if not data:
             raise ValueError("media is empty")
-        if len(data) > self.max_bytes:
-            raise ValueError(f"media exceeds {self.max_bytes // (1024 * 1024)} MiB limit")
+        limit = self.max_bytes if max_bytes is None else max(1, int(max_bytes))
+        if len(data) > limit:
+            raise ValueError(f"media exceeds {limit // (1024 * 1024)} MiB limit")
         mime_type = self._sniff_mime(data)
         if mime_type is None:
-            raise ValueError("unsupported media format; use JPEG, PNG, GIF, WebP, WAV or MP3")
+            raise ValueError("unsupported media format; use JPEG, PNG, GIF, WebP, WAV, MP3, MP4 or WebM")
         media_id = uuid.uuid4().hex
         storage_name = f"{media_id}{_MIME_TO_EXT[mime_type]}"
         self.root.mkdir(parents=True, exist_ok=True)

@@ -416,6 +416,7 @@ class WorldObservationAppraisal(BaseModel):
 class SpaceMediaIntentType(str, Enum):
     SEARCH_IMAGE = "SEARCH_IMAGE"
     GENERATE_IMAGE = "GENERATE_IMAGE"
+    GENERATE_VIDEO = "GENERATE_VIDEO"
     VOICE = "VOICE"
 
 
@@ -427,6 +428,9 @@ class SpaceMediaIntent(BaseModel):
     query: str | None = Field(default=None, max_length=300)
     purpose: str | None = Field(default=None, max_length=16)
     visual_intent: str | None = Field(default=None, max_length=800)
+    video_prompt: str | None = Field(default=None, max_length=1200)
+    duration_seconds: int | None = Field(default=None, ge=5, le=15)
+    video_ratio: str | None = Field(default=None, max_length=16)
     voice_text: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="before")
@@ -450,6 +454,9 @@ class SpaceMediaIntent(BaseModel):
                 raise ValueError("SEARCH_IMAGE requires query")
             self.purpose = None
             self.visual_intent = None
+            self.video_prompt = None
+            self.duration_seconds = None
+            self.video_ratio = None
             self.voice_text = None
             return self
 
@@ -462,6 +469,23 @@ class SpaceMediaIntent(BaseModel):
             self.query = None
             self.purpose = None
             self.visual_intent = None
+            self.video_prompt = None
+            self.duration_seconds = None
+            self.video_ratio = None
+            return self
+
+        if self.type == SpaceMediaIntentType.GENERATE_VIDEO:
+            video_prompt = " ".join(str(self.video_prompt or "").split()).strip()
+            if not video_prompt:
+                raise ValueError("GENERATE_VIDEO requires video_prompt")
+            self.count = 1
+            self.video_prompt = video_prompt[:1200]
+            self.duration_seconds = int(self.duration_seconds or 5)
+            self.video_ratio = str(self.video_ratio or "16:9").strip()[:16] or "16:9"
+            self.query = None
+            self.purpose = None
+            self.visual_intent = None
+            self.voice_text = None
             return self
 
         purpose = str(self.purpose or "SCENE").strip().upper()
@@ -473,6 +497,9 @@ class SpaceMediaIntent(BaseModel):
         self.purpose = purpose
         self.visual_intent = visual_intent[:800]
         self.query = None
+        self.video_prompt = None
+        self.duration_seconds = None
+        self.video_ratio = None
         self.voice_text = None
         return self
 
@@ -507,12 +534,17 @@ class SpacePostPlan(BaseModel):
         # same media primitive, keep the first instead of synthesizing several
         # independent voice bubbles for one social post.
         voice_seen = False
+        video_seen = False
         normalized = []
         for intent in self.media_intents:
             if intent.type == SpaceMediaIntentType.VOICE:
                 if voice_seen:
                     continue
                 voice_seen = True
+            if intent.type == SpaceMediaIntentType.GENERATE_VIDEO:
+                if video_seen:
+                    continue
+                video_seen = True
             normalized.append(intent)
         self.media_intents = normalized
         return self

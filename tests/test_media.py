@@ -54,6 +54,7 @@ def test_media_storage_rejects_non_image_and_oversized_payload(tmp_path):
 
 MP3_ID3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\x00" * 64
 MP3_FRAME_SYNC = b"\xff\xfb\x90\x00" + b"\x00" * 64
+MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64
 
 
 def wav_bytes() -> bytes:
@@ -119,3 +120,20 @@ def test_media_storage_sniffs_claimed_audio_mime_off_a_wav(tmp_path):
 
     assert asset.mime_type == "audio/wav"
     assert normalized.startswith("data:audio/wav;base64,")
+
+
+def test_media_storage_stores_mp4_with_per_call_video_limit(tmp_path):
+    storage = MediaStorage(tmp_path / "media", max_bytes=16)
+
+    asset = storage.save_bytes(
+        character_id="momo",
+        original_name="clip.mp4",
+        payload=MP4,
+        created_at=datetime(2026, 9, 29, tzinfo=timezone.utc),
+        source="SPACE_GENERATED_VIDEO",
+        max_bytes=1024,
+    )
+
+    assert asset.mime_type == "video/mp4"
+    assert asset.storage_name.endswith(".mp4")
+    assert storage.asset_path(asset).read_bytes() == MP4

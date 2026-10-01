@@ -3,11 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+import pytest
 
 from character_memory.config import Settings
 from character_memory.settings_store import (
     LEGACY_SECRET_FIELDS,
     SETTINGS_SCHEMA,
+    _runtime_field_contract,
     resolved_schema,
 )
 
@@ -69,3 +71,8 @@ def test_config_example_values_match_runtime_defaults():
             }
 
     assert mismatches == {}
+
+
+def test_settings_ui_rejects_unknown_runtime_field():
+    with pytest.raises(KeyError, match="not declared in runtime Settings"):
+        _runtime_field_contract("typo_unknown_settings_knob")

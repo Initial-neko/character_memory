@@ -23,7 +23,7 @@ class Element {
   }
   querySelectorAll(selector) {
     if (selector === '.message-row[data-message-id]') {
-      return this.children.filter(child => String(child.className || '').split(/\\s+/).includes('message-row') && child.dataset?.messageId);
+      return this.children.filter(child => String(child.className || '').split(/\s+/).includes('message-row') && child.dataset?.messageId);
     }
     return [];
   }

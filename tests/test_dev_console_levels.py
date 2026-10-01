@@ -54,10 +54,22 @@ FIRST_SCREEN = {
     "groupAutonomyGroup",
     "runGroupAutonomyOpportunity",
     "devModeToggle",
+    # The two video checks. They were reachable only after opening "detailed"
+    # mode *and* a collapsed diagnostic group, which meant a paid capability
+    # whose check nobody could find. The exception is deliberate and narrow:
+    # two checks, eight controls, and no other card gets to join them.
+    "videoSmokePrompt",
+    "videoSmokeResolution",
+    "videoSmokeDryRun",
+    "runVideoSmoke",
+    "videoPostPrompt",
+    "videoPostText",
+    "runVideoPost",
 }
-# The first screen is intentionally tiny. Formal configuration belongs to
-# Settings; Space/Group runtime overrides live in closed advanced groups.
-FIRST_SCREEN_BAND = (5, 8)
+# The first screen stays small on purpose. Formal configuration belongs to
+# Settings; Space/Group runtime overrides live in closed advanced groups. The
+# ceiling counts the video exception above; anything else must earn an edit here.
+FIRST_SCREEN_BAND = (5, 13)
 
 
 class _Markup(HTMLParser):

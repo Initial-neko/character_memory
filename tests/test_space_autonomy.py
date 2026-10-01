@@ -798,9 +798,17 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="runWorldSearch"',
         'id="runWorldFetch"',
         'id="spaceMediaType"',
-        'id="spaceMediaVideoPrompt"',
-        'id="spaceMediaDuration"',
         'id="runSpaceMedia"',
+        # The two video checks live in their own card, outside every folding
+        # surface, because a check you cannot see is a check that does not run.
+        'id="videoGenerationCard"',
+        'id="videoSmokePrompt"',
+        'id="videoSmokeDryRun"',
+        'id="runVideoSmoke"',
+        'id="videoPostPrompt"',
+        'id="runVideoPost"',
+        'id="videoSmokeReport"',
+        'id="videoPostReport"',
         'id="spaceAudienceSize"',
         'id="spacePollSeconds"',
         'id="applySpaceConfig"',
@@ -813,6 +821,13 @@ def test_dev_console_exposes_space_autonomy_controls():
         'data-minutes="60"',
     ]:
         assert token in html
+
+    # "Visible" is exactly the property that was broken, so assert it
+    # structurally rather than trusting the markup to stay unfolded: the video
+    # card must not carry either of the surfaces dev.css hides in Simple mode.
+    video_card = html.split('id="videoGenerationCard"', 1)[1].split("</article>", 1)[0]
+    assert "data-dev-surface" not in video_card
+    assert "level-group" not in video_card
 
     # A console that lost its script renders the markup's placeholder values and
     # looks alive while nothing responds. The page has to say so, and dev.js has

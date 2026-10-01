@@ -5,7 +5,7 @@ import logging
 from typing import Any, Callable
 from character_memory.avatars import AvatarSearchService, AvatarStore
 from character_memory.browser_web import HeadlessBrowserWebFetcher
-from character_memory.config import Settings, resolve_avatar_dir
+from character_memory.config import Settings, resolve_avatar_dir, runtime_setting
 from character_memory.search import BraveSearchProvider, SearchApiProvider, SearchProvider
 from character_memory.visual_generation import ImageGenerationProvider, build_image_providers
 from character_memory.world_observation import WorldObservationService
@@ -22,13 +22,13 @@ def build_search_provider(settings: Settings) -> SearchProvider | None:
     No HTTP route owns this provider.
     """
 
-    provider_name = str(settings.search_provider or "searchapi").strip().lower()
+    provider_name = str(runtime_setting(settings, "search_provider", "searchapi") or "searchapi").strip().lower()
     provider_kwargs = {
-        "country": settings.search_country,
-        "language": settings.search_language,
-        "safe_search": settings.search_safe_search,
+        "country": runtime_setting(settings, "search_country", "jp"),
+        "language": runtime_setting(settings, "search_language", "zh-cn"),
+        "safe_search": runtime_setting(settings, "search_safe_search", "strict"),
     }
-    api_key = settings.search_api_key
+    api_key = runtime_setting(settings, "search_api_key", "")
     if provider_name in {"searchapi", "searchapi.io", "search_api"}:
         return SearchApiProvider(api_key, **provider_kwargs)
     if provider_name == "brave":
@@ -149,14 +149,14 @@ def build_runtime_services(settings: Settings) -> RuntimeServices:
     search_provider = build_search_provider(settings)
     avatar_store = AvatarStore(
         resolve_avatar_dir(settings),
-        max_bytes=int(settings.avatar_max_bytes),
+        max_bytes=int(runtime_setting(settings, "avatar_max_bytes", 8 * 1024 * 1024)),
     )
     avatar_search = AvatarSearchService(search_provider, avatar_store)
     image_generation_providers = build_image_providers(settings)
     world_fetcher = HeadlessBrowserWebFetcher(
-        timeout_seconds=float(settings.web_browser_timeout_seconds),
-        render_wait_ms=int(settings.web_browser_render_wait_ms),
-        channel=str(settings.web_browser_channel or "auto"),
+        timeout_seconds=float(runtime_setting(settings, "web_browser_timeout_seconds", 20.0)),
+        render_wait_ms=int(runtime_setting(settings, "web_browser_render_wait_ms", 700)),
+        channel=str(runtime_setting(settings, "web_browser_channel", "auto") or "auto"),
     )
     world_observer = WorldObservationService(search_provider, world_fetcher)
     return RuntimeServices(

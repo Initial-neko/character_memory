@@ -12,6 +12,8 @@ from typing import Any, Protocol
 import httpx
 from pydantic import BaseModel, Field
 
+from character_memory.config import Settings
+
 
 logger = logging.getLogger("character_memory.visual_generation")
 
@@ -383,17 +385,17 @@ Has reference image: {has_reference_image}
         return text
 
 
-def build_image_providers(settings) -> dict[str, ImageGenerationProvider]:
+def build_image_providers(settings: Settings) -> dict[str, ImageGenerationProvider]:
     return {
         "agnes": AgnesImageProvider(
-            getattr(settings, "agnes_api_key", ""),
-            base_url=getattr(settings, "agnes_base_url", "https://apihub.agnes-ai.com/v1"),
-            model=getattr(settings, "agnes_image_model", "agnes-image-2.1-flash"),
-            timeout_seconds=getattr(settings, "image_generation_timeout_seconds", 180.0),
+            settings.agnes_api_key,
+            base_url=settings.agnes_base_url,
+            model=settings.agnes_image_model,
+            timeout_seconds=settings.image_generation_timeout_seconds,
         ),
         "msimg": MsimgProvider(
-            getattr(settings, "msimg_api_key", ""),
-            models=getattr(settings, "msimg_models", "qwen"),
+            settings.msimg_api_key,
+            models=settings.msimg_models,
             timeout_seconds=getattr(settings, "image_generation_timeout_seconds", 180.0),
         ),
     }

@@ -53,3 +53,5 @@ def test_stopping_call_cancels_streaming_session_and_retires_pending_mic_owner()
     assert "voice.asrSession?.cancel?.()" in stop_body
     assert "voice.streamingAsr = false" in stop_body
     assert "mediaAudio.closeCapture" in stop_body
+    assert "stream:voice.stream" in stop_body
+    assert "context:voice.audioContext" in stop_body

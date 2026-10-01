@@ -372,6 +372,13 @@
     if (!opened || feedEpoch !== epoch || !postsById.has(postId)) return;
     const data = await CM.api(`/v1/space/posts/${encodeURIComponent(postId)}`);
     if (!opened || feedEpoch !== epoch || !postsById.has(postId)) return;
+    const current = Array.from(feed.querySelectorAll("[data-space-post]"))
+      .find(node => node.dataset.spacePost === String(postId));
+    const draft = current?.querySelector(".space-comment-input");
+    // Delayed background replies must never discard a second, unsent comment
+    // or interrupt the input method's composition/focus. The next scheduled
+    // read (or the next submitted comment) will reconcile the card.
+    if (draft && (draft.value.trim() || current.contains(document.activeElement))) return;
     replacePost(data.post);
   }
 

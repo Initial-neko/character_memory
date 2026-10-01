@@ -47,6 +47,30 @@ uv run pytest -q
 
 If your change affects browser behavior, also run the relevant browser smoke checks. If it affects a real local model or CUDA sidecar, document the live validation separately from CI.
 
+## Documentation checks before submission
+
+Run `python scripts/check_docs.py` before each commit. It checks local link targets in maintained documents and requires every `docs/current/*.md` to be indexed in `docs/README.md`. It does not fetch external links or validate Markdown heading anchors.
+
+Every PR must include three plain-text fields (not only checked boxes):
+
+```text
+Docs-Impact: updated
+Docs-Reason: Describe which durable contract changed and how the document now matches it.
+Docs-Contracts: docs/current/CONVERSATION_RUNTIME.md
+```
+
+Use `Docs-Impact: none` with a concrete `Docs-Reason` when behavior, configuration, persistence, lifecycle and public entry points are unchanged. Tests and internal refactors do not automatically require prose edits. With `updated`, list the actual changed maintained documents in `Docs-Contracts`, separated by commas.
+
+Run the same PR impact check locally using a UTF-8 PR body file:
+
+```bash
+python scripts/check_docs.py --base origin/main --pr-body /path/to/pr-body.md
+```
+
+The `Documentation / docs-contract` CI job runs on every PR push and body edit, and checks structure on main pushes. Missing impact declarations, placeholder reasons, broken local links, unindexed current contracts, or claimed document updates absent from the diff fail the check. No model dependencies are installed for this job. To make it a merge requirement, repository rules must require this status check; adding the workflow alone does not change branch protection.
+
+Automation checks evidence and completeness, not behavioral truth. The contributor still reads the owning contract via `docs/README.md`, checks it against current source and behavioral tests, replaces stale statements, and updates `CODEBASE_LAYOUT` when a modification entry moves or is introduced. Reviewers must check that the listed contract owns the change and that a `none` reason is valid. Keep capability lists/defaults in their owning contract or source schema and link there from architecture summaries rather than copying them into multiple maintained documents. Do not auto-generate prose, append scan logs, or change unrelated documents to satisfy CI.
+
 ## Branches and releases
 
 Use short-lived feature/fix/refactor/chore branches and merge them into a CI-green `main`. Do not maintain a permanent `develop` or moving `stable` branch.

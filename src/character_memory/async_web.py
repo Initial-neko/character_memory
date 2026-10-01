@@ -48,39 +48,39 @@ async def _stream_hub_events(
     iterator. Durable chat state is still stored in SQLite; this stream remains
     only a low-latency notification channel.
     """
-    channel = hub._channel(channel_key)
-    cursor = max(0, int(after_id or 0))
-    next_heartbeat = time.monotonic() + max(0.1, heartbeat_seconds)
-    yield "retry: 1500\n\n"
+    with hub.channel_lease(channel_key) as channel:
+        cursor = max(0, int(after_id or 0))
+        next_heartbeat = time.monotonic() + max(0.1, heartbeat_seconds)
+        yield "retry: 1500\n\n"
 
-    # Brand-new UI streams skip old ephemeral events by design, but they still
-    # need one authoritative status snapshot. Otherwise a locally cached typing
-    # flag can survive a tab/character/group switch forever after missing idle.
-    if initial_event is not None:
-        event_type, data = initial_event
-        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-        yield f"event: {event_type}\ndata: {payload}\n\n"
+        # Brand-new UI streams skip old ephemeral events by design, but they still
+        # need one authoritative status snapshot. Otherwise a locally cached typing
+        # flag can survive a tab/character/group switch forever after missing idle.
+        if initial_event is not None:
+            event_type, data = initial_event
+            payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            yield f"event: {event_type}\ndata: {payload}\n\n"
 
-    while not hub._closed.is_set():
-        with channel.condition:
-            batch = [item for item in channel.events if item[0] > cursor]
+        while not hub._closed.is_set():
+            with channel.condition:
+                batch = [item for item in channel.events if item[0] > cursor]
 
-        if batch:
-            for seq, event_type, data in batch:
-                cursor = seq
-                payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-                yield f"id: {seq}\nevent: {event_type}\ndata: {payload}\n\n"
-            next_heartbeat = time.monotonic() + max(0.1, heartbeat_seconds)
-            # Give cancellation a scheduling point even during an event burst.
-            await asyncio.sleep(0)
-            continue
+            if batch:
+                for seq, event_type, data in batch:
+                    cursor = seq
+                    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+                    yield f"id: {seq}\nevent: {event_type}\ndata: {payload}\n\n"
+                next_heartbeat = time.monotonic() + max(0.1, heartbeat_seconds)
+                # Give cancellation a scheduling point even during an event burst.
+                await asyncio.sleep(0)
+                continue
 
-        now = time.monotonic()
-        if now >= next_heartbeat:
-            yield ": ping\n\n"
-            next_heartbeat = now + max(0.1, heartbeat_seconds)
+            now = time.monotonic()
+            if now >= next_heartbeat:
+                yield ": ping\n\n"
+                next_heartbeat = now + max(0.1, heartbeat_seconds)
 
-        await asyncio.sleep(max(0.01, poll_seconds))
+            await asyncio.sleep(max(0.01, poll_seconds))
 
 
 def attach_async_routes(app):

@@ -64,13 +64,7 @@ class GroupAutonomyService:
         # Match ReactionScheduler's Group watermark: durable arrival order wins
         # even when a client submits an older `at`. The quiet-time query remains
         # timestamp-based because it answers a different question.
-        with self.repository.store._lock:
-            row = self.repository.store.conn.execute(
-                "SELECT id FROM conversation_events WHERE conversation_id=? "
-                "AND actor_type='USER' ORDER BY id DESC LIMIT 1",
-                (conversation_id,),
-            ).fetchone()
-        return int(row["id"]) if row is not None else None
+        return self.repository.latest_user_event_id_by_insertion(conversation_id)
 
     def user_quiet(self, conversation_id: str, now: datetime) -> tuple[bool, float | None]:
         latest = self.repository.latest_user_event(conversation_id)

@@ -224,3 +224,39 @@ def test_autonomous_group_messages_stream_without_a_user_turn(page, realtime_ser
     )
     expect(page.locator(".message-row.user")).to_have_count(0)
     expect(page.locator(".message-row.assistant.group-assistant")).to_have_count(2)
+
+
+def test_direct_generation_error_survives_idle_and_history_reconcile(page, realtime_server):
+    _open(page, realtime_server)
+    page.locator("#messageInput").fill("E2E_FAIL_DIRECT: regression")
+    page.locator("#sendButton").click()
+    expect(page.locator(".message-row.user .bubble", has_text="E2E_FAIL_DIRECT:")).to_be_visible()
+    page.wait_for_function("() => !CM.state.pendingCharacters.has(CM.state.characterId)")
+    expect(page.locator("#chat .error", has_text="E2E direct provider failure")).to_be_visible()
+    page.evaluate("CM.features.realtimeReconcile.reconcileDirectLatest(CM.state.characterId)")
+    expect(page.locator("#chat .error", has_text="E2E direct provider failure")).to_be_visible()
+
+    # A new accepted turn replaces the failed attempt and must recover normally.
+    page.locator("#messageInput").fill("recover after failure")
+    page.locator("#sendButton").click()
+    expect(page.locator(".message-row.assistant .bubble", has_text="E2E reply: recover after failure")).to_be_visible()
+    expect(page.locator("#chat .error")).to_have_count(0)
+
+
+def test_direct_generated_media_event_renders_without_history_reload(page, realtime_server):
+    _open(page, realtime_server)
+    # The provider and binary asset are mocked; the production SSE listener,
+    # projection and browser message renderer remain in use.
+    page.route("**/v1/media/audit-generated-image", lambda route: route.fulfill(
+        content_type="image/svg+xml",
+        body='<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="red"/></svg>',
+    ))
+    page.evaluate("""() => CM.state.directStream.dispatchEvent(new MessageEvent('character_event', {
+      data: JSON.stringify({id:900001, character_id:CM.state.characterId,
+        event_time:new Date().toISOString(), content:'[生成图片：配图]',
+        metadata:{action:'IMAGE', media_id:'audit-generated-image', generated:true, source_event_id:900000}})
+    }))""")
+    image = page.locator('[data-message-id="900001"] img')
+    expect(image).to_have_attribute("src", "/v1/media/audit-generated-image")
+    page.wait_for_function("() => { const img = document.querySelector('[data-message-id=\"900001\"] img'); return img?.complete && img.naturalWidth > 0; }")
+    assert page.locator('[data-message-id="900001"]').inner_text().find("audit-generated-image") == -1

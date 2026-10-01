@@ -7,6 +7,7 @@
       characterId: localStorage.getItem(activeCharacterKey) || "rin",
       characters: [],
       pendingCharacters: new Set(),
+      directErrors: new Map(),
       lastRenderedSignature: "",
       conversation: {type: "DIRECT", groupId: null},
       directHistory: {messages: [], hasMore: false, nextBeforeId: null, loadingOlder: false},
@@ -156,6 +157,7 @@
       d.chat.innerHTML = `<div class="empty">还没有和 ${CM.escapeHtml(CM.currentProfile().name || CM.state.characterId)} 的聊天记录。<br>从第一句话开始认识彼此。</div>`;
       CM.state.lastRenderedSignature = signature;
       if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
+      CM.renderDirectError();
       return;
     }
     if (CM.state.directHistory.hasMore) {
@@ -177,6 +179,7 @@
       CM.addMessage(message);
     }
     if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
+    CM.renderDirectError();
     CM.state.lastRenderedSignature = signature;
     if (preserveScroll) {
       requestAnimationFrame(() => {
@@ -186,6 +189,15 @@
     } else {
       CM.scrollToBottom(false);
     }
+  };
+
+  CM.renderDirectError = () => {
+    const error = CM.state.directErrors.get(CM.state.characterId);
+    if (!error) return;
+    const box = document.createElement("div");
+    box.className = "error";
+    box.textContent = `生成失败：${error.message || "未知错误"}`;
+    CM.dom.chat.appendChild(box);
   };
 
   CM.appendTypingForCurrent = () => {
@@ -281,6 +293,7 @@
     const metadata = raw.metadata || {};
     const stickerId = metadata.sticker_id || null;
     const imageId = metadata.image_id || null;
+    const mediaId = metadata.media_id || null;
     return {
       id: raw.id,
       role:"assistant",
@@ -291,7 +304,8 @@
       sticker_id:stickerId,
       sticker:stickerId ? {id:stickerId,label:metadata.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(stickerId)}/asset`} : null,
       image_id:imageId,
-      image:imageId ? {id:imageId,label:metadata.image_label || "图片",url:`/v1/images/${encodeURIComponent(raw.character_id)}/${encodeURIComponent(imageId)}/asset`} : null,
+      media_id:mediaId,
+      image:mediaId ? {id:mediaId,label:null,url:`/v1/media/${encodeURIComponent(mediaId)}`} : imageId ? {id:imageId,label:metadata.image_label || "图片",url:`/v1/images/${encodeURIComponent(raw.character_id)}/${encodeURIComponent(imageId)}/asset`} : null,
       voice_status:metadata.voice_status || null,
       voice_media_id:metadata.voice_media_id || null,
       voice_duration_ms:metadata.voice_duration_ms ?? null,
@@ -323,6 +337,8 @@
       if (CM.isGroupConversation() || characterId !== CM.state.characterId) return;
       const data = JSON.parse(event.data || "{}");
       if (["queued", "typing", "superseded"].includes(data.state)) CM.state.pendingCharacters.add(characterId);
+      const error = CM.state.directErrors.get(characterId);
+      if (["queued", "typing"].includes(data.state) && error && Number(data.watermark) > Number(error.watermark)) CM.state.directErrors.delete(characterId);
       if (data.state === "idle") CM.state.pendingCharacters.delete(characterId);
       CM.renderCharacterList();
       CM.updateHeader();
@@ -338,10 +354,9 @@
     source.addEventListener("reaction_error", event => {
       if (CM.isGroupConversation() || characterId !== CM.state.characterId) return;
       const data = JSON.parse(event.data || "{}");
-      const box = document.createElement("div");
-      box.className = "error";
-      box.textContent = `生成失败：${data.message || "未知错误"}`;
-      CM.dom.chat.appendChild(box);
+      CM.state.directErrors.set(characterId, data);
+      CM.state.lastRenderedSignature = "";
+      CM.renderHistory(CM.state.directHistory.messages);
     });
   };
 

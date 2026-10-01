@@ -373,7 +373,7 @@ def test_voice_call_mobile_layout_is_viewport_bounded_and_scrollable(chat):
             row.textContent = 'long call history row ' + i;
             log.appendChild(row);
           }
-          transcript.textContent = Array.from({length: 30}, (_, i) => 'transcript line ' + i).join('\n');
+          transcript.textContent = Array.from({length: 30}, (_, i) => 'transcript line ' + i).join('\\n');
 
           const rect = el => {
             const r = el.getBoundingClientRect();

@@ -405,6 +405,26 @@ def test_space_world_observation_appraises_untrusted_page_before_memory_and_expr
     store.close()
 
 
+def test_space_post_and_social_event_commit_atomically(tmp_path, monkeypatch):
+    access, store, _ = _access(tmp_path, ids=("c00",))
+    repository = SpaceRepository(store)
+    service = SpaceAutonomyService(access, repository)
+    now = datetime(2026, 9, 22, 9, 10, tzinfo=timezone.utc)
+
+    def fail_post(*_args, **_kwargs):
+        raise RuntimeError("post insert failed")
+
+    monkeypatch.setattr(repository, "create_post", fail_post)
+    with pytest.raises(RuntimeError, match="post insert failed"):
+        service.run_opportunity("c00", now=now, cascade=False, source="DEV")
+
+    assert not any(
+        item.event_type == EventType.SOCIAL_POST
+        for item in store.list_events("c00")
+    )
+    store.close()
+
+
 def test_world_summary_does_not_become_memory_without_personal_meaning(tmp_path):
     model = WorldNoPersonalMemoryModel()
     access, store, _ = _access(tmp_path, ids=("c00",), model=model)

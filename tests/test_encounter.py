@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from pathlib import Path
+import threading
+import time
 
 import pytest
 
@@ -136,6 +138,18 @@ class _RecordingModel:
         return SimpleNamespace(message=self.message)
 
 
+class _DismissDuringReplyModel(_RecordingModel):
+    def __init__(self, repo, candidate_id, now):
+        super().__init__("这句已经来迟了。")
+        self.repo = repo
+        self.candidate_id = candidate_id
+        self.now = now
+
+    def structured_for_session(self, prompt, schema, session_id):
+        self.repo.set_status(self.candidate_id, "DISMISSED", self.now)
+        return super().structured_for_session(prompt, schema, session_id)
+
+
 def test_a_message_is_stored_before_the_character_answers(tmp_path):
     """The send no longer waits on the model, so the two halves are separable."""
 
@@ -182,6 +196,73 @@ def test_a_closed_encounter_is_never_answered(tmp_path):
     store.close()
 
 
+def test_reply_that_finishes_after_dismiss_is_dropped(tmp_path):
+    """Closing during the model call must win over its late result."""
+
+    store = SQLiteStore(str(tmp_path / "x.db"))
+    repo = EncounterRepository(store)
+    now = datetime(2026, 9, 22, 12, 45, tzinfo=timezone.utc)
+    candidate = _chat_candidate(repo, now)
+    model = _DismissDuringReplyModel(repo, candidate["id"], now)
+    service = EncounterService(
+        SimpleNamespace(require_bundle=lambda: SimpleNamespace(model=model)),
+        repo,
+    )
+
+    service.post_message(candidate["id"], "还在吗？", now=now)
+    assert service.reply(candidate["id"], now=now) is None
+    assert repo.get_candidate(candidate["id"])["status"] == "DISMISSED"
+    assert [item["role"] for item in repo.list_messages(candidate["id"])] == ["USER"]
+    store.close()
+
+
+def test_concurrent_accept_creates_only_one_formal_character(tmp_path):
+    """Two HTTP workers accepting one card must share one lifecycle claim."""
+
+    store = SQLiteStore(str(tmp_path / "x.db"))
+    repo = EncounterRepository(store)
+    now = datetime(2026, 9, 22, 12, 50, tzinfo=timezone.utc)
+    candidate = _chat_candidate(repo, now)
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    created = []
+
+    def creator(*_args, **_kwargs):
+        created.append(f"formal-{len(created) + 1}")
+        if len(created) == 1:
+            first_entered.set()
+            release_first.wait(timeout=2)
+        return {"id": created[-1]}
+
+    service = EncounterService(
+        SimpleNamespace(create_character_from_draft=creator, store=lambda: store),
+        repo,
+    )
+    results = []
+    errors = []
+
+    def accept():
+        try:
+            results.append(service.accept(candidate["id"], now=now))
+        except Exception as exc:  # pragma: no cover - assertion reports the exception
+            errors.append(exc)
+
+    first = threading.Thread(target=accept)
+    second = threading.Thread(target=accept)
+    first.start()
+    assert first_entered.wait(timeout=1)
+    second.start()
+    time.sleep(0.05)
+    release_first.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert errors == []
+    assert created == ["formal-1"]
+    assert {item["accepted_character_id"] for item in results} == {"formal-1"}
+    store.close()
+
+
 def test_scheduler_answers_queued_messages_and_survives_a_failure(tmp_path):
     """Queued replies run on the worker, and a broken one never escapes it."""
 
@@ -211,6 +292,31 @@ def test_scheduler_answers_queued_messages_and_survives_a_failure(tmp_path):
     assert scheduler.enqueue_reply(candidate["id"], now=now) is True
     assert scheduler.drain_pending_replies() == []
     assert scheduler.pending_reply_count() == 0
+    store.close()
+
+
+def test_scheduler_recovers_a_durable_user_line_after_restart(tmp_path):
+    store = SQLiteStore(str(tmp_path / "x.db"))
+    repo = EncounterRepository(store)
+    now = datetime(2026, 9, 22, 13, 15, tzinfo=timezone.utc)
+    candidate = _chat_candidate(repo, now)
+    model = _RecordingModel("重启后也没有丢掉这次回答。")
+    access = SimpleNamespace(
+        settings=SimpleNamespace(),
+        require_bundle=lambda: SimpleNamespace(model=model),
+    )
+
+    # The request process stored the user line and then stopped before its
+    # process-local queue could be drained.
+    EncounterService(access, repo).post_message(candidate["id"], "刚才断开了吗？", now=now)
+    restarted = EncounterScheduler(access, repo)
+    assert restarted.pending_reply_count() == 0
+    assert restarted.recover_pending_replies(now=now) == 1
+    assert restarted.recover_pending_replies(now=now) == 0
+
+    answered = restarted.drain_pending_replies()
+    assert answered[0]["message"]["content"] == "重启后也没有丢掉这次回答。"
+    assert repo.candidates_waiting_for_reply() == []
     store.close()
 
 
@@ -252,3 +358,27 @@ def test_the_chat_panel_opens_with_a_transition_and_re_reads_for_the_reply():
     # Bounded re-reads, and only while the panel is still open.
     assert "for (const delay of [2500, 6500])" in script
     assert "data-encounter-panel]:not(.hidden)" in script
+
+
+def test_encounter_lifecycle_locks_do_not_collide_across_candidates(tmp_path):
+    """A slow accept on candidate 1 must not block candidate 65."""
+
+    store = SQLiteStore(str(tmp_path / "lock.db"))
+    repo = EncounterRepository(store)
+    first = repo.lifecycle_lock(1)
+    assert first is repo.lifecycle_lock(1)
+    unrelated = repo.lifecycle_lock(65)
+    assert unrelated is not first
+
+    acquired = threading.Event()
+
+    def claim_unrelated():
+        with repo.lifecycle_lock(65):
+            acquired.set()
+
+    with first:
+        worker = threading.Thread(target=claim_unrelated)
+        worker.start()
+        assert acquired.wait(timeout=1), "unrelated candidate shares a lifecycle lock"
+    worker.join(timeout=2)
+    store.close()

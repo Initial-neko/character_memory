@@ -237,12 +237,13 @@ Excerpt:
 
     def mark_seen(self, candidate_id: int, *, now: datetime | None = None) -> dict:
         now = now or datetime.now().astimezone()
-        candidate = self.repository.get_candidate(candidate_id)
-        if candidate is None:
-            raise KeyError("encounter candidate not found")
-        if candidate["status"] == "NEW":
-            return self.repository.set_status(candidate_id, "SEEN", now)
-        return candidate
+        with self.repository.lifecycle_lock(candidate_id):
+            candidate = self.repository.get_candidate(candidate_id)
+            if candidate is None:
+                raise KeyError("encounter candidate not found")
+            if candidate["status"] == "NEW":
+                return self.repository.set_status(candidate_id, "SEEN", now)
+            return candidate
 
     def post_message(
         self, candidate_id: int, message: str, *, now: datetime | None = None
@@ -256,18 +257,14 @@ Excerpt:
         """
 
         now = now or datetime.now().astimezone()
-        candidate = self.repository.get_candidate(candidate_id)
-        if candidate is None:
-            raise KeyError("encounter candidate not found")
-        if candidate["status"] in {"ACCEPTED", "DISMISSED", "EXPIRED", "FAILED"}:
-            raise ValueError("this encounter is already closed")
         clean = str(message or "").strip()
         if not clean:
             raise ValueError("message must not be empty")
-        message_row = self.repository.append_message(candidate_id, "USER", clean, now)
-        # CHATTING is set here rather than with the reply: the panel is rendered
-        # open from the status, and the browser refreshes right after sending.
-        candidate = self.repository.set_status(candidate_id, "CHATTING", now)
+        with self.repository.lifecycle_lock(candidate_id):
+            message_row = self.repository.append_open_message(candidate_id, "USER", clean, now)
+            if message_row is None:
+                raise ValueError("this encounter is already closed")
+            candidate = self.repository.get_candidate(candidate_id)
         return {
             "candidate": candidate,
             "message": message_row,
@@ -312,8 +309,13 @@ Excerpt:
             EncounterReply,
             f"encounter-chat:{candidate_id}",
         )
-        message_row = self.repository.append_message(candidate_id, "CHARACTER", reply.message, now)
-        candidate = self.repository.set_status(candidate_id, "CHATTING", now)
+        with self.repository.lifecycle_lock(candidate_id):
+            message_row = self.repository.append_open_message(
+                candidate_id, "CHARACTER", reply.message, now
+            )
+            if message_row is None:
+                return None
+            candidate = self.repository.get_candidate(candidate_id)
         return {
             "candidate": candidate,
             "message": message_row,
@@ -339,66 +341,68 @@ Excerpt:
         confirm_over_soft_limit: bool = False,
     ) -> dict:
         now = now or datetime.now().astimezone()
-        candidate = self.repository.get_candidate(candidate_id)
-        if candidate is None:
-            raise KeyError("encounter candidate not found")
-        if candidate["status"] == "ACCEPTED":
-            return candidate
-        if candidate["status"] in {"DISMISSED", "EXPIRED", "FAILED"}:
-            raise ValueError("closed encounter cannot be accepted")
+        with self.repository.lifecycle_lock(candidate_id):
+            candidate = self.repository.get_candidate(candidate_id)
+            if candidate is None:
+                raise KeyError("encounter candidate not found")
+            if candidate["status"] == "ACCEPTED":
+                return candidate
+            if candidate["status"] in {"DISMISSED", "EXPIRED", "FAILED"}:
+                raise ValueError("closed encounter cannot be accepted")
 
-        creator = getattr(self.access, "create_character_from_draft", None)
-        if not callable(creator):
-            raise RuntimeError("character creator is unavailable")
-        draft = PersonaDraft.model_validate(candidate["draft"])
-        profile = creator(
-            draft,
-            "",
-            confirm_over_soft_limit=confirm_over_soft_limit,
-        )
-        character_id = profile["id"]
-
-        messages = self.repository.list_messages(candidate_id, limit=40)
-        visible = [candidate["opening_message"]]
-        visible.extend(
-            f"{'我' if item['role'] == 'USER' else draft.name}: {item['content']}"
-            for item in messages
-        )
-        event_content = "初次邂逅。\n" + "\n".join(item for item in visible if item)[:6000]
-        try:
-            self.access.store().append_event(
-                Event(
-                    character_id=character_id,
-                    event_type=EventType.LIFE_EVENT,
-                    event_time=now,
-                    content=event_content,
-                    metadata={
-                        "channel": "ENCOUNTER",
-                        "encounter_candidate_id": candidate_id,
-                        "encounter_source_type": candidate["source_type"],
-                        "source_urls": candidate["source_urls"],
-                    },
-                )
+            creator = getattr(self.access, "create_character_from_draft", None)
+            if not callable(creator):
+                raise RuntimeError("character creator is unavailable")
+            draft = PersonaDraft.model_validate(candidate["draft"])
+            profile = creator(
+                draft,
+                "",
+                confirm_over_soft_limit=confirm_over_soft_limit,
             )
-        except Exception:
-            logger.exception("encounter.accept initial_event_failed candidate=%s", candidate_id)
+            character_id = profile["id"]
 
-        accepted = self.repository.set_status(
-            candidate_id,
-            "ACCEPTED",
-            now,
-            accepted_character_id=character_id,
-        )
-        return {**accepted, "character": profile}
+            messages = self.repository.list_messages(candidate_id, limit=40)
+            visible = [candidate["opening_message"]]
+            visible.extend(
+                f"{'我' if item['role'] == 'USER' else draft.name}: {item['content']}"
+                for item in messages
+            )
+            event_content = "初次邂逅。\n" + "\n".join(item for item in visible if item)[:6000]
+            try:
+                self.access.store().append_event(
+                    Event(
+                        character_id=character_id,
+                        event_type=EventType.LIFE_EVENT,
+                        event_time=now,
+                        content=event_content,
+                        metadata={
+                            "channel": "ENCOUNTER",
+                            "encounter_candidate_id": candidate_id,
+                            "encounter_source_type": candidate["source_type"],
+                            "source_urls": candidate["source_urls"],
+                        },
+                    )
+                )
+            except Exception:
+                logger.exception("encounter.accept initial_event_failed candidate=%s", candidate_id)
+
+            accepted = self.repository.set_status(
+                candidate_id,
+                "ACCEPTED",
+                now,
+                accepted_character_id=character_id,
+            )
+            return {**accepted, "character": profile}
 
     def dismiss(self, candidate_id: int, *, now: datetime | None = None) -> dict:
         now = now or datetime.now().astimezone()
-        candidate = self.repository.get_candidate(candidate_id)
-        if candidate is None:
-            raise KeyError("encounter candidate not found")
-        if candidate["status"] == "ACCEPTED":
-            raise ValueError("accepted encounter cannot be dismissed")
-        return self.repository.set_status(candidate_id, "DISMISSED", now)
+        with self.repository.lifecycle_lock(candidate_id):
+            candidate = self.repository.get_candidate(candidate_id)
+            if candidate is None:
+                raise KeyError("encounter candidate not found")
+            if candidate["status"] == "ACCEPTED":
+                raise ValueError("accepted encounter cannot be dismissed")
+            return self.repository.set_status(candidate_id, "DISMISSED", now)
 
 
 class EncounterScheduler:
@@ -520,6 +524,28 @@ class EncounterScheduler:
         with self._pending_lock:
             return len(self._pending_replies)
 
+    def recover_pending_replies(self, *, now: datetime | None = None) -> int:
+        """Rebuild the bounded reply queue from durable last-user lines."""
+
+        queued_at = now or datetime.now().astimezone()
+        waiting = self.repository.candidates_waiting_for_reply(
+            limit=MAX_PENDING_CHAT_REPLIES
+        )
+        recovered = 0
+        with self._pending_lock:
+            existing = {candidate_id for candidate_id, _ in self._pending_replies}
+            for candidate_id in waiting:
+                if candidate_id in existing:
+                    continue
+                if len(self._pending_replies) >= MAX_PENDING_CHAT_REPLIES:
+                    break
+                self._pending_replies.append((candidate_id, queued_at))
+                existing.add(candidate_id)
+                recovered += 1
+        if recovered:
+            self._wake.set()
+        return recovered
+
     def drain_pending_replies(self, *, limit: int = REPLIES_PER_DRAIN) -> list[dict]:
         """Answer queued messages. Safe to call from any thread."""
 
@@ -558,8 +584,11 @@ class EncounterScheduler:
                 # A backlog larger than one drain keeps the worker awake rather
                 # than waiting out the full polling interval.
                 self._wake.set()
-            self._wake.wait(self.poll_seconds())
+            # Clear before sleeping so a concurrent enqueue cannot be
+            # silently erased between wait() returning and clear().
             self._wake.clear()
+            if not self.pending_reply_count():
+                self._wake.wait(self.poll_seconds())
         logger.info("encounter.scheduler stop")
 
     def start(self) -> None:
@@ -567,6 +596,7 @@ class EncounterScheduler:
             return
         self._stop.clear()
         self._wake.clear()
+        self.recover_pending_replies()
         self._thread = threading.Thread(
             target=self._loop,
             name="character-encounter",

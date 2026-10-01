@@ -368,6 +368,38 @@
     if (target) target.outerHTML = postHtml(post);
   }
 
+  async function refreshPost(postId, epoch) {
+    if (!opened || feedEpoch !== epoch || !postsById.has(postId)) return;
+    const data = await CM.api(`/v1/space/posts/${encodeURIComponent(postId)}`);
+    if (!opened || feedEpoch !== epoch || !postsById.has(postId)) return;
+    const current = Array.from(feed.querySelectorAll("[data-space-post]"))
+      .find(node => node.dataset.spacePost === String(postId));
+    const draft = current?.querySelector(".space-comment-input");
+    // Never replace a card containing unsent text. The submit handler will
+    // reconcile the card after the next comment. An empty, focused composer is
+    // safe to refresh, provided we restore focus after the replacement.
+    if (draft?.value.trim()) return;
+    const restoreFocus = draft && document.activeElement === draft;
+    replacePost(data.post);
+    if (restoreFocus) {
+      const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
+        .find(node => node.dataset.spacePost === String(postId));
+      updated?.querySelector(".space-comment-input")?.focus();
+    }
+  }
+
+  function scheduleCommentReconciliation(postId) {
+    // Comment-thread reactions run on the scheduler after the POST response.
+    // Space has no push channel yet, so use a bounded set of re-reads rather
+    // than leaving an open panel permanently stale or polling forever.
+    const epoch = feedEpoch;
+    for (const delay of [2500, 6500, 12000, 22000]) {
+      window.setTimeout(() => {
+        refreshPost(postId, epoch).catch(console.warn);
+      }, delay);
+    }
+  }
+
   function updateCharacterEntry() {
     characterEntry.classList.toggle("hidden", CM.isGroupConversation());
   }
@@ -665,6 +697,7 @@
       }
       replyTargets.delete(postId);
       replacePost(data.post);
+      scheduleCommentReconciliation(postId);
       const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
         .find(node => node.dataset.spacePost === postId);
       updated?.querySelector(".space-comment-input")?.focus();

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import hashlib
 import json
+import threading
 from typing import Any
 
 from character_memory.time_utils import epoch_us, parse_datetime
@@ -17,7 +18,25 @@ class EncounterRepository:
 
     def __init__(self, store):
         self.store = store
+        # EncounterService is instantiated both for HTTP routes and the
+        # scheduler. Keep lifecycle serialization on their shared repository so
+        # those callers cannot accept/dismiss/reopen one candidate concurrently.
+        # A stable lock per durable candidate prevents an unrelated candidate
+        # from blocking on a slow character creator due to modulo collisions.
+        # Keep entries strongly owned: callers hold a raw RLock and eviction
+        # without tracking waiters could hand out two locks for one candidate.
+        self._lifecycle_guard = threading.Lock()
+        self._lifecycle_locks: dict[int, threading.RLock] = {}
         self._init_schema()
+
+    def lifecycle_lock(self, candidate_id: int) -> threading.RLock:
+        key = int(candidate_id)
+        with self._lifecycle_guard:
+            lock = self._lifecycle_locks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                self._lifecycle_locks[key] = lock
+            return lock
 
     def _init_schema(self) -> None:
         now = datetime.now().astimezone()
@@ -271,6 +290,55 @@ class EncounterRepository:
             "created_at": now.isoformat(),
         }
 
+    def append_open_message(
+        self,
+        candidate_id: int,
+        role: str,
+        content: str,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        """Append and mark chatting only if the encounter is still open.
+
+        The status check, message insert, and transition share one transaction.
+        A model result that finishes after accept/dismiss/expiry therefore
+        cannot write a late line or reopen the candidate.
+        """
+
+        normalized_role = str(role or "").strip().upper()
+        if normalized_role not in {"USER", "CHARACTER"}:
+            raise ValueError("invalid encounter message role")
+        text = str(content or "").strip()
+        if not text:
+            raise ValueError("encounter message must not be empty")
+        with self.store.transaction():
+            candidate = self.store.conn.execute(
+                "SELECT status FROM encounter_candidates WHERE id=?",
+                (int(candidate_id),),
+            ).fetchone()
+            if candidate is None:
+                raise KeyError("encounter candidate not found")
+            if str(candidate["status"]) in {"ACCEPTED", "DISMISSED", "EXPIRED", "FAILED"}:
+                return None
+            cur = self.store.conn.execute(
+                "INSERT INTO encounter_messages(candidate_id,role,content,created_at,created_at_epoch) VALUES(?,?,?,?,?)",
+                (int(candidate_id), normalized_role, text[:8000], now.isoformat(), epoch_us(now)),
+            )
+            self.store.conn.execute(
+                """
+                UPDATE encounter_candidates
+                SET status='CHATTING',updated_at=?,updated_at_epoch=?
+                WHERE id=?
+                """,
+                (now.isoformat(), epoch_us(now), int(candidate_id)),
+            )
+        return {
+            "id": int(cur.lastrowid),
+            "candidate_id": int(candidate_id),
+            "role": normalized_role,
+            "content": text[:8000],
+            "created_at": now.isoformat(),
+        }
+
     def list_messages(self, candidate_id: int, *, limit: int = 30) -> list[dict[str, Any]]:
         with self.store._lock:
             rows = self.store.conn.execute(
@@ -287,6 +355,29 @@ class EncounterRepository:
             }
             for row in rows
         ]
+
+    def candidates_waiting_for_reply(self, *, limit: int = 50) -> list[int]:
+        """Open candidates whose latest durable chat line is from the user."""
+
+        with self.store._lock:
+            rows = self.store.conn.execute(
+                """
+                SELECT c.id
+                FROM encounter_candidates AS c
+                JOIN encounter_messages AS m ON m.id=(
+                    SELECT latest.id
+                    FROM encounter_messages AS latest
+                    WHERE latest.candidate_id=c.id
+                    ORDER BY latest.created_at_epoch DESC,latest.id DESC
+                    LIMIT 1
+                )
+                WHERE c.status IN ('NEW','SEEN','CHATTING') AND m.role='USER'
+                ORDER BY m.created_at_epoch,m.id
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 200)),),
+            ).fetchall()
+        return [int(row["id"]) for row in rows]
 
     def ensure_state(self, now: datetime, interval_minutes: float) -> dict[str, Any]:
         next_at = datetime.fromtimestamp(

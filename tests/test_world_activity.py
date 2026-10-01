@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+import threading
+
+import pytest
 
 from character_memory.config import Settings
 from character_memory.domain.models import Event, EventType, WorldObservation
@@ -186,6 +189,62 @@ def test_world_pulse_repository_deduplicates_topics_and_character_comments(tmp_p
     assert duplicate["id"] == comment["id"]
     assert repo.list_comments(first["id"])[0]["content"] == "我会继续看看。"
     assert WorldPulseRepository.MIGRATION in store.list_schema_migrations()
+    store.close()
+
+
+def test_world_pulse_comment_rolls_back_when_person_event_fails(tmp_path, monkeypatch):
+    store, access, _ = make_access(tmp_path, count=1)
+    repository = WorldPulseRepository(store)
+    topic = repository.upsert_topic(
+        WorldPulseTopicDraft(
+            title="需要原子提交的话题",
+            summary="角色公开评论与个人 World 事件必须一起持久化。",
+            category="technology",
+            source_indexes=[1],
+        ),
+        ["https://example.com/atomic"],
+        NOW,
+    )
+
+    def fail_event(_event):
+        raise RuntimeError("event insert failed")
+
+    monkeypatch.setattr(store, "append_event", fail_event)
+    service = WorldActivityService(access, repository)
+    with pytest.raises(RuntimeError, match="event insert failed"):
+        service.discuss_topic(topic["id"], now=NOW, character_ids=["c00"])
+
+    assert repository.list_comments(topic["id"]) == []
+    assert store.list_events("c00") == []
+    store.close()
+
+
+def test_world_scheduler_coalesces_concurrent_due_runs(tmp_path, monkeypatch):
+    store, access, _ = make_access(tmp_path, count=1)
+    access.settings.world_browse_enabled = False
+    repository = WorldPulseRepository(store)
+    scheduler = WorldActivityScheduler(access, repository)
+    repository.force_due("PULSE", "global", NOW)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_refresh(*, now):
+        entered.set()
+        release.wait(timeout=2)
+        return {"refreshed": True, "topics": [], "errors": []}
+
+    monkeypatch.setattr(scheduler.service, "refresh_pulse", slow_refresh)
+    first_result = []
+
+    first = threading.Thread(target=lambda: first_result.extend(scheduler.run_once(now=NOW)))
+    first.start()
+    assert entered.wait(timeout=1)
+    assert scheduler.run_once(now=NOW) == []
+    release.set()
+    first.join(timeout=2)
+
+    assert [item["kind"] for item in first_result] == ["PULSE"]
+    assert len([item for item in repository.recent_runs() if item["kind"] == "PULSE"]) == 1
     store.close()
 
 
@@ -649,4 +708,37 @@ def test_idle_browse_gate_periodically_rechecks_even_without_new_events(tmp_path
     assert len(_browsed(scheduler.run_once(now=recheck))) == 1
     assert _browse_plan_call_count(model) == 2
     assert scheduler.status()["browse_idle_recheck_minutes"] == 120
+    store.close()
+
+
+def test_legacy_world_pulse_comment_repairs_missing_person_event_once(tmp_path):
+    """Older comment-only rows self-heal without another model take or duplicates."""
+
+    store, access, model = make_access(tmp_path, count=1)
+    repo = WorldPulseRepository(store)
+    topic = repo.upsert_topic(
+        WorldPulseTopicDraft(
+            title="迁移前的历史话题",
+            summary="公开评论已有记录，但角色的观察事实丢失。",
+            category="technology",
+            source_indexes=[1],
+        ),
+        ["https://example.com/legacy"],
+        NOW,
+    )
+    original = repo.add_comment(topic["id"], "c00", "原先已经公开说过的话", NOW)
+    service = WorldActivityService(access, repo)
+
+    first = service.discuss_topic(topic["id"], now=NOW, character_ids=["c00"])
+    assert first["outcomes"][0]["comment"]["id"] == original["id"]
+    assert first["outcomes"][0]["reason"] == "restored_missing_pulse_observation"
+    assert not model.calls, "Recovery must not ask the model to rewrite existing comments"
+    events = [e for e in store.list_events("c00") if e.metadata.get("channel") == "WORLD_PULSE"]
+    assert len(events) == 1
+    assert "原先已经公开说过的话" in events[0].content
+
+    second = service.discuss_topic(topic["id"], now=NOW, character_ids=["c00"])
+    assert second["outcomes"] == []
+    assert len([e for e in store.list_events("c00") if e.metadata.get("channel") == "WORLD_PULSE"]) == 1
+    assert len(repo.list_comments(topic["id"])) == 1
     store.close()

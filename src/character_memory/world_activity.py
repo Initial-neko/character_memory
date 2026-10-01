@@ -336,6 +336,33 @@ class WorldPulseRepository:
             ).fetchone()
         return row is not None
 
+    def get_comment(self, topic_id: int, character_id: str) -> dict | None:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM world_pulse_comments WHERE topic_id=? AND character_id=?",
+                (int(topic_id), character_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row["id"]),
+            "topic_id": int(row["topic_id"]),
+            "character_id": str(row["character_id"]),
+            "content": str(row["content"]),
+            "created_at": str(row["created_at"]),
+        }
+
+    def has_pulse_observation(self, topic_id: int, character_id: str) -> bool:
+        """Find a durable personal event even for legacy partially written comments."""
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT 1 FROM events WHERE character_id=? AND event_type=? "
+                "AND json_extract(metadata_json, '$.channel')='WORLD_PULSE' "
+                "AND CAST(json_extract(metadata_json, '$.topic_id') AS INTEGER)=? LIMIT 1",
+                (character_id, EventType.WORLD_OBSERVATION.value, int(topic_id)),
+            ).fetchone()
+        return row is not None
+
     def ensure_state(
         self,
         kind: str,
@@ -790,7 +817,10 @@ Summary: {topic["summary"]}
             character_id
             for character_id in (character_ids or list(profiles))
             if character_id in profiles
-            and not self.repository.has_comment(topic_id, character_id)
+            and (
+                not self.repository.has_comment(topic_id, character_id)
+                or not self.repository.has_pulse_observation(topic_id, character_id)
+            )
         ]
         candidates.sort(
             key=lambda character_id: hashlib.sha256(
@@ -808,7 +838,46 @@ Summary: {topic["summary"]}
 
         bundle = self.access.require_bundle()
         outcomes = []
+
+        def observation_event(character_id: str, comment_text: str) -> Event:
+            return Event(
+                character_id=character_id,
+                event_type=EventType.WORLD_OBSERVATION,
+                event_time=now,
+                content=(
+                    f"看到 World Pulse 话题「{topic['title']}」："
+                    f"{topic['summary']}\n我的公开评论：{comment_text}"
+                ),
+                metadata={
+                    "channel": "WORLD_PULSE",
+                    "topic_id": topic_id,
+                    "category": topic.get("category") or "",
+                    "sources": topic.get("source_urls") or [],
+                    "conversation_id": f"world-pulse:{topic_id}:{character_id}",
+                },
+            )
+
         for character_id in candidates:
+            previous = self.repository.get_comment(topic_id, character_id)
+            if previous is not None:
+                # Legacy partial writes may have a public comment without its
+                # personal observation. Recover without another model request.
+                with self.repository.store.transaction():
+                    if self.repository.has_pulse_observation(topic_id, character_id):
+                        continue
+                    restored = self.repository.store.append_event(
+                        observation_event(character_id, previous["content"])
+                    )
+                outcomes.append({
+                    "character_id": character_id,
+                    "character_name": profiles[character_id].get("name") or character_id,
+                    "interested": True,
+                    "comment": previous,
+                    "reason": "restored_missing_pulse_observation",
+                    "source_event_id": restored.id,
+                })
+                continue
+
             runtime = bundle.runtimes.get(character_id)
             if runtime is None:
                 continue
@@ -834,32 +903,23 @@ Summary: {topic["summary"]}
             comment = None
             event_id = None
             if take.interested and take.comment:
-                comment = self.repository.add_comment(
-                    topic_id,
-                    character_id,
-                    take.comment,
-                    now,
-                )
-                if comment is not None:
-                    event = self.access.store().append_event(
-                        Event(
-                            character_id=character_id,
-                            event_type=EventType.WORLD_OBSERVATION,
-                            event_time=now,
-                            content=(
-                                f"看到 World Pulse 话题「{topic['title']}」："
-                                f"{topic['summary']}\n我的公开评论：{take.comment}"
-                            ),
-                            metadata={
-                                "channel": "WORLD_PULSE",
-                                "topic_id": topic_id,
-                                "category": topic.get("category") or "",
-                                "sources": topic.get("source_urls") or [],
-                                "conversation_id": f"world-pulse:{topic_id}:{character_id}",
-                            },
+                # The public take and the person's durable observation are two
+                # projections of one decision. Keep them on the repository
+                # connection so a failed event insert does not strand a comment
+                # that the unique constraint would then prevent us from retrying.
+                with self.repository.store.transaction():
+                    # A parallel scheduler may have committed during inference.
+                    # Only one event is allowed per character/topic; use the
+                    # actual persisted comment content in that event.
+                    if not self.repository.has_pulse_observation(topic_id, character_id):
+                        comment = self.repository.add_comment(
+                            topic_id, character_id, take.comment, now
                         )
-                    )
-                    event_id = event.id
+                        if comment is not None:
+                            event = self.repository.store.append_event(
+                                observation_event(character_id, comment["content"])
+                            )
+                            event_id = event.id
 
             outcomes.append(
                 {
@@ -1074,6 +1134,7 @@ class WorldActivityScheduler:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
+        self._run_lock = threading.Lock()
 
     def enabled(self) -> bool:
         return bool(
@@ -1240,6 +1301,17 @@ class WorldActivityScheduler:
         }
 
     def run_once(self, *, now: datetime | None = None) -> list[dict]:
+        # The background loop and the Dev endpoint share this scheduler. A Dev
+        # trigger landing while the loop is between due() and complete_state()
+        # must not start the same paid work a second time.
+        if not self._run_lock.acquire(blocking=False):
+            return []
+        try:
+            return self._run_once_unlocked(now=now)
+        finally:
+            self._run_lock.release()
+
+    def _run_once_unlocked(self, *, now: datetime | None = None) -> list[dict]:
         now = now or datetime.now().astimezone()
         if not self.enabled():
             return []

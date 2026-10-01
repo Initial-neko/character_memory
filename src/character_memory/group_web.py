@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 import threading
-import weakref
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -76,7 +75,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         raise RuntimeError("create_api() must expose app.state.character_memory before group routes are attached")
 
     turn_locks_guard = threading.Lock()
-    turn_locks: weakref.WeakValueDictionary[str, threading.RLock] = weakref.WeakValueDictionary()
+    turn_locks: dict[str, threading.RLock] = {}
 
     def turn_lock_for(conversation_id: str) -> threading.RLock:
         # Once P0.15 async routes are mounted, both the legacy synchronous group

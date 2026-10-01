@@ -12,11 +12,20 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
 class Element {
-  constructor() { this.children = []; this.dataset = {}; }
+  constructor() { this.children = []; this.dataset = {}; this.parent = null; this.className = ''; this.textContent = ''; }
   set innerHTML(value) { this.html = value; this.children = []; }
   get innerHTML() { return this.html || ''; }
-  appendChild(child) { this.children.push(child); }
-  querySelector() { return null; }
+  appendChild(child) { child.parent = this; this.children.push(child); }
+  querySelector(selector) {
+    if (selector === '[data-direct-error]') return this.children.find(child => child.dataset?.directError) || null;
+    if (selector === '.typing-row') return this.children.find(child => String(child.className || '').split(/\s+/).includes('typing-row')) || null;
+    return null;
+  }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter(child => child !== this);
+    this.parent = null;
+  }
 }
 const elements = new Map();
 global.document = {

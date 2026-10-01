@@ -26,7 +26,8 @@ from character_memory.api_resource_service import ApiResourceService
 from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.application.proactive_service import ProactiveService
 from character_memory.background_services import BackgroundServices
-from character_memory.config import (, runtime_setting
+from character_memory.config import (
+    runtime_setting,
     load_persona,
     load_settings,
     resolve_media_dir,

@@ -217,9 +217,13 @@
     CM.dom.chat.appendChild(typing);
   };
 
-  CM.syncDirectEphemeralUi = () => {
+  CM.clearDirectEphemeralUi = () => {
     CM.dom.chat.querySelector(".typing-row")?.remove();
     CM.dom.chat.querySelector("[data-direct-error]")?.remove();
+  };
+
+  CM.syncDirectEphemeralUi = () => {
+    CM.clearDirectEphemeralUi();
     if (CM.state.pendingCharacters.has(CM.state.characterId)) CM.appendTypingForCurrent();
     CM.renderDirectError();
   };
@@ -232,9 +236,7 @@
     const renderedRows = CM.dom.chat.querySelectorAll(".message-row[data-message-id]");
     if (!renderedRows.length || !previousLast) return false;
 
-    CM.syncDirectEphemeralUi();
-    CM.dom.chat.querySelector(".typing-row")?.remove();
-    CM.dom.chat.querySelector("[data-direct-error]")?.remove();
+    CM.clearDirectEphemeralUi();
 
     const previousDate = CM.fmtDate(previousLast.event_time);
     const nextDate = CM.fmtDate(message.event_time);

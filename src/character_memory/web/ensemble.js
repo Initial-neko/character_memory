@@ -53,19 +53,20 @@
         <strong>正在恢复上次进度…</strong>
       </div>
     `;
+    let restoredBuild = null;
     try {
       const response = await CM.api("/v1/ensembles");
-      const build = response?.build;
-      if (build?.status === "READY") {
-        renderConfirmation(build);
-        return;
-      }
-      if (build?.status === "FAILED") {
-        renderBuildFailure(build);
-        return;
-      }
+      restoredBuild = response?.build || null;
     } catch (error) {
       console.warn("ensemble.resume failed", error);
+    }
+    if (restoredBuild?.status === "READY") {
+      renderConfirmation(restoredBuild);
+      return;
+    }
+    if (restoredBuild?.status === "FAILED") {
+      renderBuildFailure(restoredBuild);
+      return;
     }
     CM.openDrawer("AI 建群", "一句话整理资料和成员草稿，确认一次后再真正创建群聊");
     CM.dom.drawerBody.innerHTML = introHtml();

@@ -679,6 +679,15 @@ def test_space_dev_media_can_request_a_video_and_reports_the_missing_provider(tm
         assert missing.status_code == 400
         assert "video_prompt" in missing.text
 
+        # So is a video with no words beside it: the manual entry point may not
+        # publish a post the autonomous planner is forbidden from planning.
+        wordless = client.post(
+            "/v1/space/dev/media/c00",
+            json={"type": "GENERATE_VIDEO", "video_prompt": "雨夜街道，镜头缓慢跟随。"},
+        )
+        assert wordless.status_code == 400
+        assert "requires content" in wordless.text
+
         # With a prompt the request reaches the executor, so the remaining
         # failure is the absent provider rather than the request shape.
         reached = client.post(

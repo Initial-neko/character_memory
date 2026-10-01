@@ -135,7 +135,11 @@ SpacePostPlan
       count: 1
 ```
 
-The character may choose text only, image only, voice only, text + media, or silence. A Space post may contain at most one VOICE intent; its `voice_text` is the complete public spoken expression and is stored as attachment metadata for transcript/provenance. Media is never a quota. `SpaceMediaExecutor` executes the optional intents after the character has decided they are natural:
+The character may choose text only, image only, voice only, text + media, or silence — with one exception: **`GENERATE_VIDEO` requires `social_post`**. A plan that selects a video without words is rejected during `SpacePostPlan` validation, which the structured-output path turns into one repair attempt (the model is told to add the caption or drop the video); if it still fails, the run is recorded `FAILED` and no budget is reserved, so a malformed plan costs nothing. The rule exists because of what the audience can see, below.
+
+A Space post may contain at most one VOICE intent; its `voice_text` is the complete public spoken expression and is stored as attachment metadata for transcript/provenance. Media is never a quota.
+
+`video_prompt` goes to the provider verbatim — unlike `GENERATE_IMAGE`, which compiles through `VisualPromptPlanner` with the persona and an identity policy, video has no compiler step. The character's own look therefore has to be asked for in the planner instruction: the shot must fit this character's visual identity and keep the product's default warm, soft, everyday register, while a persona that is not written that way wins over the default. `SpaceMediaExecutor` executes the optional intents after the character has decided they are natural:
 
 ```text
 SEARCH_IMAGE
@@ -301,6 +305,14 @@ After an autonomous post is created, the selector chooses a sparse subset of act
 The affinity signal deliberately stays narrow and auditable. It is based only on already-persisted public Space interaction; it does not inspect private chat, invent a hidden relationship score, or ask another model which characters should react. Content/interest-aware ranking remains a later refinement if runtime metrics show the extra complexity is justified.
 
 The audience step runs after the post is already public, so it is fail-soft like media execution: an outage there is reported as `audience_error`, and the run keeps `POSTED` with its `post_id`. A provider failure while deciding who noticed a post must not be recorded as a run that published nothing.
+
+A viewer never receives the media bytes, only one line of text:
+
+```text
+{author} 在空间发布了一条动态：{content}；{attachment captions}
+```
+
+The captions exist because an attachment the viewer cannot perceive is an attachment they cannot answer. A VOICE post carries its `transcript` into that line; a VIDEO post carries its `duration_seconds` **and its `prompt`** — the shot description already persisted in the relation metadata. Without the prompt a video post reached every other character as `附一段 5 秒视频`, which is why a video now also has to bring its own words (`social_post`); with both, the caption reads `附一段5 秒视频，画面是：“…”`. The same asymmetry is closed on the author's side: its own `SOCIAL_POST` event records `[视频 · N 秒视频] {prompt}`, the way the voice branch records `[语音] {transcript}`, so a later recall of "I posted that video" is not a memory of a duration. IMAGE attachments still surface as a count alone; the image prompt stays unused for the same reason the video prompt used to be.
 
 Each selected character gets a `SPACE_POST_SEEN` event through its existing PersonRuntime. The Space channel only allows:
 

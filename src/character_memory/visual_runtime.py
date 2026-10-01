@@ -32,7 +32,7 @@ class DirectVisualRuntime:
         self.settings = access.settings
 
     def _provider(self):
-        name = str(getattr(self.settings, "image_generation_provider", "agnes") or "agnes").strip().lower()
+        name = str(self.settings.image_generation_provider or "agnes").strip().lower()
         services = getattr(self.access, "services", None)
         providers = getattr(services, "image_generation_providers", {}) if services is not None else {}
         # Legacy test adapters may still inject the provider map directly.

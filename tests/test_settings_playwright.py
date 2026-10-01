@@ -206,3 +206,21 @@ def test_non_hot_local_device_change_is_explicitly_restart_required(page, settin
     page.locator("#saveSettings").click()
     expect(page.locator("#notice")).to_contain_text("重启对应 Runtime")
     expect(page.locator("#notice")).to_contain_text("无需重启整个 stack")
+
+
+def test_diagnostic_settings_stay_out_of_the_operator_surface(page, settings_server):
+    page.set_default_timeout(10000)
+    page.goto(f"{settings_server}/settings", wait_until="domcontentloaded")
+    _wait_for_render(page)
+
+    # These are real supported Settings, but intentionally backend/diagnostic-only.
+    # The contract is what the operator can reach, not whether settings.js happens
+    # to contain a particular buckets.diagnostic branch.
+    assert page.locator("#setting-base_url").count() == 0
+    assert page.locator("#setting-llm_attempts").count() == 0
+    assert page.locator("#setting-web_browser_timeout_seconds").count() == 0
+    assert page.locator("#setting-db_path").count() == 0
+
+    guidance = page.locator(".secrets-card")
+    expect(guidance).to_contain_text("底层轮询、超时、路径等参数使用后端默认值")
+    expect(guidance).to_contain_text("Dev Console 的 Detailed Dev")

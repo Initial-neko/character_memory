@@ -15,30 +15,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from character_memory.character_onboarding import save_creation_metadata
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
-from character_memory.persona_builder import PersonaDraft
+from character_memory.persona_builder import PersonaDraft, coerce_age_hint
 from character_memory.time_utils import epoch_us
 
 
 logger = logging.getLogger("character_memory.ensemble")
-
-
-def _age_hint_to_int(value: str | int | None) -> int | None:
-    """Best-effort age extraction; unknown/compound age text is never fatal."""
-
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if 1 <= value <= 120 else None
-    text = str(value).strip()
-    if not text:
-        return None
-    prioritized = re.search(r"(?<!\d)(\d{1,3})\s*岁", text)
-    candidates = [prioritized.group(1)] if prioritized else re.findall(r"(?<!\d)\d{1,4}(?!\d)", text)
-    for raw in candidates:
-        age = int(raw)
-        if 1 <= age <= 120:
-            return age
-    return None
 
 
 def _clean_list(items: list[str], *, limit: int) -> list[str]:
@@ -82,7 +63,7 @@ def member_research_to_persona(member: "EnsembleMemberResearch") -> PersonaDraft
 
     return PersonaDraft(
         name=member.name.strip(),
-        age=_age_hint_to_int(member.age),
+        age=coerce_age_hint(member.age),
         identity=identity[:240],
         tagline=tagline,
         description=description[:1600],

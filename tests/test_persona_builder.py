@@ -4,7 +4,26 @@ import threading
 import pytest
 import yaml
 
-from character_memory.persona_builder import PersonaBuilder, PersonaDraft, dump_persona_yaml, ensure_safe_persona_text, normalize_character_id
+from character_memory.persona_builder import PersonaBuilder, PersonaDraft, coerce_age_hint, dump_persona_yaml, ensure_safe_persona_text, normalize_character_id
+
+
+def _valid_persona_payload() -> dict:
+    return {
+        "name": "Nova",
+        "age": 24,
+        "identity": "独立游戏音效设计师，喜欢收集城市里奇怪的声音",
+        "tagline": "脑洞很大，但不会什么都顺着别人",
+        "description": "Nova 很容易被奇怪的小事吸引。她会认真记住共同经历里的细节，也会直接表达不同意见。",
+        "personality": ["好奇心强", "有自己的审美", "熟悉以后会开怪玩笑"],
+        "conversation": "偏自然短句，兴奋时会突然连着说两三句。",
+        "expression": "会偶尔使用感叹号和很轻的 emoji，不机械刷表情。",
+        "questions": "真的好奇才追问，一次通常只抓一个点。",
+        "silence": "对话自然结束或没想说的话时可以不回复。",
+        "initiative": "遇到和共同经历有关的声音、游戏或小事时可能主动想起对方。",
+        "disagreement": "不同意会直接说理由，不为了维持气氛假装赞同。",
+        "care": "更喜欢记住具体事情并后来问结果，而不是泛泛安慰。",
+        "boundaries": ["不无条件迎合", "关系通过共同经历慢慢形成"],
+    }
 
 
 class BuilderFakeModel:
@@ -22,25 +41,34 @@ class BuilderFakeModel:
         self.calls += 1
         assert conversation_id == "persona-builder"
         assert json_object is True
-        return json.dumps(
-            {
-                "name": "Nova",
-                "age": 24,
-                "identity": "独立游戏音效设计师，喜欢收集城市里奇怪的声音",
-                "tagline": "脑洞很大，但不会什么都顺着别人",
-                "description": "Nova 很容易被奇怪的小事吸引。她会认真记住共同经历里的细节，也会直接表达不同意见。",
-                "personality": ["好奇心强", "有自己的审美", "熟悉以后会开怪玩笑"],
-                "conversation": "偏自然短句，兴奋时会突然连着说两三句。",
-                "expression": "会偶尔使用感叹号和很轻的 emoji，不机械刷表情。",
-                "questions": "真的好奇才追问，一次通常只抓一个点。",
-                "silence": "对话自然结束或没想说的话时可以不回复。",
-                "initiative": "遇到和共同经历有关的声音、游戏或小事时可能主动想起对方。",
-                "disagreement": "不同意会直接说理由，不为了维持气氛假装赞同。",
-                "care": "更喜欢记住具体事情并后来问结果，而不是泛泛安慰。",
-                "boundaries": ["不无条件迎合", "关系通过共同经历慢慢形成"],
-            },
-            ensure_ascii=False,
-        )
+        return json.dumps(_valid_persona_payload(), ensure_ascii=False)
+
+
+class RepairAwareFakeModel(BuilderFakeModel):
+    """A model that can only fix its output when the repair turn says what broke.
+
+    It answers with one boundary item, which ``PersonaDraft.boundaries`` rejects
+    (``min_length=2``), and only repairs that when the repair turn carries the
+    actual validation error. A retry that just says "the JSON was wrong" leaves
+    it re-emitting the same payload, which is what the live request did.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.repair_turns: list[str] = []
+
+    def _request(self, messages, *, conversation_id=None, json_object=False):
+        self.calls += 1
+        assert conversation_id == "persona-builder"
+        assert json_object is True
+        payload = _valid_persona_payload()
+        if self.calls > 1:
+            repair = str((messages[-1] or {}).get("content") or "")
+            self.repair_turns.append(repair)
+            if "at least 2 items" in repair:
+                return json.dumps(payload, ensure_ascii=False)
+        payload["boundaries"] = ["只有一条边界"]
+        return json.dumps(payload, ensure_ascii=False)
 
 
 def test_persona_builder_generates_valid_draft():
@@ -50,6 +78,52 @@ def test_persona_builder_generates_valid_draft():
     assert draft.age == 24
     assert "共同经历" in draft.description
     assert model.calls == 1
+
+
+def test_persona_builder_repair_turn_carries_the_validation_error():
+    """The retry is only worth taking if it says what actually broke.
+
+    The live failure: validation rejected the draft, the repair turn said only
+    "the JSON was wrong", the model re-emitted the same payload, the last
+    attempt was spent, and the phone got a 502 after 31 seconds.
+    """
+
+    model = RepairAwareFakeModel()
+    draft = PersonaBuilder(model).generate("想认识一个边界感很强的人")
+
+    assert model.calls == 2
+    assert draft.boundaries == ["不无条件迎合", "关系通过共同经历慢慢形成"]
+    assert model.repair_turns, "the failed attempt must produce a repair turn"
+    assert "at least 2 items" in model.repair_turns[0]
+
+
+def test_persona_draft_treats_age_as_weak_data():
+    """A non-human character must not lose the whole draft over its age.
+
+    ``docs/current/CONVERSATION_RUNTIME.md`` already fixes this policy for the
+    ensemble path: only a reliable 1..120 integer becomes an age, anything else
+    stays null. The builder used to hard-fail instead, which is what turned
+    "猫龄三岁半" into a 502.
+    """
+
+    payload = _valid_persona_payload()
+    payload["age"] = "猫龄三岁半"
+
+    draft = PersonaDraft.model_validate(payload)
+
+    assert draft.age is None
+    assert draft.name == "Nova"
+    assert draft.boundaries == ["不无条件迎合", "关系通过共同经历慢慢形成"]
+
+
+def test_persona_age_hint_reads_only_a_reliable_integer():
+    assert coerce_age_hint(24) == 24
+    assert coerce_age_hint("18岁（大学一年级）") == 18
+    assert coerce_age_hint("年龄不详") is None
+    assert coerce_age_hint("猫龄三岁半") is None
+    assert coerce_age_hint(0) is None
+    assert coerce_age_hint(121) is None
+    assert coerce_age_hint(None) is None
 
 
 def test_persona_yaml_keeps_existing_persona_shape():

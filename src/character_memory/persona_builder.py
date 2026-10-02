@@ -6,10 +6,36 @@ from pathlib import Path
 import re
 import uuid
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 import yaml
 
 from character_memory.llm.usage import llm_usage_scope, new_logical_call_id
+
+
+def coerce_age_hint(value: str | int | None) -> int | None:
+    """Best-effort age extraction; unknown or compound age text is never fatal.
+
+    Age is weak data (``docs/current/CONVERSATION_RUNTIME.md``): a model may
+    answer ``"18岁（大学一年级）"``, ``"年龄不详"`` or, for a non-human character,
+    ``"猫龄三岁半"``. Only a reliable ``1..120`` integer becomes an age; anything
+    else stays null so the rest of the draft -- the part the user actually asked
+    for -- survives instead of failing the whole request.
+    """
+
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= 120 else None
+    text = str(value).strip()
+    if not text:
+        return None
+    prioritized = re.search(r"(?<!\d)(\d{1,3})\s*岁", text)
+    candidates = [prioritized.group(1)] if prioritized else re.findall(r"(?<!\d)\d{1,4}(?!\d)", text)
+    for raw in candidates:
+        age = int(raw)
+        if 1 <= age <= 120:
+            return age
+    return None
 
 
 class PersonaDraft(BaseModel):
@@ -27,6 +53,13 @@ class PersonaDraft(BaseModel):
     disagreement: str = Field(min_length=1, max_length=320)
     care: str = Field(min_length=1, max_length=320)
     boundaries: list[str] = Field(default_factory=list, min_length=2, max_length=8)
+
+    @field_validator("age", mode="before")
+    @classmethod
+    def _age_is_weak_data(cls, value):
+        # A model that describes a non-human character's age in words must not
+        # cost the user the whole draft; the field degrades to null instead.
+        return coerce_age_hint(value)
 
 
 _BLOCKED_TERMS = (
@@ -143,6 +176,28 @@ disagreement, care, boundaries。
 """
 
 
+def persona_repair_prompt(error: Exception) -> str:
+    """Tell the model *which* field failed, not just that something failed.
+
+    The retry used to say only "上一份 JSON 不符合人物草稿字段约束", so the model had
+    no way to know that ``age`` was the problem: the live failure re-emitted
+    ``age="猫龄三岁半"`` on the second attempt, spent the last try, and ended as a
+    502. The canonical repair prompt in ``llm/client.py`` already carries the
+    validation error for exactly this reason; this mirrors that shape.
+    """
+
+    fields = ", ".join(PersonaDraft.model_fields.keys())
+    message = " ".join(str(error).split())
+    if len(message) > 700:
+        message = message[:700] + "…"
+    return (
+        "上一份 JSON 不符合 PersonaDraft。只修正为该对象的 JSON 结构，不要改成聊天回复格式。"
+        f"目标字段：{fields}。校验错误：{message}。"
+        "age 必须是不带单位和文字的整数，非人类角色也要折算成整数年龄；确实没有年龄时写 null。"
+        "字段为空时使用该对象允许的空值/空数组；不要添加 JSON 之外的解释，只返回修正后的 JSON。"
+    )
+
+
 class PersonaBuilder:
     def __init__(self, model):
         self.model = model
@@ -184,7 +239,7 @@ class PersonaBuilder:
                         messages.extend(
                             [
                                 {"role": "assistant", "content": text},
-                                {"role": "user", "content": "上一份 JSON 不符合人物草稿字段约束。保留人物含义，只修正 JSON 结构和字段；不要添加解释。"},
+                                {"role": "user", "content": persona_repair_prompt(exc)},
                             ]
                         )
         raise RuntimeError(f"persona draft invalid after {attempts} attempts: {last_error}") from last_error

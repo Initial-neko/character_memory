@@ -166,6 +166,7 @@ SETTING_HELP: dict[str, str] = {
     "GSV_TTS_SOVITS_MODEL": "GSV-TTS-Lite 共享 SoVITS 模型 .pth 路径；保存到 .env，不写入 config.yaml。",
     "GSV_TTS_VOICE": "GSV 默认声音模板名，对应 voices/<name>.yaml；角色专属声音仍优先于默认模板。",
     "search_provider": "图片发现和 World 公网发现共用的搜索 Provider；不是私聊中的任意浏览器工具。",
+    "web_search_provider": "World 公网发现单独使用的搜索 Provider。auto = 跟随 search_provider；local = 本机无 Key 搜索（多引擎融合），图片发现仍走 search_provider。",
     "search_country": "传给搜索 Provider 的地区提示，用于本地化搜索结果。",
     "search_language": "传给搜索 Provider 的语言提示，用于结果语言偏好。",
     "search_safe_search": "搜索安全过滤模式。strict 为保守默认值。",
@@ -412,6 +413,16 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "options": [
                     {"value": "searchapi", "label": "SearchAPI"},
                     {"value": "brave", "label": "Brave"},
+                ],
+            },
+            {
+                "name": "web_search_provider",
+                "label": "Web Search Provider",
+                "type": "select",
+                "level": "advanced",
+                "options": [
+                    {"value": "auto", "label": "Auto (follow Search Provider)"},
+                    {"value": "local", "label": "Local (no key)"},
                 ],
             },
             {"name": "search_country", "label": "Search Country", "type": "text", "level": "diagnostic"},

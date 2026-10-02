@@ -329,7 +329,9 @@ World Browser belongs to Character Runtime, not to Dev Console itself. Dev only 
     POST /v1/dev/world/search
     POST /v1/dev/world/fetch
 
-The search path first asks the configured SearchAPI/Brave provider for candidate URLs, then opens up to N public pages with Playwright headless Chromium. The fetch path opens one public URL to diagnose JavaScript rendering and readable-text extraction.
+The search path first asks the configured discovery provider for candidate URLs, then opens up to N public pages with Playwright headless Chromium. The fetch path opens one public URL to diagnose JavaScript rendering and readable-text extraction.
+
+`GET /v1/dev/world/status` reports discovery separately from image search: `search_provider` is the provider serving image discovery, while `web_search_provider` / `web_search_effective` describe what actually answers public-web discovery (`auto` resolves to the former, `local` to the keyless local fusion). `web_search_configured` is the honest one to read for the web path, because the local provider needs no API key. Swapping providers never changes retrieval: rendering still goes through the same SSRF-guarded headless browser.
 
 This is not a generic Postman surface: there are no custom headers, cookies or secrets, and local/private-network targets are rejected. Page text is untrusted external data; only the appraisal-safe summary may reach PersonRuntime Memory or final Space expression context.
 

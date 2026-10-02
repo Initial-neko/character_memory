@@ -8,6 +8,7 @@ dependencies = [
   "PyYAML==6.0.3",
   "numpy==2.5.3",
   "httpx==0.28.1",
+  "webless==0.1.0",
 ]
 
 [project.optional-dependencies]

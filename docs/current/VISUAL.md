@@ -721,9 +721,26 @@ search_provider: "searchapi"
 search_country: "jp"
 search_language: "zh-cn"
 search_safe_search: "strict"
+web_search_provider: "auto"
+web_search_timeout_seconds: 12.0
 avatar_dir: ""
 avatar_max_bytes: 8388608
 ```
+
+`web_search_provider` covers public-web discovery only, and takes `auto | local`：
+
+- `auto`（默认）跟随 `search_provider`，即"图片与公网发现共用一个 Provider"，现有安装行为不变；
+- `local` 使用本机无 Key 的多引擎融合搜索（`webless`），不消耗 API 配额。
+
+图片发现（Avatar 搜索、Space 配图）**没有** `local` 选项：本地 Provider 不提供图片搜索，
+它只可能被接到 World 公网发现上。因此 `search_provider` 不接受 `local`
+（`avatar_web` 对不认识的 Provider 名返回 501），`search_api_key` 也始终按
+`search_provider` 解析，避免 Provider 与凭据错配。
+
+换 Provider 不改变取回路径：无论 `search_provider` 取什么值，页面渲染都走
+`HeadlessBrowserWebFetcher`，每次导航与子请求仍过 `ensure_public_http_url`。
+本地 Provider 只回答"哪些页面可能相关"，**不承担取回**——启用它不会让未校验的
+URL 绕过 SSRF 护栏。
 
 Search credentials belong in `.env` or the Settings Center, not in new `config.yaml` examples：
 

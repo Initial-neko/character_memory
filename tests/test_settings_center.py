@@ -1168,7 +1168,11 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     # space_thread_reply_rounds is `advanced`: it changes how much a discussion
     # costs, which an operator does need to reach, but it is not first-screen
     # material next to the autonomy switch itself.
-    assert levels == {"common": 9, "advanced": 43, "diagnostic": 36}
+    #
+    # web_search_provider is `advanced` for the same reason: it decides whether
+    # public-web discovery spends an API quota, which an operator reaches for
+    # when the quota runs out -- not something to read before first use.
+    assert levels == {"common": 9, "advanced": 44, "diagnostic": 36}
     assert "group_max_speakers_per_turn" in {
         field["name"]
         for section in schema

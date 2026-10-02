@@ -6,6 +6,7 @@ import logging
 from urllib.parse import urlparse
 
 import httpx
+from webless import BingEngine, DuckDuckGoEngine, search_sync
 
 
 logger = logging.getLogger("character_memory.search")
@@ -389,3 +390,76 @@ class BraveSearchProvider(SearchProvider):
     def close(self) -> None:
         if self._owns_client:
             self.client.close()
+
+
+class LocalSearchProvider(SearchProvider):
+    """Keyless public-web discovery backed by the local ``webless`` fusion.
+
+    Only ``search_web`` is implemented. ``webless`` has no image search, so image
+    discovery (Avatar search, Space media) keeps using the configured API
+    provider; selecting this provider must never be wired to those callers.
+
+    Retrieval is deliberately not delegated to ``webless.fetch``. Page rendering
+    stays on :class:`~character_memory.browser_web.HeadlessBrowserWebFetcher` so
+    every navigation and subresource keeps passing ``ensure_public_http_url``;
+    this provider answers "which pages might be relevant" and nothing else.
+    """
+
+    # ``GENERAL_ENGINES`` cannot be used as-is. ``mojeek`` burns its whole
+    # timeout on every call and ``wikipedia`` answers 403, and rank fusion waits
+    # for the slowest engine: that measured 16.2s median against 4.2s for this
+    # pair over 20 rounds. The remaining two also fail independently -- DuckDuckGo
+    # intermittently answers HTTP 202 -- so a dead engine degrades the round
+    # instead of failing it.
+    ENGINES = (DuckDuckGoEngine, BingEngine)
+
+    def __init__(self, *, timeout_seconds: float = 12.0):
+        self.timeout_seconds = max(3.0, min(30.0, float(timeout_seconds)))
+
+    def search_images(self, query: str, *, limit: int = 12) -> list[ImageSearchResult]:
+        raise RuntimeError(
+            "local web search provider does not provide image search; "
+            "image discovery must use the search_provider API provider"
+        )
+
+    def search_web(self, query: str, *, limit: int = 5) -> list[WebSearchResult]:
+        query = " ".join(str(query or "").split()).strip()
+        if not query:
+            raise ValueError("web search query must not be empty")
+
+        count = max(1, min(int(limit), 10))
+        result = search_sync(
+            query,
+            limit=count,
+            engines=self.ENGINES,
+            timeout=self.timeout_seconds,
+        )
+
+        results: list[WebSearchResult] = []
+        for hit in list(getattr(result, "hits", None) or []):
+            url = str(getattr(hit, "url", "") or "").strip()
+            if not url:
+                continue
+            domain = str(getattr(hit, "host", "") or "").strip() or (urlparse(url).hostname or "")
+            results.append(
+                WebSearchResult(
+                    title=str(getattr(hit, "title", "") or "").strip() or domain or url,
+                    url=url,
+                    snippet=str(getattr(hit, "snippet", "") or "").strip(),
+                    source_domain=domain,
+                    # Public engine result pages carry no reliable publication date.
+                    published_at=None,
+                )
+            )
+            if len(results) >= count:
+                break
+        logger.info(
+            "search.web provider=local query_chars=%d returned=%d engines_failed=%s",
+            len(query),
+            len(results),
+            ",".join(sorted((getattr(result, "failed", None) or {}).keys())) or "none",
+        )
+        return results
+
+    def close(self) -> None:
+        return None

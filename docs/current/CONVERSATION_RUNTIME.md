@@ -162,6 +162,8 @@ member C -> ...
 
 Research 只负责整理群体事实。成员 Persona 不再为每个人额外发起一次严格 JSON LLM 调用，而是从 `EnsembleMemberResearch` 做确定性 projection。年龄是弱资料：允许 `18`、`18岁（大学一年级）`、`年龄不详` 或 null；只有能可靠抽出 1..120 的整数时才进入 `PersonaDraft.age`，否则保持 null。角色 identity、description、personality、speech style、relationship 才是建模和后续声线设计的主要输入。
 
+该规则由 `PersonaDraft` 自己的字段校验器执行，所以单角色草稿 `/v1/characters/draft` 走的是同一条弱资料策略：模型对非人类角色写出 `猫龄三岁半` 只会让 `age` 退化为 null，不会连累整份草稿。草稿校验失败后的重试也不再只说“JSON 不符合要求”，而是把目标字段与具体校验错误回传给模型，避免模型原地重发同一份无效 JSON 直到耗尽次数。
+
 成员整理采用 partial-success：一位成员格式异常只标为 `FAILED` 并保留 research 原始字段，其他可用成员继续；只要至少 2 位成员是 `READY`，整个 build 就可以进入确认页。前端默认隐藏内部 Pydantic/Provider 细节，用户只看到可理解的“重试这一位 / 重试整理 / 修改描述”。
 
 `/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。

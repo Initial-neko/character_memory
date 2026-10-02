@@ -83,6 +83,16 @@ class FakeHttpClient:
         return FakeResponse({}, status_code=404, text="not found")
 
 
+class SpaceConfigHttpClient(FakeHttpClient):
+    """Records the Space override body the console forwards to :8000."""
+
+    def post(self, url, **kwargs):
+        if url.endswith("/v1/space/dev/config"):
+            self.calls.append(("POST", url, kwargs))
+            return FakeResponse({"ok": True})
+        return super().post(url, **kwargs)
+
+
 class FailingTtsHttpClient(FakeHttpClient):
     def post(self, url, **kwargs):
         if url.endswith("/v1/tts"):
@@ -355,4 +365,38 @@ def test_dev_space_media_accepts_a_video_intent_without_opening_the_whitelist():
     # the field into a free-form string.
     with pytest.raises(ValidationError):
         DevSpaceMediaRequest(type="GENERATE_AUDIO")
+
+
+def test_dev_space_config_forwards_reply_rounds_and_rejects_omission():
+    """The Space override is a closed set, so a new knob has to reach :8000.
+
+    reply_rounds is required rather than defaulted: a console that omits the
+    field would otherwise silently reset the running value to a number nobody
+    chose, which is exactly the failure mode the runtime-only surface cannot
+    show.
+    """
+
+    http = SpaceConfigHttpClient()
+    app = create_dev_app(settings=settings(), http_client=http, model_factory=lambda _: FakeModel())
+    payload = {
+        "enabled": True,
+        "interval_minutes": 120.0,
+        "max_posts_per_day": 3,
+        "audience_size": 5,
+        "reply_rounds": 2,
+        "poll_seconds": 30.0,
+    }
+    with TestClient(app) as client:
+        omitted = client.post(
+            "/v1/dev/space/config",
+            json={key: value for key, value in payload.items() if key != "reply_rounds"},
+        )
+        accepted = client.post("/v1/dev/space/config", json=payload)
+
+    assert omitted.status_code == 422
+    assert accepted.status_code == 200
+    assert accepted.json()["scope"] == "runtime-only"
+
+    forwarded = next(call for call in http.calls if call[1].endswith("/v1/space/dev/config"))
+    assert forwarded[2]["json"]["reply_rounds"] == 2
 

@@ -115,6 +115,7 @@
             <div class="visual-provider-row">
               <label>Scheduler Poll (s)<input id="spacePollSeconds" type="number" min="10" max="3600" step="10" value="60" / title="仅当前 Runtime 的临时 Scheduler Poll；只影响检查延迟，不改变 Opportunity 间隔。"><small>只影响检查到期的延迟。</small></label>
               <label>Audience<input id="spaceAudienceSize" type="number" min="0" max="10" step="1" value="5" / title="仅当前 Runtime 的临时 Audience 上限；控制最多邀请多少其他角色判断互动。"><small>最多邀请多少其他角色判断是否互动。</small></label>
+              <label>Reply Rounds<input id="spaceThreadReplyRounds" type="number" min="0" max="4" step="1" value="2" / title="仅当前 Runtime 的临时评论跟进轮数；每轮是一位角色真正判断一次，直接等于评论线程的模型调用成本。0 = 评论入库但不自动回复。"><small>一条评论最多自动跟进几轮；0 = 不自动回复。</small></label>
             </div>
           </div>
           <div class="field-group">

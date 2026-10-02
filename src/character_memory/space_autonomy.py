@@ -29,6 +29,26 @@ logger = logging.getLogger("character_memory.space_autonomy")
 MAX_AUTONOMOUS_AUDIENCE = 10
 MAX_COLD_AUDIENCE_EXPLORERS = 2
 MAX_AUTOMATIC_REPLY_ROUNDS = 4
+DEFAULT_THREAD_REPLY_ROUNDS = 2
+
+
+def configured_reply_rounds(settings) -> int:
+    """Automatic follow-up rounds one discussion may advance; 0 means none.
+
+    ``MAX_AUTOMATIC_REPLY_ROUNDS`` stays the hard ceiling so the documented "at
+    most 4 rounds" contract holds no matter what the setting says. Read from the
+    settings object rather than a service attribute because both the service
+    (which advances a thread) and the scheduler (which reports and applies the
+    runtime override) need the same answer.
+    """
+    return max(
+        0,
+        min(
+            MAX_AUTOMATIC_REPLY_ROUNDS,
+            int(getattr(settings, "space_thread_reply_rounds", DEFAULT_THREAD_REPLY_ROUNDS)),
+        ),
+    )
+
 
 # A reply to a Space comment is a follow-up to a comment that is already
 # durable, so it is queued for the scheduler thread instead of running inside
@@ -735,7 +755,7 @@ Sources:
         comment_id: int,
         *,
         now: datetime | None = None,
-        max_rounds: int = MAX_AUTOMATIC_REPLY_ROUNDS,
+        max_rounds: int | None = None,
     ) -> list[dict]:
         """Advance one Space discussion without allowing an unbounded AI loop."""
         if not str(getattr(self.access.settings, "api_key", "") or "").strip():
@@ -750,7 +770,11 @@ Sources:
 
         bundle = self.access.require_bundle()
         replies: list[dict] = []
-        rounds = max(0, min(int(max_rounds), MAX_AUTOMATIC_REPLY_ROUNDS))
+        # ``None`` means "use the configured ceiling" so every caller -- the
+        # queued drain and the audience pass that advances a thread inline --
+        # picks up the setting without passing it explicitly.
+        requested = configured_reply_rounds(self.access.settings) if max_rounds is None else int(max_rounds)
+        rounds = max(0, min(requested, MAX_AUTOMATIC_REPLY_ROUNDS))
         root_id = self.repository.root_comment_id(source.id) or source.id
 
         for round_index in range(rounds):
@@ -967,6 +991,9 @@ class SpaceAutonomyScheduler:
             min(200, int(getattr(self.access.settings, "space_max_posts_per_day", 0))),
         )
 
+    def reply_rounds(self) -> int:
+        return configured_reply_rounds(self.access.settings)
+
     def _posts_today(self, character_id: str, now: datetime) -> int:
         midnight = now.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
         return self.repository.count_posts_since(character_id, midnight)
@@ -1069,6 +1096,7 @@ class SpaceAutonomyScheduler:
                 MAX_AUTONOMOUS_AUDIENCE,
                 max(0, int(getattr(self.access.settings, "space_audience_size", 5))),
             ),
+            "reply_rounds": self.reply_rounds(),
             "characters": items,
             "recent_runs": recent_runs,
             # recent_runs carries a summary of each decision, not its raw model
@@ -1093,6 +1121,7 @@ class SpaceAutonomyScheduler:
         world_max_pages: int | None = None,
         world_max_chars_per_page: int | None = None,
         audience_size: int | None = None,
+        reply_rounds: int | None = None,
         poll_seconds: float | None = None,
         rearm: bool = True,
         now: datetime | None = None,
@@ -1127,6 +1156,10 @@ class SpaceAutonomyScheduler:
         if audience_size is not None:
             self.access.settings.space_audience_size = max(
                 0, min(MAX_AUTONOMOUS_AUDIENCE, int(audience_size))
+            )
+        if reply_rounds is not None:
+            self.access.settings.space_thread_reply_rounds = max(
+                0, min(MAX_AUTOMATIC_REPLY_ROUNDS, int(reply_rounds))
             )
         if poll_seconds is not None:
             self.poll_seconds = max(10.0, min(3600.0, float(poll_seconds)))

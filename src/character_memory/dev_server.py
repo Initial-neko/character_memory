@@ -83,6 +83,9 @@ class DevSpaceConfigRequest(BaseModel):
     world_max_pages: int = Field(default=2, ge=1, le=4)
     world_max_chars_per_page: int = Field(default=6000, ge=500, le=16000)
     audience_size: int = Field(ge=0, le=10)
+    # Required on purpose: a default here would let an older client omit the
+    # field and silently reset the running runtime to a value nobody chose.
+    reply_rounds: int = Field(ge=0, le=4)
     poll_seconds: float = Field(ge=10.0, le=3600.0)
     rearm: bool = True
 

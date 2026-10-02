@@ -147,6 +147,14 @@ class Settings(BaseModel):
     # ceiling. It never forces a post -- a character that decides not to publish
     # simply does not consume the budget.
     space_max_posts_per_day: int = Field(default=0, ge=0, le=200)
+    # How many automatic follow-up rounds one Space discussion may advance. Each
+    # round is one target character deciding through its own PersonRuntime
+    # whether to answer, so this is the direct cost ceiling of a comment thread:
+    # one round is one full reaction call. The hard ceiling stays
+    # MAX_AUTOMATIC_REPLY_ROUNDS (4), so the documented "at most 4 rounds"
+    # contract is unchanged. 0 means a comment is stored but never answered
+    # automatically -- the Space kill switch that leaves publishing intact.
+    space_thread_reply_rounds: int = Field(default=2, ge=0, le=4)
     # Optional media expression on autonomous Space posts. The character may
     # choose images or one voice post; these fields gate/cap the shared executor.
     space_media_enabled: bool = True

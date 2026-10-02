@@ -237,7 +237,10 @@ def test_ensemble_research_uses_world_observation_and_reuses_existing_character(
     build = service.research(started["group_id"], now=now)
 
     assert observer.calls
-    assert "LAB MEM" in observer.calls[0]["query"]
+    # The description is the query. It used to carry a trailing
+    # "角色 成员 人物 资料 wiki", which steered the ranking at a source family
+    # this network cannot retrieve instead of letting the engine choose sources.
+    assert observer.calls[0]["query"] == "复刻命运石之门的 LAB MEM，并形成群聊"
     assert build["status"] == "READY"
     assert build["group_name"] == "LAB MEM"
     assert len(build["sources"]) == 2

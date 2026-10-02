@@ -85,6 +85,11 @@ other provider's key drops into the diagnostic group instead of being removed,
 because a key has to exist *before* its provider can be switched to. Within a
 level, configured keys sort before unconfigured ones.
 
+`web_search_provider: "local"` is the one selection that consumes no secret at
+all: it answers public-web discovery from a local multi-engine fusion, so the
+`search_api_key` staying on its level is irrelevant to it. Image discovery still
+follows `search_provider`, and therefore still needs that key.
+
 ### 2.2 Restart requirement is part of the field
 
 `restart_required` is served per field (`true` unless the field is in

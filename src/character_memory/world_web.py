@@ -45,10 +45,20 @@ def attach_world_routes(app) -> None:
 
     @app.get("/v1/world/status")
     def world_status():
+        web_provider = getattr(services, "web_search_provider", None)
         return {
             "enabled": bool(runtime_setting(settings, "space_world_observation_enabled", True)),
             "search_provider": str(runtime_setting(settings, "search_provider", "") or ""),
+            # Discovery may now run on a provider other than search_provider, so a
+            # status payload that only echoed the image provider would describe a
+            # search path that is not the one running.
+            "web_search_provider": str(runtime_setting(settings, "web_search_provider", "auto") or "auto"),
+            "web_search_effective": type(web_provider).__name__ if web_provider is not None else "unavailable",
             "search_configured": bool(runtime_setting(settings, "search_api_key", "")),
+            # The local provider needs no key, so a bare search_api_key check
+            # would report the web path as unconfigured while it works fine.
+            "web_search_configured": bool(runtime_setting(settings, "search_api_key", ""))
+            or str(runtime_setting(settings, "web_search_provider", "auto") or "auto").strip().lower() == "local",
             "browser": "playwright-chromium",
             "browser_channel": str(runtime_setting(settings, "web_browser_channel", "auto") or "auto"),
             "timeout_seconds": float(runtime_setting(settings, "web_browser_timeout_seconds", 20.0)),

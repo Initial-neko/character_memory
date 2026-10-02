@@ -59,6 +59,15 @@ class Settings(BaseModel):
     search_language: str = "zh-cn"
     search_safe_search: str = "strict"
 
+    # Only public-web discovery can be swapped to the keyless local provider:
+    # it has no image search, so Avatar/Space image discovery keeps
+    # search_provider. "auto" means "same provider as search_provider".
+    # Deliberately not offering searchapi/brave here: search_api_key is resolved
+    # from search_provider (config.py), so naming a different API provider would
+    # silently pair it with the wrong credential.
+    web_search_provider: str = Field(default="auto", pattern=r"^(auto|local)$")
+    web_search_timeout_seconds: float = Field(default=12.0, ge=3.0, le=30.0)
+
     # Public-page observation uses Playwright headless Chromium. "auto" first
     # tries Playwright's managed Chromium and then the installed Chrome channel.
     web_browser_channel: str = Field(default="auto", pattern=r"^(auto|chromium|chrome)$")

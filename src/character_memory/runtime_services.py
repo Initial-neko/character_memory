@@ -6,7 +6,7 @@ from typing import Any, Callable
 from character_memory.avatars import AvatarSearchService, AvatarStore
 from character_memory.browser_web import HeadlessBrowserWebFetcher
 from character_memory.config import Settings, resolve_avatar_dir, runtime_setting
-from character_memory.search import BraveSearchProvider, SearchApiProvider, SearchProvider
+from character_memory.search import BraveSearchProvider, LocalSearchProvider, SearchApiProvider, SearchProvider
 from character_memory.visual_generation import ImageGenerationProvider, build_image_providers
 from character_memory.world_observation import WorldObservationService
 
@@ -36,6 +36,28 @@ def build_search_provider(settings: Settings) -> SearchProvider | None:
     return None
 
 
+def build_web_search_provider(settings: Settings, search_provider: SearchProvider | None) -> SearchProvider | None:
+    """Resolve the provider that answers public-web discovery.
+
+    ``auto`` returns the already-built ``search_provider`` itself rather than
+    building a second one: identity is what lets a caller reason about "one
+    provider for images and web", and it is what keeps ``RuntimeServices.close``
+    from closing two clients where the install only ever needed one.
+
+    Only the web half can be swapped. ``LocalSearchProvider`` has no image
+    search, and image discovery (Avatar search, Space media) must keep the API
+    provider -- ``avatar_web`` answers 501 for a provider name it does not know,
+    so ``local`` can never be a ``search_provider`` value.
+    """
+
+    name = str(runtime_setting(settings, "web_search_provider", "auto") or "auto").strip().lower()
+    if name == "local":
+        return LocalSearchProvider(
+            timeout_seconds=float(runtime_setting(settings, "web_search_timeout_seconds", 12.0)),
+        )
+    return search_provider
+
+
 @dataclass
 class RuntimeServices:
     """Infrastructure/services shared by Character Runtime feature adapters.
@@ -46,6 +68,7 @@ class RuntimeServices:
     """
 
     search_provider: SearchProvider | None
+    web_search_provider: SearchProvider | None
     avatar_store: AvatarStore
     avatar_search: AvatarSearchService
     image_generation_providers: dict[str, ImageGenerationProvider]
@@ -63,11 +86,20 @@ class RuntimeServices:
                     "runtime_services image_provider close_failed provider=%s",
                     getattr(provider, "name", "unknown"),
                 )
-        if self.search_provider is not None:
+        closed: set[int] = set()
+        for label, provider in (
+            ("search_provider", self.search_provider),
+            ("web_search_provider", self.web_search_provider),
+        ):
+            # ``auto`` resolves the web provider to the very same object, which
+            # must not be closed twice.
+            if provider is None or id(provider) in closed:
+                continue
+            closed.add(id(provider))
             try:
-                self.search_provider.close()
+                provider.close()
             except Exception:
-                logger.exception("runtime_services search_provider close_failed")
+                logger.exception("runtime_services %s close_failed", label)
         try:
             self.avatar_store.close()
         except Exception:
@@ -147,6 +179,7 @@ class CharacterRuntimeAccess:
 
 def build_runtime_services(settings: Settings) -> RuntimeServices:
     search_provider = build_search_provider(settings)
+    web_search_provider = build_web_search_provider(settings, search_provider)
     avatar_store = AvatarStore(
         resolve_avatar_dir(settings),
         max_bytes=int(runtime_setting(settings, "avatar_max_bytes", 8 * 1024 * 1024)),
@@ -158,9 +191,10 @@ def build_runtime_services(settings: Settings) -> RuntimeServices:
         render_wait_ms=int(runtime_setting(settings, "web_browser_render_wait_ms", 700)),
         channel=str(runtime_setting(settings, "web_browser_channel", "auto") or "auto"),
     )
-    world_observer = WorldObservationService(search_provider, world_fetcher)
+    world_observer = WorldObservationService(web_search_provider, world_fetcher)
     return RuntimeServices(
         search_provider=search_provider,
+        web_search_provider=web_search_provider,
         avatar_store=avatar_store,
         avatar_search=avatar_search,
         image_generation_providers=image_generation_providers,

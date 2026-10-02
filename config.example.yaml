@@ -77,6 +77,17 @@ search_language: "zh-cn"
 # Safe-search mode forwarded to search. "strict" is the conservative default.
 search_safe_search: "strict"
 
+# Provider for World public-web discovery only: auto | local.
+# "auto" follows search_provider, so existing installs are unchanged.
+# "local" uses the keyless local multi-engine fusion (needs no API key, and no
+# quota to exhaust); image discovery still uses search_provider, because the
+# local provider has no image search. Page retrieval is unaffected either way:
+# rendered pages always go through the SSRF-guarded headless browser.
+web_search_provider: "auto"
+
+# Seconds allowed for one local web search before it gives up.
+web_search_timeout_seconds: 12.0
+
 # Playwright browser selection for World Observation: auto | chromium | chrome.
 web_browser_channel: "auto"
 

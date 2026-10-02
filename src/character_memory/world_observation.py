@@ -9,6 +9,48 @@ from character_memory.search import SearchProvider, WebFetcher
 
 logger = logging.getLogger("character_memory.world_observation")
 
+# Discovery spends a few extra page opens when the top-ranked candidates cannot
+# be rendered here. Ranking order is not reachability order: a candidate that
+# resolves to a blocked address, times out, or answers 5xx takes its slot with
+# it, so three unreachable hits at the top ended the whole observation and the
+# caller had no way to recover -- for group creation that was a hard failure,
+# reproducible on every retry.
+#
+# The extra attempts are bounded because a failed navigation costs one full
+# browser timeout. The common case is unchanged: when the top-ranked candidates
+# render, exactly ``max_pages`` pages are opened, in one batch.
+EXTRA_FETCH_ATTEMPTS = 2
+
+
+def _ordered_candidates(candidates, *, limit: int) -> list[tuple[str, object]]:
+    """Rank-order the search hits, one domain first, duplicates after.
+
+    A result page can return several hits from the same site, and two slots
+    spent on one domain spend one of the few page opens on a host that already
+    answered. Preferring the first hit of each domain keeps the attempt budget
+    spread across sources; repeats stay available when the pool is thin.
+    """
+
+    seen_urls: set[str] = set()
+    seen_domains: set[str] = set()
+    primary: list[tuple[str, object]] = []
+    repeated: list[tuple[str, object]] = []
+    for item in candidates:
+        url = str(getattr(item, "url", "") or "").strip()
+        if not url or url in seen_urls:
+            continue
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            continue
+        seen_urls.add(url)
+        domain = (parsed.hostname or "").lower()
+        if domain and domain in seen_domains:
+            repeated.append((url, item))
+        else:
+            seen_domains.add(domain)
+            primary.append((url, item))
+    return (primary + repeated)[:limit]
+
 
 class WorldObservationService:
     """Discover public pages, then render them through the formal headless browser."""
@@ -16,6 +58,35 @@ class WorldObservationService:
     def __init__(self, search_provider: SearchProvider | None, web_fetcher: WebFetcher):
         self.search_provider = search_provider
         self.web_fetcher = web_fetcher
+
+    def _fetch(self, batch: list[str], *, max_chars: int) -> tuple[list, list[dict[str, str]]]:
+        fetch_many = getattr(self.web_fetcher, "fetch_many", None)
+        if callable(fetch_many):
+            return fetch_many(batch, max_chars=max_chars)
+        pages = []
+        errors: list[dict[str, str]] = []
+        for url in batch:
+            try:
+                pages.append(self.web_fetcher.fetch(url, max_chars=max_chars))
+            except Exception as exc:
+                errors.append({"url": url, "error": str(exc)[:800]})
+        return pages, errors
+
+    def _render(self, ordered: list[tuple[str, object]], *, wanted: int, max_chars: int):
+        """Open pages until ``wanted`` render, promoting the next candidate on failure."""
+
+        pages: list = []
+        errors: list[dict[str, str]] = []
+        position = 0
+        while len(pages) < wanted and position < len(ordered):
+            batch = [url for url, _ in ordered[position:position + (wanted - len(pages))]]
+            position += len(batch)
+            if not batch:
+                break
+            fetched, batch_errors = self._fetch(batch, max_chars=max_chars)
+            pages.extend(fetched)
+            errors.extend(batch_errors)
+        return pages, errors
 
     def observe(
         self,
@@ -34,34 +105,17 @@ class WorldObservationService:
         max_pages = max(1, min(4, int(max_pages)))
         search_limit = max(max_pages, min(10, int(search_limit)))
         candidates = self.search_provider.search_web(normalized, limit=search_limit)
-        urls: list[str] = []
         by_url = {}
         for item in candidates:
-            url = str(item.url or "").strip()
-            if not url or url in by_url:
-                continue
-            parsed = urlparse(url)
-            if parsed.scheme not in {"http", "https"}:
-                continue
-            by_url[url] = item
-            urls.append(url)
-            if len(urls) >= max_pages:
-                break
+            url = str(getattr(item, "url", "") or "").strip()
+            if url and url not in by_url:
+                by_url[url] = item
+        ordered = _ordered_candidates(candidates, limit=max_pages + EXTRA_FETCH_ATTEMPTS)
 
-        if not urls:
-            return {"query": normalized, "observations": [], "errors": [], "search_results": 0}
+        if not ordered:
+            return {"query": normalized, "observations": [], "errors": [], "search_results": len(candidates)}
 
-        fetch_many = getattr(self.web_fetcher, "fetch_many", None)
-        if callable(fetch_many):
-            pages, errors = fetch_many(urls, max_chars=max_chars_per_page)
-        else:
-            pages = []
-            errors = []
-            for url in urls:
-                try:
-                    pages.append(self.web_fetcher.fetch(url, max_chars=max_chars_per_page))
-                except Exception as exc:
-                    errors.append({"url": url, "error": str(exc)[:800]})
+        pages, errors = self._render(ordered, wanted=max_pages, max_chars=max_chars_per_page)
 
         observations: list[WorldObservation] = []
         for page in pages:

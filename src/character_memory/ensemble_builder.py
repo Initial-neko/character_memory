@@ -528,7 +528,13 @@ class EnsembleBuilderService:
         return self.research(build["group_id"], now=now)
 
     def _observe(self, prompt: str) -> tuple[str, list[Any], list[dict[str, str]]]:
-        query = f"{prompt} 角色 成员 人物 资料 wiki"
+        # Discovery is a general web search: the description *is* the query, and
+        # the engine decides which sources fit. The query used to carry a
+        # trailing "角色 成员 人物 资料 wiki", which moved source selection out of
+        # the ranking and into a magic word -- and picked out the one source
+        # family this network cannot retrieve, so the top hits were rejected by
+        # our own SSRF guard before anything could be rendered.
+        query = " ".join(str(prompt or "").split()).strip()
         observed = self.access.world_observer.observe(
             query,
             max_pages=3,

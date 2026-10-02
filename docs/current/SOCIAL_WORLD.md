@@ -270,6 +270,7 @@ Settings Center persists:
 space_autonomy_enabled
 space_opportunity_interval_minutes
 space_max_posts_per_day
+space_thread_reply_rounds
 space_media_enabled
 space_media_max_items
 space_image_search_enabled
@@ -326,7 +327,7 @@ actions=[]
 
 Ordinary `MESSAGE / VOICE_MESSAGE / STICKER / IMAGE` actions are dropped for Space events and cannot leak into private chat.
 
-A `SPACE_COMMENT` or validated `SPACE_STICKER` becomes a shared Space comment. A root comment targets the post author; a reply targets the character being replied to. The target receives `SPACE_COMMENT_RECEIVED` through its own PersonRuntime and may answer with public text, an existing retrieved Sticker, or silence. AI-to-AI propagation is bounded to at most 4 automatic reply rounds per trigger, so a thread can feel alive without becoming an unbounded model loop.
+A `SPACE_COMMENT` or validated `SPACE_STICKER` becomes a shared Space comment. A root comment targets the post author; a reply targets the character being replied to. The target receives `SPACE_COMMENT_RECEIVED` through its own PersonRuntime and may answer with public text, an existing retrieved Sticker, or silence. AI-to-AI propagation is bounded to at most 4 automatic reply rounds per trigger, so a thread can feel alive without becoming an unbounded model loop. `space_thread_reply_rounds` lowers that ceiling per runtime and defaults to 2, because each round is one real reaction call and a measured 59% of threads reached the old ceiling of 4; `0` still stores every comment and simply never answers it. The hard ceiling stays 4, so the bound above is a property of the runtime, not of the setting. Note that `space_autonomy_enabled` is not a Space kill switch: it gates publishing opportunities, while replies to a comment are queued and drain regardless of it.
 
 The comment POST returns after the user's durable comment is queued; it does not wait for those automatic rounds. There is no Space push channel yet, so an open browser performs four bounded post re-reads over 22 seconds after a successful comment. Each re-read is guarded by the current feed epoch and open post, which exposes scheduler replies without turning Space into permanent polling or letting a response from an old feed overwrite a newly opened one.
 
@@ -369,7 +370,7 @@ The product should stay small-scale and legible even if many personas exist.
 - human-user comments are durable shared facts but do not consume that 10-character commenter ceiling;
 - the comment actor (`CHARACTER` or `USER`) is stored and read back with the comment: it decides the shown name and whether the comment spends a character slot, so a reader that drops it silently reclassifies every user comment as a character one;
 - one post may reference at most 9 media assets;
-- one triggered AI reply chain advances at most 4 automatic rounds; a later user reply starts a new bounded interaction opportunity;
+- one triggered AI reply chain advances at most `space_thread_reply_rounds` automatic rounds (default 2, hard ceiling 4; `0` answers nothing); a later user reply starts a new bounded interaction opportunity;
 - 10 character commenters/audience members and 9 media assets are hard ceilings, not targets;
 - a written comment is durable before the characters answer it, and the POST returns without waiting for them: the automatic replies are a queued follow-up on the `space_autonomy` worker, so a model or provider failure there is logged inside the worker while the comment POST still succeeds — returning an error would make the client retry a comment that is already stored;
 - the follow-up queue is bounded (200 discussions, 8 drained per pass): one comment already fans out to several model calls, and a reply that waited behind a long backlog would land long after the comment it answers;

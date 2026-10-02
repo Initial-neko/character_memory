@@ -33,6 +33,7 @@ from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
 from character_memory.space_autonomy import (
+    MAX_AUTOMATIC_REPLY_ROUNDS,
     MAX_PENDING_COMMENT_THREADS,
     MAX_RAW_MODEL_OUTPUT_CHARS,
     SpaceAutonomyScheduler,
@@ -324,6 +325,7 @@ def _access(tmp_path, ids=("c00", "c01", "c02"), model=None, sticker_catalog=Non
             space_world_max_chars_per_page=6000,
             space_audience_size=5,
             space_scheduler_poll_seconds=60.0,
+            space_thread_reply_rounds=2,
         ),
         read_store=store,
         store=lambda: store,
@@ -482,6 +484,9 @@ def test_space_channel_drops_private_chat_actions(tmp_path):
 
 def test_space_autonomy_runs_view_reaction_comment_and_author_reply(tmp_path):
     access, store, _ = _access(tmp_path)
+    # This test pins the hard ceiling so it keeps covering the full chain; the
+    # configurable default is exercised by the reply-rounds test below.
+    access.settings.space_thread_reply_rounds = 4
     repository = SpaceRepository(store)
     service = SpaceAutonomyService(access, repository)
     now = datetime(2026, 9, 21, 20, 0, tzinfo=timezone.utc)
@@ -550,6 +555,7 @@ def test_space_thread_allows_validated_stickers_and_stops_after_four_rounds(tmp_
         model=model,
         sticker_catalog=stickers,
     )
+    access.settings.space_thread_reply_rounds = 4
     repository = SpaceRepository(store)
     service = SpaceAutonomyService(access, repository)
     now = datetime(2026, 9, 22, 20, 30, tzinfo=timezone.utc)
@@ -577,6 +583,49 @@ def test_space_thread_allows_validated_stickers_and_stops_after_four_rounds(tmp_
         for character_id in ("c00", "c01")
         for item in store.list_events(character_id)
     )
+    store.close()
+
+
+def test_space_thread_reply_rounds_caps_the_chain_and_zero_stores_without_answering(tmp_path):
+    """The configured ceiling is what a comment thread actually costs.
+
+    Each round is one real character reaction, so this is a cost ceiling rather
+    than a cosmetic knob. 0 must still keep the comment itself durable.
+    """
+
+    for cap, expected_replies in ((2, 2), (0, 0)):
+        case_dir = tmp_path / f"cap{cap}"
+        case_dir.mkdir()
+        access, store, _ = _access(case_dir, ids=("c00", "c01"))
+        access.settings.space_thread_reply_rounds = cap
+        repository = SpaceRepository(store)
+        service = SpaceAutonomyService(access, repository)
+        now = datetime(2026, 9, 22, 20, 30, tzinfo=timezone.utc)
+
+        outcome = service.run_opportunity("c00", now=now, cascade=True, source="DEV")
+        commenter = next(item for item in outcome["audience"] if item["character_id"] == "c01")
+        assert len(commenter["thread_replies"]) == expected_replies, cap
+
+        # Capping the answering never discards what was already written.
+        assert len(repository.list_comments(outcome["post"]["id"])) == 1 + expected_replies, cap
+        store.close()
+
+
+def test_space_reply_rounds_clamp_at_the_documented_four_round_ceiling(tmp_path):
+    access, store, _ = _access(tmp_path, ids=("c00", "c01"))
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=20)
+    now = datetime(2026, 9, 22, 20, 30, tzinfo=timezone.utc)
+
+    # The HTTP models bound this field too, but the runtime setter is also called
+    # directly, so the documented hard ceiling has to hold here as well.
+    scheduler.apply_runtime_config(reply_rounds=99, now=now)
+    assert access.settings.space_thread_reply_rounds == MAX_AUTOMATIC_REPLY_ROUNDS
+    assert scheduler.status(now)["reply_rounds"] == MAX_AUTOMATIC_REPLY_ROUNDS
+
+    scheduler.apply_runtime_config(reply_rounds=0, now=now)
+    assert scheduler.reply_rounds() == 0
+    assert scheduler.status(now)["reply_rounds"] == 0
     store.close()
 
 
@@ -937,6 +986,7 @@ def test_dev_console_exposes_space_autonomy_controls():
         'id="videoSmokeReport"',
         'id="videoPostReport"',
         'id="spaceAudienceSize"',
+        'id="spaceThreadReplyRounds"',
         'id="spacePollSeconds"',
         'id="applySpaceConfig"',
         'id="forceSpaceDue"',

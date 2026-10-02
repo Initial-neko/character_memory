@@ -76,6 +76,7 @@ class SpaceDevConfigRequest(BaseModel):
     world_max_pages: int | None = Field(default=None, ge=1, le=4)
     world_max_chars_per_page: int | None = Field(default=None, ge=500, le=16000)
     audience_size: int | None = Field(default=None, ge=0, le=10)
+    reply_rounds: int | None = Field(default=None, ge=0, le=4)
     poll_seconds: float | None = Field(default=None, ge=10.0, le=3600.0)
     rearm: bool = True
 
@@ -515,6 +516,7 @@ def attach_space_routes(app):
             world_max_pages=req.world_max_pages,
             world_max_chars_per_page=req.world_max_chars_per_page,
             audience_size=req.audience_size,
+            reply_rounds=req.reply_rounds,
             poll_seconds=req.poll_seconds,
             rearm=req.rearm,
             now=datetime.now().astimezone(),

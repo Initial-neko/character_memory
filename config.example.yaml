@@ -204,6 +204,12 @@ space_opportunity_interval_minutes: 1440
 # Per-character posts allowed per local day. 0 = no extra daily ceiling.
 space_max_posts_per_day: 0
 
+# How many automatic follow-up rounds one Space comment thread may advance.
+# Each round is one target character deciding through its own Runtime whether to
+# answer, so this number is the direct model-call cost of a comment thread; the
+# hard ceiling is 4. 0 stores comments without ever answering them.
+space_thread_reply_rounds: 2
+
 # Whether an autonomous Space post may contain generated/searched media.
 space_media_enabled: true
 

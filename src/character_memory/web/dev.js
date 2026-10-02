@@ -349,6 +349,7 @@
       if ($("spaceWorldMaxPages")) $("spaceWorldMaxPages").value = String(data.world_max_pages ?? 2);
       if ($("spaceWorldMaxChars")) $("spaceWorldMaxChars").value = String(data.world_max_chars_per_page ?? 6000);
       if ($("spaceAudienceSize")) $("spaceAudienceSize").value = String(data.audience_size ?? 5);
+      if ($("spaceThreadReplyRounds")) $("spaceThreadReplyRounds").value = String(data.reply_rounds ?? 2);
       if ($("spacePollSeconds")) $("spacePollSeconds").value = String(data.poll_seconds ?? 60);
       renderSpaceScheduleSummary(data);
     } catch (error) {
@@ -377,6 +378,7 @@
           world_max_pages: Number($("spaceWorldMaxPages").value || 2),
           world_max_chars_per_page: Number($("spaceWorldMaxChars").value || 6000),
           audience_size: Number($("spaceAudienceSize").value || 0),
+          reply_rounds: Number($("spaceThreadReplyRounds").value || 0),
           poll_seconds: Number($("spacePollSeconds").value || 60),
           rearm: true,
         }),

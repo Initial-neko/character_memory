@@ -976,6 +976,7 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
             "space_autonomy_enabled",
             "space_opportunity_interval_minutes",
             "space_max_posts_per_day",
+            "space_thread_reply_rounds",
             "space_media_enabled",
             "space_media_max_items",
             "space_image_search_enabled",
@@ -999,6 +1000,7 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
                     "space_autonomy_enabled": True,
                     "space_opportunity_interval_minutes": 60,
                     "space_max_posts_per_day": 12,
+                    "space_thread_reply_rounds": 2,
                     "space_media_enabled": True,
                     "space_media_max_items": 4,
                     "space_image_search_enabled": False,
@@ -1018,6 +1020,7 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
         "space_autonomy_enabled",
         "space_opportunity_interval_minutes",
         "space_max_posts_per_day",
+        "space_thread_reply_rounds",
         "space_media_enabled",
         "space_media_max_items",
         "space_image_search_enabled",
@@ -1031,6 +1034,7 @@ def test_space_autonomy_settings_are_editable_from_settings_center(tmp_path: Pat
     settings = load_settings(str(config))
     assert settings.space_opportunity_interval_minutes == 60
     assert settings.space_max_posts_per_day == 12
+    assert settings.space_thread_reply_rounds == 2
     assert settings.space_media_enabled is True
     assert settings.space_media_max_items == 4
     assert settings.space_image_search_enabled is False
@@ -1160,7 +1164,11 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     # The proactive dispatch and Intent-admission fields are counted the same
     # way: the switches and cadences are `advanced`, and only the tuning knobs
     # (poll latency, similarity threshold, dedup window) are `diagnostic`.
-    assert levels == {"common": 9, "advanced": 42, "diagnostic": 36}
+    #
+    # space_thread_reply_rounds is `advanced`: it changes how much a discussion
+    # costs, which an operator does need to reach, but it is not first-screen
+    # material next to the autonomy switch itself.
+    assert levels == {"common": 9, "advanced": 43, "diagnostic": 36}
     assert "group_max_speakers_per_turn" in {
         field["name"]
         for section in schema

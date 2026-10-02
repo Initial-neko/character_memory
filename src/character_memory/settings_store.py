@@ -191,6 +191,7 @@ SETTING_HELP: dict[str, str] = {
     "space_autonomy_enabled": "是否允许角色获得自主 Space 发帖机会；Opportunity 不等于强制发布。",
     "space_opportunity_interval_minutes": "同一角色两次 Space Opportunity 的间隔；控制判断频率，不是发帖频率。",
     "space_max_posts_per_day": "每个角色每天允许发布的 Space 动态上限；0 = 不额外限制。",
+    "space_thread_reply_rounds": "一条 Space 评论最多自动跟进几轮；每轮是一次真实角色反应调用，直接决定评论线程的成本。0 = 评论仍然入库但不自动回复。上界固定为 4。",
     "space_media_enabled": "自主 Space 是否允许附带搜索图、生图或语音等媒体；关闭后仍可发纯文本。",
     "space_media_max_items": "单条自主 Space 动态实际执行的媒体数量上限；防止一次生成过多附件。",
     "space_image_search_enabled": "是否允许 Space 使用配置的搜索 Provider 找互联网图片。",
@@ -555,6 +556,14 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "step": 1,
                 "level": "diagnostic",
                 "help": "每个角色每天最多发布几条自主动态。0 = 不限。它只是上限，不会强制发帖；角色判断不发时不消耗额度。",
+            },
+            {
+                "name": "space_thread_reply_rounds",
+                "label": "Thread Reply Rounds",
+                "type": "number",
+                "step": 1,
+                "level": "advanced",
+                "help": "一条评论最多自动跟进几轮。每轮是一位角色通过自己的 Runtime 真正判断一次，所以它直接等于评论线程的模型调用成本；实测 59% 的线程会跑满上限。0 = 评论照常入库但不自动回复。上界固定为 4。",
             },
             {
                 "name": "space_media_enabled",

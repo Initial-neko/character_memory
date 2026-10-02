@@ -16,8 +16,10 @@ def test_group_chat_ai_image_generation_reuses_sendable_image_draft():
     assert "data-ai-image-target" in ai_images
     assert "CM.features.groups?.current?.()" in ai_images
     assert "groupMembers()" in ai_images
-    assert "/images/rewrite" in ai_images
+    assert "/images/rewrite" not in ai_images
     assert "/images/generate" in ai_images
+    assert "data-ai-image-rewrite" not in ai_images
+    assert "润色并生成草稿" in ai_images
     assert "CM.features.images?.openDataDraft?." in ai_images
     assert 'source:"AI_GENERATED"' in ai_images
     assert "sameConversation(snapshot)" in ai_images

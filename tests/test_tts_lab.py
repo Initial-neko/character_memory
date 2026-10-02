@@ -432,12 +432,28 @@ def test_tts_lab_web_ui_exposes_provider_voice_and_ab_controls():
     assert 'id="voiceDesignInstruct"' in html
     assert 'id="generateVoiceDesign"' in html
     assert 'id="polishVoiceDesign"' in html
+    assert "润色并试听" in html
     assert 'fetchJsonWithTimeout("/v1/providers")' in script
     assert 'fetch("/v1/tts"' in script
     assert 'fetchJsonWithTimeout("/v1/voice-design/status")' in script
     assert 'fetch("/v1/voice-design/polish"' in script
     assert 'fetch("/v1/voice-design/generate"' in script
+    polish_body = script.split("async function polishVoiceDesign()", 1)[1].split("async function generateVoiceDesign(", 1)[0]
+    assert "await generateVoiceDesign({fromPolish: true})" in polish_body
     assert "decodeURIComponent" in script
+
+
+def test_voice_design_polish_prevents_duplicate_preview_and_reports_preview_failure():
+    script = Path("src/character_memory/web/tts_lab.js").read_text(encoding="utf-8")
+    polish_body = script.split("async function polishVoiceDesign()", 1)[1].split("async function generateVoiceDesign(", 1)[0]
+    generate_body = script.split("async function generateVoiceDesign(", 1)[1].split("function voiceDesignInputs()", 1)[0]
+
+    assert "state.voiceDesignPolishing = true" in polish_body
+    assert "if (!previewGenerated)" in polish_body
+    assert "试听生成失败" in polish_body
+    assert "state.voiceDesignGenerating" in generate_body
+    assert "!options.fromPolish" in generate_body
+    assert "return false" in generate_body
 
 
 

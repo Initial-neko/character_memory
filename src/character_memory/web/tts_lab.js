@@ -5,6 +5,9 @@
     providers: [],
     providersState: "idle",
     voiceDesignState: "idle",
+    voiceDesignReady: false,
+    voiceDesignPolishing: false,
+    voiceDesignGenerating: false,
     voiceDesignUrl: null,
     // VoiceDesign is not reproducible, so the freeze step needs the opaque
     // artifact token that addresses the exact audio the user auditioned, plus
@@ -328,9 +331,10 @@
     const generate = $("generateVoiceDesign");
     const payload = status?.voice_design || {};
     const ready = Boolean(payload.ready);
+    state.voiceDesignReady = ready;
     badge.className = ready ? "badge ok" : "badge bad";
     badge.textContent = ready ? (payload.loaded ? "已加载" : "就绪") : "不可用";
-    generate.disabled = !ready;
+    generate.disabled = !ready || state.voiceDesignPolishing || state.voiceDesignGenerating;
     $("voiceDesignStatus").textContent = pretty({
       ready,
       loaded: Boolean(payload.loaded),
@@ -374,13 +378,24 @@
 
   async function polishVoiceDesign() {
     const button = $("polishVoiceDesign");
+    if (state.voiceDesignPolishing || state.voiceDesignGenerating) return;
     const description = $("voiceDesignRaw").value.trim();
     if (!description) {
       $("voiceDesignPolishStatus").textContent = "请先填写原始声线描述。";
       return;
     }
+    if (!$("voiceDesignText").value.trim()) {
+      $("voiceDesignPolishStatus").textContent = "请先填写试听文本，避免润色完成后还要再点一次试听。";
+      return;
+    }
+    if ($("generateVoiceDesign").disabled) {
+      $("voiceDesignPolishStatus").textContent = "Voice Design 当前不可用，请先检查状态。";
+      return;
+    }
+    state.voiceDesignPolishing = true;
     button.disabled = true;
-    $("voiceDesignPolishStatus").textContent = "AI 润色中...";
+    $("generateVoiceDesign").disabled = true;
+    $("voiceDesignPolishStatus").textContent = "正在润色声线并生成试听...";
     try {
       const response = await fetch("/v1/voice-design/polish", {
         method: "POST",
@@ -393,25 +408,36 @@
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json();
       $("voiceDesignInstruct").value = data.instruct || "";
-      $("voiceDesignPolishStatus").textContent = String(data.total_ms || 0) + " ms · " + (data.model || "standard LLM");
+      $("voiceDesignPolishStatus").textContent = "润色完成，正在生成试听 · " + String(data.total_ms || 0) + " ms · " + (data.model || "standard LLM");
       // Programmatic value changes do not fire "input"; re-check the freeze gate.
       renderFreezeState();
+      const previewGenerated = await generateVoiceDesign({fromPolish: true});
+      if (!previewGenerated) {
+        const previewError = $("voiceDesignResultSummary").textContent.replace(/^ERROR:\s*/, "");
+        $("voiceDesignPolishStatus").textContent = "润色完成，但试听生成失败：" + previewError;
+        return;
+      }
+      $("voiceDesignPolishStatus").textContent = "润色并试听完成 · " + String(data.total_ms || 0) + " ms · " + (data.model || "standard LLM");
     } catch (error) {
       $("voiceDesignPolishStatus").textContent = "润色失败：" + error.message;
     } finally {
+      state.voiceDesignPolishing = false;
       button.disabled = false;
+      $("generateVoiceDesign").disabled = !state.voiceDesignReady || state.voiceDesignGenerating;
     }
   }
 
-  async function generateVoiceDesign() {
+  async function generateVoiceDesign(options = {}) {
+    if (state.voiceDesignGenerating || (state.voiceDesignPolishing && !options.fromPolish)) return false;
     const button = $("generateVoiceDesign");
     const instruct = $("voiceDesignInstruct").value.trim();
     const text = $("voiceDesignText").value.trim();
     if (!instruct || !text) {
       $("voiceDesignResultSummary").textContent = "ERROR: Instruct 和测试文本都不能为空。";
       $("voiceDesignResult").textContent = "ERROR: Instruct 和测试文本都不能为空。";
-      return;
+      return false;
     }
+    state.voiceDesignGenerating = true;
     button.disabled = true;
     $("voiceDesignResultSummary").textContent = "生成中...";
     $("voiceDesignResult").textContent = "生成中...";
@@ -458,10 +484,14 @@
       });
       await $("voiceDesignAudio").play().catch(() => {});
       await loadVoiceDesignStatus();
+      return true;
     } catch (error) {
       $("voiceDesignResultSummary").textContent = "ERROR: " + error.message;
       $("voiceDesignResult").textContent = "ERROR: " + error.message;
+      return false;
     } finally {
+      state.voiceDesignGenerating = false;
+      button.disabled = !state.voiceDesignReady || state.voiceDesignPolishing;
       renderFreezeState();
       await loadVoiceDesignStatus({quiet: true});
     }

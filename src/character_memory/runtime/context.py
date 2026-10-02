@@ -102,6 +102,7 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
         space_contract = """
 这是 Character Space / 朋友圈评论场景，不是私聊。有人在一条动态下评论了你，或回复了你参与的评论。
 - SPACE_COMMENT：表示在这条动态下公开回复，message 就是回复正文。
+- 当且仅当你想特别提醒用户“你正在回应我/喊我”时，可在 SPACE_COMMENT 上设置 mentions_user=true；系统会把它保存为显眼的未读空间提醒。普通回复不必设置，提及用户不代表发送私聊消息。
 - SPACE_STICKER：只有 Available Stickers 非空并且一个现有表情比文字更自然时使用，sticker_id 必须来自候选列表。
 - actions=[]：完全合法，表示看到了评论但不公开回复。
 不要使用 MESSAGE / VOICE_MESSAGE / EMOJI / STICKER / IMAGE；普通 STICKER 属于聊天表达，Space 表情必须使用 SPACE_STICKER。不要因为对方评论了就机械回复。

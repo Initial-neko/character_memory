@@ -81,29 +81,9 @@
     }
   }
 
-  async function rewriteImagePrompt() {
-    const button = $("rewriteImagePrompt");
-    button.disabled = true;
-    $("imageRewriteResult").textContent = "AI 正在润色绘图 Prompt...";
-    try {
-      const data = await jsonFetch("/v1/dev/imagegen/rewrite", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(imageRequestPayload()),
-      });
-      renderPrompt(data.prompt);
-      $("imageGenLatency").textContent = `${data.duration_ms ?? "-"} ms · rewrite`;
-    } catch (error) {
-      $("imageRewriteResult").textContent = `ERROR: ${error.message}`;
-    } finally {
-      button.disabled = false;
-    }
-  }
-
   async function runImageGen() {
     const button = $("runImageGen");
     button.disabled = true;
-    $("rewriteImagePrompt").disabled = true;
     $("useImageAsAvatar").hidden = true;
     $("imageGenPreview").hidden = true;
     $("imageGenPreview").removeAttribute("src");
@@ -133,7 +113,6 @@
       $("imageGenResult").textContent = `ERROR: ${error.message}`;
     } finally {
       button.disabled = false;
-      $("rewriteImagePrompt").disabled = false;
       refreshProviders();
     }
   }
@@ -178,7 +157,6 @@
     }
   }
 
-  $("rewriteImagePrompt")?.addEventListener("click", rewriteImagePrompt);
   $("copyImagePrompt")?.addEventListener("click", copyImagePrompt);
   $("runImageGen")?.addEventListener("click", runImageGen);
   $("refreshImageProviders")?.addEventListener("click", refreshProviders);

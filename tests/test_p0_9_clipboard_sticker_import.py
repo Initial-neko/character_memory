@@ -114,6 +114,7 @@ def test_sticker_picker_has_global_pack_tabs_and_small_previews():
     assert "pack_name" in js
     assert 'CM.registerFeature("stickers"' in js
     assert 'CM.api("/v1/stickers")' in js
-    assert "character_id" not in js[js.index('CM.api("/v1/stickers")') - 120:js.index('CM.api("/v1/stickers")') + 120]
+    assert 'CM.api(`/v1/stickers?character_id=${encodeURIComponent(characterId)}`)' in js
+    assert 'const key = characterId || "global"' in js
     assert "grid-template-columns: repeat(6, 52px)" in css
     assert "max-width: 112px" in css

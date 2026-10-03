@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
+import zipfile
 
 import pytest
 
@@ -94,8 +96,13 @@ def test_identical_named_private_packs_do_not_collide_and_reimports_preserve_his
         assert first["pack_id"] != momo["pack_id"]
         assert client.get(f'/v1/stickers/neko/{momo["id"]}/asset').status_code == 404
 
-        changed = _tagged_zip().replace(b"tagged-png", b"new-content")
-        assert _import(client, data=changed).status_code == 200
+        changed_stream = BytesIO()
+        with zipfile.ZipFile(BytesIO(_tagged_zip())) as original:
+            with zipfile.ZipFile(changed_stream, "w") as replacement:
+                for name in original.namelist():
+                    payload = b"new-content" if name.endswith("cute_happy.png") else original.read(name)
+                    replacement.writestr(name, payload)
+        assert _import(client, data=changed_stream.getvalue()).status_code == 200
         updated = [item for item in client.get("/v1/stickers?character_id=neko").json()["stickers"]
                    if item["scope"] == "character"]
         assert len(updated) == 2

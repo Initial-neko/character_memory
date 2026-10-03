@@ -619,4 +619,4 @@ def test_ai_image_generation_uses_one_request_then_waits_for_send_confirmation(p
     sent_payload = json.loads(chat_requests[0].post_data or "{}")
     assert sent_payload["message"] == "用户确认后的图片说明"
     assert sent_payload["image"]["filename"] == "fake-scene.png"
-    expect(page.locator(".image-panel [data-image-send]")).to_have_count(0)
+    expect(page.locator(".image-panel")).to_be_hidden()

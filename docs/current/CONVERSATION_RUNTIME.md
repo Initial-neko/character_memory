@@ -729,7 +729,7 @@ GET /v1/stickers/{character_id}/{sticker_id}/asset
 
 仍保留给旧客户端，但读取的仍是当前 global catalog。不要据此重新把 Sticker ownership 解释成 character-owned。
 
-### 4. Web ZIP import
+### 4. Web ZIP / transparent sheet import
 
 正式 Web import：
 
@@ -749,6 +749,8 @@ auto_tag
 其中 `character_id` 即使由旧客户端发送，也**不会决定 storage ownership**。后端只用它做兼容校验；导入仍写全局 user library。
 
 成功后 runtime 会重新加载 global catalog，并刷新已经加载的人物 Sticker resource。
+
+同一路由也接受 `Content-Type: image/png` 的等分 3×3 透明九宫图，`filename` 使用 `.png`。当前支持 8-bit、非交错 RGBA PNG，最大 16 MiB / 400 万像素；长宽均须被3整除。每格都必须非空并具有透明外边界，布局不明确、损坏、超限或不支持的格式返回400，整张先验证再导入，不会留下部分素材。每格按 alpha 裁边并补2px透明留白，生成同一套装的9个PNG，通过现有 ZIP 导入器原子发布。内容哈希生成固定套装/素材ID，重复导入相同图不会产生重复条目。CLI 的 `archive` 参数同样接受 `.png`；无需新增图像依赖。
 
 ### 5. Import metadata
 

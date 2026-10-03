@@ -10,6 +10,7 @@ from character_memory.time_utils import epoch_us, parse_datetime
 
 
 MAX_COMMENTERS_PER_POST = 10
+MAX_SPACE_MENTIONS = 4
 
 
 class SpacePost(BaseModel):
@@ -31,6 +32,19 @@ class SpaceComment(BaseModel):
     sticker_id: str | None = None
     created_at: datetime
     reply_to_comment_id: int | None = None
+    mentions: list[str] = Field(default_factory=list)
+    mentions_user: bool = False
+    idempotent_replay: bool = Field(default=False, exclude=True)
+
+
+class SpaceNotification(BaseModel):
+    id: int
+    recipient_id: str = "user"
+    post_id: int
+    comment_id: int
+    reasons: list[str]
+    created_at: datetime
+    read_at: datetime | None = None
 
 
 class SpaceReaction(BaseModel):
@@ -83,7 +97,22 @@ class SpaceRepository:
                     sticker_id TEXT,
                     created_at TEXT NOT NULL,
                     created_at_epoch INTEGER NOT NULL,
-                    reply_to_comment_id INTEGER
+                    reply_to_comment_id INTEGER,
+                    mentions_json TEXT NOT NULL DEFAULT '[]',
+                    mentions_user INTEGER NOT NULL DEFAULT 0,
+                    client_request_id TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS space_notifications(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recipient_id TEXT NOT NULL DEFAULT 'user',
+                    post_id INTEGER NOT NULL,
+                    comment_id INTEGER NOT NULL UNIQUE,
+                    reasons_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    created_at_epoch INTEGER NOT NULL,
+                    read_at TEXT,
+                    read_at_epoch INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS space_reactions(
@@ -159,6 +188,8 @@ class SpaceRepository:
                     ON space_posts(character_id,created_at_epoch DESC,id DESC);
                 CREATE INDEX IF NOT EXISTS idx_space_comments_post_created
                     ON space_comments(post_id,created_at_epoch,id);
+                CREATE INDEX IF NOT EXISTS idx_space_notifications_recipient_unread
+                    ON space_notifications(recipient_id,read_at,created_at_epoch DESC,id DESC);
                 CREATE INDEX IF NOT EXISTS idx_space_reactions_post
                     ON space_reactions(post_id,reaction_type,created_at_epoch);
                 CREATE INDEX IF NOT EXISTS idx_space_views_post
@@ -195,6 +226,22 @@ class SpaceRepository:
                 self.store.conn.execute(
                     "ALTER TABLE space_comments ADD COLUMN sticker_id TEXT"
                 )
+            if "mentions_json" not in comment_columns:
+                self.store.conn.execute(
+                    "ALTER TABLE space_comments ADD COLUMN mentions_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "mentions_user" not in comment_columns:
+                self.store.conn.execute(
+                    "ALTER TABLE space_comments ADD COLUMN mentions_user INTEGER NOT NULL DEFAULT 0"
+                )
+            if "client_request_id" not in comment_columns:
+                self.store.conn.execute(
+                    "ALTER TABLE space_comments ADD COLUMN client_request_id TEXT"
+                )
+            self.store.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_space_comments_client_request "
+                "ON space_comments(client_request_id) WHERE client_request_id IS NOT NULL"
+            )
             self.store._ensure_migration_table_locked()
             self.store.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
@@ -216,6 +263,10 @@ class SpaceRepository:
                 "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
                 ("space/006-comment-stickers", datetime.now().astimezone().isoformat()),
             )
+            self.store.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
+                ("space/007-bidirectional-mentions-notifications", datetime.now().astimezone().isoformat()),
+            )
             self.store._maybe_commit()
 
     @staticmethod
@@ -232,6 +283,12 @@ class SpaceRepository:
 
     @staticmethod
     def _comment_from_row(row) -> SpaceComment:
+        try:
+            mentions = json.loads(row["mentions_json"] or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            mentions = []
+        if not isinstance(mentions, list):
+            mentions = []
         return SpaceComment(
             id=int(row["id"]),
             post_id=int(row["post_id"]),
@@ -244,6 +301,26 @@ class SpaceRepository:
             sticker_id=row["sticker_id"],
             created_at=parse_datetime(row["created_at"]),
             reply_to_comment_id=row["reply_to_comment_id"],
+            mentions=[str(item) for item in mentions if str(item).strip()],
+            mentions_user=bool(row["mentions_user"]),
+        )
+
+    @staticmethod
+    def _notification_from_row(row) -> SpaceNotification:
+        try:
+            reasons = json.loads(row["reasons_json"] or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            reasons = []
+        if not isinstance(reasons, list):
+            reasons = []
+        return SpaceNotification(
+            id=int(row["id"]),
+            recipient_id=str(row["recipient_id"]),
+            post_id=int(row["post_id"]),
+            comment_id=int(row["comment_id"]),
+            reasons=[str(item) for item in reasons],
+            created_at=parse_datetime(row["created_at"]),
+            read_at=parse_datetime(row["read_at"]) if row["read_at"] else None,
         )
 
     @staticmethod
@@ -391,6 +468,51 @@ class SpaceRepository:
             comment = parent
         return comment.id
 
+    def find_comment_request_replay(
+        self,
+        post_id: int,
+        character_id: str,
+        content: str,
+        *,
+        actor_type: str = "CHARACTER",
+        reply_to_comment_id: int | None = None,
+        sticker_id: str | None = None,
+        mentions: list[str] | None = None,
+        mentions_user: bool = False,
+        client_request_id: str | None = None,
+    ) -> SpaceComment | None:
+        """Return an identical durable request, or reject key reuse with new data."""
+
+        request_id = str(client_request_id or "").strip() or None
+        if not request_id:
+            return None
+        normalized_actor_type = str(actor_type or "CHARACTER").strip().upper()
+        clean_content = str(content or "").strip()
+        clean_sticker_id = str(sticker_id or "").strip() or None
+        clean_mentions = [str(item or "").strip() for item in (mentions or [])]
+        clean_mentions = [item for item in clean_mentions if item]
+        with self.store._lock:
+            existing = self.store.conn.execute(
+                "SELECT * FROM space_comments WHERE client_request_id=?",
+                (request_id,),
+            ).fetchone()
+        if existing is None:
+            return None
+        existing_comment = self._comment_from_row(existing)
+        same_request = (
+            existing_comment.post_id == int(post_id)
+            and existing_comment.character_id == character_id
+            and existing_comment.actor_type == normalized_actor_type
+            and existing_comment.content == clean_content
+            and existing_comment.sticker_id == clean_sticker_id
+            and existing_comment.reply_to_comment_id == reply_to_comment_id
+            and existing_comment.mentions == clean_mentions
+            and existing_comment.mentions_user == bool(mentions_user)
+        )
+        if not same_request:
+            raise ValueError("client_request_id was already used for a different Space comment")
+        return existing_comment.model_copy(update={"idempotent_replay": True})
+
     def add_comment(
         self,
         post_id: int,
@@ -401,6 +523,9 @@ class SpaceRepository:
         actor_type: str = "CHARACTER",
         reply_to_comment_id: int | None = None,
         sticker_id: str | None = None,
+        mentions: list[str] | None = None,
+        mentions_user: bool = False,
+        client_request_id: str | None = None,
     ) -> SpaceComment:
         if self.get_post(post_id) is None:
             raise KeyError("space post not found")
@@ -409,6 +534,19 @@ class SpaceRepository:
             raise ValueError("space comment actor_type must be CHARACTER or USER")
         clean_content = str(content or "").strip()
         clean_sticker_id = str(sticker_id or "").strip() or None
+        clean_mentions = [str(item or "").strip() for item in (mentions or [])]
+        clean_mentions = [item for item in clean_mentions if item]
+        request_id = str(client_request_id or "").strip() or None
+        if request_id and len(request_id) > 64:
+            raise ValueError("client_request_id must be at most 64 characters")
+        if len(clean_mentions) > MAX_SPACE_MENTIONS:
+            raise ValueError(f"a Space comment may mention at most {MAX_SPACE_MENTIONS} characters")
+        if len(clean_mentions) != len(set(clean_mentions)):
+            raise ValueError("Space comment mentions must be unique")
+        if normalized_actor_type == "CHARACTER" and clean_mentions:
+            raise ValueError("character-authored comments cannot mention characters")
+        if normalized_actor_type == "USER" and mentions_user:
+            raise ValueError("user-authored comments cannot mention the user")
         if not clean_content and clean_sticker_id is None:
             raise ValueError("space comment requires content or sticker")
         if reply_to_comment_id is not None:
@@ -416,7 +554,20 @@ class SpaceRepository:
             if parent is None or int(parent.post_id) != int(post_id):
                 raise ValueError("reply target does not belong to this post")
 
-        with self.store._lock:
+        with self.store.transaction():
+            replay = self.find_comment_request_replay(
+                post_id,
+                character_id,
+                clean_content,
+                actor_type=normalized_actor_type,
+                reply_to_comment_id=reply_to_comment_id,
+                sticker_id=clean_sticker_id,
+                mentions=clean_mentions,
+                mentions_user=mentions_user,
+                client_request_id=request_id,
+            )
+            if replay is not None:
+                return replay
             if normalized_actor_type == "CHARACTER":
                 existing = self.store.conn.execute(
                     "SELECT 1 FROM space_comments WHERE post_id=? AND character_id=? AND actor_type='CHARACTER' LIMIT 1",
@@ -432,8 +583,9 @@ class SpaceRepository:
                         raise ValueError(f"a space post may have at most {MAX_COMMENTERS_PER_POST} character commenters")
             cur = self.store.conn.execute(
                 "INSERT INTO space_comments("
-                "post_id,character_id,actor_type,content,sticker_id,created_at,created_at_epoch,reply_to_comment_id"
-                ") VALUES(?,?,?,?,?,?,?,?)",
+                "post_id,character_id,actor_type,content,sticker_id,created_at,created_at_epoch,reply_to_comment_id,"
+                "mentions_json,mentions_user,client_request_id"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     int(post_id),
                     character_id,
@@ -443,9 +595,35 @@ class SpaceRepository:
                     now.isoformat(),
                     epoch_us(now),
                     reply_to_comment_id,
+                    json.dumps(clean_mentions, ensure_ascii=False, separators=(",", ":")),
+                    int(bool(mentions_user)),
+                    request_id,
                 ),
             )
-            self.store._maybe_commit()
+            reasons: list[str] = []
+            if normalized_actor_type == "CHARACTER":
+                if reply_to_comment_id is not None:
+                    parent_row = self.store.conn.execute(
+                        "SELECT actor_type FROM space_comments WHERE id=? AND post_id=?",
+                        (int(reply_to_comment_id), int(post_id)),
+                    ).fetchone()
+                    if parent_row is not None and str(parent_row["actor_type"] or "CHARACTER") == "USER":
+                        reasons.append("REPLY")
+                if mentions_user:
+                    reasons.append("MENTION")
+            if reasons:
+                self.store.conn.execute(
+                    "INSERT OR IGNORE INTO space_notifications("
+                    "recipient_id,post_id,comment_id,reasons_json,created_at,created_at_epoch"
+                    ") VALUES('user',?,?,?,?,?)",
+                    (
+                        int(post_id),
+                        int(cur.lastrowid),
+                        json.dumps(reasons, separators=(",", ":")),
+                        now.isoformat(),
+                        epoch_us(now),
+                    ),
+                )
         return SpaceComment(
             id=int(cur.lastrowid),
             post_id=int(post_id),
@@ -455,7 +633,60 @@ class SpaceRepository:
             sticker_id=clean_sticker_id,
             created_at=now,
             reply_to_comment_id=reply_to_comment_id,
+            mentions=clean_mentions,
+            mentions_user=bool(mentions_user),
         )
+
+    def list_notifications(
+        self,
+        *,
+        unread_only: bool = True,
+        limit: int = 50,
+        before_id: int | None = None,
+        recipient_id: str = "user",
+    ) -> list[SpaceNotification]:
+        page_size = max(1, min(int(limit), 100))
+        sql = "SELECT * FROM space_notifications WHERE recipient_id=?"
+        args: list[Any] = [str(recipient_id)]
+        if unread_only:
+            sql += " AND read_at IS NULL"
+        if before_id is not None:
+            sql += " AND id<?"
+            args.append(int(before_id))
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(page_size)
+        with self.store._lock:
+            rows = self.store.conn.execute(sql, args).fetchall()
+        return [self._notification_from_row(row) for row in rows]
+
+    def unread_notification_count(self, *, recipient_id: str = "user") -> int:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) AS total FROM space_notifications "
+                "WHERE recipient_id=? AND read_at IS NULL",
+                (str(recipient_id),),
+            ).fetchone()
+        return int(row["total"] if row is not None else 0)
+
+    def mark_notification_read(
+        self,
+        notification_id: int,
+        now: datetime,
+        *,
+        recipient_id: str = "user",
+    ) -> SpaceNotification | None:
+        with self.store._lock:
+            self.store.conn.execute(
+                "UPDATE space_notifications SET read_at=COALESCE(read_at,?),"
+                "read_at_epoch=COALESCE(read_at_epoch,?) WHERE id=? AND recipient_id=?",
+                (now.isoformat(), epoch_us(now), int(notification_id), str(recipient_id)),
+            )
+            self.store._maybe_commit()
+            row = self.store.conn.execute(
+                "SELECT * FROM space_notifications WHERE id=? AND recipient_id=?",
+                (int(notification_id), str(recipient_id)),
+            ).fetchone()
+        return self._notification_from_row(row) if row is not None else None
 
     def list_reactions(self, post_id: int, reaction_type: str = "LIKE") -> list[SpaceReaction]:
         with self.store._lock:

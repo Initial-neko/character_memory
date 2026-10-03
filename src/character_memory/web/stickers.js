@@ -71,7 +71,7 @@
   function showImportDialog(file) {
     importFile = file;
     panel.classList.remove("hidden");
-    panel.innerHTML = `<div class="sticker-import-card"><div class="sticker-import-title">导入全局表情包</div><div class="sticker-import-file">${CM.escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div><div class="sticker-import-help">导入后所有人物和群聊都能使用。推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>；只有图片时可让 Vision 自动补标签。</div><label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>只补缺失标签，不覆盖已有标注</small></span></label><div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="primary" data-sticker-import-confirm>导入</button></div></div>`;
+    panel.innerHTML = `<div class="sticker-import-card"><div class="sticker-import-title">导入全局表情包</div><div class="sticker-import-file">${CM.escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div><div class="sticker-import-help">导入后所有人物和群聊都能使用。推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>；也支持透明、等分3×3的 RGBA PNG 九宫图（最大16 MiB）。只有图片时可让 Vision 自动补标签。</div><label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>只补缺失标签，不覆盖已有标注</small></span></label><div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="primary" data-sticker-import-confirm>导入</button></div></div>`;
   }
 
   function importError(payload, status) {
@@ -84,13 +84,14 @@
   async function importStickerFile() {
     const file = importFile;
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".zip")) { panel.innerHTML = '<div class="error">Web 导入使用 ZIP 格式。</div>'; return; }
-    if (file.size > 64 * 1024 * 1024) { panel.innerHTML = '<div class="error">表情包 ZIP 不能超过 64 MiB。</div>'; return; }
+    const isPng = file.name.toLowerCase().endsWith(".png");
+    if (!isPng && !file.name.toLowerCase().endsWith(".zip")) { panel.innerHTML = '<div class="error">请选择 ZIP 或透明九宫 PNG。</div>'; return; }
+    if (file.size > (isPng ? 16 : 64) * 1024 * 1024) { panel.innerHTML = '<div class="error">PNG 不能超过16 MiB，ZIP 不能超过64 MiB。</div>'; return; }
     const autoTag = Boolean(panel.querySelector("[data-sticker-auto-tag]")?.checked);
     panel.innerHTML = `<div class="sticker-loading"><strong>正在导入 ${CM.escapeHtml(file.name)}</strong><br><span>${autoTag ? "缺标签的图片会调用 Vision。" : "只读取 ZIP 内现有标签。"}</span></div>`;
     const params = new URLSearchParams({filename:file.name, auto_tag:autoTag ? "true" : "false"});
     try {
-      const response = await fetch(`/v1/stickers/import?${params.toString()}`, {method:"POST", headers:{"Content-Type":"application/zip"}, body:file});
+      const response = await fetch(`/v1/stickers/import?${params.toString()}`, {method:"POST", headers:{"Content-Type":isPng ? "image/png" : "application/zip"}, body:file});
       let payload = {};
       try { payload = await response.json(); } catch (_) { payload = {}; }
       if (!response.ok) throw new Error(importError(payload, response.status));
@@ -100,7 +101,7 @@
       importFile = null;
       await open({refresh:true});
     } catch (error) {
-      panel.innerHTML = `${toolbar()}<div class="error">${CM.escapeHtml(error.message)}</div><div class="sticker-import-retry"><button type="button" data-sticker-import-open>重新选择 ZIP</button></div>`;
+      panel.innerHTML = `${toolbar()}<div class="error">${CM.escapeHtml(error.message)}</div><div class="sticker-import-retry"><button type="button" data-sticker-import-open>重新选择文件</button></div>`;
     }
   }
 
@@ -137,7 +138,7 @@
   document.querySelector(".composer-wrap")?.appendChild(panel);
   importInput = document.createElement("input");
   importInput.type = "file";
-  importInput.accept = ".zip,application/zip";
+  importInput.accept = ".zip,.png,application/zip,image/png";
   importInput.className = "sticker-import-input";
   document.body.appendChild(importInput);
 

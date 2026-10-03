@@ -119,36 +119,6 @@
     panel.querySelector("[data-ai-image-instruction]")?.focus();
   }
 
-  async function rewrite() {
-    const body = requestBody();
-    if (!body.instruction) {
-      setStatus("先写一句你想生成什么。", "error");
-      return;
-    }
-    const characterId = targetCharacterId();
-    if (!characterId) {
-      setStatus("请选择一个群成员作为本次视觉参考。", "error");
-      return;
-    }
-    const snapshot = conversationSnapshot();
-    setBusy(true);
-    setStatus("AI 正在把你的描述润色成绘图 Prompt…");
-    try {
-      const data = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/images/rewrite`, {
-        method:"POST",
-        body:JSON.stringify(body),
-      });
-      if (!sameConversation(snapshot)) return;
-      setPrompt(data.prompt);
-      const target = CM.isGroupConversation() ? ` · 参考 ${groupMembers().find(item => item.id === characterId)?.name || characterId}` : "";
-      setStatus(`润色完成 · ${data.duration_ms ?? "-"} ms · ${data.aspect_ratio || "-"}${target}`);
-    } catch (error) {
-      if (sameConversation(snapshot)) setStatus(`润色失败：${error.message}`, "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function generate() {
     const body = requestBody();
     if (!body.instruction) {
@@ -228,8 +198,7 @@
     </div>
     <textarea data-ai-image-instruction rows="4" maxlength="1600" placeholder="例如：画一张 Rin 在图书馆窗边看雨的日常场景，安静一点，不要像棚拍。"></textarea>
     <div class="ai-image-actions">
-      <button type="button" class="secondary" data-ai-image-rewrite>润色 Prompt</button>
-      <button type="button" class="primary" data-ai-image-generate>生成图片</button>
+      <button type="button" class="primary" data-ai-image-generate>润色并生成草稿</button>
       <button type="button" class="secondary" data-ai-image-copy hidden>复制 Prompt</button>
     </div>
     <div class="ai-image-status" data-ai-image-status>生成后会进入图片草稿，你确认后再发送；群聊中可选择一个成员作为视觉参考。</div>
@@ -243,7 +212,6 @@
   panel.addEventListener("click", event => {
     event.stopPropagation();
     if (event.target.closest("[data-ai-image-close]")) { close(); return; }
-    if (event.target.closest("[data-ai-image-rewrite]")) { rewrite().catch(console.error); return; }
     if (event.target.closest("[data-ai-image-generate]")) { generate().catch(console.error); return; }
     if (event.target.closest("[data-ai-image-copy]")) copyPrompt().catch(console.error);
   });
@@ -262,5 +230,5 @@
   CM.on("ready", syncState);
 
   syncState();
-  CM.registerFeature("aiImages", {open, close, rewrite, generate, syncState, trigger});
+  CM.registerFeature("aiImages", {open, close, generate, syncState, trigger});
 })();

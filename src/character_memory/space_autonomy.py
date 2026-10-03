@@ -749,6 +749,120 @@ Sources:
         )
         return text_action, sticker_action
 
+    def _process_user_comment_targets(
+        self,
+        post,
+        source,
+        *,
+        now,
+        root_id,
+        reply_target_id: str | None = None,
+    ) -> list[dict]:
+        """Give the reply target and explicit mentions one independent decision each.
+
+        Explicit mentions bypass the optional continuation-round setting, but
+        never force a reply. A user trigger with mentions also does not start a
+        role-to-role continuation chain.
+        """
+        bundle = self.access.require_bundle()
+        replies: list[dict] = []
+        visible_content = source.content.strip() if source.content else ""
+        if source.sticker_id:
+            visible_content = f"{visible_content} [表情包]".strip()
+
+        targets: list[str] = []
+        if reply_target_id:
+            targets.append(reply_target_id)
+        for target_id in source.mentions:
+            if target_id not in targets:
+                targets.append(target_id)
+
+        for target_id in targets:
+            explicitly_mentioned = target_id in source.mentions
+            try:
+                self._require_active(target_id)
+            except (KeyError, ValueError):
+                logger.info(
+                    "space.user_comment_target_unavailable post=%s comment=%s target=%s",
+                    post.id,
+                    source.id,
+                    target_id,
+                )
+                continue
+            runtime = bundle.runtimes.get(target_id)
+            if runtime is None:
+                continue
+
+            if explicitly_mentioned and target_id == reply_target_id:
+                event_content = (
+                    f"{self._comment_actor_name(source)} 在空间的一条评论讨论中回复了你，并明确 @ 了你："
+                    f"{visible_content or '[无文字]'}"
+                )
+            elif explicitly_mentioned:
+                event_content = (
+                    f"{self._comment_actor_name(source)} 在空间动态“{post.content}”中明确 @ 了你："
+                    f"{visible_content or '[无文字]'}"
+                )
+            else:
+                event_content = (
+                    f"{self._comment_actor_name(source)} 在空间的一条评论讨论中回复了你："
+                    f"{visible_content or '[无文字]'}"
+                )
+            try:
+                result = runtime.handle(
+                    Event(
+                        character_id=target_id,
+                        event_type=EventType.SPACE_COMMENT_RECEIVED,
+                        event_time=now,
+                        content=(
+                            f"{event_content}。你可以像平常一样决定是否公开回应；保持沉默也是有效选择。"
+                        ),
+                        metadata={
+                            "channel": "SPACE",
+                            "post_id": post.id,
+                            "comment_id": source.id,
+                            "commenter_id": source.character_id,
+                            "reply_to_comment_id": source.reply_to_comment_id,
+                            "thread_root_comment_id": root_id,
+                            "propagation_round": 1,
+                            "explicitly_mentioned": explicitly_mentioned,
+                            "mentions": list(source.mentions),
+                            "conversation_id": f"space:{post.id}:thread:{root_id}:target:{target_id}",
+                        },
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "space.user_comment_decision_failed post=%s comment=%s target=%s",
+                    post.id,
+                    source.id,
+                    target_id,
+                )
+                continue
+            text_action, sticker_action = self._reply_actions(result.reaction)
+            if text_action is None and sticker_action is None:
+                continue
+
+            try:
+                reply = self.repository.add_comment(
+                    post.id,
+                    target_id,
+                    text_action.message if text_action is not None else "",
+                    now,
+                    reply_to_comment_id=source.id,
+                    sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
+                    mentions_user=text_action.mentions_user if text_action is not None else False,
+                )
+            except ValueError:
+                logger.info(
+                    "space.user_comment_reply_skipped post=%s target=%s",
+                    post.id,
+                    target_id,
+                )
+                continue
+            replies.append(reply.model_dump(mode="json"))
+        return replies
+
     def process_comment_thread(
         self,
         post_id: int,
@@ -776,6 +890,21 @@ Sources:
         requested = configured_reply_rounds(self.access.settings) if max_rounds is None else int(max_rounds)
         rounds = max(0, min(requested, MAX_AUTOMATIC_REPLY_ROUNDS))
         root_id = self.repository.root_comment_id(source.id) or source.id
+
+        if source.actor_type == "USER" and source.mentions:
+            # Keep the established reply decision when this is a user reply,
+            # then add explicit @ targets in stable order. Mentions always get
+            # one decision, including at rounds=0; one trigger never cascades.
+            reply_target_id = None
+            if source.reply_to_comment_id is not None and rounds > 0:
+                reply_target_id = self._comment_target_id(post, source)
+            return self._process_user_comment_targets(
+                post,
+                source,
+                now=now,
+                root_id=root_id,
+                reply_target_id=reply_target_id,
+            )
 
         for round_index in range(rounds):
             target_id = self._comment_target_id(post, source)
@@ -815,6 +944,8 @@ Sources:
                         "comment_id": source.id,
                         "commenter_id": source.character_id,
                         "reply_to_comment_id": source.reply_to_comment_id,
+                        "mentions": list(source.mentions),
+                        "explicitly_mentioned": False,
                         "thread_root_comment_id": root_id,
                         "propagation_round": round_index + 1,
                         "conversation_id": f"space:{post.id}:thread:{root_id}:target:{target_id}",
@@ -833,6 +964,7 @@ Sources:
                     now,
                     reply_to_comment_id=source.id,
                     sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
+                    mentions_user=text_action.mentions_user if text_action is not None else False,
                 )
             except ValueError:
                 logger.info(
@@ -925,6 +1057,7 @@ Sources:
                         comment_action.message if comment_action is not None else "",
                         now,
                         sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
+                        mentions_user=comment_action.mentions_user if comment_action is not None else False,
                     )
                 except ValueError:
                     comment = None

@@ -1,7 +1,7 @@
 {
   "kind": "CharacterMemoryAndroidV1EndpointInventory",
   "status": "source-verified route inventory; not generated OpenAPI / not authorization enforcement",
-  "verified_at": "2026-10-01",
+  "verified_at": "2026-10-02",
   "canonical_document": "docs/current/MOBILE_API_CONTRACT.md",
   "openapi_runtime": [
     "CORE/openapi.json",
@@ -12,6 +12,12 @@
     "MEDIA": "https://<node>.<tailnet>.ts.net:8443"
   },
   "routes": [
+    {
+      "service": "CORE",
+      "method": "GET",
+      "path": "/v1/llm/usage",
+      "source": "src/character_memory/core_resource_web.py"
+    },
     {
       "service": "CORE",
       "method": "GET",
@@ -88,6 +94,18 @@
       "service": "CORE",
       "method": "POST",
       "path": "/v1/space/posts/{post_id}/comments",
+      "source": "src/character_memory/space_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "GET",
+      "path": "/v1/space/notifications",
+      "source": "src/character_memory/space_web.py"
+    },
+    {
+      "service": "CORE",
+      "method": "POST",
+      "path": "/v1/space/notifications/{notification_id}/read",
       "source": "src/character_memory/space_web.py"
     },
     {

@@ -188,7 +188,7 @@
   }
 
   async function refreshLlmUsage() {
-    const hours = Number($("llmUsageWindow")?.value || 24);
+    const hours = Number($("llmUsageWindow")?.value || 1);
     try {
       const data = await jsonFetch(`/v1/dev/llm-usage?hours=${hours}&limit=80`);
       const summary = data.summary || {};

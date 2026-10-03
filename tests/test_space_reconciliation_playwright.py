@@ -42,6 +42,15 @@ def space_server(tmp_path_factory):
     persona = root / "personas" / "rin"
     persona.mkdir(parents=True)
     shutil.copyfile(ROOT / "personas" / "rin" / "persona.yaml", persona / "persona.yaml")
+    deferred_persona = root / "personas" / "deferred-space-role"
+    deferred_persona.mkdir(parents=True)
+    persona_text = (ROOT / "personas" / "rin" / "persona.yaml").read_text(encoding="utf-8")
+    persona_text = persona_text.replace("id: rin\n", "id: deferred-space-role\n", 1)
+    persona_text = persona_text.replace("name: Rin\n", "name: Deferred Space Role\n", 1)
+    (deferred_persona / "persona.yaml").write_text(persona_text, encoding="utf-8")
+    (deferred_persona / "direct_pending.yaml").write_text(
+        "pending_at: '2026-10-02T09:00:00+08:00'\n", encoding="utf-8"
+    )
     port = _free_port()
     env = os.environ.copy()
     env["CHARACTER_MEMORY_E2E_DB"] = str(root / "e2e.db")
@@ -92,6 +101,31 @@ def space_server(tmp_path_factory):
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
         process.kill()
+
+
+def test_space_mention_picker_includes_deferred_roles(page, space_server):
+    page.set_default_timeout(15000)
+    default_characters = page.request.get(f"{space_server}/v1/characters").json()["characters"]
+    all_characters = page.request.get(
+        f"{space_server}/v1/characters?include_deferred=true"
+    ).json()["characters"]
+    assert "deferred-space-role" not in {item["id"] for item in default_characters}
+    assert "deferred-space-role" in {item["id"] for item in all_characters}
+
+    created = page.request.post(
+        f"{space_server}/v1/space/posts",
+        data={"character_id": "rin", "content": "deferred 角色 @ 选择器测试"},
+    )
+    assert created.ok
+    post_id = str(created.json()["post"]["id"])
+
+    page.goto(space_server, wait_until="domcontentloaded")
+    page.locator(".space-nav-button").click()
+    post = page.locator(f'[data-space-post="{post_id}"]')
+    expect(post).to_be_visible()
+    post.locator("[data-space-comments-panel-toggle]").click()
+    post.locator("[data-space-mention-toggle]").click()
+    expect(post.locator('[data-space-mention-id="deferred-space-role"]')).to_be_visible()
 
 
 def test_open_comment_panel_re_reads_scheduler_replies(page, space_server):

@@ -40,6 +40,67 @@
       </div>
     </header>
 
+    <section class="grid feature-grid" aria-label="LLM usage">
+      <article class="card wide llm-usage-card" id="llmUsageCard">
+        <div class="card-title-row">
+          <div>
+            <h2>LLM Usage</h2>
+            <p class="subtle">真实 Provider 请求计量；按 Feature / Purpose 归因，不复制 Prompt / Response 正文。</p>
+          </div>
+          <span id="llmUsageWindowBadge" class="pill">1H</span>
+        </div>
+        <div class="llm-usage-common" data-level="common">
+          <details class="level-group" data-level="advanced" data-title="高级 · 统计窗口" data-hint="只改变统计范围，不改变运行配置">
+            <summary>高级 · 统计窗口</summary>
+            <div class="actions">
+              <label>统计窗口
+                <select id="llmUsageWindow" title="选择 LLM Usage 统计查询窗口；只改变报表范围，不修改 Runtime 配置。">
+                  <option value="1" selected>1 小时</option>
+                  <option value="24">24 小时</option>
+                  <option value="168">7 天</option>
+                  <option value="720">30 天</option>
+                </select>
+              </label>
+              <button id="refreshLlmUsage" class="secondary compact" type="button" title="重新查询真实 LLM 请求用量、Feature/Purpose 归因、重试与错误统计。">刷新用量</button>
+            </div>
+          </details>
+          <div class="usage-summary" aria-label="LLM usage summary">
+            <div class="usage-stat"><span>请求</span><strong id="usageRequests">0</strong><small id="usageLogicalCalls">0 logical</small></div>
+            <div class="usage-stat"><span>总 Token</span><strong id="usageTotalTokens">0</strong><small id="usageCoverage">coverage 100%</small></div>
+            <div class="usage-stat"><span>输入</span><strong id="usageInputTokens">0</strong><small>tokens</small></div>
+            <div class="usage-stat"><span>输出</span><strong id="usageOutputTokens">0</strong><small>tokens</small></div>
+            <div class="usage-stat"><span>重试率</span><strong id="usageRetryRate">0%</strong><small id="usageRetryCalls">0 logical calls</small></div>
+            <div class="usage-stat"><span>错误率</span><strong id="usageErrorRate">0%</strong><small id="usageLatency">avg 0 ms</small></div>
+          </div>
+        </div>
+        <details class="level-group" data-level="diagnostic" data-title="详细 · LLM 请求归因与历史" data-hint="按功能、模型和最近真实请求展开">
+          <summary>详细 · LLM 请求归因与历史</summary>
+          <h3 class="usage-section-title">按功能归因</h3>
+          <div class="table-wrap usage-table-wrap">
+            <table class="usage-table">
+              <thead><tr><th>Feature</th><th>Purpose</th><th>Requests</th><th>Logical</th><th>Req/Logical</th><th>Input chars</th><th>Char share</th><th>Input tok</th><th>Output tok</th><th>Total tok</th><th>Retry</th><th>Errors</th><th>Avg ms</th></tr></thead>
+              <tbody id="llmUsageFeatureBody"><tr><td colspan="13">暂无数据</td></tr></tbody>
+            </table>
+          </div>
+          <h3 class="usage-section-title">按 Model</h3>
+          <div class="table-wrap usage-table-wrap">
+            <table>
+              <thead><tr><th>Model</th><th>Requests</th><th>Logical</th><th>Input</th><th>Output</th><th>Total</th><th>Retry</th><th>Errors</th><th>Avg ms</th></tr></thead>
+              <tbody id="llmUsageModelBody"><tr><td colspan="9">暂无数据</td></tr></tbody>
+            </table>
+          </div>
+          <h3 class="usage-section-title">最近真实请求</h3>
+          <div class="table-wrap usage-table-wrap usage-recent-wrap">
+            <table>
+              <thead><tr><th>Time</th><th>Feature / Purpose</th><th>Character</th><th>Model</th><th>Attempt</th><th>Tokens</th><th>Latency</th><th>Status</th></tr></thead>
+              <tbody id="llmUsageRecentBody"><tr><td colspan="8">暂无数据</td></tr></tbody>
+            </table>
+          </div>
+          <p class="subtle">Usage 表不复制 Prompt/Response 正文；需要检查具体上下文时继续使用 Runtime Trace，并用 llm_logical_call_id 关联。</p>
+        </details>
+      </article>
+    </section>
+
     <section class="grid status-grid" aria-label="System status">
       <article class="card status-card">
         <div class="card-title-row"><h2>Character Runtime</h2><span id="characterBadge" class="badge">unknown</span></div>
@@ -448,8 +509,7 @@
           <textarea id="imageIntent" rows="3" title="本次 ImageGen 的自然语言创作意图；只用于测试生成。">自然分享一下现在的样子，保持人物身份一致，像日常聊天里随手发来的照片。</textarea>
           <label class="visual-check"><input id="imageUseAvatar" type="checkbox" checked / title="Provider 支持参考图时，是否把该角色当前头像作为身份参考。"> Provider 支持时使用当前头像作为 identity reference</label>
           <div class="actions">
-            <button id="rewriteImagePrompt" class="secondary" title="只运行正式 Prompt Rewrite，查看最终绘图 Prompt；不生成图片。">Rewrite Prompt</button>
-            <button class="primary" id="runImageGen" title="真实执行 Prompt Rewrite → Provider → MediaStorage，并保留测试 MediaAsset 供预览。">Generate Image</button>
+            <button class="primary" id="runImageGen" title="一次完成 Prompt 润色、Provider 生成和 MediaStorage 持久化，并展示结果。">润色并生成图片</button>
             <button id="copyImagePrompt" class="secondary" hidden title="把最近一次润色后的 ImageGen Prompt 复制到剪贴板。">复制 Prompt</button>
             <button id="refreshImageProviders" class="secondary" title="重新读取 ImageGen Provider 的 configured、available、model 和能力状态。">刷新 Provider</button>
             <button id="useImageAsAvatar" class="secondary" hidden title="把最近生成且已持久化的测试图片设置为当前角色头像。">设为当前头像</button>
@@ -526,66 +586,6 @@
         <details class="debug-output">
           <summary>原始响应（调试用）</summary>
           <pre id="mediaSmokeResult" class="result">等待请求...</pre>
-        </details>
-      </article>
-
-      <article class="card wide llm-usage-card" id="llmUsageCard">
-        <div class="card-title-row">
-          <div>
-            <h2>LLM Usage</h2>
-            <p class="subtle">真实 Provider 请求计量；按 Feature / Purpose 归因，不复制 Prompt / Response 正文。</p>
-          </div>
-          <span id="llmUsageWindowBadge" class="pill">24H</span>
-        </div>
-        <div class="llm-usage-common" data-level="common">
-          <details class="level-group" data-level="advanced" data-title="高级 · 统计窗口" data-hint="只改变统计范围，不改变运行配置">
-            <summary>高级 · 统计窗口</summary>
-            <div class="actions">
-            <label>统计窗口
-              <select id="llmUsageWindow" title="选择 LLM Usage 统计查询窗口；只改变报表范围，不修改 Runtime 配置。">
-                <option value="1">1 小时</option>
-                <option value="24" selected>24 小时</option>
-                <option value="168">7 天</option>
-                <option value="720">30 天</option>
-              </select>
-            </label>
-            <button id="refreshLlmUsage" class="secondary compact" type="button" title="重新查询真实 LLM 请求用量、Feature/Purpose 归因、重试与错误统计。">刷新用量</button>
-          </div>
-            </div>
-          </details>
-          <div class="usage-summary" aria-label="LLM usage summary">
-            <div class="usage-stat"><span>请求</span><strong id="usageRequests">0</strong><small id="usageLogicalCalls">0 logical</small></div>
-            <div class="usage-stat"><span>总 Token</span><strong id="usageTotalTokens">0</strong><small id="usageCoverage">coverage 100%</small></div>
-            <div class="usage-stat"><span>输入</span><strong id="usageInputTokens">0</strong><small>tokens</small></div>
-            <div class="usage-stat"><span>输出</span><strong id="usageOutputTokens">0</strong><small>tokens</small></div>
-            <div class="usage-stat"><span>重试率</span><strong id="usageRetryRate">0%</strong><small id="usageRetryCalls">0 logical calls</small></div>
-            <div class="usage-stat"><span>错误率</span><strong id="usageErrorRate">0%</strong><small id="usageLatency">avg 0 ms</small></div>
-          </div>
-        </div>
-        <details class="level-group" data-level="diagnostic" data-title="详细 · LLM 请求归因与历史" data-hint="按功能、模型和最近真实请求展开">
-          <summary>详细 · LLM 请求归因与历史</summary>
-          <h3 class="usage-section-title">按功能归因</h3>
-          <div class="table-wrap usage-table-wrap">
-            <table class="usage-table">
-              <thead><tr><th>Feature</th><th>Purpose</th><th>Requests</th><th>Logical</th><th>Req/Logical</th><th>Input chars</th><th>Char share</th><th>Input tok</th><th>Output tok</th><th>Total tok</th><th>Retry</th><th>Errors</th><th>Avg ms</th></tr></thead>
-              <tbody id="llmUsageFeatureBody"><tr><td colspan="13">暂无数据</td></tr></tbody>
-            </table>
-          </div>
-          <h3 class="usage-section-title">按 Model</h3>
-          <div class="table-wrap usage-table-wrap">
-            <table>
-              <thead><tr><th>Model</th><th>Requests</th><th>Logical</th><th>Input</th><th>Output</th><th>Total</th><th>Retry</th><th>Errors</th><th>Avg ms</th></tr></thead>
-              <tbody id="llmUsageModelBody"><tr><td colspan="9">暂无数据</td></tr></tbody>
-            </table>
-          </div>
-          <h3 class="usage-section-title">最近真实请求</h3>
-          <div class="table-wrap usage-table-wrap usage-recent-wrap">
-            <table>
-              <thead><tr><th>Time</th><th>Feature / Purpose</th><th>Character</th><th>Model</th><th>Attempt</th><th>Tokens</th><th>Latency</th><th>Status</th></tr></thead>
-              <tbody id="llmUsageRecentBody"><tr><td colspan="8">暂无数据</td></tr></tbody>
-            </table>
-          </div>
-          <p class="subtle">Usage 表不复制 Prompt/Response 正文；需要检查具体上下文时继续使用 Runtime Trace，并用 llm_logical_call_id 关联。</p>
         </details>
       </article>
 

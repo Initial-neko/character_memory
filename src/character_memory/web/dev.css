@@ -83,10 +83,14 @@ th { color: var(--ui-muted); font-weight: 600; }
 td { color: var(--ui-text); font-variant-numeric: tabular-nums; }
 .future p { margin: 0; color: var(--ui-muted); }
 
+.usage-first { margin-bottom: 16px; }
+.usage-cost { min-width: 0; }
+.usage-cost strong { font-variant-numeric: tabular-nums; }
+
 .llm-usage-card { align-self: stretch; }
 .usage-summary {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 10px;
   margin: 4px 0 18px;
 }

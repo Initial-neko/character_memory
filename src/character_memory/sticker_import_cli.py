@@ -5,11 +5,12 @@ from pathlib import Path
 
 from character_memory.config import discover_character_profiles, load_settings, resolve_sticker_dir
 from character_memory.stickers import import_sticker_bundle, load_global_sticker_catalog
+from character_memory.sticker_sheet import sticker_sheet_bundle
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Import a tagged sticker ZIP into the global sticker library.")
-    parser.add_argument("archive", help="Path to the sticker ZIP archive")
+    parser = argparse.ArgumentParser(description="Import a tagged ZIP or transparent 3x3 RGBA PNG into the global sticker library.")
+    parser.add_argument("archive", help="Path to a sticker ZIP or transparent 3x3 RGBA PNG sheet")
     parser.add_argument(
         "--character",
         default="",
@@ -33,9 +34,12 @@ def main() -> int:
 
     sticker_dir = resolve_sticker_dir(settings)
     persona_paths = [item["persona_path"] for item in profiles]
+    payload = archive_path.read_bytes()
+    if payload.startswith(b"\x89PNG\r\n\x1a\n") or archive_path.suffix.lower() == ".png":
+        payload = sticker_sheet_bundle(payload, pack_name=archive_path.stem)
     result = import_sticker_bundle(
         settings.persona_path,
-        archive_path.read_bytes(),
+        payload,
         target_dir=sticker_dir,
     )
     catalog = load_global_sticker_catalog(sticker_dir, persona_paths=persona_paths)

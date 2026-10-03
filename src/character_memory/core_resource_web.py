@@ -8,6 +8,7 @@ from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.config import resolve_sticker_dir
 from character_memory.llm.usage import LlmUsageStore
 from character_memory.stickers import import_sticker_bundle
+from character_memory.sticker_sheet import sticker_sheet_bundle
 
 
 logger = logging.getLogger("character_memory.api.resources")
@@ -45,7 +46,9 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
             "stickers": catalog.public_items(),
         }
 
-    @app.post("/v1/stickers/import")
+    @app.post("/v1/stickers/import", openapi_extra={"requestBody": {"content": {
+        "image/png": {"schema": {"type": "string", "format": "binary"}}
+    }}})
     def import_stickers_web(
         archive: bytes = Body(..., media_type="application/zip"),
         character_id: str | None = None,
@@ -63,6 +66,8 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
         pack_name = Path(filename).stem.strip()[:80] or "自定义表情包"
         started = time.perf_counter()
         try:
+            if archive.startswith(b"\x89PNG\r\n\x1a\n") or filename.lower().endswith(".png"):
+                archive = sticker_sheet_bundle(archive, pack_name=pack_name)
             result = import_sticker_bundle(
                 compatibility_persona,
                 archive,

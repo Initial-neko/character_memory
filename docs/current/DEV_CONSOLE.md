@@ -164,7 +164,7 @@ POST /v1/dev/encounters/due
 
 ### LLM Usage
 
-LLM Usage Explorer 是 `diagnostic` 层能力，不进入 Dev Console 首屏。它统计真实 OpenAI-compatible `/chat/completions` HTTP 请求，而不是解析日志；正式运行态和 Dev probe 共用 `llm_calls` 计量表。
+LLM Usage 默认显示近 1H 的真实请求摘要，位于 Simple Dev 首屏。统计窗口选择属于高级组，按功能、模型和最近请求的归因表属于诊断组，需要切换 Detailed Dev 后展开。它统计真实 OpenAI-compatible `/chat/completions` HTTP 请求；正式运行态和 Dev probe 共用 `llm_calls` 计量表。
 
 每条真实请求记录 Feature / Purpose、Model / Provider、Character / Conversation / Session、Logical Call ID / Attempt、latency、status、request id，以及 Provider 真正返回的 input/output/total token。Provider 不返回 `usage` 时，Token 保持未知，只保留字符数和 Token Coverage；不会用字符数伪造 token。
 

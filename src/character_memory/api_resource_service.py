@@ -8,7 +8,7 @@ from typing import Any, Callable
 from character_memory.config import resolve_sticker_dir
 from character_memory.images import load_image_catalog
 from character_memory.message_projection import project_direct_message, upload_caption
-from character_memory.stickers import StickerTagSuggestion, load_global_sticker_catalog
+from character_memory.stickers import StickerTagSuggestion, load_global_sticker_catalog, sticker_library_lock
 
 
 logger = logging.getLogger("character_memory.api.resources.service")
@@ -67,8 +67,12 @@ class ApiResourceService:
         current = self.current_bundle()
         if current is None or not hasattr(current, "runtimes"):
             return
-        for runtime in current.runtimes.values():
-            runtime.sticker_catalog = catalog
+        # Reload under the same mutation lock: a slower import/delete refresh
+        # must never publish an older catalog over a newer removal.
+        with sticker_library_lock(resolve_sticker_dir(self.settings)):
+            catalog = self.global_sticker_catalog()
+            for runtime in current.runtimes.values():
+                runtime.sticker_catalog = catalog
 
     def ai_sticker_tagger(self, scope: str = "global"):
         model_holder: dict[str, object] = {}
@@ -138,7 +142,7 @@ class ApiResourceService:
         if not sticker_id:
             return None
         catalog = self.sticker_catalog_for(character_id)
-        sticker = catalog.get(sticker_id)
+        sticker = catalog.historical_get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
         return {

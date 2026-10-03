@@ -75,6 +75,8 @@ All paths below are relative to the noted base. JSON request/response is default
 | Visual group chat | `POST /v1/visual/groups/{conversation_id}/messages` | 202, text + bounded transient frames |
 | Direct screen observation | `POST /v1/visual/direct/observations` | 202, low-priority, only DISPLAY source; `{accepted,reason,...}` can reject without HTTP error |
 
+Sticker library management (`DELETE /v1/stickers`, single ID or current pack) belongs to the PC local panel. The Android UI only reads the resulting active catalog and sends available stickers; it has no import/removal management entry. Removed stickers remain readable through historical message payloads and asset URLs. See [CONVERSATION_RUNTIME](CONVERSATION_RUNTIME.md#stickers) for persistence and removal semantics.
+
 For the normal ImageGen flow, call `POST /v1/characters/{character_id}/images/generate` once: Core performs prompt rewriting and image generation in that request, then returns a sendable draft. Keep message sending as a separate explicit user action; do not require a standalone `/images/rewrite` click first.
 
 ### Direct message example — CURRENT

@@ -136,7 +136,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         if not sticker_id:
             return None
         catalog = resources["stickers"]
-        sticker = catalog.get(sticker_id)
+        sticker = catalog.historical_get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
         return {

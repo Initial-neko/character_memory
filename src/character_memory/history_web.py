@@ -30,7 +30,7 @@ def attach_history_routes(app):
     def sticker_payload(catalog, sticker_id: str | None):
         if not sticker_id:
             return None
-        sticker = catalog.get(sticker_id)
+        sticker = catalog.historical_get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
         return {**sticker.model_dump(mode="json"), "url": f"/v1/stickers/{sticker.id}/asset"}

@@ -176,7 +176,7 @@ def test_sticker_web_manager_uses_global_library_and_no_character_cache_key():
     context = (ROOT / "src" / "character_memory" / "runtime" / "context.py").read_text(encoding="utf-8")
 
     assert "/v1/stickers/import" in js
-    assert '"Content-Type":"application/zip"' in js
+    assert '"Content-Type":isPng ? "image/png" : "application/zip"' in js
     assert "导入全局表情包" in js
     assert "所有人物和群聊都能使用" in js
     assert 'CM.api("/v1/stickers")' in js

@@ -74,6 +74,37 @@ def test_opaque_sheet_requires_explicit_transparent_input():
         sticker_sheet_bundle(png(30, 30, bytes((1, 2, 3, 255)) * 900))
 
 
+@pytest.mark.parametrize('filter_type', [1, 2, 3, 4])
+def test_png_standard_filters_preserve_cell_colors_and_alpha(filter_type):
+    source = sheet()
+    length = struct.unpack('>I', source[33:37])[0]
+    raw = zlib.decompress(source[41:41 + length])
+    previous = bytes(120)
+    encoded = bytearray()
+    for y in range(30):
+        row = raw[y * 121 + 1:(y + 1) * 121]
+        encoded.append(filter_type)
+        for x, value in enumerate(row):
+            a, b, c = row[x - 4] if x >= 4 else 0, previous[x], previous[x - 4] if x >= 4 else 0
+            if filter_type == 1:
+                predictor = a
+            elif filter_type == 2:
+                predictor = b
+            elif filter_type == 3:
+                predictor = (a + b) // 2
+            else:
+                p = a + b - c
+                predictor = min(enumerate((a, b, c)), key=lambda item: (abs(p - item[1]), item[0]))[1]
+            encoded.append((value - predictor) & 255)
+        previous = row
+    compressed = zlib.compress(encoded)
+    filtered = source[:33] + struct.pack('>I', len(compressed)) + b'IDAT' + compressed + struct.pack('>I', zlib.crc32(b'IDAT' + compressed) & 0xffffffff) + source[-12:]
+    def assets(data):
+        with zipfile.ZipFile(BytesIO(sticker_sheet_bundle(data))) as archive:
+            return [archive.read(name) for name in archive.namelist() if name.endswith('.png')]
+    assert assets(source) == assets(filtered)
+
+
 def test_cli_png_import_uses_global_library(tmp_path, monkeypatch):
     from test_sticker_import_cli import _write_config
     from character_memory.sticker_import_cli import main

@@ -443,8 +443,10 @@ def import_sticker_bundle(
 
             sticker_id = _safe_id(row.get("id"), f"sticker_{index:03d}")
             pack_id = _safe_id(row.get("set_id") or row.get("pack_id"), "custom")
+            digest = hashlib.sha256(payload).hexdigest()[:16]
             if id_namespace is not None:
-                sticker_id = _namespace_sticker_id(sticker_id, id_namespace)
+                # An updated image gets a new ID: old chat messages retain their asset.
+                sticker_id = _namespace_sticker_id(f"{sticker_id}_{digest[:8]}", id_namespace)
                 pack_id = _namespace_sticker_id(pack_id, id_namespace)
             pack_name = str(row.get("display_name") or row.get("pack_name") or row.get("set_name") or default_pack_name or "自定义").strip()[:80] or "自定义"
             label = str(row.get("tag_zh") or row.get("label") or row.get("tag_en") or sticker_id).strip()[:80] or sticker_id
@@ -456,7 +458,6 @@ def import_sticker_bundle(
                 *aliases,
             ])
             description = str(row.get("description") or "").strip()[:240]
-            digest = hashlib.sha256(payload).hexdigest()[:16]
             output_name = f"{sticker_id}-{digest}{suffix}"
             prepared.append(
                 (

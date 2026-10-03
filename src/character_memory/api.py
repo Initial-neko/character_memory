@@ -179,7 +179,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         current.runtimes[character_id] = runtime
         if isinstance(getattr(current.chat, "runtime", None), dict):
             current.chat.runtime[character_id] = runtime
-        refresh_runtime_sticker_catalog(stickers)
+        refresh_runtime_sticker_catalog(global_sticker_catalog())
         characters.refresh_cache()
 
 

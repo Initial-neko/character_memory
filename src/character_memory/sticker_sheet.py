@@ -1,7 +1,8 @@
 """Bounded 3x3 transparent RGBA PNG import through the existing ZIP importer.
 
-Only 8-bit, non-interlaced RGBA PNG is accepted. No image/model downloads or
-optional imaging dependency is needed; unsupported PNG variants fail explicitly.
+Only 8-bit, non-interlaced RGBA PNG is accepted. Separators are detected near
+the thirds rather than requiring divisible dimensions or perfectly clean alpha.
+No image/model downloads or optional imaging dependency is needed.
 """
 from __future__ import annotations
 
@@ -74,8 +75,8 @@ def _decode(data: bytes) -> tuple[int, int, bytearray]:
     width, height, depth, color, compression, filtering, interlace = header
     if (depth, color, compression, filtering, interlace) != (8, 6, 0, 0, 0):
         raise ValueError('expected 8-bit non-interlaced transparent RGBA PNG')
-    if width < 6 or height < 6 or width % 3 or height % 3 or width * height > MAX_PIXELS:
-        raise ValueError('sheet dimensions must divide into equal 3x3 cells within 4 million pixels')
+    if width < 18 or height < 18 or width * height > MAX_PIXELS:
+        raise ValueError('sheet must contain a 3x3 grid within 4 million pixels')
     stride = width * 4
     expected = height * (stride + 1)
     try:
@@ -105,6 +106,38 @@ def _decode(data: bytes) -> tuple[int, int, bytearray]:
     return width, height, rgba
 
 
+def _grid_lines(width: int, height: int, rgba: bytearray, *, columns: bool) -> list[int]:
+    """Find nearly empty separator lines around 1/3 and 2/3 of an image.
+
+    Thresholding tiny-alpha noise is essential for some generated PNG sheets.
+    A detected separator must also have an almost-empty neighboring row/column;
+    this deliberately rejects sheets without gutters instead of cutting art.
+    """
+    length = width if columns else height
+    counts = [0] * length
+    for y in range(height):
+        for x in range(width):
+            if rgba[(y * width + x) * 4 + 3] >= 24:
+                counts[x if columns else y] += 1
+    lines = [0]
+    for section in (1, 2):
+        center = round(section * length / 3)
+        radius = max(2, length // 12)
+        candidates = range(max(2, center - radius), min(length - 2, center + radius) + 1)
+        selected = min(
+            candidates,
+            key=lambda pos: (
+                counts[pos - 1] + counts[pos] + counts[pos + 1],
+                abs(pos - center),
+            ),
+        )
+        if counts[selected] > max(2, (height if columns else width) // 100):
+            raise ValueError('each cell needs a transparent border; ambiguous sheet layout')
+        lines.append(selected)
+    lines.append(length)
+    return lines
+
+
 def sticker_sheet_bundle(data: bytes, *, pack_name: str = '九宫表情') -> bytes:
     """Validate all nine cells before returning an importer-compatible ZIP.
 
@@ -113,17 +146,21 @@ def sticker_sheet_bundle(data: bytes, *, pack_name: str = '九宫表情') -> byt
     are alpha-trimmed and receive two transparent pixels on every side.
     """
     width, height, rgba = _decode(data)
-    cell_width, cell_height = width // 3, height // 3
+    xs = _grid_lines(width, height, rgba, columns=True)
+    ys = _grid_lines(width, height, rgba, columns=False)
     pack_id = 'sheet_' + hashlib.sha256(data).hexdigest()[:16]
     pack_name = pack_name.strip()[:80] or '九宫表情'
     assets = []
     rows = []
     for index in range(9):
-        cell_x, cell_y = (index % 3) * cell_width, (index // 3) * cell_height
+        cell_col, cell_row = index % 3, index // 3
+        cell_x, cell_y = xs[cell_col], ys[cell_row]
+        cell_width = xs[cell_col + 1] - cell_x
+        cell_height = ys[cell_row + 1] - cell_y
         left, top, right, bottom = cell_width, cell_height, -1, -1
         for y in range(cell_height):
             for x in range(cell_width):
-                if rgba[((cell_y + y) * width + cell_x + x) * 4 + 3]:
+                if rgba[((cell_y + y) * width + cell_x + x) * 4 + 3] >= 24:
                     if x in (0, cell_width - 1) or y in (0, cell_height - 1):
                         raise ValueError('each cell needs a transparent border; ambiguous sheet layout')
                     left, top = min(left, x), min(top, y)

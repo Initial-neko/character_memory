@@ -2,7 +2,7 @@
   const CM = window.CM;
   if (!CM) throw new Error("CM core must load before stickers.js");
 
-  let cache = null;
+  let cache = new Map();
   let selectedPackId = null;
   let panel = null;
   let importInput = null;
@@ -11,13 +11,19 @@
   let trigger = null;
 
   const stickerAsset = id => `/v1/stickers/${encodeURIComponent(id)}/asset`;
+  const activeCharacterId = () => CM.isGroupConversation() ? null : (CM.state.characterId || null);
 
   async function load({refresh = false} = {}) {
-    if (refresh) cache = null;
-    if (cache) return cache;
-    const data = await CM.api("/v1/stickers");
-    cache = (data.stickers || []).map(item => ({...item, pack_id:item.pack_id || "default", pack_name:item.pack_name || "内置", url:item.url || stickerAsset(item.id)}));
-    return cache;
+    const characterId = activeCharacterId();
+    const key = characterId || "global";
+    if (refresh) cache.delete(key);
+    if (cache.has(key)) return cache.get(key);
+    const data = characterId
+      ? await CM.api(`/v1/stickers?character_id=${encodeURIComponent(characterId)}`)
+      : await CM.api("/v1/stickers");
+    const stickers = (data.stickers || []).map(item => ({...item, pack_id:item.pack_id || "default", pack_name:item.pack_name || "内置", url:item.url || stickerAsset(item.id)}));
+    cache.set(key, stickers);
+    return stickers;
   }
 
   function close() {
@@ -30,7 +36,7 @@
     const result = new Map();
     for (const item of stickers) {
       const id = item.pack_id || "default";
-      if (!result.has(id)) result.set(id, {id, name:item.pack_name || "表情包", stickers:[]});
+      if (!result.has(id)) result.set(id, {id, name:item.pack_name || "表情包", scope:item.scope || "global", stickers:[]});
       result.get(id).stickers.push(item);
     }
     return [...result.values()];
@@ -51,7 +57,7 @@
     const tabs = allPacks.length > 1 ? `<div class="sticker-pack-tabs">${allPacks.map(pack => `<button type="button" class="sticker-pack-tab${pack.id === active.id ? " active" : ""}" data-sticker-pack="${CM.escapeHtml(pack.id)}" title="${CM.escapeHtml(pack.name)}">${CM.escapeHtml(pack.name)}</button>`).join("")}</div>` : "";
     const grid = `<div class="sticker-grid">${active.stickers.map(item => `<button type="button" class="sticker-choice" data-sticker-id="${CM.escapeHtml(item.id)}" title="${CM.escapeHtml(item.label)}"><img src="${CM.escapeHtml(item.url || stickerAsset(item.id))}" alt="${CM.escapeHtml(item.label)}"><span class="sticker-choice-fallback">表情</span></button>`).join("")}</div>`;
     const notice = importNotice ? `<div class="sticker-import-notice">${CM.escapeHtml(importNotice)}</div>` : "";
-    panel.innerHTML = `${toolbar()}${notice}${tabs}${grid}<div class="sticker-pack-foot">${CM.escapeHtml(active.name)} · ${active.stickers.length} 张 · 全局</div>`;
+    panel.innerHTML = `${toolbar()}${notice}${tabs}${grid}<div class="sticker-pack-foot">${CM.escapeHtml(active.name)} · ${active.stickers.length} 张 · ${active.scope === "character" ? "角色专属" : "公共"}</div>`;
     wireFallbacks();
   }
 
@@ -71,7 +77,11 @@
   function showImportDialog(file) {
     importFile = file;
     panel.classList.remove("hidden");
-    panel.innerHTML = `<div class="sticker-import-card"><div class="sticker-import-title">导入全局表情包</div><div class="sticker-import-file">${CM.escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div><div class="sticker-import-help">导入后所有人物和群聊都能使用。推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>；也支持透明、等分3×3的 RGBA PNG 九宫图（最大16 MiB）。只有图片时可让 Vision 自动补标签。</div><label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>只补缺失标签，不覆盖已有标注</small></span></label><div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="primary" data-sticker-import-confirm>导入</button></div></div>`;
+    const canBePrivate = Boolean(activeCharacterId());
+    const scopeChoice = canBePrivate
+      ? '<label class="sticker-auto-tag">导入到 <select data-sticker-scope><option value="global">公共池（所有角色可用）</option><option value="character">当前角色私有池</option></select></label>'
+      : '<div class="sticker-import-help">群聊导入使用公共池。进入角色私聊后可选择专属表情池。</div>';
+    panel.innerHTML = `<div class="sticker-import-card"><div class="sticker-import-title">导入表情包</div><div class="sticker-import-file">${CM.escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div><div class="sticker-import-help">推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>；也支持带透明分隔的3×3 RGBA PNG 九宫图（最大16 MiB）。只有图片时可让 Vision 自动补标签。</div>${scopeChoice}<label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>只补缺失标签，不覆盖已有标注</small></span></label><div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="primary" data-sticker-import-confirm>导入</button></div></div>`;
   }
 
   function importError(payload, status) {
@@ -88,16 +98,23 @@
     if (!isPng && !file.name.toLowerCase().endsWith(".zip")) { panel.innerHTML = '<div class="error">请选择 ZIP 或透明九宫 PNG。</div>'; return; }
     if (file.size > (isPng ? 16 : 64) * 1024 * 1024) { panel.innerHTML = '<div class="error">PNG 不能超过16 MiB，ZIP 不能超过64 MiB。</div>'; return; }
     const autoTag = Boolean(panel.querySelector("[data-sticker-auto-tag]")?.checked);
+    const selectedScope = panel.querySelector("[data-sticker-scope]")?.value || "global";
+    const characterId = activeCharacterId();
+    if (selectedScope === "character" && !characterId) {
+      panel.innerHTML = '<div class="error">请先选择需要绑定表情包的角色。</div>';
+      return;
+    }
     panel.innerHTML = `<div class="sticker-loading"><strong>正在导入 ${CM.escapeHtml(file.name)}</strong><br><span>${autoTag ? "缺标签的图片会调用 Vision。" : "只读取 ZIP 内现有标签。"}</span></div>`;
-    const params = new URLSearchParams({filename:file.name, auto_tag:autoTag ? "true" : "false"});
+    const params = new URLSearchParams({filename:file.name, auto_tag:autoTag ? "true" : "false", scope:selectedScope});
+    if (selectedScope === "character") params.set("character_id", characterId);
     try {
       const response = await fetch(`/v1/stickers/import?${params.toString()}`, {method:"POST", headers:{"Content-Type":isPng ? "image/png" : "application/zip"}, body:file});
       let payload = {};
       try { payload = await response.json(); } catch (_) { payload = {}; }
       if (!response.ok) throw new Error(importError(payload, response.status));
-      cache = null;
+      cache.clear();
       if (payload.packs?.[0]?.id) selectedPackId = payload.packs[0].id;
-      importNotice = `已全局导入 ${payload.imported || 0} 张${payload.ai_tagged ? ` · AI 标注 ${payload.ai_tagged} 张` : ""}`;
+      importNotice = `已导入${selectedScope === "character" ? "当前角色专属" : "公共"}表情 ${payload.imported || 0} 张${payload.ai_tagged ? ` · AI 标注 ${payload.ai_tagged} 张` : ""}`;
       importFile = null;
       await open({refresh:true});
     } catch (error) {
@@ -158,7 +175,7 @@
   });
   document.addEventListener("click", event => { if (!event.target.closest(".sticker-panel") && !event.target.closest(".sticker-trigger")) close(); });
   CM.on("composerPopoverOpened", name => { if (name !== "stickers") close(); });
-  CM.on("conversationChanged", () => close());
+  CM.on("conversationChanged", () => { close(); selectedPackId = null; });
 
   CM.registerFeature("stickers", {load, open, close, send, setDisabled, trigger});
 })();

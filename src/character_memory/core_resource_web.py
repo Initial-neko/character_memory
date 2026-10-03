@@ -7,7 +7,7 @@ import time
 from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.config import resolve_sticker_dir
 from character_memory.llm.usage import LlmUsageStore
-from character_memory.stickers import import_sticker_bundle
+from character_memory.stickers import import_sticker_bundle, remove_global_stickers
 from character_memory.sticker_sheet import sticker_sheet_bundle
 
 
@@ -104,6 +104,21 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
             "source": catalog.source,
             "stickers": catalog.public_items(),
         }
+
+    @app.delete("/v1/stickers")
+    def remove_stickers(sticker_id: str | None = None, pack_id: str | None = None):
+        try:
+            result = remove_global_stickers(
+                resolve_sticker_dir(access.settings), sticker_id=sticker_id, pack_id=pack_id,
+                persona_paths=[profile["persona_path"] for profile in access.character_profiles()],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="sticker or pack not found") from exc
+        catalog = access.global_sticker_catalog()
+        access.refresh_runtime_sticker_catalog(catalog)
+        return {**result, "scope": "global", "stickers": catalog.public_items()}
 
     @app.get("/v1/stickers/{sticker_id}/asset")
     def global_sticker_asset(sticker_id: str):

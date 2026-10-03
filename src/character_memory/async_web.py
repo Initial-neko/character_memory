@@ -128,7 +128,7 @@ def attach_async_routes(app):
         sticker = None
         if sticker_id:
             catalog = access.global_sticker_catalog()
-            item = catalog.get(sticker_id)
+            item = catalog.historical_get(sticker_id)
             if item is not None:
                 sticker = {
                     **item.model_dump(mode="json"),
@@ -163,7 +163,7 @@ def attach_async_routes(app):
         sticker = None
         if sticker_id:
             catalog = access.global_sticker_catalog()
-            item = catalog.get(sticker_id)
+            item = catalog.historical_get(sticker_id)
             if item is not None:
                 sticker = {
                     **item.model_dump(mode="json"),

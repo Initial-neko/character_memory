@@ -51,18 +51,25 @@ class StickerCatalog:
         *,
         source: str,
         asset_roots: dict[str, Path] | None = None,
+        removed_ids: set[str] | None = None,
     ):
         self.root = root
-        self.stickers = stickers
+        removed = removed_ids or set()
+        self.stickers = [item for item in stickers if item.id not in removed]
         self.source = source
-        self._by_id = {item.id: item for item in stickers}
+        self._history_by_id = {item.id: item for item in stickers}
+        self._by_id = {item.id: item for item in self.stickers}
         self._asset_roots = {key: value.resolve() for key, value in (asset_roots or {}).items()}
 
     def get(self, sticker_id: str) -> Sticker | None:
         return self._by_id.get(sticker_id)
 
+    def historical_get(self, sticker_id: str) -> Sticker | None:
+        """Resolve existing messages, including stickers removed from selection."""
+        return self._history_by_id.get(sticker_id)
+
     def asset_path(self, sticker_id: str) -> Path | None:
-        item = self.get(sticker_id)
+        item = self.historical_get(sticker_id)
         if item is None:
             return None
         root = self._asset_roots.get(sticker_id, self.root.resolve())
@@ -115,14 +122,16 @@ def _read_manifest(path: Path) -> list[Sticker]:
     return result
 
 
-def _catalog_from_manifests(manifests: Iterable[Path], *, root: Path, source: str) -> StickerCatalog:
+def _catalog_from_manifests(
+    manifests: Iterable[Path], *, root: Path, source: str, removed_ids: set[str] | None = None,
+) -> StickerCatalog:
     merged: dict[str, Sticker] = {}
     roots: dict[str, Path] = {}
     for manifest in manifests:
         for item in _read_manifest(manifest):
             merged[item.id] = item
             roots[item.id] = manifest.parent
-    return StickerCatalog(root, list(merged.values()), source=source, asset_roots=roots)
+    return StickerCatalog(root, list(merged.values()), source=source, asset_roots=roots, removed_ids=removed_ids)
 
 
 def load_global_sticker_catalog(
@@ -140,7 +149,46 @@ def load_global_sticker_catalog(
             manifests.append(legacy)
             seen.add(key)
     manifests.append(root / "manifest.yaml")
-    return _catalog_from_manifests(manifests, root=root, source="default+global+legacy")
+    return _catalog_from_manifests(
+        manifests, root=root, source="default+global+legacy", removed_ids=_read_removed_ids(root),
+    )
+
+
+def _read_removed_ids(root: Path) -> set[str]:
+    path = root / "removed.json"
+    return set(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else set()
+
+
+def remove_global_stickers(
+    global_dir: str | Path, *, sticker_id: str | None = None,
+    pack_id: str | None = None, persona_paths: Iterable[str | Path] = (),
+) -> dict:
+    """Hide a sticker or current pack without deleting history assets or manifests."""
+    if (sticker_id is None) == (pack_id is None):
+        raise ValueError("provide exactly one sticker_id or pack_id")
+    value = sticker_id if sticker_id is not None else pack_id
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value):
+        raise ValueError("invalid sticker or pack id")
+    root = Path(global_dir)
+    with _import_lock_for(root):
+        catalog = load_global_sticker_catalog(root, persona_paths=persona_paths)
+        matches = [
+            item.id for item in catalog._history_by_id.values()
+            if (item.id == sticker_id if sticker_id is not None else item.pack_id == pack_id)
+        ]
+        if not matches:
+            raise KeyError(value)
+        removed = _read_removed_ids(root)
+        newly_removed = set(matches) - removed
+        if newly_removed:
+            root.mkdir(parents=True, exist_ok=True)
+            temp = root / f".removed.{uuid4().hex}.tmp"
+            try:
+                _durable_write(temp, json.dumps(sorted(removed | set(matches))).encode("utf-8"))
+                os.replace(temp, root / "removed.json")
+            finally:
+                temp.unlink(missing_ok=True)
+        return {"removed": len(newly_removed), "sticker_ids": matches}
 
 
 def load_sticker_catalog(persona_path: str | Path) -> StickerCatalog:
@@ -226,6 +274,11 @@ def _import_lock_for(output_dir: Path) -> threading.RLock:
             lock = threading.RLock()
             _IMPORT_LOCKS[key] = lock
         return lock
+
+
+def sticker_library_lock(global_dir: str | Path) -> threading.RLock:
+    """Coordinate mutations and runtime publication in the supported single process."""
+    return _import_lock_for(Path(global_dir))
 
 
 def _durable_write(path: Path, content: bytes) -> None:

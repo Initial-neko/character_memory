@@ -69,6 +69,8 @@ All paths below are relative to the noted base. JSON request/response is default
 | Asset | `GET /v1/media/{media_id}` | image/audio binary; not JSON |
 | Stickers | `GET /v1/stickers`; `GET /v1/stickers/{sticker_id}/asset` | JSON catalog, binary asset |
 | Sticker import | `POST /v1/stickers/import` | Raw ZIP (`application/zip`) or transparent equal 3×3 8-bit non-interlaced RGBA PNG (`image/png`, filename `.png`); validated atomically, shared global catalog; `auto_tag=false` avoids model calls. See CONVERSATION_RUNTIME for limits. |
+
+Sticker library management (`DELETE /v1/stickers`, single ID or current pack) belongs to the PC local panel. The Android UI only reads the resulting active catalog and sends available stickers; it has no import/removal management entry. Removed stickers remain readable through historical message payloads and asset URLs. See [CONVERSATION_RUNTIME](CONVERSATION_RUNTIME.md#stickers) for persistence and removal semantics.
 | Avatar | `GET /v1/characters/{id}/avatar/asset` | binary; optional V1 client display |
 | Visual config | `GET /v1/visual/periodic/config` | `{enabled,interval_seconds,max_per_hour,scope:"DIRECT_DISPLAY_ONLY"}` |
 | Visual direct chat | `POST /v1/visual/direct/messages` | 202, text + bounded transient frames |

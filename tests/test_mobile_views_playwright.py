@@ -281,6 +281,7 @@ def test_dev_usage_default_window_renders_real_fields_and_request_rows(page, dev
         ("src/character_memory/web/dev.html", "src/character_memory/web/dev.js"),
     )
 
+    page.locator("#devModeToggle").click()
     diagnostic = page.locator('#llmUsageCard details[data-level="diagnostic"]')
     diagnostic.locator("summary").click()
     expect(page.locator("#llmUsageFeatureBody")).to_contain_text("私聊")
@@ -305,6 +306,7 @@ def test_dev_usage_empty_state_renders_zero_summary_and_empty_tables(page, dev_c
     expect(page.locator("#usageCoverage")).to_have_text("token coverage 0%")
     expect(page.locator("#usageRetryRate")).to_have_text("0%")
     _assert_default_one_hour_request(urls)
+    page.locator("#devModeToggle").click()
     diagnostic = page.locator('#llmUsageCard details[data-level="diagnostic"]')
     diagnostic.locator("summary").click()
     for table_id in ("llmUsageFeatureBody", "llmUsageModelBody", "llmUsageRecentBody"):
@@ -322,6 +324,7 @@ def test_dev_usage_failure_state_explains_unavailable_response(page, dev_console
     _open_dev_console(page, dev_console_url)
 
     expect(page.locator("#usageRequests")).to_have_text("0")
+    page.locator("#devModeToggle").click()
     diagnostic = page.locator('#llmUsageCard details[data-level="diagnostic"]')
     diagnostic.locator("summary").click()
     expect(page.locator("#llmUsageFeatureBody")).to_contain_text(
@@ -536,6 +539,7 @@ def test_space_notification_opens_target_marks_read_and_highlights_comment(page,
 def test_ai_image_generation_uses_one_request_then_waits_for_send_confirmation(page, space_server):
     page.set_viewport_size(MOBILE_VIEWPORT)
     page.goto(space_server, wait_until="domcontentloaded")
+    page.locator(".composer-tools-trigger").click()
     page.locator(".ai-image-trigger").wait_for(state="visible")
 
     image_requests: list[tuple[str, dict]] = []

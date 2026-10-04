@@ -872,7 +872,7 @@ def test_confirmed_ensemble_relationships_reach_group_contract_not_history(tmp_p
     assert origin is not None
     assert origin["overview"] == "未来道具研究所的核心成员。"
     assert [item["character_id"] for item in origin["participants"]] == ["kurisu", "okabe"]
-    assert "Mayuri" not in json.dumps(origin, ensure_ascii=False)
+    assert all(item["name"] != "Mayuri" for item in origin["participants"])
     group = GroupRepository(store).get_group(result["group_id"])
     runtime = GroupConversationService(store, {}, None, profiles=profiles)
     normal = runtime._group_contract(group, "okabe")

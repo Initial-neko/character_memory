@@ -50,12 +50,18 @@
     const isGroup = (options && options.variant) === "group";
     const stickerClass = isGroup ? ' class="group-message-sticker"' : "";
     const imageClass = isGroup ? ' class="group-message-image"' : "";
+    // A sticker with only an id gives no scope, so prefer the character-scoped
+    // route: it serves both the public pool and that role's private pool, while
+    // the global route 404s on private ids.
+    const stickerOwner = message.character_id || message.actor_id || null;
     const sticker = message.sticker || (
       message.sticker_id
         ? {
             id: message.sticker_id,
             label: message.sticker_label || "表情包",
-            url: `/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset`,
+            url: stickerOwner
+              ? `/v1/stickers/${encodeURIComponent(stickerOwner)}/${encodeURIComponent(message.sticker_id)}/asset`
+              : `/v1/stickers/${encodeURIComponent(message.sticker_id)}/asset`,
           }
         : null
     );

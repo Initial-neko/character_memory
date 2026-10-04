@@ -36,3 +36,15 @@ def test_pc_manage_cancel_single_pack_and_history_asset(chat):
     page.reload()
     available = {item["id"] for item in page.request.get(urljoin(page.url, "/v1/stickers")).json()["stickers"]}
     assert sticker_id not in available
+
+
+def test_manage_mode_does_not_survive_closing_the_panel(chat):
+    page = chat
+    page.locator(".sticker-trigger").click()
+    page.locator("[data-sticker-manage]").click()
+    assert page.locator("[data-sticker-remove-pack]").count() == 1
+    page.locator(".sticker-trigger").click()  # close
+    page.locator(".sticker-trigger").click()  # reopen
+    page.wait_for_selector("[data-sticker-id]")
+    # Management is per-visit: the next visit must not remove on a single click.
+    assert page.locator("[data-sticker-remove-pack]").count() == 0

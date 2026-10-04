@@ -8,6 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import threading
+import time
 from typing import Callable, Iterable
 from uuid import uuid4
 import zipfile
@@ -185,7 +186,7 @@ def remove_global_stickers(
             temp = root / f".removed.{uuid4().hex}.tmp"
             try:
                 _durable_write(temp, json.dumps(sorted(removed | set(matches))).encode("utf-8"))
-                os.replace(temp, root / "removed.json")
+                _replace_with_retry(temp, root / "removed.json")
             finally:
                 temp.unlink(missing_ok=True)
         return {"removed": len(newly_removed), "sticker_ids": matches}
@@ -288,6 +289,22 @@ def _durable_write(path: Path, content: bytes) -> None:
         os.fsync(handle.fileno())
 
 
+def _replace_with_retry(temp: Path, target: Path, *, attempts: int = 5, delay: float = 0.02) -> None:
+    """Replace atomically, tolerating a concurrent reader holding the target.
+
+    On Windows a plain open() does not share delete access, so MoveFileEx fails
+    with a sharing violation while another thread is reading the same manifest.
+    """
+    for remaining in range(attempts, 0, -1):
+        try:
+            os.replace(temp, target)
+            return
+        except PermissionError:
+            if remaining == 1:
+                raise
+            time.sleep(delay)
+
+
 def _commit_prepared_import(output_dir: Path, prepared: list[tuple[Sticker, bytes]]) -> None:
     """Publish assets first under immutable content-addressed names, manifest last.
 
@@ -311,7 +328,7 @@ def _commit_prepared_import(output_dir: Path, prepared: list[tuple[Sticker, byte
                 temp = output_dir / f".{target.name}.{transaction_id}.tmp"
                 temp_paths.append(temp)
                 _durable_write(temp, payload)
-                os.replace(temp, target)
+                _replace_with_retry(temp, target)
                 temp_paths.remove(temp)
                 created_assets.append(target)
             existing[sticker.id] = sticker
@@ -325,7 +342,7 @@ def _commit_prepared_import(output_dir: Path, prepared: list[tuple[Sticker, byte
         for sticker, _ in prepared:
             if not (output_dir / sticker.file).is_file():
                 raise RuntimeError(f"prepared sticker asset missing before manifest commit: {sticker.file}")
-        os.replace(temp_manifest, manifest)
+        _replace_with_retry(temp_manifest, manifest)
         temp_paths.remove(temp_manifest)
         committed = True
     finally:

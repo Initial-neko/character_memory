@@ -326,6 +326,7 @@
 
   function editPrompt() {
     const prompt = currentBuild?.prompt || lastPrompt || "";
+    lastMode = currentBuild?.mode || lastMode;
     currentBuild = null;
     CM.openDrawer("AI 建群", "修改一句话描述后重新整理");
     CM.dom.drawerBody.innerHTML = introHtml();

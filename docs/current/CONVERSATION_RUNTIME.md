@@ -160,7 +160,7 @@ member C -> ...
 
 `POST /v1/ensembles` 只创建一个不可见的 `BUILDING` build record，不提前创建真实 GroupConversation；`POST /v1/ensembles/prepare` 是一键入口，会创建 build record 后执行联网 research。失败时 build 保留为可重试状态，不再因为一次 Provider / structured-output 错误把整次输入和进度删掉。兼容的 `/{build_id}/research` 可继续对已有 build 重试资料整理；单个失败成员还可以通过 `/{build_id}/members/{index}/retry` 局部恢复。
 
-Research 只负责整理群体事实。成员 Persona 不再为每个人额外发起一次严格 JSON LLM 调用，而是从 `EnsembleMemberResearch` 做确定性 projection。年龄是弱资料：允许 `18`、`18岁（大学一年级）`、`年龄不详` 或 null；只有能可靠抽出 1..120 的整数时才进入 `PersonaDraft.age`，否则保持 null。角色 identity、description、personality、speech style、relationship 才是建模和后续声线设计的主要输入。
+Research 负责群体事实及初始关系；新角色随后复用 `PersonaBuilder.generate()` 按人独立深化对话、分歧、主动和关心方式，失败时回退到 `member_research_to_persona()` 的确定性草稿并标为 `FALLBACK`，不会因某个人的模型输出失败而放弃整批；已存在角色则直接复用现有 Persona，不另行修改。用户可在确认页预览完整草稿并针对单人重新深化（`POST /v1/ensembles/{build_id}/members/{index}/regenerate`），失败成员仍保留原有 `/retry`。`mode=SOURCE` 默认走公开网页资料检索，`mode=ORIGINAL` 则直接以用户原创描述生成人物与关系，不要求联网检索。年龄是弱资料：允许 `18`、`18岁（大学一年级）`、`年龄不详` 或 null；只有能可靠抽出 1..120 的整数时才进入 `PersonaDraft.age`，否则保持 null。角色 identity、description、personality、speech style、relationship 才是建模和后续声线设计的主要输入。
 
 该规则由 `PersonaDraft` 自己的字段校验器执行，所以单角色草稿 `/v1/characters/draft` 走的是同一条弱资料策略：模型对非人类角色写出 `猫龄三岁半` 只会让 `age` 退化为 null，不会连累整份草稿。草稿校验失败后的重试也不再只说“JSON 不符合要求”，而是把目标字段与具体校验错误回传给模型，避免模型原地重发同一份无效 JSON 直到耗尽次数。
 
@@ -168,13 +168,13 @@ Research 只负责整理群体事实。成员 Persona 不再为每个人额外�
 
 成员整理采用 partial-success：一位成员格式异常只标为 `FAILED` 并保留 research 原始字段，其他可用成员继续；只要至少 2 位成员是 `READY`，整个 build 就可以进入确认页。前端默认隐藏内部 Pydantic/Provider 细节，用户只看到可理解的“重试这一位 / 重试整理 / 修改描述”。
 
-`/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。
+`/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；选中成员的 `relationship_notes` 作为初始公开群关系连同 build 一起持久化并按当前有效成员筛选注入正常/自主群聊上下文，明确标注其不是实际发生过的群消息，不进入 Event/Memory；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。
 
 READY build 是可跨请求保留的 research 快照，不是提交时的角色注册表快照。再次打开 AI 建群会恢复最近一条 READY / FAILED build；服务重启时遗留的 BUILDING 会转成可重试的 FAILED，而不是永久卡在整理中。confirm 会重新按当前 active Character 匹配每位成员；research 后被删除/归档的旧 ID 不会写进新群，期间新建的同名 active Character 可以直接复用。同一 build 的重复/并发 confirm 只提交一次；成功 re-key 到真实 group id 后，原 build id 仍作为幂等别名接受响应重试。批量容量先用于确认页预测，真正创建每个 Character 时仍在共享 registry lock 下重查硬上限，防止头像/声音 onboarding 释放锁期间有其它创建插入。新角色的 `creation.json.group_id` 在真实 GroupConversation 创建后改写为最终 group id，不保留已经被 re-key 掉的临时 build id。
 
 可选 `use_voice_design=true` 只在用户显式勾选后生效。它要求用户已经手动启动 Qwen3 VoiceDesign sidecar；群聊和 Character 核心 commit 完成后，后台才按角色 identity/personality/speech style 逐个尝试 VoiceDesign + freeze。VoiceDesign 未启动、不可用或单个角色生成失败都只记日志并保留现有默认/回退 voice，绝不回滚 Character 或 Group。
 
-模型调用量级因此从“1 次群体 research + 每名成员 1 次 Persona structured call”收敛为主要的群体 research 调用；成员 Persona projection 为本地确定性转换。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
+模型调用量级：`SOURCE` 模式一次群体 research + 最多每个新成员一次 `PersonaBuilder` 模型生成（可能附带结构化修复重试）；已有人物不再次生成，失败的单个角色采用本地确定性兜底。`ORIGINAL` 模式不触发 World Observer，但仍需一次群体生成和新人物深化。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
 
 ### Member failure isolation
 

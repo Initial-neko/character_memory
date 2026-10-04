@@ -16,6 +16,7 @@
   let currentBuild = null;
   let useVoiceDesignRequested = false;
   let lastPrompt = "";
+  let lastMode = "SOURCE";
 
   function introHtml() {
     return `
@@ -27,6 +28,10 @@
         <label class="ensemble-prompt-field">
           <span>你想创建什么群？</span>
           <textarea data-ensemble-prompt rows="5" maxlength="2000" placeholder="复刻命运石之门的 LAB MEM，并形成群聊"></textarea>
+        </label>
+        <label class="ensemble-voice-option">
+          <span>创建类型</span>
+          <select data-ensemble-mode><option value="SOURCE">作品 / 公开资料复刻</option><option value="ORIGINAL">原创世界与人物（不联网检索）</option></select>
         </label>
         <label class="ensemble-voice-option">
           <input type="checkbox" data-ensemble-voice-design>
@@ -117,19 +122,31 @@
         </div>
       `;
     }
+    const previewFields = [
+      ["人物描述", draft.description], ["性格", (draft.personality || []).join("；")],
+      ["对话习惯", draft.conversation], ["情绪表达", draft.expression],
+      ["追问", draft.questions], ["沉默", draft.silence],
+      ["主动", draft.initiative], ["分歧", draft.disagreement],
+      ["关心", draft.care], ["边界", (draft.boundaries || []).join("；")],
+    ];
     return `
-      <label class="ensemble-member-card">
-        <input type="checkbox" data-ensemble-member value="${Number(item.index)}" checked>
+      <div class="ensemble-member-card">
+        <input type="checkbox" data-ensemble-member value="${Number(item.index)}" checked aria-label="选择 ${CM.escapeHtml(draft.name || item.canonical_name || "角色")}">
         <span class="ensemble-member-avatar">${CM.escapeHtml(CM.initialFor(draft))}</span>
         <span class="ensemble-member-copy">
           <span class="ensemble-member-name">
             <strong>${CM.escapeHtml(draft.name || item.canonical_name || "角色")}</strong>
-            ${existing ? '<em>已存在 · 直接加入</em>' : '<em>将创建</em>'}
+            ${existing ? '<em>已存在 · 保留当前设定</em>' : item.generation_method === "FALLBACK" ? '<em>基础草稿 · 深化失败可重试</em>' : '<em>已深化 · 将创建</em>'}
           </span>
           <span>${CM.escapeHtml(draft.identity || item.identity || draft.tagline || "")}</span>
           <small>${CM.escapeHtml((item.relationship_notes || []).slice(0, 2).join("；"))}</small>
+          <details class="ensemble-persona-preview">
+            <summary>${existing ? "查看研究草稿（实际复用现有人物设定）" : "查看完整人物草稿"}</summary>
+            ${previewFields.map(([title, value]) => `<p><strong>${title}：</strong>${CM.escapeHtml(value || "未提供")}</p>`).join("")}
+          </details>
+          ${existing ? "" : `<button type="button" data-ensemble-regenerate="${Number(item.index)}">重新深化此人物</button>`}
         </span>
-      </label>
+      </div>
     `;
   }
 
@@ -182,7 +199,7 @@
     `;
   }
 
-  function renderConfirmation(build) {
+  function renderConfirmation(build, selectedIndices = null) {
     currentBuild = build;
     const drafts = Array.isArray(build.drafts) ? build.drafts : [];
     CM.openDrawer(build.group_name || build.group?.name || "确认群成员", "勾选要加入的角色，然后一次确认创建");
@@ -209,6 +226,12 @@
         </div>
       </div>
     `;
+    if (selectedIndices) {
+      const selected = new Set(selectedIndices);
+      CM.dom.drawerBody.querySelectorAll("[data-ensemble-member]").forEach(input => {
+        input.checked = selected.has(Number(input.value));
+      });
+    }
     updateCapacity(build);
   }
 
@@ -220,6 +243,7 @@
     }
     currentBuild = null;
     lastPrompt = prompt;
+    lastMode = CM.dom.drawerBody.querySelector("[data-ensemble-mode]")?.value || "SOURCE";
     useVoiceDesignRequested = Boolean(
       CM.dom.drawerBody.querySelector("[data-ensemble-voice-design]")?.checked
     );
@@ -235,7 +259,7 @@
     try {
       const prepared = await CM.api("/v1/ensembles/prepare", {
         method:"POST",
-        body:JSON.stringify({prompt}),
+        body:JSON.stringify({prompt, mode:lastMode}),
       });
       if (prepared.build?.status === "FAILED") {
         renderBuildFailure(prepared.build);
@@ -274,25 +298,43 @@
 
   async function retryMember(index) {
     if (!currentBuild?.group_id) return;
+    const selected = selectedItems(currentBuild).map(item => Number(item.index));
     try {
       const response = await CM.api(
         `/v1/ensembles/${encodeURIComponent(currentBuild.group_id)}/members/${Number(index)}/retry`,
         {method:"POST"}
       );
-      renderConfirmation(response.build);
+      renderConfirmation(response.build, selected);
     } catch (error) {
       showError("这一位暂时仍无法整理；其他可用成员可以继续创建。");
     }
   }
 
+  async function regenerateMember(index) {
+    if (!currentBuild?.group_id) return;
+    const selected = selectedItems(currentBuild).map(item => Number(item.index));
+    try {
+      const response = await CM.api(
+        `/v1/ensembles/${encodeURIComponent(currentBuild.group_id)}/members/${Number(index)}/regenerate`,
+        {method:"POST"}
+      );
+      renderConfirmation(response.build, selected);
+    } catch (error) {
+      showError("此人物的深化暂时失败，其他成员不受影响。");
+    }
+  }
+
   function editPrompt() {
     const prompt = currentBuild?.prompt || lastPrompt || "";
+    lastMode = currentBuild?.mode || lastMode;
     currentBuild = null;
     CM.openDrawer("AI 建群", "修改一句话描述后重新整理");
     CM.dom.drawerBody.innerHTML = introHtml();
     const textarea = CM.dom.drawerBody.querySelector("[data-ensemble-prompt]");
     const voice = CM.dom.drawerBody.querySelector("[data-ensemble-voice-design]");
     if (textarea) textarea.value = prompt;
+    const mode = CM.dom.drawerBody.querySelector("[data-ensemble-mode]");
+    if (mode) mode.value = currentBuild?.mode || lastMode;
     if (voice) voice.checked = useVoiceDesignRequested;
   }
 
@@ -361,6 +403,8 @@
     if (event.target.closest("[data-ensemble-edit]")) { editPrompt(); return; }
     const retryMemberButton = event.target.closest("[data-ensemble-retry-member]");
     if (retryMemberButton) { retryMember(retryMemberButton.dataset.ensembleRetryMember).catch(console.error); return; }
+    const regenerateButton = event.target.closest("[data-ensemble-regenerate]");
+    if (regenerateButton) { regenerateMember(regenerateButton.dataset.ensembleRegenerate).catch(console.error); return; }
     if (event.target.closest("[data-ensemble-discard]")) { discardBuild().catch(console.error); return; }
     if (event.target.closest("[data-ensemble-confirm]")) confirmBuild().catch(console.error);
   });

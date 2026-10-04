@@ -120,11 +120,12 @@ def test_dev_console_exposes_real_imagegen_controls():
     assert 'id="imageProvider"' in html
     assert 'id="imagePurpose"' in html
     assert 'id="imageGenPreview"' in html
-    assert 'id="rewriteImagePrompt"' in html
+    assert 'id="rewriteImagePrompt"' not in html
+    assert "润色并生成图片" in html
     assert 'id="imageRewriteResult"' in html
     assert 'id="useImageAsAvatar"' in html
     assert "/v1/dev/visual/providers" in script
-    assert "/v1/dev/imagegen/rewrite" in script
+    assert "/v1/dev/imagegen/rewrite" not in script
     assert "/v1/dev/imagegen" in script
     assert "/v1/dev/avatar-from-media" in script
 
@@ -187,8 +188,10 @@ def test_chat_ai_image_tool_generates_into_existing_image_draft_instead_of_auto_
     image_script = Path("src/character_memory/web/images.js").read_text(encoding="utf-8")
     index = Path("src/character_memory/web/index.html").read_text(encoding="utf-8")
 
-    assert "/images/rewrite" in ai_script
+    assert "/images/rewrite" not in ai_script
     assert "/images/generate" in ai_script
+    assert "data-ai-image-rewrite" not in ai_script
+    assert "润色并生成草稿" in ai_script
     assert "openDataDraft" in ai_script
     assert 'source:"AI_GENERATED"' in ai_script
     assert "CM.sendDirectPayload" not in ai_script

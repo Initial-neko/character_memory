@@ -8,6 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import threading
+import time
 from typing import Callable, Iterable
 from uuid import uuid4
 import zipfile
@@ -51,18 +52,30 @@ class StickerCatalog:
         *,
         source: str,
         asset_roots: dict[str, Path] | None = None,
+        removed_ids: set[str] | None = None,
+        private_ids: set[str] | None = None,
+        owner_character_id: str | None = None,
     ):
         self.root = root
-        self.stickers = stickers
+        removed = removed_ids or set()
+        self._removed_ids = set(removed)
+        self.stickers = [item for item in stickers if item.id not in removed]
         self.source = source
-        self._by_id = {item.id: item for item in stickers}
+        self._history_by_id = {item.id: item for item in stickers}
+        self._by_id = {item.id: item for item in self.stickers}
         self._asset_roots = {key: value.resolve() for key, value in (asset_roots or {}).items()}
+        self._private_ids = private_ids or set()
+        self.owner_character_id = owner_character_id
 
     def get(self, sticker_id: str) -> Sticker | None:
         return self._by_id.get(sticker_id)
 
+    def historical_get(self, sticker_id: str) -> Sticker | None:
+        """Resolve existing messages, including stickers removed from selection."""
+        return self._history_by_id.get(sticker_id)
+
     def asset_path(self, sticker_id: str) -> Path | None:
-        item = self.get(sticker_id)
+        item = self.historical_get(sticker_id)
         if item is None:
             return None
         root = self._asset_roots.get(sticker_id, self.root.resolve())
@@ -82,21 +95,49 @@ class StickerCatalog:
             rows.append(f"- {item.id}: {item.label}；适合：{meaning}")
         return "\n".join(rows)
 
+    def asset_url(self, sticker_id: str, character_id: str | None = None) -> str:
+        if sticker_id in self._private_ids:
+            # Private assets must never be reachable through the global URL.
+            owner = self.owner_character_id
+            if owner is None:
+                raise ValueError("private sticker catalog has no owner")
+            return f"/v1/stickers/{owner}/{sticker_id}/asset"
+        if character_id:
+            return f"/v1/stickers/{character_id}/{sticker_id}/asset"
+        return f"/v1/stickers/{sticker_id}/asset"
+
     def public_items(self, character_id: str | None = None) -> list[dict]:
         result = []
         for item in self.stickers:
             if self.asset_path(item.id) is None:
                 continue
-            if character_id:
-                url = f"/v1/stickers/{character_id}/{item.id}/asset"
-            else:
-                url = f"/v1/stickers/{item.id}/asset"
-            result.append({**item.model_dump(mode="json"), "url": url})
+            private = item.id in self._private_ids
+            result.append({
+                **item.model_dump(mode="json"),
+                "url": self.asset_url(item.id, character_id),
+                "scope": "character" if private else "global",
+                "owner_character_id": self.owner_character_id if private else None,
+            })
         return result
 
 
 def _default_manifest() -> Path:
     return Path(__file__).with_name("web") / "stickers" / "default" / "manifest.yaml"
+
+
+def private_sticker_dir(global_dir: str | Path, character_id: str) -> Path:
+    """Keep user-controlled identifiers out of filesystem path components."""
+    key = hashlib.sha256(character_id.encode("utf-8")).hexdigest()[:24]
+    return Path(global_dir) / "characters" / key
+
+
+def _namespace_sticker_id(value: str, character_id: str) -> str:
+    """Isolate identical imported pack/image IDs across different characters."""
+    prefix = "private_" + hashlib.sha256(character_id.encode("utf-8")).hexdigest()[:12] + "_"
+    if len(prefix) + len(value) <= 64:
+        return prefix + value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+    return prefix + value[:64 - len(prefix) - len(digest) - 1] + "_" + digest
 
 
 def _read_manifest(path: Path) -> list[Sticker]:
@@ -115,14 +156,16 @@ def _read_manifest(path: Path) -> list[Sticker]:
     return result
 
 
-def _catalog_from_manifests(manifests: Iterable[Path], *, root: Path, source: str) -> StickerCatalog:
+def _catalog_from_manifests(
+    manifests: Iterable[Path], *, root: Path, source: str, removed_ids: set[str] | None = None,
+) -> StickerCatalog:
     merged: dict[str, Sticker] = {}
     roots: dict[str, Path] = {}
     for manifest in manifests:
         for item in _read_manifest(manifest):
             merged[item.id] = item
             roots[item.id] = manifest.parent
-    return StickerCatalog(root, list(merged.values()), source=source, asset_roots=roots)
+    return StickerCatalog(root, list(merged.values()), source=source, asset_roots=roots, removed_ids=removed_ids)
 
 
 def load_global_sticker_catalog(
@@ -140,7 +183,79 @@ def load_global_sticker_catalog(
             manifests.append(legacy)
             seen.add(key)
     manifests.append(root / "manifest.yaml")
-    return _catalog_from_manifests(manifests, root=root, source="default+global+legacy")
+    return _catalog_from_manifests(
+        manifests, root=root, source="default+global+legacy", removed_ids=_read_removed_ids(root),
+    )
+
+
+def _read_removed_ids(root: Path) -> set[str]:
+    path = root / "removed.json"
+    return set(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else set()
+
+
+def remove_global_stickers(
+    global_dir: str | Path, *, sticker_id: str | None = None,
+    pack_id: str | None = None, persona_paths: Iterable[str | Path] = (),
+) -> dict:
+    """Hide a sticker or current pack without deleting history assets or manifests."""
+    if (sticker_id is None) == (pack_id is None):
+        raise ValueError("provide exactly one sticker_id or pack_id")
+    value = sticker_id if sticker_id is not None else pack_id
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value):
+        raise ValueError("invalid sticker or pack id")
+    root = Path(global_dir)
+    with _import_lock_for(root):
+        catalog = load_global_sticker_catalog(root, persona_paths=persona_paths)
+        matches = [
+            item.id for item in catalog._history_by_id.values()
+            if (item.id == sticker_id if sticker_id is not None else item.pack_id == pack_id)
+        ]
+        if not matches:
+            raise KeyError(value)
+        removed = _read_removed_ids(root)
+        newly_removed = set(matches) - removed
+        if newly_removed:
+            root.mkdir(parents=True, exist_ok=True)
+            temp = root / f".removed.{uuid4().hex}.tmp"
+            try:
+                _durable_write(temp, json.dumps(sorted(removed | set(matches))).encode("utf-8"))
+                _replace_with_retry(temp, root / "removed.json")
+            finally:
+                temp.unlink(missing_ok=True)
+        return {"removed": len(newly_removed), "sticker_ids": matches}
+
+
+def character_sticker_catalog(
+    global_catalog: StickerCatalog, global_dir: str | Path, character_id: str,
+) -> StickerCatalog:
+    """Expose the global pool and only this character's namespaced private pool.
+
+    Legacy per-persona manifests remain in the global catalog for backward
+    compatibility. New private packs live only under the hashed owner directory.
+    """
+    manifest = private_sticker_dir(global_dir, character_id) / "manifest.yaml"
+    private = _read_manifest(manifest)
+    # Seed from the global history, not the visible subset: a message that
+    # references a sticker removed from the public pool must still resolve its
+    # asset, while removed_ids keeps it out of selection again.
+    by_id = dict(global_catalog._history_by_id)
+    roots = dict(global_catalog._asset_roots)
+    private_ids: set[str] = set()
+    for item in private:
+        # Never allow a malformed private manifest to shadow a public asset.
+        if item.id in by_id:
+            continue
+        by_id[item.id] = item
+        roots[item.id] = manifest.parent
+        private_ids.add(item.id)
+    return StickerCatalog(
+        Path(global_dir), list(by_id.values()),
+        source=global_catalog.source + "+character",
+        asset_roots=roots,
+        removed_ids=set(global_catalog._removed_ids),
+        private_ids=private_ids,
+        owner_character_id=character_id,
+    )
 
 
 def load_sticker_catalog(persona_path: str | Path) -> StickerCatalog:
@@ -228,11 +343,32 @@ def _import_lock_for(output_dir: Path) -> threading.RLock:
         return lock
 
 
+def sticker_library_lock(global_dir: str | Path) -> threading.RLock:
+    """Coordinate mutations and runtime publication in the supported single process."""
+    return _import_lock_for(Path(global_dir))
+
+
 def _durable_write(path: Path, content: bytes) -> None:
     with path.open("wb") as handle:
         handle.write(content)
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _replace_with_retry(temp: Path, target: Path, *, attempts: int = 5, delay: float = 0.02) -> None:
+    """Replace atomically, tolerating a concurrent reader holding the target.
+
+    On Windows a plain open() does not share delete access, so MoveFileEx fails
+    with a sharing violation while another thread is reading the same manifest.
+    """
+    for remaining in range(attempts, 0, -1):
+        try:
+            os.replace(temp, target)
+            return
+        except PermissionError:
+            if remaining == 1:
+                raise
+            time.sleep(delay)
 
 
 def _commit_prepared_import(output_dir: Path, prepared: list[tuple[Sticker, bytes]]) -> None:
@@ -258,7 +394,7 @@ def _commit_prepared_import(output_dir: Path, prepared: list[tuple[Sticker, byte
                 temp = output_dir / f".{target.name}.{transaction_id}.tmp"
                 temp_paths.append(temp)
                 _durable_write(temp, payload)
-                os.replace(temp, target)
+                _replace_with_retry(temp, target)
                 temp_paths.remove(temp)
                 created_assets.append(target)
             existing[sticker.id] = sticker
@@ -272,7 +408,7 @@ def _commit_prepared_import(output_dir: Path, prepared: list[tuple[Sticker, byte
         for sticker, _ in prepared:
             if not (output_dir / sticker.file).is_file():
                 raise RuntimeError(f"prepared sticker asset missing before manifest commit: {sticker.file}")
-        os.replace(temp_manifest, manifest)
+        _replace_with_retry(temp_manifest, manifest)
         temp_paths.remove(temp_manifest)
         committed = True
     finally:
@@ -296,6 +432,7 @@ def import_sticker_bundle(
     tagger: StickerTagger | None = None,
     default_pack_name: str = "自定义",
     target_dir: str | Path | None = None,
+    id_namespace: str | None = None,
 ) -> dict:
     """Import a sticker ZIP using validate-first, manifest-last publication."""
     if not archive_bytes:
@@ -381,6 +518,11 @@ def import_sticker_bundle(
 
             sticker_id = _safe_id(row.get("id"), f"sticker_{index:03d}")
             pack_id = _safe_id(row.get("set_id") or row.get("pack_id"), "custom")
+            digest = hashlib.sha256(payload).hexdigest()[:16]
+            if id_namespace is not None:
+                # An updated image gets a new ID: old chat messages retain their asset.
+                sticker_id = _namespace_sticker_id(f"{sticker_id}_{digest[:8]}", id_namespace)
+                pack_id = _namespace_sticker_id(pack_id, id_namespace)
             pack_name = str(row.get("display_name") or row.get("pack_name") or row.get("set_name") or default_pack_name or "自定义").strip()[:80] or "自定义"
             label = str(row.get("tag_zh") or row.get("label") or row.get("tag_en") or sticker_id).strip()[:80] or sticker_id
             aliases = row.get("aliases") if isinstance(row.get("aliases"), list) else []
@@ -391,7 +533,6 @@ def import_sticker_bundle(
                 *aliases,
             ])
             description = str(row.get("description") or "").strip()[:240]
-            digest = hashlib.sha256(payload).hexdigest()[:16]
             output_name = f"{sticker_id}-{digest}{suffix}"
             prepared.append(
                 (

@@ -123,7 +123,7 @@ def test_web_import_uses_existing_tags_without_vision_and_hot_refreshes_every_ru
 
     neko = client.get("/v1/stickers?character_id=neko").json()
     momo = client.get("/v1/stickers?character_id=momo").json()
-    assert neko["scope"] == momo["scope"] == "global"
+    assert neko["scope"] == momo["scope"] == "character"
     assert [item["id"] for item in neko["stickers"]] == [item["id"] for item in momo["stickers"]]
     selected = next(item for item in momo["stickers"] if item["id"] == "cute_happy")
     assert selected["url"] == "/v1/stickers/cute_happy/asset"
@@ -176,11 +176,13 @@ def test_sticker_web_manager_uses_global_library_and_no_character_cache_key():
     context = (ROOT / "src" / "character_memory" / "runtime" / "context.py").read_text(encoding="utf-8")
 
     assert "/v1/stickers/import" in js
-    assert '"Content-Type":"application/zip"' in js
-    assert "导入全局表情包" in js
-    assert "所有人物和群聊都能使用" in js
+    assert '"Content-Type":isPng ? "image/png" : "application/zip"' in js
+    assert 'data-sticker-import-open title="导入表情包"' in js
+    assert "公共池（所有角色可用）" in js
+    assert "当前角色私有池" in js
+    assert 'scope:selectedScope' in js
     assert 'CM.api("/v1/stickers")' in js
-    assert "stickerCache = new Map" not in js
+    assert "let cache = new Map()" in js
     assert "cache.get(CM.state.characterId)" not in js
     assert "cache.set(CM.state.characterId" not in js
     assert "不需要等用户先发表情包" in context

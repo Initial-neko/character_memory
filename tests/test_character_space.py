@@ -8,7 +8,10 @@ import yaml
 
 from character_memory.api import create_api
 from character_memory.config import load_settings, set_character_archived
-from character_memory.space_autonomy import SpaceAutonomyService
+from character_memory.space_autonomy import (
+    MAX_PENDING_COMMENT_THREADS,
+    SpaceAutonomyService,
+)
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
 from character_memory.space_web import attach_space_routes
@@ -187,6 +190,131 @@ def test_space_comment_threads_keep_nested_reply_links_and_stickers(tmp_path: Pa
         sticker_reply.id,
         nested.id,
     ]
+    store.close()
+
+
+def test_space_comments_persist_structured_mentions_and_durable_user_notifications(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "space-mentions.db")
+    repo = SpaceRepository(store)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    post = repo.create_post("c00", "今天想出去走走。", now)
+
+    user_comment = repo.add_comment(
+        post.id,
+        "user",
+        "@角色01 你觉得呢？",
+        now,
+        actor_type="USER",
+        mentions=["c01"],
+    )
+    assert user_comment.mentions == ["c01"]
+    assert repo.get_comment(user_comment.id).mentions == ["c01"]
+    assert repo.list_notifications(unread_only=True) == []
+
+    character_comment = repo.add_comment(
+        post.id,
+        "c01",
+        "我也想陪你走走。",
+        now + timedelta(seconds=1),
+        reply_to_comment_id=user_comment.id,
+        mentions_user=True,
+    )
+    assert character_comment.mentions_user is True
+    notification = repo.list_notifications(unread_only=True)[0]
+    assert notification.comment_id == character_comment.id
+    assert notification.post_id == post.id
+    assert notification.reasons == ["REPLY", "MENTION"]
+    assert repo.unread_notification_count() == 1
+
+    first_read = repo.mark_notification_read(notification.id, now + timedelta(seconds=2))
+    repeated_read = repo.mark_notification_read(notification.id, now + timedelta(seconds=3))
+    assert first_read is not None and first_read.read_at is not None
+    assert repeated_read is not None and repeated_read.read_at == first_read.read_at
+    assert repo.unread_notification_count() == 0
+    store.close()
+
+
+def test_unread_space_notification_survives_database_reopen(tmp_path: Path):
+    db_path = tmp_path / "space-notification-reopen.db"
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    store = SQLiteStore(db_path)
+    repo = SpaceRepository(store)
+    post = repo.create_post("c00", "今天想出去走走。", now)
+    user_comment = repo.add_comment(post.id, "user", "你们愿意一起吗？", now, actor_type="USER")
+    reply = repo.add_comment(
+        post.id,
+        "c01",
+        "当然愿意。",
+        now + timedelta(seconds=1),
+        reply_to_comment_id=user_comment.id,
+        mentions_user=True,
+    )
+    notification = repo.list_notifications(unread_only=True)[0]
+    assert notification.comment_id == reply.id
+    store.close()
+
+    reopened = SQLiteStore(db_path)
+    reloaded_repo = SpaceRepository(reopened)
+    unread = reloaded_repo.list_notifications(unread_only=True)
+    assert reloaded_repo.unread_notification_count() == 1
+    assert len(unread) == 1
+    assert unread[0].id == notification.id
+    assert unread[0].comment_id == reply.id
+    assert unread[0].reasons == ["REPLY", "MENTION"]
+    assert unread[0].read_at is None
+    marked = reloaded_repo.mark_notification_read(notification.id, now + timedelta(seconds=2))
+    assert marked is not None and marked.read_at is not None
+    reopened.close()
+
+    reopened_again = SQLiteStore(db_path)
+    persisted_repo = SpaceRepository(reopened_again)
+    persisted_read = persisted_repo.list_notifications(unread_only=False)[0]
+    assert persisted_repo.unread_notification_count() == 0
+    assert persisted_repo.list_notifications(unread_only=True) == []
+    assert persisted_read.id == notification.id and persisted_read.read_at == marked.read_at
+    reopened_again.close()
+
+
+def test_space_schema_migrates_existing_comment_rows_for_mentions(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "legacy-space-comments.db")
+    with store._lock:
+        store.conn.executescript(
+            """
+            CREATE TABLE space_posts(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                created_at_epoch INTEGER NOT NULL,
+                media_id TEXT,
+                source_event_id INTEGER,
+                visibility TEXT NOT NULL DEFAULT 'ACTIVE_CHARACTERS'
+            );
+            CREATE TABLE space_comments(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id INTEGER NOT NULL,
+                character_id TEXT NOT NULL,
+                actor_type TEXT NOT NULL DEFAULT 'CHARACTER',
+                content TEXT NOT NULL,
+                sticker_id TEXT,
+                created_at TEXT NOT NULL,
+                created_at_epoch INTEGER NOT NULL,
+                reply_to_comment_id INTEGER
+            );
+            INSERT INTO space_posts(character_id,content,created_at,created_at_epoch)
+                VALUES('c00','旧动态','2026-10-02T09:00:00+00:00',1);
+            INSERT INTO space_comments(post_id,character_id,actor_type,content,created_at,created_at_epoch)
+                VALUES(1,'user','USER','旧评论','2026-10-02T09:00:00+00:00',1);
+            """
+        )
+        store._maybe_commit()
+
+    repo = SpaceRepository(store)
+    old_comment = repo.get_comment(1)
+    columns = {row["name"] for row in store.conn.execute("PRAGMA table_info(space_comments)")}
+    assert old_comment is not None and old_comment.mentions == [] and not old_comment.mentions_user
+    assert {"mentions_json", "mentions_user", "client_request_id"} <= columns
+    assert "space/007-bidirectional-mentions-notifications" in store.list_schema_migrations()
     store.close()
 
 
@@ -468,6 +596,152 @@ def test_browser_user_can_comment_and_reload_the_same_space_fact(tmp_path: Path)
         assert nested["actor_type"] == "USER"
 
 
+def test_space_api_accepts_mentions_and_reads_notifications_idempotently(tmp_path: Path):
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        post_id = client.post(
+            "/v1/space/posts",
+            json={"character_id": "c00", "content": "想去海边看看。"},
+        ).json()["post"]["id"]
+        user_response = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={
+                "content": "@角色01 你愿意一起去吗？",
+                "mentions": ["c01"],
+                "client_request_id": "space-mention-request-01",
+            },
+        )
+        assert user_response.status_code == 200, user_response.text
+        user_comment_id = user_response.json()["comment"]["id"]
+        assert user_response.json()["comment"]["mentions"] == ["c01"]
+        replay = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={
+                "content": "@角色01 你愿意一起去吗？",
+                "mentions": ["c01"],
+                "client_request_id": "space-mention-request-01",
+            },
+        )
+        assert replay.status_code == 200 and replay.json()["comment"]["id"] == user_comment_id
+        conflicting_replay = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={"content": "不同内容", "client_request_id": "space-mention-request-01"},
+        )
+        assert conflicting_replay.status_code == 409
+        reloaded = client.get(f"/v1/space/posts/{post_id}").json()["post"]["comments"][-1]
+        assert reloaded["mentions"] == ["c01"]
+
+        invalid = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={"content": "未知角色也来看看", "mentions": ["missing-character"]},
+        )
+        assert invalid.status_code >= 400
+        duplicate_mentions = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={"content": "重复角色", "mentions": ["c01", "c01"]},
+        )
+        assert duplicate_mentions.status_code == 422
+
+        role_reply = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={
+                "character_id": "c01",
+                "content": "当然愿意。",
+                "reply_to_comment_id": user_comment_id,
+            },
+        )
+        assert role_reply.status_code == 200, role_reply.text
+
+        inbox = client.get("/v1/space/notifications?unread_only=true")
+        assert inbox.status_code == 200, inbox.text
+        payload = inbox.json()
+        assert payload["unread_count"] == 1
+        notification = payload["notifications"][0]
+        assert notification["post_id"] == post_id
+        assert notification["comment"]["id"] == role_reply.json()["comment"]["id"]
+        assert notification["reasons"] == ["REPLY"]
+
+        marked = client.post(f"/v1/space/notifications/{notification['id']}/read")
+        repeated = client.post(f"/v1/space/notifications/{notification['id']}/read")
+        assert marked.status_code == 200 and marked.json()["notification"]["read_at"]
+        assert repeated.json()["notification"]["read_at"] == marked.json()["notification"]["read_at"]
+        assert client.get("/v1/space/notifications?unread_only=true").json()["unread_count"] == 0
+
+
+def test_space_comment_stays_durable_and_idempotent_when_follow_up_queue_is_full(tmp_path: Path):
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+
+    with TestClient(app) as client:
+        scheduler = app.state.character_memory.space_scheduler
+        for index in range(MAX_PENDING_COMMENT_THREADS):
+            assert scheduler.enqueue_comment_thread(999, index, now=now) is True
+        assert scheduler.pending_thread_count() == MAX_PENDING_COMMENT_THREADS
+
+        post_id = client.post(
+            "/v1/space/posts",
+            json={"character_id": "c00", "content": "想去海边看看。"},
+        ).json()["post"]["id"]
+        body = {
+            "content": "那我们找一天出发吧。",
+            "client_request_id": "space-full-queue-durable-comment",
+        }
+        first = client.post(f"/v1/space/posts/{post_id}/comments", json=body)
+        assert first.status_code == 200, first.text
+        comment_id = first.json()["comment"]["id"]
+        assert scheduler.pending_thread_count() == MAX_PENDING_COMMENT_THREADS
+
+        retry = client.post(f"/v1/space/posts/{post_id}/comments", json=body)
+        assert retry.status_code == 200, retry.text
+        assert retry.json()["comment"]["id"] == comment_id
+        assert scheduler.pending_thread_count() == MAX_PENDING_COMMENT_THREADS
+
+        post = client.get(f"/v1/space/posts/{post_id}").json()["post"]
+        matching = [item for item in post["comments"] if item["id"] == comment_id]
+        assert len(matching) == 1 and matching[0]["content"] == body["content"]
+        assert [item["id"] for item in post["comments"]].count(comment_id) == 1
+
+
+def test_space_idempotent_replay_survives_archiving_a_mentioned_character(tmp_path: Path):
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        post_id = client.post(
+            "/v1/space/posts",
+            json={"character_id": "c00", "content": "想去海边看看。"},
+        ).json()["post"]["id"]
+        body = {
+            "content": "@角色01 你愿意一起去吗？",
+            "mentions": ["c01"],
+            "client_request_id": "space-mention-archive-replay",
+        }
+        first = client.post(f"/v1/space/posts/{post_id}/comments", json=body)
+        assert first.status_code == 200, first.text
+        first_comment_id = first.json()["comment"]["id"]
+
+        archived = client.post("/v1/characters/c01/archive")
+        assert archived.status_code == 200, archived.text
+
+        replay = client.post(f"/v1/space/posts/{post_id}/comments", json=body)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["comment"]["id"] == first_comment_id
+
+        conflict = client.post(
+            f"/v1/space/posts/{post_id}/comments",
+            json={"content": "不同内容", "client_request_id": body["client_request_id"]},
+        )
+        assert conflict.status_code == 409
+        comments = client.get(f"/v1/space/posts/{post_id}").json()["post"]["comments"]
+        assert [item["id"] for item in comments] == [first_comment_id]
+
+
 def test_a_failed_follow_up_never_unsends_a_stored_comment(tmp_path: Path, monkeypatch):
     """A comment that was stored stays stored, whatever the characters do next.
 
@@ -603,6 +877,12 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         "reply_to_comment_id",
         "space-comment-sticker",
         "data-space-comment-form",
+        "data-space-mention-toggle",
+        "data-space-mention-id",
+        "mentions_user",
+        "data-space-notification",
+        "/v1/space/notifications?unread_only=true",
+        "/v1/space/notifications/${encodeURIComponent(item.id)}/read",
         "/comments",
         'addEventListener("submit"',
     ]:
@@ -634,6 +914,10 @@ def test_space_frontend_has_global_and_character_entry_without_a_second_app_cont
         ".space-comment-form",
         ".space-comment-input",
         ".space-comment-submit",
+        ".space-mention-picker",
+        ".space-comment-alert",
+        ".space-notification-inbox",
+        ".space-notification-item",
     ]:
         assert token in css
 

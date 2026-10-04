@@ -472,7 +472,7 @@ Dev Console 不持有云 API key，不是任意 URL/header 的 Postman 替代品
 - `ai_images.js` — explicit generated-image source
 - `visual_capture.js` — camera/display sampling + keyframe selection
 - `visual_client.js` — visual request helper
-- `stickers.js` — sticker catalog/import UI
+- `stickers.js` — scoped sticker catalog/import UI (global + current character)
 - `avatars.js` — avatar manager
 - `search.js` — message search
 - `mentions.js` — group mentions
@@ -481,6 +481,16 @@ Dev Console 不持有云 API key，不是任意 URL/header 的 Postman 替代品
 - `time_format.js` — shared `MM-DD HH:mm:ss` chat timestamp formatter
 
 历史 `p0_*.css` 仍是正式加载资源，属于样式技术债。V1 不为了目录美观做大规模重命名；下个大版本再按 feature/layout 职责整理。
+
+### 表情包作用域（公共池 + 角色私有池）
+
+- 旧全局表情库（包括内置、全局 ZIP 导入及历史 persona 表情）仍是公共池，旧消息和无 `character_id` 的 `/v1/stickers` 保持原有访问语义。
+- 新私有包放在 `sticker_dir/characters/<character-id-hash>/manifest.yaml`，私有 sticker/pack ID 以角色 ID 哈希命名空间隔离。相同图片重复导入复用 ID，图片内容变化时生成新 ID，保留旧消息的资源引用。
+- 角色 runtime 的候选池是 `公共池 ∪ 该角色私有池`。群聊每个 AI 成员也按自己的角色读取；群聊用户发送表情仍从公共池选择。
+- 导入接口 `POST /v1/stickers/import?scope=character&character_id=<id>` 写私有池，未指定 `scope` 时默认写公共池。前端私聊选择当前角色私有池；群聊导入公共池。
+- 全局图片 URL `/v1/stickers/<sticker_id>/asset` 不暴露私有资源；私有图片走 `/v1/stickers/<character_id>/<sticker_id>/asset`，由服务端校验角色归属。
+- 当前版本不自动清理旧资产，也不提供删除已使用私有表情的破坏性操作，以免历史聊天出现资源缺失。归属变更需要后续单独做复制/归档事务，不能直接迁移文件。
+- `sticker_sheet.py` 支持检测接近三等分的透明分隔线（含非 3 整除尺寸和微弱 Alpha 噪声），仍拒绝不明确的九宫格，不自动猜测跨格图案。
 
 ## 17. Deliberate boundaries
 

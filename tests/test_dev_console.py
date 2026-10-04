@@ -194,11 +194,15 @@ def test_dev_console_assets_cover_runtime_test_surfaces():
     assert "TTS Workbench :9002" in html
     assert ">LLM<" in html
     assert "LLM Usage" in html
+    assert html.index('id="llmUsageCard"') < html.index('<section class="grid status-grid"')
     assert 'id="llmUsageFeatureBody"' in html
     assert 'id="llmUsageRecentBody"' in html
     assert ">ASR<" in html
     assert "Media Live Smoke" in html
     assert "Resource Monitor" in html
+    assert 'value="1" selected' in html
+    assert 'value="24" selected' not in html
+    assert 'llmUsageWindow")?.value || 1' in script
     assert 'value="60" selected' in html
     assert "Media Metrics" in html
     for endpoint in (
@@ -399,7 +403,6 @@ def test_dev_space_config_forwards_reply_rounds_and_rejects_omission():
 
     forwarded = next(call for call in http.calls if call[1].endswith("/v1/space/dev/config"))
     assert forwarded[2]["json"]["reply_rounds"] == 2
-
 
 
 def test_dev_usage_first_one_hour_and_cost_never_fabricated():

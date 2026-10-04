@@ -53,16 +53,15 @@
           <details class="level-group" data-level="advanced" data-title="高级 · 统计窗口" data-hint="只改变统计范围，不改变运行配置">
             <summary>高级 · 统计窗口</summary>
             <div class="actions">
-            <label>统计窗口
-              <select id="llmUsageWindow" title="选择 LLM Usage 统计查询窗口；只改变报表范围，不修改 Runtime 配置。">
-                <option value="1" selected>1 小时</option>
-                <option value="24">24 小时</option>
-                <option value="168">7 天</option>
-                <option value="720">30 天</option>
-              </select>
-            </label>
-            <button id="refreshLlmUsage" class="secondary compact" type="button" title="重新查询真实 LLM 请求用量、Feature/Purpose 归因、重试与错误统计。">刷新用量</button>
-          </div>
+              <label>统计窗口
+                <select id="llmUsageWindow" title="选择 LLM Usage 统计查询窗口；只改变报表范围，不修改 Runtime 配置。">
+                  <option value="1" selected>1 小时</option>
+                  <option value="24">24 小时</option>
+                  <option value="168">7 天</option>
+                  <option value="720">30 天</option>
+                </select>
+              </label>
+              <button id="refreshLlmUsage" class="secondary compact" type="button" title="重新查询真实 LLM 请求用量、Feature/Purpose 归因、重试与错误统计。">刷新用量</button>
             </div>
           </details>
           <div class="usage-summary" aria-label="LLM usage summary">
@@ -511,8 +510,7 @@
           <textarea id="imageIntent" rows="3" title="本次 ImageGen 的自然语言创作意图；只用于测试生成。">自然分享一下现在的样子，保持人物身份一致，像日常聊天里随手发来的照片。</textarea>
           <label class="visual-check"><input id="imageUseAvatar" type="checkbox" checked / title="Provider 支持参考图时，是否把该角色当前头像作为身份参考。"> Provider 支持时使用当前头像作为 identity reference</label>
           <div class="actions">
-            <button id="rewriteImagePrompt" class="secondary" title="只运行正式 Prompt Rewrite，查看最终绘图 Prompt；不生成图片。">Rewrite Prompt</button>
-            <button class="primary" id="runImageGen" title="真实执行 Prompt Rewrite → Provider → MediaStorage，并保留测试 MediaAsset 供预览。">Generate Image</button>
+            <button class="primary" id="runImageGen" title="一次完成 Prompt 润色、Provider 生成和 MediaStorage 持久化，并展示结果。">润色并生成图片</button>
             <button id="copyImagePrompt" class="secondary" hidden title="把最近一次润色后的 ImageGen Prompt 复制到剪贴板。">复制 Prompt</button>
             <button id="refreshImageProviders" class="secondary" title="重新读取 ImageGen Provider 的 configured、available、model 和能力状态。">刷新 Provider</button>
             <button id="useImageAsAvatar" class="secondary" hidden title="把最近生成且已持久化的测试图片设置为当前角色头像。">设为当前头像</button>

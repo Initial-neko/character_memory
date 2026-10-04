@@ -128,20 +128,30 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
         return {
             "profiles": profiles,
             "stickers": access.global_sticker_catalog(),
+            "character_stickers": {},
             "images": {},
             "member_ids": list(group.member_ids) if group is not None else [],
         }
 
-    def sticker_payload(resources: dict, sticker_id: str | None) -> dict | None:
+    def sticker_payload(
+        resources: dict, sticker_id: str | None, *, actor_character_id: str | None = None,
+    ) -> dict | None:
         if not sticker_id:
             return None
         catalog = resources["stickers"]
-        sticker = catalog.get(sticker_id)
+        if actor_character_id and actor_character_id in resources["profiles"]:
+            catalogs = resources["character_stickers"]
+            if actor_character_id not in catalogs:
+                catalogs[actor_character_id] = access.sticker_catalog_for(actor_character_id)
+            catalog = catalogs[actor_character_id]
+        # History resolves through the actor's own catalog, which keeps both its
+        # private pool and the public pool's removed-from-selection entries.
+        sticker = catalog.historical_get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
         return {
             **sticker.model_dump(mode="json"),
-            "url": f"/v1/stickers/{sticker.id}/asset",
+            "url": catalog.asset_url(sticker.id),
         }
 
     def image_payload(resources: dict, character_id: str, image_id: str | None) -> dict | None:
@@ -182,7 +192,10 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
     def event_payload(event, resources: dict, turn_summary: dict | None = None) -> dict:
         profile = resources["profiles"].get(event.actor_id, {})
         role = "user" if event.actor_type == "USER" else "assistant"
-        sticker = sticker_payload(resources, event.metadata.get("sticker_id"))
+        sticker = sticker_payload(
+            resources, event.metadata.get("sticker_id"),
+            actor_character_id=event.actor_id if role == "assistant" else None,
+        )
         image = (
             image_payload(resources, event.actor_id, event.metadata.get("image_id"))
             if role == "assistant"

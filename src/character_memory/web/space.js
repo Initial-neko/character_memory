@@ -9,8 +9,14 @@
   const nav = document.createElement("button");
   nav.className = "space-nav-button";
   nav.type = "button";
-  nav.innerHTML = '<span class="space-nav-icon">◎</span><span class="space-nav-copy"><strong>空间</strong><small>角色们的近况</small></span>';
+  nav.innerHTML = '<span class="space-nav-icon">◎</span><span class="space-nav-copy"><strong>空间</strong><small>角色们的近况</small></span><span class="space-nav-unread hidden" data-space-unread aria-label="未读空间提醒"></span>';
   sidebarSlot?.appendChild(nav);
+
+  const notificationsButton = document.createElement("button");
+  notificationsButton.className = "ghost-button space-notification-button";
+  notificationsButton.type = "button";
+  notificationsButton.innerHTML = '<span>空间提醒</span><span class="space-notification-count hidden" data-space-unread></span>';
+  topbarActions?.appendChild(notificationsButton);
 
   const characterEntry = document.createElement("button");
   characterEntry.id = "characterSpaceButton";
@@ -32,6 +38,7 @@
     </header>
     <div class="space-feed-wrap">
       <div class="space-feed-meta"></div>
+      <section class="space-notification-inbox hidden" aria-live="polite" aria-label="未读空间提醒"></section>
       <div class="space-feed" aria-live="polite"></div>
       <button class="space-feed-more hidden" type="button" aria-live="polite">继续向下滚动加载更多</button>
     </div>
@@ -57,6 +64,7 @@
 
   const feed = shell.querySelector(".space-feed");
   const meta = shell.querySelector(".space-feed-meta");
+  const notificationInbox = shell.querySelector(".space-notification-inbox");
   const more = shell.querySelector(".space-feed-more");
   const title = shell.querySelector(".space-title");
   const subtitle = shell.querySelector(".space-subtitle");
@@ -82,9 +90,149 @@
   const expandedComments = new Set();
   const expandedThreads = new Set();
   const replyTargets = new Map();
+  const mentionTargets = new Map();
+  const commentRequestIds = new Map();
+  let mentionProfiles = null;
+  let unreadNotifications = [];
+  let notificationLoading = false;
+  const unreadIndicators = [...document.querySelectorAll("[data-space-unread]")];
 
   function profileFor(id) {
-    return CM.state.characters.find(item => item.id === id) || {id, name:id};
+    return CM.state.characters.find(item => item.id === id)
+      || mentionProfiles?.find(item => item.id === id)
+      || {id, name:id};
+  }
+
+  async function loadMentionProfiles() {
+    try {
+      const data = await CM.api("/v1/characters?include_deferred=true");
+      mentionProfiles = Array.isArray(data.characters) ? data.characters : [];
+    } catch (error) {
+      console.error("[space] mention profiles", error);
+      mentionProfiles = CM.state.characters || [];
+    }
+  }
+
+  function selectedMentions(postId) {
+    return mentionTargets.get(String(postId)) || [];
+  }
+
+  function commentRequestId(postId, body) {
+    const key = String(postId);
+    const fingerprint = JSON.stringify(body);
+    const existing = commentRequestIds.get(key);
+    if (existing?.fingerprint === fingerprint) return existing.id;
+    const id = globalThis.crypto?.randomUUID?.()
+      || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    commentRequestIds.set(key, {id, fingerprint});
+    return id;
+  }
+
+  function mentionControlsHtml(postId) {
+    const selected = selectedMentions(postId);
+    const roles = (mentionProfiles || CM.state.characters || []).filter(
+      item => !item.archived_at && !item.archived
+    );
+    const chips = selected.map(id => {
+      const profile = profileFor(id);
+      return `<span class="space-mention-chip">@${CM.escapeHtml(profile.name || id)}<button type="button" data-space-mention-remove="${CM.escapeHtml(id)}" aria-label="移除提及 ${CM.escapeHtml(profile.name || id)}">×</button></span>`;
+    }).join("");
+    const options = roles.map(profile => {
+      const id = String(profile.id || "");
+      const pressed = selected.includes(id);
+      const disabled = !pressed && selected.length >= 4;
+      return `<button type="button" class="space-mention-option${pressed ? " selected" : ""}" data-space-mention-id="${CM.escapeHtml(id)}" aria-pressed="${pressed}" ${disabled ? "disabled" : ""}>${CM.escapeHtml(profile.name || id)}${pressed ? " ✓" : ""}</button>`;
+    }).join("");
+    return `<div class="space-mention-controls" data-space-mention-controls="${CM.escapeHtml(postId)}">
+      <div class="space-mention-selected">${chips}<span class="space-mention-hint">${selected.length ? `已提醒 ${selected.length}/4 位角色` : "可 @ 最多 4 位角色"}</span></div>
+      <div class="space-mention-picker hidden" data-space-mention-picker>
+        <strong>选择要提醒的角色</strong>${options || '<span class="space-mention-hint">暂无可用角色</span>'}
+      </div>
+    </div>`;
+  }
+
+  function updateUnreadIndicators(count) {
+    const unread = Math.max(0, Number(count || 0));
+    unreadIndicators.forEach(indicator => {
+      indicator.classList.toggle("hidden", unread === 0);
+      if (indicator.matches(".space-notification-count")) {
+        indicator.textContent = unread > 99 ? "99+" : String(unread);
+      } else {
+        indicator.textContent = unread > 0 ? (unread > 9 ? "9+" : String(unread)) : "";
+      }
+    });
+    notificationsButton.classList.toggle("has-unread", unread > 0);
+  }
+
+  function renderNotificationInbox() {
+    const count = unreadNotifications.length;
+    notificationInbox.classList.toggle("hidden", count === 0);
+    if (!count) {
+      notificationInbox.innerHTML = "";
+      return;
+    }
+    notificationInbox.innerHTML = `
+      <div class="space-notification-heading"><strong>角色在空间喊你</strong><span>${count} 条未读 · 页面打开时同步</span></div>
+      <div class="space-notification-list">${unreadNotifications.map(item => {
+        const comment = item.comment || {};
+        const post = item.post || {};
+        const labels = (item.reasons || []).map(reason => reason === "MENTION" ? "@了你" : reason === "REPLY" ? "回复了你" : "空间提醒");
+        const actor = comment.author?.name || comment.character_id || "角色";
+        const excerpt = String(comment.content || "发送了一个表情").trim();
+        return `<button type="button" class="space-notification-item" data-space-notification="${CM.escapeHtml(item.id)}" data-space-notification-post="${CM.escapeHtml(item.post_id)}" data-space-notification-comment="${CM.escapeHtml(item.comment_id)}">
+          <span class="space-notification-label">${CM.escapeHtml(labels.join(" · "))}</span>
+          <strong>${CM.escapeHtml(actor)}：${CM.escapeHtml(excerpt)}</strong>
+          <small>来自 ${CM.escapeHtml(post.author?.name || post.character_id || "空间动态")} · 查看动态</small>
+        </button>`;
+      }).join("")}</div>`;
+  }
+
+  async function refreshNotifications() {
+    if (notificationLoading || document.visibilityState === "hidden") return;
+    notificationLoading = true;
+    try {
+      const data = await CM.api("/v1/space/notifications?unread_only=true&limit=20");
+      unreadNotifications = Array.isArray(data.notifications) ? data.notifications : [];
+      updateUnreadIndicators(Number(data.unread_count || 0));
+      if (opened) renderNotificationInbox();
+    } catch (error) {
+      console.warn("Space notification refresh failed", error);
+    } finally {
+      notificationLoading = false;
+    }
+  }
+
+  async function openNotification(item) {
+    const postId = String(item.post_id || "");
+    const commentId = String(item.comment_id || "");
+    const data = await CM.api(`/v1/space/posts/${encodeURIComponent(postId)}`);
+    const post = data.post;
+    filterCharacterId = null;
+    setOpen(true);
+    title.textContent = "空间";
+    subtitle.textContent = "角色们公开留下的近况";
+    const key = String(post.id);
+    if (!feed.querySelector(`[data-space-post="${CSS.escape(key)}"]`)) {
+      postsById.set(key, post);
+      feed.insertAdjacentHTML("afterbegin", postHtml(post));
+    } else {
+      replacePost(post);
+    }
+    expandedCommentPanels.add(key);
+    expandedComments.add(key);
+    const rootId = threadRootId(post, commentId);
+    expandedThreads.add(`${key}:${rootId}`);
+    replacePost(post);
+    const notification = unreadNotifications.find(row => String(row.id) === String(item.id));
+    if (notification) {
+      await CM.api(`/v1/space/notifications/${encodeURIComponent(item.id)}/read`, {method:"POST"});
+      await refreshNotifications();
+    }
+    requestAnimationFrame(() => {
+      const card = feed.querySelector(`[data-space-post="${CSS.escape(key)}"]`);
+      card?.scrollIntoView({behavior:"smooth", block:"center"});
+      card?.querySelector(`[data-space-comment="${CSS.escape(commentId)}"]`)?.classList.add("space-comment-notified");
+    });
   }
 
   function avatarHtml(profile, className) {
@@ -252,14 +400,24 @@
     const replyTo = reply && parent
       ? `<span class="space-comment-reply-to">回复 <strong>${CM.escapeHtml(commentName(parent))}</strong></span>`
       : "";
+    const markers = [];
+    if (comment.actor_type === "CHARACTER" && parent?.actor_type === "USER") markers.push("回复了你");
+    if (comment.actor_type === "CHARACTER" && comment.mentions_user) markers.push("@了你");
+    const markerHtml = markers.map(label => `<span class="space-comment-alert">${label}</span>`).join("");
+    const mentionHtml = (comment.mentions || []).map(id => {
+      const profile = profileFor(id);
+      return `<span class="space-comment-mention">@${CM.escapeHtml(profile.name || id)}</span>`;
+    }).join("");
     const content = comment.content
       ? `<span class="space-comment-text">${CM.escapeHtml(comment.content)}</span>`
       : "";
-    return `<div class="space-comment${actorClass}${reply ? " space-comment-reply" : ""}" data-space-comment="${CM.escapeHtml(comment.id)}">
+    return `<div class="space-comment${actorClass}${reply ? " space-comment-reply" : ""}${markers.length ? " space-comment-notice" : ""}" data-space-comment="${CM.escapeHtml(comment.id)}">
       <div class="space-comment-main">
         <strong class="space-comment-author">${CM.escapeHtml(name)}</strong>
+        ${markerHtml}
         ${replyTo}
         ${content}
+        ${mentionHtml}
         ${commentStickerHtml(comment)}
       </div>
       <button class="space-comment-reply-button" type="button"
@@ -323,6 +481,7 @@
       ? `<button class="space-comments-toggle" type="button" data-space-comments-toggle="${CM.escapeHtml(post.id)}">${expandedRoots ? "收起评论" : `查看全部 ${roots.length} 条主评论`}</button>`
       : "";
     const target = replyTargets.get(postId);
+    const mentionControls = mentionControlsHtml(postId);
     const replyBanner = target
       ? `<div class="space-comment-replying">回复 <strong>${CM.escapeHtml(target.name)}</strong><button type="button" data-space-reply-cancel="${CM.escapeHtml(postId)}">取消</button></div>`
       : "";
@@ -333,7 +492,9 @@
       ${rootToggle}
       <form class="space-comment-form" data-space-comment-form="${CM.escapeHtml(postId)}">
         ${replyBanner}
+        ${mentionControls}
         <textarea class="space-comment-input" name="content" rows="1" maxlength="1000" placeholder="${CM.escapeHtml(placeholder)}" aria-label="${CM.escapeHtml(placeholder)}"></textarea>
+        <button class="space-mention-toggle" type="button" data-space-mention-toggle aria-expanded="false" aria-label="提及角色">@</button>
         <button class="space-comment-submit" type="submit">发送</button>
         <div class="space-comment-error hidden" aria-live="polite"></div>
       </form>
@@ -513,6 +674,7 @@
       }
       if (append && automatic && freshPosts.length) autoPrefetchPages += 1;
       updateFeedMeta();
+      if (opened) refreshNotifications();
     } catch (error) {
       if (epoch !== feedEpoch) return;
       failed = true;
@@ -538,7 +700,15 @@
     filterCharacterId = characterId || null;
     setOpen(true);
     window.scrollTo({top:0, behavior:"auto"});
+    await loadMentionProfiles();
     await loadFeed();
+    await refreshNotifications();
+  }
+
+  async function openNotifications() {
+    if (!opened) await open(null);
+    else await refreshNotifications();
+    notificationInbox.scrollIntoView({behavior:"smooth", block:"start"});
   }
 
   function close() {
@@ -550,6 +720,39 @@
   }
 
   feed.addEventListener("click", event => {
+    const mentionToggle = event.target.closest("[data-space-mention-toggle]");
+    if (mentionToggle) {
+      const form = mentionToggle.closest("[data-space-comment-form]");
+      const picker = form?.querySelector("[data-space-mention-picker]");
+      if (picker) {
+        picker.classList.toggle("hidden");
+        mentionToggle.setAttribute("aria-expanded", String(!picker.classList.contains("hidden")));
+      }
+      return;
+    }
+
+    const mentionChoice = event.target.closest("[data-space-mention-id]");
+    const mentionRemove = event.target.closest("[data-space-mention-remove]");
+    if (mentionChoice || mentionRemove) {
+      const form = event.target.closest("[data-space-comment-form]");
+      const postId = String(form?.dataset.spaceCommentForm || "");
+      const id = String(mentionChoice?.dataset.spaceMentionId || mentionRemove?.dataset.spaceMentionRemove || "");
+      if (!postId || !id) return;
+      const selected = selectedMentions(postId).slice();
+      const existing = selected.indexOf(id);
+      if (existing >= 0) selected.splice(existing, 1);
+      else if (selected.length < 4) selected.push(id);
+      mentionTargets.set(postId, selected);
+      const controls = form.querySelector("[data-space-mention-controls]");
+      if (controls) {
+        const keepOpen = !form.querySelector("[data-space-mention-picker]")?.classList.contains("hidden");
+        controls.outerHTML = mentionControlsHtml(postId);
+        form.querySelector("[data-space-mention-picker]")?.classList.toggle("hidden", !keepOpen);
+        form.querySelector("[data-space-mention-toggle]")?.setAttribute("aria-expanded", String(keepOpen));
+      }
+      return;
+    }
+
     const imageButton = event.target.closest("[data-space-image-open]");
     if (imageButton) {
       event.preventDefault();
@@ -686,6 +889,9 @@
       const replyTarget = replyTargets.get(postId);
       const body = {content};
       if (replyTarget?.commentId) body.reply_to_comment_id = Number(replyTarget.commentId);
+      const mentions = selectedMentions(postId);
+      if (mentions.length) body.mentions = mentions;
+      body.client_request_id = commentRequestId(postId, body);
       const data = await CM.api(`/v1/space/posts/${encodeURIComponent(postId)}/comments`, {
         method:"POST",
         body:JSON.stringify(body),
@@ -696,6 +902,8 @@
         expandedThreads.add(`${postId}:${rootId}`);
       }
       replyTargets.delete(postId);
+      mentionTargets.delete(postId);
+      commentRequestIds.delete(postId);
       replacePost(data.post);
       scheduleCommentReconciliation(postId);
       const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
@@ -737,6 +945,13 @@
   }
 
   nav.addEventListener("click", () => open(null).catch(console.error));
+  notificationsButton.addEventListener("click", () => openNotifications().catch(console.error));
+  notificationInbox.addEventListener("click", event => {
+    const button = event.target.closest("[data-space-notification]");
+    if (!button) return;
+    const item = unreadNotifications.find(row => String(row.id) === String(button.dataset.spaceNotification));
+    if (item) openNotification(item).catch(error => console.warn("Could not open Space notification", error));
+  });
   characterEntry.addEventListener("click", () => {
     if (!CM.isGroupConversation()) open(CM.state.characterId).catch(console.error);
   });
@@ -750,6 +965,11 @@
   });
   CM.on("charactersLoaded", updateCharacterEntry);
   updateCharacterEntry();
+  refreshNotifications();
+  window.setInterval(refreshNotifications, 30000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "hidden") refreshNotifications();
+  });
 
   CM.registerFeature("space", {open, close, reload:loadFeed});
 })();

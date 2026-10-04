@@ -9,7 +9,7 @@ from character_memory.web_lifecycle import background_services
 from character_memory.domain.models import SpaceMediaIntent, SpaceMediaIntentType
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
-from character_memory.space_store import MAX_COMMENTERS_PER_POST, SpaceRepository
+from character_memory.space_store import MAX_COMMENTERS_PER_POST, MAX_SPACE_MENTIONS, SpaceRepository
 
 
 logger = logging.getLogger("character_memory.space")
@@ -54,11 +54,19 @@ class CreateSpaceCommentRequest(BaseModel):
     content: str = Field(default="", max_length=1000)
     sticker_id: str | None = Field(default=None, min_length=1, max_length=64)
     reply_to_comment_id: int | None = None
+    mentions: list[str] = Field(default_factory=list, max_length=MAX_SPACE_MENTIONS)
+    client_request_id: str | None = Field(default=None, min_length=1, max_length=64)
 
     @model_validator(mode="after")
     def clean_content(self):
         self.content = self.content.strip()
         self.sticker_id = str(self.sticker_id or "").strip() or None
+        self.client_request_id = str(self.client_request_id or "").strip() or None
+        self.mentions = [str(item or "").strip() for item in self.mentions]
+        if any(not item for item in self.mentions):
+            raise ValueError("mentions must contain non-empty character IDs")
+        if len(self.mentions) != len(set(self.mentions)):
+            raise ValueError("mentions must contain unique character IDs")
         if not self.content and self.sticker_id is None:
             raise ValueError("comment requires content or sticker_id")
         return self
@@ -186,7 +194,7 @@ def attach_space_routes(app):
             }
         return profile_payload(comment.character_id)
 
-    def comment_sticker_payload(sticker_id: str | None) -> dict | None:
+    def comment_sticker_payload(sticker_id: str | None, *, active: bool = False) -> dict | None:
         clean_id = str(sticker_id or "").strip()
         if not clean_id:
             return None
@@ -194,7 +202,7 @@ def attach_space_routes(app):
         if not callable(catalog_factory):
             return {"id": clean_id, "label": "表情包", "url": f"/v1/stickers/{clean_id}/asset"}
         catalog = catalog_factory()
-        sticker = catalog.get(clean_id)
+        sticker = catalog.get(clean_id) if active else catalog.historical_get(clean_id)
         if sticker is None or catalog.asset_path(clean_id) is None:
             return None
         return {
@@ -331,6 +339,8 @@ def attach_space_routes(app):
                     "sticker": comment_sticker_payload(item.sticker_id),
                     "created_at": item.created_at.isoformat(),
                     "reply_to_comment_id": item.reply_to_comment_id,
+                    "mentions": list(item.mentions),
+                    "mentions_user": item.mentions_user,
                 }
                 for item in comments
             ],
@@ -409,26 +419,45 @@ def attach_space_routes(app):
     def create_space_comment(post_id: int, req: CreateSpaceCommentRequest):
         actor_type = "CHARACTER" if req.character_id else "USER"
         commenter_id = req.character_id or "user"
-        if req.character_id:
-            require_known(req.character_id, active=True)
-        if req.sticker_id and comment_sticker_payload(req.sticker_id) is None:
-            raise HTTPException(status_code=400, detail="sticker not found")
         repository = repo()
         now = datetime.now().astimezone()
         try:
-            comment = repository.add_comment(
+            comment = repository.find_comment_request_replay(
                 post_id,
                 commenter_id,
                 req.content,
-                now,
                 actor_type=actor_type,
                 reply_to_comment_id=req.reply_to_comment_id,
                 sticker_id=req.sticker_id,
+                mentions=req.mentions,
+                client_request_id=req.client_request_id,
             )
+            if comment is None:
+                if req.character_id:
+                    if req.mentions:
+                        raise HTTPException(status_code=400, detail="only user-authored comments may mention characters")
+                    require_known(req.character_id, active=True)
+                else:
+                    for mentioned_id in req.mentions:
+                        require_known(mentioned_id, active=True)
+                if req.sticker_id and comment_sticker_payload(req.sticker_id, active=True) is None:
+                    raise HTTPException(status_code=400, detail="sticker not found")
+                comment = repository.add_comment(
+                    post_id,
+                    commenter_id,
+                    req.content,
+                    now,
+                    actor_type=actor_type,
+                    reply_to_comment_id=req.reply_to_comment_id,
+                    sticker_id=req.sticker_id,
+                    mentions=req.mentions,
+                    client_request_id=req.client_request_id,
+                )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=409 if "at most" in str(exc) else 400, detail=str(exc)) from exc
+            conflict = "at most" in str(exc) or "already used" in str(exc)
+            raise HTTPException(status_code=409 if conflict else 400, detail=str(exc)) from exc
         # The comment is durable now. Whether the characters answer it is a
         # follow-up, so it is queued for the Space scheduler thread instead of
         # running inside this request: the user gets their own comment back
@@ -437,7 +466,7 @@ def attach_space_routes(app):
         # that follow-up must still never turn a comment the user successfully
         # wrote into an error they would retry, because retrying would post the
         # same comment twice.
-        if not scheduler.enqueue_comment_thread(post_id, comment.id, now=now):
+        if not comment.idempotent_replay and not scheduler.enqueue_comment_thread(post_id, comment.id, now=now):
             logger.warning(
                 "space.thread_queue_full post=%s comment=%s", post_id, comment.id
             )
@@ -452,6 +481,62 @@ def attach_space_routes(app):
             # that still reads it does not break.
             "thread_replies": [],
             "post": post_payload(repository, repository.get_post(post_id)),
+        }
+
+    def notification_payload(notification) -> dict:
+        repository = repo()
+        comment = repository.get_comment(notification.comment_id)
+        post = repository.get_post(notification.post_id)
+        if comment is None or post is None:
+            # The notification and its source are created atomically. This can
+            # only be a legacy/manual database inconsistency; skip dangling rows.
+            return {
+                **notification.model_dump(mode="json"),
+                "comment": None,
+                "post": None,
+            }
+        return {
+            **notification.model_dump(mode="json"),
+            "comment": {
+                **comment.model_dump(mode="json"),
+                "author": comment_author_payload(comment),
+                "sticker": comment_sticker_payload(comment.sticker_id),
+            },
+            "post": {
+                "id": post.id,
+                "character_id": post.character_id,
+                "author": profile_payload(post.character_id),
+                "content": post.content,
+                "created_at": post.created_at.isoformat(),
+            },
+        }
+
+    @app.get("/v1/space/notifications")
+    def list_space_notifications(unread_only: bool = True, limit: int = 50):
+        repository = repo()
+        notifications = repository.list_notifications(
+            unread_only=unread_only,
+            limit=max(1, min(int(limit), 100)),
+        )
+        return {
+            "notifications": [notification_payload(item) for item in notifications],
+            "unread_count": repository.unread_notification_count(),
+            "max_items": 100,
+            "background_push": False,
+        }
+
+    @app.post("/v1/space/notifications/{notification_id}/read")
+    def mark_space_notification_read(notification_id: int):
+        notification = repo().mark_notification_read(
+            notification_id,
+            datetime.now().astimezone(),
+        )
+        if notification is None:
+            raise HTTPException(status_code=404, detail="Space notification not found")
+        repository = repo()
+        return {
+            "notification": notification_payload(notification),
+            "unread_count": repository.unread_notification_count(),
         }
 
     @app.put("/v1/space/posts/{post_id}/likes/{character_id}")

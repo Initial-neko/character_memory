@@ -8,7 +8,12 @@ from typing import Any, Callable
 from character_memory.config import resolve_sticker_dir
 from character_memory.images import load_image_catalog
 from character_memory.message_projection import project_direct_message, upload_caption
-from character_memory.stickers import StickerTagSuggestion, load_global_sticker_catalog
+from character_memory.stickers import (
+    StickerTagSuggestion,
+    character_sticker_catalog,
+    load_global_sticker_catalog,
+    sticker_library_lock,
+)
 
 
 logger = logging.getLogger("character_memory.api.resources.service")
@@ -59,16 +64,24 @@ class ApiResourceService:
             if (
                 runtime is not None
                 and getattr(runtime, "sticker_catalog", None) is not None
+                and getattr(runtime.sticker_catalog, "owner_character_id", None) == character_id
             ):
                 return runtime.sticker_catalog
-        return self.global_sticker_catalog()
+        return character_sticker_catalog(
+            self.global_sticker_catalog(), resolve_sticker_dir(self.settings), character_id
+        )
 
     def refresh_runtime_sticker_catalog(self, catalog) -> None:
         current = self.current_bundle()
         if current is None or not hasattr(current, "runtimes"):
             return
-        for runtime in current.runtimes.values():
-            runtime.sticker_catalog = catalog
+        global_dir = resolve_sticker_dir(self.settings)
+        # Reload under the same mutation lock: a slower import/delete refresh
+        # must never publish an older catalog over a newer removal.
+        with sticker_library_lock(global_dir):
+            catalog = self.global_sticker_catalog()
+            for character_id, runtime in current.runtimes.items():
+                runtime.sticker_catalog = character_sticker_catalog(catalog, global_dir, character_id)
 
     def ai_sticker_tagger(self, scope: str = "global"):
         model_holder: dict[str, object] = {}
@@ -138,12 +151,12 @@ class ApiResourceService:
         if not sticker_id:
             return None
         catalog = self.sticker_catalog_for(character_id)
-        sticker = catalog.get(sticker_id)
+        sticker = catalog.historical_get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
         return {
             **sticker.model_dump(mode="json"),
-            "url": f"/v1/stickers/{sticker.id}/asset",
+            "url": catalog.asset_url(sticker.id),
         }
 
     def character_image_payload(

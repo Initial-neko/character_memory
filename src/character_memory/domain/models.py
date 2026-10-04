@@ -112,6 +112,9 @@ class ActionDecision(BaseModel):
     image_id: str | None = None
     image_purpose: str | None = None
     visual_intent: str | None = None
+    # Space-only structured mention. When true on SPACE_COMMENT, persist an
+    # unread in-app notification for the user; it has no effect on chat.
+    mentions_user: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -150,6 +153,8 @@ class ActionDecision(BaseModel):
             self.image_id = None
             self.image_purpose = None
             self.visual_intent = None
+            if self.type != ActionType.SPACE_COMMENT:
+                self.mentions_user = False
             return self
         if self.type in {ActionType.STICKER, ActionType.SPACE_STICKER}:
             if not (self.sticker_id or "").strip():
@@ -158,6 +163,7 @@ class ActionDecision(BaseModel):
             self.image_id = None
             self.image_purpose = None
             self.visual_intent = None
+            self.mentions_user = False
             self.sticker_id = self.sticker_id.strip()
             return self
         if self.type == ActionType.IMAGE:
@@ -167,6 +173,7 @@ class ActionDecision(BaseModel):
             self.sticker_id = None
             self.image_purpose = None
             self.visual_intent = None
+            self.mentions_user = False
             self.image_id = self.image_id.strip()
             return self
         if self.type == ActionType.GENERATE_IMAGE:
@@ -181,12 +188,14 @@ class ActionDecision(BaseModel):
             self.image_id = None
             self.image_purpose = purpose
             self.visual_intent = intent[:800]
+            self.mentions_user = False
             return self
         self.message = None
         self.sticker_id = None
         self.image_id = None
         self.image_purpose = None
         self.visual_intent = None
+        self.mentions_user = False
         return self
 
 

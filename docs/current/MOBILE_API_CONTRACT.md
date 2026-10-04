@@ -1,6 +1,6 @@
 # Android / External Client API Contract (V1)
 
-> Status: **IMPLEMENTED vs PROPOSED inventory**, verified against the Character Memory Core `main` source on 2026-10-01. This is the **Core-owned, human-readable client contract**. An entry marked PROPOSED is **not callable yet**. The FastAPI runtime schemas and actual route code remain authoritative for implementation details. [Android consumer](https://github.com/Initial-neko/character_memory_android).
+> Status: **source-level IMPLEMENTED vs PROPOSED inventory**, reviewed on 2026-10-02 against feature source based on Core base `bb1f637323c4b6fe01e6fd494ca33aac58694ccb`. This feature branch is uncommitted, unmerged, and undeployed: added routes, including Space notifications, describe source behavior only and are not evidence of runtime OpenAPI or live availability. The machine-readable route inventory is source-checked; deployed runtime schemas remain authoritative. [Android consumer](https://github.com/Initial-neko/character_memory_android).
 
 ## 1. Scope and ownership
 
@@ -21,7 +21,7 @@ Use Tailscale **on both devices**; Tailscale is the private transport, **not** t
 
 Do **not** use the Android device's own `127.0.0.1:8000/8001`. The existing `scripts/mobile-start.sh` and `scripts/mobile-check.sh` set up and verify this routing. Settings `:8003`, Dev `:8002` and TTS Workbench `:9002` are deliberately PC-local. Do not expose them wholesale to make the App work. A future one-origin gateway is OPTIONAL; it does not exist in V1.
 
-All paths below are relative to the noted base. JSON request/response is default **except** SSE, WAV upload, TTS audio and media assets. Exact runtime OpenAPI documents are `CORE/openapi.json` and `MEDIA/openapi.json`; consult those for full generated models. A source-checked, machine-readable **route subset inventory** is maintained at [docs/contracts/android-v1-route-inventory.json](../contracts/android-v1-route-inventory.json). It records 19 V1 paths and their source files, but does **not** replace generated OpenAPI or runtime schema tests.
+All paths below are relative to the noted base. JSON request/response is default **except** SSE, WAV upload, TTS audio and media assets. Exact runtime OpenAPI documents are `CORE/openapi.json` and `MEDIA/openapi.json`; consult those for full generated models. A source-checked, machine-readable **route subset inventory** is maintained at [docs/contracts/android-v1-route-inventory.json](../contracts/android-v1-route-inventory.json). It records 22 V1 paths and their source files, but does **not** replace generated OpenAPI or runtime schema tests.
 
 ## 2. API compatibility and error contract
 
@@ -37,7 +37,8 @@ All paths below are relative to the noted base. JSON request/response is default
 
 | Capability | Method + path | Request / response notes |
 |---|---|---|
-| Characters | `GET /v1/characters?archived=false&include_deferred=false` | `{characters,soft_limit,active_limit,active_total,overflow_count}` |
+| Characters | `GET /v1/characters?archived=false&include_deferred=false` | `{characters,soft_limit,active_limit,active_total,overflow_count}`; Space mention pickers should request `include_deferred=true`, since non-archived deferred characters are valid Space participants but are hidden from the direct-chat sidebar |
+| LLM Usage | `GET /v1/llm/usage?hours=1&limit=80` | existing read-only Core usage view; `hours` 1..2160 (default 24), `limit` 1..300 (default 80); `{window_hours,summary,by_feature,by_model,recent}`. Includes request/token/retry/error/latency attribution; no monetary cost field is available, so clients must not infer currency cost. Does not return Prompt/Response bodies. |
 | Sidebar summaries | `GET /v1/characters/summaries` | `{characters:[...]}`; includes latest-message summary |
 | Character draft | `POST /v1/characters/draft` | request: `description` required, optional `name,age,tags`; response `{draft}` |
 | Confirm new character | `POST /v1/characters` | request: `{draft,character_id?,confirm_over_soft_limit?,creation?}`; response `{character,description}`; may return 409 |
@@ -60,17 +61,23 @@ All paths below are relative to the noted base. JSON request/response is default
 | Events | `GET /v1/events/stream` | SSE (see section 4) |
 | Space list | `GET /v1/space/posts?limit=10&before_id=N&character_id=X` | `{posts,total,has_more,next_before_id,...}`; server caps page to 10 |
 | Space post detail | `GET /v1/space/posts/{post_id}` | `{post}` |
-| Space comment | `POST /v1/space/posts/{post_id}/comments` | `{content,reply_to_comment_id?,sticker_id?}`; omit `character_id` for human user |
+| Space comment | `POST /v1/space/posts/{post_id}/comments` | `{content,reply_to_comment_id?,sticker_id?,mentions?:[character_id],client_request_id?}`; omit `character_id` for human user; user comments may mention up to 4 active characters by stable ID; a repeated request ID with identical payload returns the existing comment, while reuse with a different payload returns 409 |
+| Space notifications | `GET /v1/space/notifications?unread_only=true&limit=50`; `POST /v1/space/notifications/{notification_id}/read` | durable in-app unread notifications for role replies to user comments and structured role @user; list cap 100; read is idempotent; no background OS push |
 | Space reactions/views | `PUT/DELETE /v1/space/posts/{post_id}/likes/{character_id}`; `PUT /v1/space/posts/{post_id}/views/{character_id}` | existing character-scoped actions; not generic human like API |
 | AI image rewrite | `POST /v1/characters/{id}/images/rewrite` | `{instruction,purpose?,provider?,use_avatar_reference?}` → `{prompt,...}` |
 | AI image draft | `POST /v1/characters/{id}/images/generate` | same request + `persist_result?`; returns sendable `image.data_url` (not automatically a chat event) |
 | Asset | `GET /v1/media/{media_id}` | image/audio binary; not JSON |
-| Stickers | `GET /v1/stickers`; `GET /v1/stickers/{sticker_id}/asset` | JSON catalog, binary asset |
+| Stickers | `GET /v1/stickers`; `GET /v1/stickers/{character_id}/{sticker_id}/asset` | `?character_id=` adds that role's private pool (`scope:"character"`); without it, the shared public pool. Render assets with the character-scoped route: a live stream event carries only `sticker_id`, and a private id 404s on the global route. |
+| Sticker import | `POST /v1/stickers/import` | Raw ZIP (`application/zip`) or transparent 3×3 8-bit non-interlaced RGBA PNG (`image/png`, filename `.png`); validated atomically; `scope=global` (default, shared) or `scope=character` + `character_id` (that role's private pool); `auto_tag=false` avoids model calls. See CONVERSATION_RUNTIME for limits. |
 | Avatar | `GET /v1/characters/{id}/avatar/asset` | binary; optional V1 client display |
 | Visual config | `GET /v1/visual/periodic/config` | `{enabled,interval_seconds,max_per_hour,scope:"DIRECT_DISPLAY_ONLY"}` |
 | Visual direct chat | `POST /v1/visual/direct/messages` | 202, text + bounded transient frames |
 | Visual group chat | `POST /v1/visual/groups/{conversation_id}/messages` | 202, text + bounded transient frames |
 | Direct screen observation | `POST /v1/visual/direct/observations` | 202, low-priority, only DISPLAY source; `{accepted,reason,...}` can reject without HTTP error |
+
+Sticker library management (`DELETE /v1/stickers`, single ID or current pack) belongs to the PC local panel. The Android UI only reads the resulting active catalog and sends available stickers; it has no import/removal management entry. Removed stickers remain readable through historical message payloads and asset URLs. See [CONVERSATION_RUNTIME](CONVERSATION_RUNTIME.md#stickers) for persistence and removal semantics.
+
+For the normal ImageGen flow, call `POST /v1/characters/{character_id}/images/generate` once: Core performs prompt rewriting and image generation in that request, then returns a sendable draft. Keep message sending as a separate explicit user action; do not require a standalone `/images/rewrite` click first.
 
 ### Direct message example — CURRENT
 
@@ -88,6 +95,71 @@ Content-Type: application/json
 Success: `202` `{"accepted":true,"event_id":123,"message":{...}}`. Direct request permits optional `sticker_id` or `image:{filename,data_url}` instead of text, but **sticker and image cannot be supplied together in the same turn**. The current image payload is a base64 data URL, not multipart.
 
 Group message route shares the 202 enqueue semantics and supports optional `mentions` (up to 4) and image/sticker. Do not use the legacy synchronous `POST /v1/chat` or `POST /v1/groups/{id}/chat` as the V1 UI send path.
+
+### Space mentions and in-app notifications — CURRENT
+
+A user Space comment may include `mentions`, an array of at most four unique **active character IDs**. IDs are validated by Core and persisted with the comment; display names are never parsed to decide identity. Each explicitly mentioned role receives one normal `SPACE_COMMENT_RECEIVED` decision, even when autonomous thread reply rounds are configured as zero. If the same comment replies to a character comment, its reply target is dispatched first and de-duplicated against the explicit mentions; the reply target still follows the configured reply-round setting. A role may remain silent, and an explicit @ does not start an AI-to-AI reply chain. The comment POST remains an immediate durable write/queue response with `thread_replies: []`; a reply may arrive later. The follow-up decision queue is bounded and in-memory in this release: a Core restart or a full queue can leave the durable comment without its pending role decision. The comment and any notification already written remain durable; pending role decisions are not rebuilt after restart.
+
+Example user comment request:
+
+~~~json
+{
+  "content": "你们愿意一起去吗？",
+  "reply_to_comment_id": 123,
+  "mentions": ["rin", "mei"],
+  "client_request_id": "c6d79c3e-b99d-4d57-a381-5369186a6d4b"
+}
+~~~
+
+The response keeps the existing shape: `{comment,thread_replies,post}`. `comment` contains `id,post_id,character_id,actor_type,content,sticker_id,created_at,reply_to_comment_id,mentions,mentions_user,author,sticker`; a user-authored comment has `character_id:"user"`, `actor_type:"USER"` and `mentions_user:false`. `thread_replies` is currently an empty array because the scheduler runs after the request.
+
+`client_request_id` is optional and limited to 64 characters. Repeating the same key with the same post, author, content, reply target, sticker and mention list returns the existing comment and does not enqueue the role decisions a second time. Reusing the key with a different payload returns `409`.
+
+`GET /v1/space/notifications` defaults to unread items (`unread_only=true`) and 50 results (`limit`, maximum 100). Each notification contains `id`, `post_id`, `comment_id`, `reasons` (`REPLY`, `MENTION`, or both), `created_at`, `read_at`, plus the source comment and post preview. A role reply to a USER-authored comment creates `REPLY`; a role `SPACE_COMMENT` with `mentions_user=true` creates `MENTION`. These conditions aggregate into one notification per role comment. The `recipient_id` is currently the local singleton `user`; the service has no per-device credential or multi-user identity contract.
+
+Representative response:
+
+~~~json
+{
+  "notifications": [
+    {
+      "id": 7,
+      "recipient_id": "user",
+      "post_id": 42,
+      "comment_id": 59,
+      "reasons": ["REPLY", "MENTION"],
+      "created_at": "2026-10-02T09:00:00+00:00",
+      "read_at": null,
+      "comment": {
+        "id": 59,
+        "post_id": 42,
+        "character_id": "rin",
+        "actor_type": "CHARACTER",
+        "content": "我看到你喊我啦。",
+        "sticker_id": null,
+        "created_at": "2026-10-02T09:00:00+00:00",
+        "reply_to_comment_id": 51,
+        "mentions": [],
+        "mentions_user": true,
+        "author": {"id":"rin","name":"Rin","identity":"","tagline":"","avatar_url":"","archived":false},
+        "sticker": null
+      },
+      "post": {
+        "id": 42,
+        "character_id": "rin",
+        "author": {"id":"rin","name":"Rin","identity":"","tagline":"","avatar_url":"","archived":false},
+        "content": "今天去看海。",
+        "created_at": "2026-10-02T08:50:00+00:00"
+      }
+    }
+  ],
+  "unread_count": 1,
+  "max_items": 100,
+  "background_push": false
+}
+~~~
+
+`POST /v1/space/notifications/{notification_id}/read` returns `{notification,unread_count}` and is idempotent: repeated reads preserve the first `read_at`. Web and Android should poll the unread count only while their foreground UI is active, show an in-app badge, and mark a notification read when the user opens it. The endpoint does not send Android system notifications or provide background push delivery.
 
 ## 4. SSE event contract — CURRENT
 
@@ -109,6 +181,14 @@ For group use `scope=group&conversation_id=<group_id>`, no `character_id` requir
 The server supports the HTTP `Last-Event-ID` header for transient SSE resume. **It is NOT a durable cross-restart event log**. On first connect, reconnect, app resume or scope change, GET the durable history page and merge/dedupe by persisted message/event IDs. Do not assume every response must generate a model message; `actions=[]` (silence) is valid. Manage stream lifecycle separately for direct and group.
 
 **Current cross-client gap:** Web `web/app.js` creates a per-character `conversation_id` in browser `localStorage`. Android must not independently invent a conflicting ID and assume perfect cross-device SSE routing. A Core-owned migration/identity contract is proposed in section 7; before it lands, the Android consumer must implement and test a deliberate compatibility strategy.
+
+### VOICE_MESSAGE payload fields — existing Core behavior
+
+Core persists a `VOICE_MESSAGE` as a text-bearing message before synthesis. Its metadata starts as `voice_status:"pending"`, `voice_media_id:null`, `voice_duration_ms:null`, and `voice_error:null`. Materialization updates the same persisted event to `ready` with `voice_media_id` and optional `voice_duration_ms`, or to `failed` with `voice_error`; the text remains available when synthesis fails. The canonical source keys are defined in `voice_message_fields.py`.
+
+Direct and Group history payloads expose these four values as top-level message fields (null for non-voice messages). Direct `character_event` and Group `group_character_event` SSE payloads carry them inside `metadata`; the Web projection promotes them to the same top-level shape and merges pending/ready/failed updates by the original event ID. A client should preserve the event ID and map the nested SSE metadata when updating its message projection. When `voice_status` is `ready`, fetch the audio binary through Core `GET /v1/media/{voice_media_id}`; this does not add a `voice_url` field or a new route.
+
+This documents existing Core source behavior for future Android integration. Android recording and playback are not implemented by this Core feature branch.
 
 ## 5. Media API (MEDIA :8443) — CURRENT
 

@@ -159,6 +159,38 @@ class ListeningSpaceModel(SpaceModel):
         return super().react_call_for_session(context, session_id)
 
 
+class MentionAwareSpaceModel(ListeningSpaceModel):
+    def _reaction(self, context):
+        if "SPACE_COMMENT_RECEIVED" in context:
+            if "persona c01" in context:
+                return PersonReaction(actions=[])
+            return PersonReaction(
+                actions=[
+                    ActionDecision(
+                        type=ActionType.SPACE_COMMENT,
+                        message="我看见你的提及啦。",
+                        mentions_user=True,
+                    )
+                ]
+            )
+        return super()._reaction(context)
+
+
+class MentionUserOnSpacePostModel(SpaceModel):
+    def _reaction(self, context):
+        if "SPACE_POST_SEEN" in context and "persona c01" in context:
+            return PersonReaction(
+                actions=[
+                    ActionDecision(
+                        type=ActionType.SPACE_COMMENT,
+                        message="这条动态让我想到你。",
+                        mentions_user=True,
+                    )
+                ]
+            )
+        return PersonReaction(actions=[])
+
+
 class AudienceFailingModel(SpaceModel):
     """The audience step fails the way an upstream provider outage does."""
 
@@ -333,6 +365,200 @@ def _access(tmp_path, ids=("c00", "c01", "c02"), model=None, sticker_catalog=Non
         require_bundle=lambda: bundle,
     )
     return access, store, model
+
+
+def test_explicit_space_mentions_dispatch_independent_reply_decisions_even_when_rounds_are_zero(tmp_path):
+    model = MentionAwareSpaceModel()
+    access, store, _ = _access(tmp_path, ids=("c00", "c01", "c02"), model=model)
+    access.settings.space_thread_reply_rounds = 0
+    repository = SpaceRepository(store)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "今天想出去走走。", now)
+    user_comment = repository.add_comment(
+        post.id,
+        "user",
+        "你们愿意一起吗？",
+        now,
+        actor_type="USER",
+        mentions=["c01", "c02"],
+    )
+
+    replies = SpaceAutonomyService(access, repository).process_comment_thread(
+        post.id, user_comment.id, now=now
+    )
+
+    # Both recipients receive a normal decision; silence from one does not
+    # prevent the other from deciding. The post author is not an implicit target.
+    assert len(model.reaction_contexts) == 2
+    events = {
+        character_id: [
+            event for event in store.list_events(character_id)
+            if event.event_type == EventType.SPACE_COMMENT_RECEIVED
+        ]
+        for character_id in ("c00", "c01", "c02")
+    }
+    assert not events["c00"]
+    assert len(events["c01"]) == 1 and len(events["c02"]) == 1
+    assert all(event.metadata["explicitly_mentioned"] is True for event in events["c01"] + events["c02"])
+    assert all(event.metadata["mentions"] == ["c01", "c02"] for event in events["c01"] + events["c02"])
+    assert [(item["character_id"], item["reply_to_comment_id"]) for item in replies] == [("c02", user_comment.id)]
+    notification = repository.list_notifications(unread_only=True)[0]
+    assert notification.reasons == ["REPLY", "MENTION"]
+    store.close()
+
+
+def test_user_reply_and_distinct_explicit_mention_each_get_one_decision_without_cascade(tmp_path):
+    model = MentionAwareSpaceModel()
+    access, store, _ = _access(tmp_path, ids=("c00", "c01", "c02"), model=model)
+    access.settings.space_thread_reply_rounds = 3
+    repository = SpaceRepository(store)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "今天想出去走走。", now)
+    reply_target = repository.add_comment(post.id, "c01", "我也在想。", now)
+    user_comment = repository.add_comment(
+        post.id,
+        "user",
+        "那我们一起吧。",
+        now,
+        actor_type="USER",
+        reply_to_comment_id=reply_target.id,
+        mentions=["c02"],
+    )
+
+    replies = SpaceAutonomyService(access, repository).process_comment_thread(
+        post.id, user_comment.id, now=now
+    )
+
+    events = {
+        character_id: [
+            event for event in store.list_events(character_id)
+            if event.event_type == EventType.SPACE_COMMENT_RECEIVED
+        ]
+        for character_id in ("c00", "c01", "c02")
+    }
+    assert len(model.reaction_contexts) == 2
+    assert len(events["c01"]) == 1 and events["c01"][0].metadata["explicitly_mentioned"] is False
+    assert len(events["c02"]) == 1 and events["c02"][0].metadata["explicitly_mentioned"] is True
+    assert not events["c00"]
+    # c01 stays silent, c02 answers once, and the answer never starts a chain.
+    assert [(item["character_id"], item["reply_to_comment_id"]) for item in replies] == [
+        ("c02", user_comment.id)
+    ]
+    store.close()
+
+
+def test_user_reply_and_explicit_mention_of_same_role_dispatch_once(tmp_path):
+    model = MentionAwareSpaceModel()
+    access, store, _ = _access(tmp_path, ids=("c00", "c01"), model=model)
+    repository = SpaceRepository(store)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "今天想出去走走。", now)
+    reply_target = repository.add_comment(post.id, "c01", "我也在想。", now)
+    user_comment = repository.add_comment(
+        post.id,
+        "user",
+        "我是在回复你，也 @ 了你。",
+        now,
+        actor_type="USER",
+        reply_to_comment_id=reply_target.id,
+        mentions=["c01"],
+    )
+
+    replies = SpaceAutonomyService(access, repository).process_comment_thread(
+        post.id, user_comment.id, now=now
+    )
+
+    events = [
+        event for event in store.list_events("c01")
+        if event.event_type == EventType.SPACE_COMMENT_RECEIVED
+    ]
+    assert len(model.reaction_contexts) == 1
+    assert len(events) == 1 and events[0].metadata["explicitly_mentioned"] is True
+    assert replies == []
+    store.close()
+
+
+def test_unavailable_reply_and_mention_targets_do_not_suppress_deferred_active_target(tmp_path):
+    model = MentionAwareSpaceModel()
+    access, store, _ = _access(
+        tmp_path, ids=("c00", "c01", "c02", "c03"), model=model
+    )
+    repository = SpaceRepository(store)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "今天想出去走走。", now)
+    reply_target = repository.add_comment(post.id, "c01", "我也在想。", now)
+    user_comment = repository.add_comment(
+        post.id,
+        "user",
+        "想听听你们的想法。",
+        now,
+        actor_type="USER",
+        reply_to_comment_id=reply_target.id,
+        mentions=["c01", "c02", "c03"],
+    )
+    profiles = access.character_profiles()
+    profiles[1]["archived_at"] = now.isoformat()
+    profiles.pop(2)  # c02 was known when the comment was stored, then disappeared.
+    profiles[2]["direct_pending"] = now.isoformat()  # c03 remains eligible for Space.
+
+    replies = SpaceAutonomyService(access, repository).process_comment_thread(
+        post.id, user_comment.id, now=now
+    )
+
+    events = [
+        event for event in store.list_events("c03")
+        if event.event_type == EventType.SPACE_COMMENT_RECEIVED
+    ]
+    assert len(model.reaction_contexts) == 1
+    assert len(events) == 1 and events[0].metadata["explicitly_mentioned"] is True
+    assert events[0].metadata["mentions"] == ["c01", "c02", "c03"]
+    assert [(item["character_id"], item["reply_to_comment_id"]) for item in replies] == [
+        ("c03", user_comment.id)
+    ]
+    store.close()
+
+
+def test_space_comment_can_structurally_mention_the_user_but_chat_message_cannot(tmp_path):
+    access, store, model = _access(tmp_path, ids=("c00", "c01"), model=MentionAwareSpaceModel())
+    repository = SpaceRepository(store)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "我们聊聊吧。", now)
+    user_comment = repository.add_comment(post.id, "user", "有人在吗？", now, actor_type="USER")
+
+    replies = SpaceAutonomyService(access, repository).process_comment_thread(
+        post.id, user_comment.id, now=now
+    )
+
+    assert len(replies) == 1
+    assert replies[0]["mentions_user"] is True
+    notification = repository.list_notifications(unread_only=True)[0]
+    assert notification.comment_id == replies[0]["id"]
+    assert notification.reasons == ["REPLY", "MENTION"]
+
+    ordinary = ActionDecision(type=ActionType.MESSAGE, message="普通聊天", mentions_user=True)
+    assert ordinary.mentions_user is False
+    store.close()
+
+
+def test_role_space_post_can_create_a_durable_user_mention_notification(tmp_path):
+    access, store, _ = _access(
+        tmp_path,
+        ids=("c00", "c01", "c02"),
+        model=MentionUserOnSpacePostModel(),
+    )
+    access.settings.space_thread_reply_rounds = 0
+    repository = SpaceRepository(store)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    post = repository.create_post("c00", "今天去看海。", now)
+
+    SpaceAutonomyService(access, repository).process_audience(post.id, now=now)
+
+    notification = repository.list_notifications(unread_only=True)[0]
+    comment = repository.get_comment(notification.comment_id)
+    assert comment is not None and comment.character_id == "c01"
+    assert comment.mentions_user is True
+    assert notification.reasons == ["MENTION"]
+    store.close()
 
 
 def test_world_observation_uses_person_runtime_memory_but_never_private_chat(tmp_path):

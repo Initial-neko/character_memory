@@ -164,9 +164,9 @@ POST /v1/dev/encounters/due
 
 ### LLM Usage
 
-LLM Usage 默认显示近 1H 的真实请求摘要，位于 Simple Dev 首屏。统计窗口选择属于高级组，按功能、模型和最近请求的归因表属于诊断组，需要切换 Detailed Dev 后展开。它统计真实 OpenAI-compatible `/chat/completions` HTTP 请求；正式运行态和 Dev probe 共用 `llm_calls` 计量表。
+LLM Usage 排在 Dev Console **首屏第一块**，默认统计**最近 1 小时**的真实请求摘要。统计窗口选择属于高级组，按功能、模型和最近请求的归因表属于诊断组，需要切换 Detailed Dev 后展开。它统计真实 OpenAI-compatible `/chat/completions` HTTP 请求，而不是解析日志；正式运行态和 Dev probe 共用 `llm_calls` 计量表。费用一栏只在模型单价与币种可信时显示估算值，否则显示 `—` 并注明尚无可信单价，不显示虚构金额。
 
-每条真实请求记录 Feature / Purpose、Model / Provider、Character / Conversation / Session、Logical Call ID / Attempt、latency、status、request id，以及 Provider 真正返回的 input/output/total token。Provider 不返回 `usage` 时，Token 保持未知，只保留字符数和 Token Coverage；不会用字符数伪造 token。
+每条真实请求记录 Feature / Purpose、Model / Provider、Character / Conversation / Session、Logical Call ID / Attempt、latency、status、request id，以及 Provider 真正返回的 input/output/total token。Provider 不返回 `usage` 时，Token 保持未知，只保留字符数和 Token Coverage；不会用字符数伪造 token。 当前 Store 缺少 Provider/Model 的有效单价与币种，无法准确计算货币 Cost；DEV 首屏显示 `—`，**不将未知成本伪造为 0**。后续 Core 需返回带货币种类、单价版本和估算依据的显式成本字段，再同步 Android。
 
 Structured Output repair/retry 属于同一个 Logical Call，但每个真实 HTTP attempt 单独计量，因此可以同时看到逻辑调用数、真实请求数和 Retry Rate。
 
@@ -184,8 +184,8 @@ Usage 只保存调用元数据和用量，不复制 Prompt / Response 正文；�
 计量写入发生在用户等待回复的路径上，因此它让路于聊天：`llm_calls` 被别的连接锁住时，这一次记录在一百毫秒的预算内放弃（不排队、不重试），并记一条带堆栈的 warning；Explorer 因此可能少算个别请求，但绝不拖慢回复，也不会无声地少算。
 
 ```text
-GET /v1/dev/llm-usage?hours=24&limit=80
-GET :8000/v1/llm/usage?hours=24&limit=80
+GET /v1/dev/llm-usage?hours=1&limit=80
+GET :8000/v1/llm/usage?hours=1&limit=80
 ```
 
 当前归因覆盖 Direct、Group、Space、Proactive、World、Persona、Ensemble、Encounter、Life、Avatar、Visual、Sticker 与 Dev probe。新增 LLM 能力时应在调用边界补 Feature / Purpose，而不是长期落到 `OTHER`。

@@ -195,6 +195,15 @@
       const requests = Number(summary.requests || 0);
       const logical = Number(summary.logical_calls || 0);
       const known = Number(summary.token_known_requests || 0);
+      // Do not infer money from token counts without effective prices and currency.
+      const cost = data.cost && typeof data.cost === "object" ? data.cost : null;
+      const estimate = cost ? Number(cost.amount) : NaN;
+      const currency = typeof cost?.currency === "string" ? cost.currency : "";
+      const knownCost = cost?.status === "ESTIMATED" && currency && Number.isFinite(estimate) && estimate >= 0;
+      $("usageEstimatedCost").textContent = knownCost ? `${currency} ${estimate.toFixed(4)}` : "—";
+      $("usageCostNote").textContent = knownCost
+        ? (cost?.note || "按后端模型单价估算，非账单金额")
+        : "尚无可信单价/币种 · 不显示虚构费用";
       $("llmUsageWindowBadge").textContent = hours < 24 ? `${hours}H` : hours === 24 ? "24H" : `${Math.round(hours / 24)}D`;
       $("usageRequests").textContent = usageNumber(requests);
       $("usageLogicalCalls").textContent = `${usageNumber(logical)} logical`;

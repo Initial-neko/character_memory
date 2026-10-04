@@ -40,7 +40,7 @@
       </div>
     </header>
 
-    <section class="grid feature-grid" aria-label="LLM usage">
+    <section class="grid feature-grid usage-first" aria-label="LLM Usage at top">
       <article class="card wide llm-usage-card" id="llmUsageCard">
         <div class="card-title-row">
           <div>
@@ -65,6 +65,7 @@
             </div>
           </details>
           <div class="usage-summary" aria-label="LLM usage summary">
+            <div class="usage-stat usage-cost"><span>最近窗口费用估算</span><strong id="usageEstimatedCost">—</strong><small id="usageCostNote">未配置模型单价 · 暂不可计算</small></div>
             <div class="usage-stat"><span>请求</span><strong id="usageRequests">0</strong><small id="usageLogicalCalls">0 logical</small></div>
             <div class="usage-stat"><span>总 Token</span><strong id="usageTotalTokens">0</strong><small id="usageCoverage">coverage 100%</small></div>
             <div class="usage-stat"><span>输入</span><strong id="usageInputTokens">0</strong><small>tokens</small></div>

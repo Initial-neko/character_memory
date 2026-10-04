@@ -403,3 +403,22 @@ def test_dev_space_config_forwards_reply_rounds_and_rejects_omission():
 
     forwarded = next(call for call in http.calls if call[1].endswith("/v1/space/dev/config"))
     assert forwarded[2]["json"]["reply_rounds"] == 2
+
+
+def test_dev_usage_first_one_hour_and_cost_never_fabricated():
+    """Usage is first; missing cost is unknown, not free."""
+    html = Path("src/character_memory/web/dev.html").read_text(encoding="utf-8")
+    js = Path("src/character_memory/web/dev.js").read_text(encoding="utf-8")
+    doc = Path("docs/current/DEV_CONSOLE.md").read_text(encoding="utf-8")
+    assert html.index('id="llmUsageCard"') < html.index('class="grid status-grid"')
+    assert html.count('id="llmUsageCard"') == 1
+    assert '<option value="1" selected>1 小时</option>' in html
+    assert '<option value="24">24 小时</option>' in html
+    assert 'id="llmUsageWindowBadge" class="pill">1H</span>' in html
+    assert 'id="usageEstimatedCost">—</strong>' in html
+    assert 'id="usageCostNote"' in html
+    assert 'const hours = Number($("llmUsageWindow")?.value || 1);' in js
+    assert 'cost?.status === "ESTIMATED"' in js
+    assert "Number.isFinite(estimate)" in js
+    assert "尚无可信单价/币种" in js
+    assert "首屏第一块" in doc and "最近 1 小时" in doc

@@ -7,6 +7,7 @@ from character_memory.ensemble_builder import EnsembleBuilderService, EnsembleRe
 
 class EnsembleStartRequest(BaseModel):
     prompt: str = Field(min_length=3, max_length=2000)
+    mode: str = Field(default="SOURCE", pattern="^(SOURCE|ORIGINAL)$")
 
 
 class EnsembleConfirmRequest(BaseModel):
@@ -33,7 +34,7 @@ def attach_ensemble_routes(app):
     @app.post("/v1/ensembles")
     def start_ensemble(req: EnsembleStartRequest):
         try:
-            return {"build": service.start(req.prompt)}
+            return {"build": service.start(req.prompt, mode=req.mode)}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -47,7 +48,7 @@ def attach_ensemble_routes(app):
     @app.post("/v1/ensembles/prepare")
     def prepare_ensemble(req: EnsembleStartRequest):
         try:
-            build = service.start(req.prompt)
+            build = service.start(req.prompt, mode=req.mode)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -82,6 +83,15 @@ def attach_ensemble_routes(app):
 
     @app.post("/v1/ensembles/{group_id}/members/{index}/retry")
     def retry_ensemble_member(group_id: str, index: int):
+        try:
+            return {"build": service.retry_member(group_id, index)}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/v1/ensembles/{group_id}/members/{index}/regenerate")
+    def regenerate_ensemble_member(group_id: str, index: int):
         try:
             return {"build": service.retry_member(group_id, index)}
         except KeyError as exc:

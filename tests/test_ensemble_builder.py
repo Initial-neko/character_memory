@@ -767,6 +767,9 @@ def test_ensemble_web_assets_are_loaded():
         "/members/",
         "data-ensemble-member",
         "data-ensemble-voice-design",
+        "data-ensemble-mode",
+        "data-ensemble-regenerate",
+        "ensemble-persona-preview",
         "use_voice_design",
         "确认并开始群聊",
         "groups?.enter",
@@ -782,3 +785,118 @@ def test_ensemble_web_assets_are_loaded():
         ".character-overflow-card",
     ]:
         assert token in css
+
+
+
+def test_ensemble_enriches_new_members_with_individual_persona_builder(tmp_path):
+    access, store, observer, _, _ = _access(tmp_path)
+    model = access.require_bundle().model
+    requests = []
+    request = model._request
+
+    def tracked(messages, **kwargs):
+        requests.append(messages[-1]["content"])
+        return request(messages, **kwargs)
+
+    model._request = tracked
+    service = EnsembleBuilderService(access, EnsembleRepository(store))
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    ready = service.research(started["group_id"])
+
+    assert len(requests) == 2  # Kurisu already exists; no replacement persona.
+    assert any("Okabe" in prompt and "Kurisu" in prompt for prompt in requests)
+    assert any("Mayuri" in prompt and "长期朋友" in prompt for prompt in requests)
+    assert ready["drafts"][0]["generation_method"] == "REUSED"
+    assert all(item["generation_method"] == "GENERATED" for item in ready["drafts"][1:])
+    assert ready["drafts"][1]["draft"]["name"] == "Okabe"
+    assert len(observer.calls) == 1
+    store.close()
+
+
+def test_ensemble_persona_enrichment_failure_falls_back_for_one_member(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    model = access.require_bundle().model
+    request = model._request
+
+    def fail_one(messages, **kwargs):
+        if "名字偏好：Mayuri" in messages[-1]["content"]:
+            raise RuntimeError("temporary persona provider failure")
+        return request(messages, **kwargs)
+
+    model._request = fail_one
+    service = EnsembleBuilderService(access, EnsembleRepository(store))
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    ready = service.research(started["group_id"])
+
+    assert ready["status"] == "READY"
+    assert ready["ready_member_count"] == 3
+    assert ready["drafts"][1]["generation_method"] == "GENERATED"
+    assert ready["drafts"][2]["generation_method"] == "FALLBACK"
+    assert "轻松自然" in ready["drafts"][2]["draft"]["conversation"]
+    store.close()
+
+
+def test_original_ensemble_mode_does_not_invoke_web_observation(tmp_path):
+    access, store, observer, _, _ = _access(tmp_path)
+    model = access.require_bundle().model
+    research = model.structured_for_session
+
+    def original_research(prompt, schema, session_id):
+        assert "原创虚构" in prompt
+        assert "PUBLIC SOURCE" not in prompt
+        return research("PUBLIC SOURCE\n" + prompt, schema, session_id)
+
+    model.structured_for_session = original_research
+    service = EnsembleBuilderService(access, EnsembleRepository(store))
+    started = service.start("原创一个有鲜明冲突的三人奇幻冒险小队", mode="ORIGINAL")
+    ready = service.research(started["group_id"])
+
+    assert observer.calls == []
+    assert ready["mode"] == "ORIGINAL"
+    assert ready["status"] == "READY"
+    assert ready["sources"] == []
+    store.close()
+
+
+def test_confirmed_ensemble_relationships_reach_group_contract_not_history(tmp_path):
+    from character_memory.application.group_conversation_service import GroupConversationService
+
+    access, store, _, profiles, _ = _access(tmp_path)
+    repo = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repo)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    service.research(started["group_id"])
+    result = service.confirm(started["group_id"], [0, 1])
+
+    origin = repo.active_context(result["group_id"])
+    assert origin is not None
+    assert origin["overview"] == "未来道具研究所的核心成员。"
+    assert [item["character_id"] for item in origin["participants"]] == ["kurisu", "okabe"]
+    assert "Mayuri" not in json.dumps(origin, ensure_ascii=False)
+    group = GroupRepository(store).get_group(result["group_id"])
+    runtime = GroupConversationService(store, {}, None, profiles=profiles)
+    normal = runtime._group_contract(group, "okabe")
+    autonomous = runtime._group_contract(group, "okabe", autonomous=True, autonomous_phase="SEED")
+    assert "与 Kurisu 经常针锋相对" in normal
+    assert "经常与 Okabe 争论" in autonomous
+    assert "不是本群已发生的对话" in normal
+    assert GroupRepository(store).list_events(group.id) == []
+    store.close()
+
+
+def test_single_member_regeneration_preserves_other_drafts_and_observations(tmp_path):
+    access, store, observer, _, _ = _access(tmp_path)
+    repo = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repo)
+    started = service.start("复刻命运石之门的 LAB MEM，并形成群聊")
+    original = service.research(started["group_id"])
+    model = access.require_bundle().model
+    model._request = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("down"))
+
+    regenerated = service.retry_member(started["group_id"], 1)
+    assert regenerated["status"] == "READY"
+    assert regenerated["drafts"][1]["generation_method"] == "FALLBACK"
+    assert regenerated["drafts"][0] == original["drafts"][0]
+    assert regenerated["drafts"][2] == original["drafts"][2]
+    assert len(observer.calls) == 1
+    store.close()

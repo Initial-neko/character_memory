@@ -372,7 +372,7 @@
       event_time:raw.event_time,
       action:metadata.action,
       sticker_id:stickerId,
-      sticker:stickerId ? {id:stickerId,label:metadata.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(stickerId)}/asset`} : null,
+      sticker:stickerId ? {id:stickerId,label:metadata.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(raw.character_id)}/${encodeURIComponent(stickerId)}/asset`} : null,
       image_id:imageId,
       media_id:mediaId,
       image:mediaId ? {id:mediaId,label:null,url:`/v1/media/${encodeURIComponent(mediaId)}`} : imageId ? {id:imageId,label:metadata.image_label || "图片",url:`/v1/images/${encodeURIComponent(raw.character_id)}/${encodeURIComponent(imageId)}/asset`} : null,

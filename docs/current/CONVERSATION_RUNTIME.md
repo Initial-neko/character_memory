@@ -630,14 +630,22 @@ Regression coverage lives in `test_voice_message_*.py`, including persistence, m
 
 ## Stickers
 
-Sticker 属于聊天/社交表达资源。当前 runtime catalog、global ownership 与 legacy compatibility contract 收敛在 Conversation Runtime 中；Space 使用同一资源语义，社会层行为见 [SOCIAL_WORLD.md](SOCIAL_WORLD.md)。
+Sticker 属于聊天/社交表达资源。当前 runtime catalog、ownership 与 legacy compatibility contract 收敛在 Conversation Runtime 中；Space 使用同一资源语义，社会层行为见 [SOCIAL_WORLD.md](SOCIAL_WORLD.md)。
 
-Sticker 当前是 **application/global resource**，不是“每个 Character 独占一套资源”的新设计。
+Sticker 有**两层 ownership**：
+
+```text
+public pool      = application/global resource，所有角色与群聊共享
+private pool     = 单个 Character 私有，只有该角色的 runtime 与 Direct picker 可见
+legacy compatibility = persona-local manifests，只读合并进 public pool
+```
+
+Public pool 是默认层，不是“每个 Character 独占一套资源”。Private pool 是叠加层：一个角色看到的是 public pool **加** 自己的 private pool，看不到别人的。Space 仍只使用 public pool。
 
 运行时仍兼容历史 character-local pack，因此必须区分：
 
 ```text
-current ownership   = global application resource
+current ownership   = public application resource + per-character private resource
 legacy compatibility = persona-local manifests / old character-scoped routes
 ```
 
@@ -658,16 +666,18 @@ legacy character-local manifests
 核心入口：
 
 ```text
-load_global_sticker_catalog(...)
+load_global_sticker_catalog(...)          # public pool
+character_sticker_catalog(global, dir, character_id)   # public + 该角色 private
 ```
 
 当前 source 描述为：
 
 ```text
-default+global+legacy
+default+global+legacy                   # public pool
+default+global+legacy+character         # 叠加 private pool 之后
 ```
 
-同一个 global catalog 会刷新到 Direct / Group 使用的 PersonRuntime，不要求每个 Character 重新复制一份 imported sticker。
+每个 PersonRuntime 持有自己的 catalog（public + 自己的 private），因此 Direct / Group 的 AI 角色能发自己的私有表情但看不到别人的。多角色场景下 private manifest 只影响拥有它的那个角色。
 
 ### 2. Storage
 
@@ -683,6 +693,12 @@ sticker_dir: ""
 
 ```text
 <sticker_dir>/manifest.yaml
+```
+
+角色 private pool 按 `character_id` 的 sha256 前 24 位分目录（用户可控的 id 不进文件路径）：
+
+```text
+<sticker_dir>/characters/<sha256(character_id)[:24]>/manifest.yaml
 ```
 
 内置 default pack 位于 package Web assets；legacy persona pack 仍可能位于：
@@ -701,7 +717,7 @@ sticker_dir: ""
 GET /v1/stickers
 ```
 
-可选 `character_id` 仍被接受用于旧客户端兼容，但正式返回：
+不带参数时返回 public pool：
 
 ```json
 {
@@ -711,7 +727,17 @@ GET /v1/stickers
 }
 ```
 
-用户导入资源在 Direct / Group 中共享。
+带 `character_id` 时返回该角色的 catalog（public + 自己的 private）：
+
+```json
+{
+  "scope": "character",
+  "source": "default+global+legacy+character",
+  "stickers": []
+}
+```
+
+每个 item 带 `"scope": "global" | "character"` 与 `"owner_character_id"`（public 为 `null`）。群聊/用户 picker 不带 `character_id`，只拿 public pool。
 
 #### Global asset
 
@@ -719,15 +745,15 @@ GET /v1/stickers
 GET /v1/stickers/{sticker_id}/asset
 ```
 
-这是当前正式 asset route。
+只服务 public pool。private id 走这条路由会 404——这是隔离的一部分，不是缺失。
 
-#### Legacy asset route
+#### Character-scoped asset route
 
 ```text
 GET /v1/stickers/{character_id}/{sticker_id}/asset
 ```
 
-仍保留给旧客户端，但读取的仍是当前 global catalog。不要据此重新把 Sticker ownership 解释成 character-owned。
+读取该角色的 catalog，public 与 private id 都可用。这条路由也是 Direct/Group SSE 直播消息拼 sticker URL 时的正式路径：直播事件只带 `sticker_id`，不带 scope，只有带上 `character_id` / `actor_id` 才能同时解析两层池子。
 
 ### 4. Web ZIP / transparent sheet import
 
@@ -738,19 +764,20 @@ POST /v1/stickers/import
 Content-Type: application/zip
 ```
 
-兼容参数：
+参数：
 
 ```text
+scope          # global（默认）| character
 character_id
 filename
 auto_tag
 ```
 
-其中 `character_id` 即使由旧客户端发送，也**不会决定 storage ownership**。后端只用它做兼容校验；导入仍写全局 user library。
+`scope=global` 时写全局 user library，所有角色与群聊共享。`scope=character` 需要 `character_id`，写入该角色的 private pool；private 素材的 id 带角色哈希前缀 + 内容哈希，因此重导入更新过的图片会得到新 id，老消息引用的旧图仍然可读。scope 非法或缺 `character_id` 返回 400；未知角色 404。
 
-成功后 runtime 会重新加载 global catalog，并刷新已经加载的人物 Sticker resource。
+成功后 runtime 会重新加载 catalog，并刷新每一个已加载角色的 Sticker resource。
 
-同一路由也接受 `Content-Type: image/png` 的等分 3×3 透明九宫图，`filename` 使用 `.png`。当前支持 8-bit、非交错 RGBA PNG，最大 16 MiB / 400 万像素；长宽均须被3整除。每格都必须非空并具有透明外边界，布局不明确、损坏、超限或不支持的格式返回400，整张先验证再导入，不会留下部分素材。每格按 alpha 裁边并补2px透明留白，生成同一套装的9个PNG，通过现有 ZIP 导入器原子发布。内容哈希生成固定套装/素材ID，重复导入相同图不会产生重复条目。CLI 的 `archive` 参数同样接受 `.png`；无需新增图像依赖。
+同一路由也接受 `Content-Type: image/png` 的 3×3 透明九宫图，`filename` 使用 `.png`。当前支持 8-bit、非交错 RGBA PNG，最大 16 MiB / 400 万像素；**长宽不再要求被 3 整除**。分隔线在 1/3、2/3 附近按“近空行/列”探测（alpha < 24 视为透明，忽略生成图常见的微弱 alpha 噪点），并要求分隔线邻居也近空；找不到可信分隔线时报 400，而不是切错。每格都必须非空并具有透明外边界，布局不明确、损坏、超限或不支持的格式返回400，整张先验证再导入，不会留下部分素材。每格按 alpha 裁边并补2px透明留白，生成同一套装的9个PNG，通过现有 ZIP 导入器原子发布。内容哈希生成固定套装/素材ID，重复导入相同图不会产生重复条目。CLI 的 `archive` 参数同样接受 `.png`；无需新增图像依赖。
 
 ### 5. Import metadata
 
@@ -851,7 +878,11 @@ STICKER action
 
 #### Global imported
 
-当前正式用户扩展资源。Web import 和 CLI import 都写到 `sticker_dir`，所有人物/群聊共享。
+Public pool。Web import（`scope=global`）和 CLI import 都写到 `sticker_dir`，所有人物/群聊共享。
+
+#### Character private
+
+Web import（`scope=character`）写到该角色的 `characters/<hash>/` 目录。只有该角色的 runtime 与 Direct picker 选中它；群聊里只有该角色作为 actor 时能发自己的 private 表情。private 素材不能通过 global asset route 取到，也不能用别的角色的 id 发出去。
 
 #### Legacy character-local
 
@@ -875,9 +906,9 @@ archive ZIP
 因此当前事实源保持一致：
 
 ```text
-Web import  -> global
+Web import  -> global，或 scope=character 时的该角色 private pool
 CLI import  -> global
-Runtime     -> default + global + legacy read compatibility
+Runtime     -> public pool + 自己的 private pool（+ legacy 只读兼容）
 ```
 
 legacy persona-local manifests 继续只读兼容，不再作为新 CLI 导入目标。
@@ -897,8 +928,10 @@ Sticker 与 ImageGen 是不同资源路径：
 至少持续覆盖：
 
 - built-in/global/legacy catalog merge；
-- `/v1/stickers` 返回 global scope；
-- legacy `character_id` 不改变 Web/CLI import ownership；
+- `/v1/stickers` 不带参返回 global scope，带 `character_id` 返回 character scope；
+- private pool 的角色隔离：别的角色 id、global asset route、跨角色直接发送都取不到；
+- Direct/Group 直播事件用 character-scoped URL 渲染 sticker，private 表情不破图；
+- CLI import 仍写 global，`scope` 只属于 Web import；
 - CLI `--character` compatibility 不写回 persona-local library；
 - asset path validation；
 - ZIP size/file-count/path traversal 限制；

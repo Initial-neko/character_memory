@@ -144,3 +144,23 @@ def test_api_png_import_reloads_global_assets_and_bad_sheet_keeps_library(tmp_pa
         assert 'image/png' in content and 'application/zip' in content
     finally:
         store.close()
+
+
+def test_generated_non_divisible_sheet_with_tiny_alpha_noise_is_split():
+    width, height = 31, 32
+    pixels = bytearray(width * height * 4)
+    xs, ys = (0, 10, 20, 31), (0, 11, 21, 32)
+    for row in range(3):
+        for col in range(3):
+            for y in range(ys[row] + 3, ys[row] + 7):
+                for x in range(xs[col] + 3, xs[col] + 7):
+                    offset = (y * width + x) * 4
+                    pixels[offset:offset + 4] = bytes((col * 70, row * 70, 80, 255))
+    # Faint alpha artifacts from image generation must not become hard dividers.
+    for y in range(height):
+        pixels[(y * width + 10) * 4 + 3] = 1
+    with zipfile.ZipFile(BytesIO(sticker_sheet_bundle(png(width, height, pixels)))) as archive:
+        rows = json.loads(archive.read('all_tags.json'))
+        assert len(rows) == 9
+        assert len({row['filename'] for row in rows}) == 9
+        assert all(struct.unpack('>II', archive.read(row['filename'])[16:24]) == (8, 8) for row in rows)

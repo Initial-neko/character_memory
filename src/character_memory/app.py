@@ -17,7 +17,7 @@ from character_memory.llm.usage import LlmUsageRecorder
 from character_memory.memory.embedding import DeterministicEmbedding, OpenAICompatibleEmbedding, SentenceTransformerEmbedding
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import IntentPolicy, PersonRuntime
-from character_memory.stickers import load_global_sticker_catalog
+from character_memory.stickers import character_sticker_catalog, load_global_sticker_catalog
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -137,7 +137,7 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
                 embeddings,
                 model,
                 persona,
-                global_stickers,
+                character_sticker_catalog(global_stickers, resolve_sticker_dir(settings), character_id),
                 image_by_id[character_id],
                 intent_policy=intent_policy,
             )

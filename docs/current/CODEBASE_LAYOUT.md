@@ -120,7 +120,7 @@ wake_web.py             wake/debug HTTP surface
 avatars.py                  avatar local persistence
 avatar_intent.py            AI avatar-search planning
 images.py                   character image catalog
-stickers.py                 built-in/global/legacy sticker catalog + import
+stickers.py                 built-in/global/legacy sticker catalog + import/removal; active/history lookup
 sticker_import_cli.py       global sticker import CLI + deprecated --character compatibility
 search.py                   shared image/web search provider contracts
 visual_generation.py        ImageGen providers + prompt compiler
@@ -240,7 +240,7 @@ ensemble.js             prompt/research/candidate confirmation
 encounter.js           temporary encounter feed/trial/accept/dismiss
 mentions.js             @ mention
 group_settings.js       group settings
-stickers.js             sticker UI/import
+stickers.js             sticker UI/import + PC global-library removal
 images.js               normal image draft/send
 ai_images.js            generated image source
 avatars.js              avatar management

@@ -9,6 +9,8 @@
   let importFile = null;
   let importNotice = "";
   let trigger = null;
+  let managing = false;
+  let removing = false;
 
   const stickerAsset = id => `/v1/stickers/${encodeURIComponent(id)}/asset`;
   const activeCharacterId = () => CM.isGroupConversation() ? null : (CM.state.characterId || null);
@@ -29,6 +31,9 @@
   function close() {
     panel?.classList.add("hidden");
     trigger?.setAttribute("aria-expanded", "false");
+    // Management is a per-visit mode: leaving the panel must not leave the
+    // next visit one click away from removing a sticker.
+    managing = false;
   }
   function setDisabled(disabled) { if (trigger) trigger.disabled = Boolean(disabled); }
 
@@ -42,7 +47,10 @@
     return [...result.values()];
   }
 
-  const toolbar = () => `<div class="sticker-panel-toolbar"><strong>表情包</strong><button type="button" class="sticker-import-open" data-sticker-import-open title="导入全局表情包">＋</button></div>`;
+  // Removal only exists for the public library: a private pack belongs to one
+  // character and the DELETE surface has no scope, so offering 管理 there would
+  // only produce a 404.
+  const toolbar = (canManage) => `<div class="sticker-panel-toolbar"><strong>表情包</strong><div class="sticker-toolbar-actions">${canManage ? `<button type="button" class="sticker-manage" data-sticker-manage title="管理公共可选表情；移除后所有人物和群聊不再选择，历史图片保留">${managing ? "完成" : "管理"}</button>` : ""}<button type="button" class="sticker-import-open" data-sticker-import-open title="导入表情包">＋</button></div></div>`;
 
   function wireFallbacks() {
     panel?.querySelectorAll(".sticker-choice img").forEach(img => img.addEventListener("error", () => img.closest(".sticker-choice")?.classList.add("broken"), {once:true}));
@@ -50,14 +58,17 @@
 
   function render(stickers) {
     if (!panel) return;
-    if (!stickers.length) { panel.innerHTML = `${toolbar()}<div class="sticker-loading">还没有可用表情包。</div>`; return; }
+    if (!stickers.length) { panel.innerHTML = `${toolbar(false)}${importNotice ? `<div class="sticker-import-notice">${CM.escapeHtml(importNotice)}</div>` : ""}<div class="sticker-loading">还没有可用表情包。</div>`; return; }
     const allPacks = packs(stickers);
     if (!allPacks.some(pack => pack.id === selectedPackId)) selectedPackId = allPacks[0].id;
     const active = allPacks.find(pack => pack.id === selectedPackId) || allPacks[0];
     const tabs = allPacks.length > 1 ? `<div class="sticker-pack-tabs">${allPacks.map(pack => `<button type="button" class="sticker-pack-tab${pack.id === active.id ? " active" : ""}" data-sticker-pack="${CM.escapeHtml(pack.id)}" title="${CM.escapeHtml(pack.name)}">${CM.escapeHtml(pack.name)}</button>`).join("")}</div>` : "";
-    const grid = `<div class="sticker-grid">${active.stickers.map(item => `<button type="button" class="sticker-choice" data-sticker-id="${CM.escapeHtml(item.id)}" title="${CM.escapeHtml(item.label)}"><img src="${CM.escapeHtml(item.url || stickerAsset(item.id))}" alt="${CM.escapeHtml(item.label)}"><span class="sticker-choice-fallback">表情</span></button>`).join("")}</div>`;
+    const removable = active.scope !== "character";
+    const removing_ = managing && removable;
+    const grid = `<div class="sticker-grid">${active.stickers.map(item => `<button type="button" class="sticker-choice" data-sticker-id="${CM.escapeHtml(item.id)}" title="${removing_ ? "从公共可选库移除：" : ""}${CM.escapeHtml(item.label)}"><img src="${CM.escapeHtml(item.url || stickerAsset(item.id))}" alt="${CM.escapeHtml(item.label)}"><span class="sticker-choice-fallback">表情</span></button>`).join("")}</div>`;
     const notice = importNotice ? `<div class="sticker-import-notice">${CM.escapeHtml(importNotice)}</div>` : "";
-    panel.innerHTML = `${toolbar()}${notice}${tabs}${grid}<div class="sticker-pack-foot">${CM.escapeHtml(active.name)} · ${active.stickers.length} 张 · ${active.scope === "character" ? "角色专属" : "公共"}</div>`;
+    const management = removing_ ? `<div class="sticker-import-help">点击图片移除单张；所有人物和群聊的可选库同步更新，历史图片保留。</div><button type="button" class="sticker-remove-pack" data-sticker-remove-pack title="从公共可选库移除当前整包，保留历史图片">移除整包：${CM.escapeHtml(active.name)}</button>` : "";
+    panel.innerHTML = `${toolbar(removable)}${notice}${tabs}${management}${grid}<div class="sticker-pack-foot">${CM.escapeHtml(active.name)} · ${active.stickers.length} 张 · ${active.scope === "character" ? "角色专属" : "公共"}</div>`;
     wireFallbacks();
   }
 
@@ -134,6 +145,19 @@
     }
   }
 
+  async function removeSelection(params, label) {
+    if (removing || !window.confirm(`从全局可选库移除${label}？所有人物和群聊将不再选择这些表情，已发送的历史图片仍可查看。`)) return;
+    removing = true;
+    try {
+      const payload = await CM.api(`/v1/stickers?${new URLSearchParams(params)}`, {method:"DELETE"});
+      importNotice = `已从全局可选库移除 ${payload.removed || 0} 张，历史图片保留`;
+      await open({refresh:true});
+    } catch (error) {
+      importNotice = `移除失败：${error.message}`;
+      render(await load());
+    } finally { removing = false; }
+  }
+
   async function send(sticker) {
     if (CM.isGroupConversation()) return CM.features.groups?.sendSticker?.(sticker);
     return sendDirect(sticker);
@@ -163,6 +187,13 @@
   importInput.addEventListener("change", () => { const file = importInput.files?.[0]; if (file) showImportDialog(file); importInput.value = ""; });
   panel.addEventListener("click", async event => {
     event.stopPropagation();
+    if (removing) return;
+    if (event.target.closest("[data-sticker-manage]")) { managing = !managing; render(await load()); return; }
+    if (event.target.closest("[data-sticker-remove-pack]")) {
+      const pack = packs(await load()).find(item => item.id === selectedPackId);
+      if (pack) await removeSelection({pack_id:pack.id}, `整包「${pack.name}」共 ${pack.stickers.length} 张`);
+      return;
+    }
     if (event.target.closest("[data-sticker-import-open]")) { importFile = null; importInput.click(); return; }
     if (event.target.closest("[data-sticker-import-cancel]")) { importFile = null; await open(); return; }
     if (event.target.closest("[data-sticker-import-confirm]")) { await importStickerFile(); return; }
@@ -171,6 +202,7 @@
     const button = event.target.closest("[data-sticker-id]");
     if (!button) return;
     const sticker = (await load()).find(item => item.id === button.dataset.stickerId);
+    if (managing && sticker && sticker.scope !== "character") { await removeSelection({sticker_id:sticker.id}, `「${sticker.label}」`); return; }
     await send(sticker);
   });
   document.addEventListener("click", event => { if (!event.target.closest(".sticker-panel") && !event.target.closest(".sticker-trigger")) close(); });

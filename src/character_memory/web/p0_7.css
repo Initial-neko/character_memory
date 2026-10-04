@@ -55,6 +55,35 @@
   font-size: 12px;
 }
 
+.sticker-toolbar-actions { display: flex; align-items: center; gap: 2px; }
+
+.sticker-manage {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--ui-r-sm);
+  background: transparent;
+  color: var(--ui-muted);
+  font-size: 12px;
+  line-height: 1;
+}
+.sticker-manage:hover { background: var(--ui-surface-sunken); color: var(--ui-text); }
+
+.sticker-remove-pack {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  margin: 8px 0 2px;
+  padding: 0 10px;
+  border: 1px solid var(--ui-danger-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.sticker-remove-pack:hover { border-color: var(--ui-danger); }
+
 .sticker-import-open {
   width: 28px;
   min-width: 28px;

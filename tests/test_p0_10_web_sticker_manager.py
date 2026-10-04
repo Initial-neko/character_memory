@@ -177,7 +177,7 @@ def test_sticker_web_manager_uses_global_library_and_no_character_cache_key():
 
     assert "/v1/stickers/import" in js
     assert '"Content-Type":isPng ? "image/png" : "application/zip"' in js
-    assert "导入全局表情包" in js
+    assert 'data-sticker-import-open title="导入表情包"' in js
     assert "公共池（所有角色可用）" in js
     assert "当前角色私有池" in js
     assert 'scope:selectedScope' in js

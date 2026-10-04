@@ -144,7 +144,9 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             if actor_character_id not in catalogs:
                 catalogs[actor_character_id] = access.sticker_catalog_for(actor_character_id)
             catalog = catalogs[actor_character_id]
-        sticker = catalog.get(sticker_id)
+        # History resolves through the actor's own catalog, which keeps both its
+        # private pool and the public pool's removed-from-selection entries.
+        sticker = catalog.historical_get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
         return {

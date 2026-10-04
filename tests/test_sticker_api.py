@@ -66,6 +66,7 @@ def test_history_exposes_sticker_without_losing_provenance(tmp_path):
     )
     client = TestClient(create_api(bundle=_bundle(store)))
 
+    assert client.delete("/v1/stickers?sticker_id=round_cat_happy").status_code == 200
     messages = client.get("/v1/chat/history?character_id=rin").json()["messages"]
     message = next(item for item in messages if item["id"] == event.id)
     assert message["sticker_id"] == "round_cat_happy"

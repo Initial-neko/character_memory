@@ -747,7 +747,20 @@ GET /v1/stickers/{sticker_id}/asset
 
 只服务 public pool。private id 走这条路由会 404——这是隔离的一部分，不是缺失。
 
+<<<<<<< HEAD
+#### PC 可选库删减
+
+```text
+DELETE /v1/stickers?sticker_id=<id>
+DELETE /v1/stickers?pack_id=<id>
+```
+
+PC 表情面板「管理」支持点击单张或「移除整包」，确认后从所有人物、Direct / Group / Space 的**公共**可选库移除；Android 只同步可选目录，不提供管理入口。两种参数必须且只能提供一个，非法 ID 返回400，未知 ID / pack 返回404，重复移除成功且 `removed: 0`。整包按当前合并目录中的 pack_id 移除。管理入口只对 public pack 出现：private pack 属于单个角色，DELETE 没有 scope，在那里提供移除只会得到 404。
+
+移除会在 `<sticker_dir>/removed.json` 原子持久化 ID 列表，与导入共用目录锁，内置、legacy 和导入资源均可移除；重启和重复导入不会复活这些 ID。发送验证、LLM 检索和 prompt 只读 active catalog，已加载 PersonRuntime 立即刷新。历史投影与 asset 读取使用 historical lookup，保留标签、原 manifest 和图片文件，不删除已发送历史，也不回收磁盘空间。需要恢复时，关闭 Core、从 `removed.json` 删除相应 ID 后重启；管理入口当前只做删减。
+
 #### Character-scoped asset route
+>>>>>>> origin/main
 
 ```text
 GET /v1/stickers/{character_id}/{sticker_id}/asset

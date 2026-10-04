@@ -194,7 +194,7 @@ def attach_space_routes(app):
             }
         return profile_payload(comment.character_id)
 
-    def comment_sticker_payload(sticker_id: str | None) -> dict | None:
+    def comment_sticker_payload(sticker_id: str | None, *, active: bool = False) -> dict | None:
         clean_id = str(sticker_id or "").strip()
         if not clean_id:
             return None
@@ -202,7 +202,7 @@ def attach_space_routes(app):
         if not callable(catalog_factory):
             return {"id": clean_id, "label": "表情包", "url": f"/v1/stickers/{clean_id}/asset"}
         catalog = catalog_factory()
-        sticker = catalog.get(clean_id)
+        sticker = catalog.get(clean_id) if active else catalog.historical_get(clean_id)
         if sticker is None or catalog.asset_path(clean_id) is None:
             return None
         return {
@@ -440,7 +440,7 @@ def attach_space_routes(app):
                 else:
                     for mentioned_id in req.mentions:
                         require_known(mentioned_id, active=True)
-                if req.sticker_id and comment_sticker_payload(req.sticker_id) is None:
+                if req.sticker_id and comment_sticker_payload(req.sticker_id, active=True) is None:
                     raise HTTPException(status_code=400, detail="sticker not found")
                 comment = repository.add_comment(
                     post_id,

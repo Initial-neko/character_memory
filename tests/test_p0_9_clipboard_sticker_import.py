@@ -114,6 +114,16 @@ def test_sticker_picker_has_global_pack_tabs_and_small_previews():
     assert "pack_name" in js
     assert 'CM.registerFeature("stickers"' in js
     assert 'CM.api("/v1/stickers")' in js
-    assert "character_id" not in js[js.index('CM.api("/v1/stickers")') - 120:js.index('CM.api("/v1/stickers")') + 120]
+    assert 'CM.api(`/v1/stickers?character_id=${encodeURIComponent(characterId)}`)' in js
+    assert 'const key = characterId || "global"' in js
     assert "grid-template-columns: repeat(6, 52px)" in css
     assert "max-width: 112px" in css
+
+
+def test_live_stream_sticker_urls_are_character_scoped():
+    # A live SSE event carries only sticker_id; the global route 404s on a
+    # private id, so both live paths must resolve through the actor's own scope.
+    app_js = (WEB / "app.js").read_text(encoding="utf-8")
+    groups_js = (WEB / "groups.js").read_text(encoding="utf-8")
+    assert "/v1/stickers/${encodeURIComponent(raw.character_id)}/${encodeURIComponent(stickerId)}/asset" in app_js
+    assert "/v1/stickers/${encodeURIComponent(raw.actor_id)}/${encodeURIComponent(stickerId)}/asset" in groups_js

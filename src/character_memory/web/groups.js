@@ -296,7 +296,7 @@
       event_time:raw.event_time,
       action:metadata.action,
       sticker_id:stickerId,
-      sticker:stickerId ? {id:stickerId,label:metadata.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(stickerId)}/asset`} : null,
+      sticker:stickerId ? {id:stickerId,label:metadata.sticker_label || "表情包",url:`/v1/stickers/${encodeURIComponent(raw.actor_id)}/${encodeURIComponent(stickerId)}/asset`} : null,
       image_id:imageId,
       image:imageId ? {id:imageId,label:metadata.image_label || "图片",url:`/v1/images/${encodeURIComponent(raw.actor_id)}/${encodeURIComponent(imageId)}/asset`} : null,
       voice_status:metadata.voice_status || null,

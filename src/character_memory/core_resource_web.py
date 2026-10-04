@@ -7,7 +7,7 @@ import time
 from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.config import resolve_sticker_dir
 from character_memory.llm.usage import LlmUsageStore
-from character_memory.stickers import import_sticker_bundle, remove_global_stickers
+from character_memory.stickers import import_sticker_bundle, private_sticker_dir, remove_global_stickers
 from character_memory.sticker_sheet import sticker_sheet_bundle
 
 
@@ -35,13 +35,14 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
 
     @app.get("/v1/stickers")
     def stickers(character_id: str | None = None):
-        # character_id remains accepted for backward compatibility. Imported
-        # stickers are global and identical across Direct and Group.
-        if character_id:
-            access.ensure_character(character_id)
-        catalog = access.global_sticker_catalog()
+        # Group/user picker requests the global library without a character ID.
+        # Direct picker and role runtimes see public + their own private assets.
+        catalog = (
+            access.sticker_catalog_for(character_id)
+            if character_id else access.global_sticker_catalog()
+        )
         return {
-            "scope": "global",
+            "scope": "character" if character_id else "global",
             "source": catalog.source,
             "stickers": catalog.public_items(),
         }
@@ -54,7 +55,12 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
         character_id: str | None = None,
         filename: str = "stickers.zip",
         auto_tag: bool = True,
+        scope: str = "global",
     ):
+        if scope not in {"global", "character"}:
+            raise HTTPException(status_code=400, detail="scope must be global or character")
+        if scope == "character" and not character_id:
+            raise HTTPException(status_code=400, detail="character_id is required for private stickers")
         if character_id:
             access.ensure_character(character_id)
         profiles = access.character_profiles()
@@ -71,19 +77,28 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
             result = import_sticker_bundle(
                 compatibility_persona,
                 archive,
-                tagger=access.ai_sticker_tagger("global") if auto_tag else None,
+                tagger=access.ai_sticker_tagger(character_id if scope == "character" else "global") if auto_tag else None,
                 default_pack_name=pack_name,
-                target_dir=resolve_sticker_dir(access.settings),
+                target_dir=(
+                    private_sticker_dir(resolve_sticker_dir(access.settings), character_id)
+                    if scope == "character" else resolve_sticker_dir(access.settings)
+                ),
+                id_namespace=character_id if scope == "character" else None,
             )
-            catalog = access.global_sticker_catalog()
-            access.refresh_runtime_sticker_catalog(catalog)
+            access.refresh_runtime_sticker_catalog(access.global_sticker_catalog())
+            catalog = (
+                access.sticker_catalog_for(character_id)
+                if scope == "character" else access.global_sticker_catalog()
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except HTTPException:
             raise
         except Exception as exc:
             logger.exception(
-                "api.sticker import_failed scope=global file=%s error=%s",
+                "api.sticker import_failed scope=%s character=%s file=%s error=%s",
+                scope,
+                character_id,
                 filename,
                 exc,
             )
@@ -92,7 +107,9 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
                 detail=f"表情包导入失败：{exc}",
             ) from exc
         logger.info(
-            "api.sticker imported scope=global file=%s count=%d ai_tagged=%d duration_ms=%.1f",
+            "api.sticker imported scope=%s character=%s file=%s count=%d ai_tagged=%d duration_ms=%.1f",
+            scope,
+            character_id,
             filename,
             result["imported"],
             result["ai_tagged"],
@@ -100,7 +117,7 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
         )
         return {
             **result,
-            "scope": "global",
+            "scope": scope,
             "source": catalog.source,
             "stickers": catalog.public_items(),
         }
@@ -131,7 +148,7 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
     @app.get("/v1/stickers/{character_id}/{sticker_id}/asset")
     def legacy_sticker_asset(character_id: str, sticker_id: str):
         access.ensure_character(character_id)
-        catalog = access.global_sticker_catalog()
+        catalog = access.sticker_catalog_for(character_id)
         path = catalog.asset_path(sticker_id)
         if path is None:
             raise HTTPException(status_code=404, detail="sticker not found")

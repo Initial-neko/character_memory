@@ -128,6 +128,7 @@ class CharacterRuntimeAccess:
     services: RuntimeServices
     character_profiles: Callable[[], list[dict[str, str]]]
     global_sticker_catalog: Callable[[], Any]
+    sticker_catalog_for: Callable[[str], Any]
     refresh_runtime_sticker_catalog: Callable[[Any], None]
 
     # Encounter is a candidate layer, not a second character registry. It uses

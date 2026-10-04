@@ -53,14 +53,19 @@ class StickerCatalog:
         source: str,
         asset_roots: dict[str, Path] | None = None,
         removed_ids: set[str] | None = None,
+        private_ids: set[str] | None = None,
+        owner_character_id: str | None = None,
     ):
         self.root = root
         removed = removed_ids or set()
+        self._removed_ids = set(removed)
         self.stickers = [item for item in stickers if item.id not in removed]
         self.source = source
         self._history_by_id = {item.id: item for item in stickers}
         self._by_id = {item.id: item for item in self.stickers}
         self._asset_roots = {key: value.resolve() for key, value in (asset_roots or {}).items()}
+        self._private_ids = private_ids or set()
+        self.owner_character_id = owner_character_id
 
     def get(self, sticker_id: str) -> Sticker | None:
         return self._by_id.get(sticker_id)
@@ -90,21 +95,49 @@ class StickerCatalog:
             rows.append(f"- {item.id}: {item.label}；适合：{meaning}")
         return "\n".join(rows)
 
+    def asset_url(self, sticker_id: str, character_id: str | None = None) -> str:
+        if sticker_id in self._private_ids:
+            # Private assets must never be reachable through the global URL.
+            owner = self.owner_character_id
+            if owner is None:
+                raise ValueError("private sticker catalog has no owner")
+            return f"/v1/stickers/{owner}/{sticker_id}/asset"
+        if character_id:
+            return f"/v1/stickers/{character_id}/{sticker_id}/asset"
+        return f"/v1/stickers/{sticker_id}/asset"
+
     def public_items(self, character_id: str | None = None) -> list[dict]:
         result = []
         for item in self.stickers:
             if self.asset_path(item.id) is None:
                 continue
-            if character_id:
-                url = f"/v1/stickers/{character_id}/{item.id}/asset"
-            else:
-                url = f"/v1/stickers/{item.id}/asset"
-            result.append({**item.model_dump(mode="json"), "url": url})
+            private = item.id in self._private_ids
+            result.append({
+                **item.model_dump(mode="json"),
+                "url": self.asset_url(item.id, character_id),
+                "scope": "character" if private else "global",
+                "owner_character_id": self.owner_character_id if private else None,
+            })
         return result
 
 
 def _default_manifest() -> Path:
     return Path(__file__).with_name("web") / "stickers" / "default" / "manifest.yaml"
+
+
+def private_sticker_dir(global_dir: str | Path, character_id: str) -> Path:
+    """Keep user-controlled identifiers out of filesystem path components."""
+    key = hashlib.sha256(character_id.encode("utf-8")).hexdigest()[:24]
+    return Path(global_dir) / "characters" / key
+
+
+def _namespace_sticker_id(value: str, character_id: str) -> str:
+    """Isolate identical imported pack/image IDs across different characters."""
+    prefix = "private_" + hashlib.sha256(character_id.encode("utf-8")).hexdigest()[:12] + "_"
+    if len(prefix) + len(value) <= 64:
+        return prefix + value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+    return prefix + value[:64 - len(prefix) - len(digest) - 1] + "_" + digest
 
 
 def _read_manifest(path: Path) -> list[Sticker]:
@@ -190,6 +223,39 @@ def remove_global_stickers(
             finally:
                 temp.unlink(missing_ok=True)
         return {"removed": len(newly_removed), "sticker_ids": matches}
+
+
+def character_sticker_catalog(
+    global_catalog: StickerCatalog, global_dir: str | Path, character_id: str,
+) -> StickerCatalog:
+    """Expose the global pool and only this character's namespaced private pool.
+
+    Legacy per-persona manifests remain in the global catalog for backward
+    compatibility. New private packs live only under the hashed owner directory.
+    """
+    manifest = private_sticker_dir(global_dir, character_id) / "manifest.yaml"
+    private = _read_manifest(manifest)
+    # Seed from the global history, not the visible subset: a message that
+    # references a sticker removed from the public pool must still resolve its
+    # asset, while removed_ids keeps it out of selection again.
+    by_id = dict(global_catalog._history_by_id)
+    roots = dict(global_catalog._asset_roots)
+    private_ids: set[str] = set()
+    for item in private:
+        # Never allow a malformed private manifest to shadow a public asset.
+        if item.id in by_id:
+            continue
+        by_id[item.id] = item
+        roots[item.id] = manifest.parent
+        private_ids.add(item.id)
+    return StickerCatalog(
+        Path(global_dir), list(by_id.values()),
+        source=global_catalog.source + "+character",
+        asset_roots=roots,
+        removed_ids=set(global_catalog._removed_ids),
+        private_ids=private_ids,
+        owner_character_id=character_id,
+    )
 
 
 def load_sticker_catalog(persona_path: str | Path) -> StickerCatalog:
@@ -366,6 +432,7 @@ def import_sticker_bundle(
     tagger: StickerTagger | None = None,
     default_pack_name: str = "自定义",
     target_dir: str | Path | None = None,
+    id_namespace: str | None = None,
 ) -> dict:
     """Import a sticker ZIP using validate-first, manifest-last publication."""
     if not archive_bytes:
@@ -451,6 +518,11 @@ def import_sticker_bundle(
 
             sticker_id = _safe_id(row.get("id"), f"sticker_{index:03d}")
             pack_id = _safe_id(row.get("set_id") or row.get("pack_id"), "custom")
+            digest = hashlib.sha256(payload).hexdigest()[:16]
+            if id_namespace is not None:
+                # An updated image gets a new ID: old chat messages retain their asset.
+                sticker_id = _namespace_sticker_id(f"{sticker_id}_{digest[:8]}", id_namespace)
+                pack_id = _namespace_sticker_id(pack_id, id_namespace)
             pack_name = str(row.get("display_name") or row.get("pack_name") or row.get("set_name") or default_pack_name or "自定义").strip()[:80] or "自定义"
             label = str(row.get("tag_zh") or row.get("label") or row.get("tag_en") or sticker_id).strip()[:80] or sticker_id
             aliases = row.get("aliases") if isinstance(row.get("aliases"), list) else []
@@ -461,7 +533,6 @@ def import_sticker_bundle(
                 *aliases,
             ])
             description = str(row.get("description") or "").strip()[:240]
-            digest = hashlib.sha256(payload).hexdigest()[:16]
             output_name = f"{sticker_id}-{digest}{suffix}"
             prepared.append(
                 (

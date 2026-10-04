@@ -632,11 +632,11 @@ Content:
             f"{'原创人物创作' if original else '根据可核实作品资料复刻人物'}，不要改变给定人物身份与姓名。"
             "从性格反差、关注点、日常交流节奏、主动行为、分歧与关心方式中，"
             "提炼具体、有区分度的长期聊天行为，不要复写通用助手建议。"
-            "复刻模式不得虚构原作具体事件；预设关系不是已经在本群发生过的聊天。\\n"
-            f"群聊：{group_name}。背景：{overview[:500]}。\\n"
-            f"姓名：{member.name}；身份：{member.identity}；年龄线索：{member.age}。\\n"
-            f"人物描述：{member.description}。说话风格：{member.speech_style}。\\n"
-            f"性格：{'；'.join(member.personality)}。与其他群员的既有关系：{notes}。\\n"
+            "复刻模式不得虚构原作具体事件；预设关系不是已经在本群发生过的聊天。\n"
+            f"群聊：{group_name}。背景：{overview[:500]}。\n"
+            f"姓名：{member.name}；身份：{member.identity}；年龄线索：{member.age}。\n"
+            f"人物描述：{member.description}。说话风格：{member.speech_style}。\n"
+            f"性格：{'；'.join(member.personality)}。与其他群员的既有关系：{notes}。\n"
             f"表达：{member.expression_style}；追问：{member.question_style}；沉默：{member.silence_style}；"
             f"主动：{member.initiative_style}；分歧：{member.disagreement_style}；关心：{member.care_style}。"
         )
@@ -763,6 +763,8 @@ Content:
         build = self.repository.get(group_id)
         if build is None:
             raise KeyError("ensemble build not found")
+        if build["status"] not in {"READY", "FAILED"}:
+            raise ValueError("已激活的群聊不能重新生成创建草稿")
         drafts = self._refresh_existing_matches(list(build.get("drafts") or []))
         target = next((item for item in drafts if int(item.get("index", -1)) == int(index)), None)
         if target is None:

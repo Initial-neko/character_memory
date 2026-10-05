@@ -1,6 +1,6 @@
 # Current Status & Roadmap
 
-> Last audited against product `main`: 2026-09-29, `38d400ac2ff459c851585d0045735c6b22eed636`.
+> Last audited against product `main`: 2026-10-05, `8f7dd9381267242e95a4b3c1c4c40b1ce7dc557d`.
 >
 > This file owns **implementation status only**. Source/tests remain authoritative; the other topic documents define current behavior contracts.
 
@@ -38,7 +38,7 @@ An open PR never upgrades a capability to SHIPPED.
 | Dev Console | SHIPPED | Common/advanced/diagnostic layers, runtime diagnostics and LLM Usage Explorer. |
 | LLM Usage telemetry | SHIPPED | Requests vs logical calls, provider/model/feature attribution, token coverage, retries/errors and latency. |
 | Media/TTS Runtime | SHIPPED | SenseVoice batch ASR plus Paraformer streaming-session support; Dictation/Call prefer streaming when health advertises it and retain batch fallback. Sherpa/Kokoro/Edge/GSV formal TTS routing remains supported. |
-| Mobile browser access | SHIPPED baseline | Private Tailscale Serve path; no native Android/iOS client is claimed. |
+| Mobile browser access | SHIPPED baseline | Private Tailscale Serve path remains the supported browser deployment path. |\n| Native Android client | IN PROGRESS | The separate `character_memory_android` repository contains the V1 chat/voice/sticker/visual client source and synthetic CI coverage. Device pairing/scoped credentials, canonical Direct identity/cross-device state, real-device media/background acceptance and release hardening are still outstanding. Native iOS is not implemented. |
 
 ## Current validation work
 
@@ -103,7 +103,7 @@ Current stable contract does not promise:
 - WebRTC media transport or streaming TTS; browser audio input currently uses the shipped WebSocket streaming-ASR session when available;
 - persistent raw camera/screen/audio recording;
 - automatic reuse of old visual-capture bytes;
-- native Android/iOS clients;
+- a native iOS client; Android is an active integration/acceptance track rather than a stable Core release contract;
 - distributed runtime infrastructure without measured need.
 
 ## Release state

@@ -106,17 +106,26 @@ def _decode(data: bytes) -> tuple[int, int, bytearray]:
     return width, height, rgba
 
 
-def _grid_lines(width: int, height: int, rgba: bytearray, *, columns: bool) -> list[int]:
+def _grid_lines(
+    width: int, height: int, rgba: bytearray, *, columns: bool, span: tuple[int, int] | None = None
+) -> list[int]:
     """Find nearly empty separator lines around 1/3 and 2/3 of an image.
 
     Thresholding tiny-alpha noise is essential for some generated PNG sheets.
     A detected separator must also have an almost-empty neighboring row/column;
     this deliberately rejects sheets without gutters instead of cutting art.
+
+    ``span`` restricts the pixels counted for a row separator to one horizontal
+    band, so each band may cut at its own y. Generated sheets frequently stagger
+    the vertical placement of the three columns, and a whole-width projection
+    then contains no empty row even though every band has a clean gutter.
     """
+    start, stop = span or (0, width)
     length = width if columns else height
+    spread = height if columns else stop - start
     counts = [0] * length
     for y in range(height):
-        for x in range(width):
+        for x in range(start, stop):
             if rgba[(y * width + x) * 4 + 3] >= 24:
                 counts[x if columns else y] += 1
     lines = [0]
@@ -131,7 +140,7 @@ def _grid_lines(width: int, height: int, rgba: bytearray, *, columns: bool) -> l
                 abs(pos - center),
             ),
         )
-        if counts[selected] > max(2, (height if columns else width) // 100):
+        if counts[selected] > max(2, spread // 100):
             raise ValueError('each cell needs a transparent border; ambiguous sheet layout')
         lines.append(selected)
     lines.append(length)
@@ -147,13 +156,19 @@ def sticker_sheet_bundle(data: bytes, *, pack_name: str = '九宫表情') -> byt
     """
     width, height, rgba = _decode(data)
     xs = _grid_lines(width, height, rgba, columns=True)
-    ys = _grid_lines(width, height, rgba, columns=False)
+    # Rows are cut inside each column band: staggered columns keep one global
+    # column layout, but their vertical gutters rarely line up across the sheet.
+    column_rows = [
+        _grid_lines(width, height, rgba, columns=False, span=(xs[col], xs[col + 1]))
+        for col in range(3)
+    ]
     pack_id = 'sheet_' + hashlib.sha256(data).hexdigest()[:16]
     pack_name = pack_name.strip()[:80] or '九宫表情'
     assets = []
     rows = []
     for index in range(9):
         cell_col, cell_row = index % 3, index // 3
+        ys = column_rows[cell_col]
         cell_x, cell_y = xs[cell_col], ys[cell_row]
         cell_width = xs[cell_col + 1] - cell_x
         cell_height = ys[cell_row + 1] - cell_y

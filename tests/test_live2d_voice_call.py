@@ -72,7 +72,7 @@ def test_call_wiring_keeps_live2d_optional_and_separate_from_tts():
     assert 'CM.live2d?.stop()' in voice
     assert "audio.play().catch(reject)" in voice  # existing playback remains the owner
     assert "voice-live2d-stage" in style
-    assert "Live2DModel.from(url)" in viewer
+    assert "Live2DModel.from(url," in viewer
     assert "createRenderer" in viewer and "destroy()" in viewer
     assert "/static/vendor/live2d/" in viewer
     assert "https://cdn" not in viewer

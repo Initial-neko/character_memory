@@ -204,9 +204,16 @@
 
   function setPhase(phase, text) {
     voice.phase = phase;
+    CM.live2d?.setPhase(phase);
     const label = text || phase;
     if (dom.status) dom.status.textContent = label;
     if (dom.dockStatus) dom.dockStatus.textContent = label;
+  }
+
+  function requestLive2dContext(scope, conversationId, characterId) {
+    const target = voice.target;
+    if (!voice.active || target?.scope !== scope || target.conversationId !== conversationId) return null;
+    return CM.live2d?.requestContext(characterId) ?? null;
   }
 
   function setCapturePhase(phase) {
@@ -658,7 +665,7 @@
       voice.lastMetrics.llm = performance.now() - voice.turnStartedAt - Number(voice.lastMetrics.asr || 0);
       formatMetrics();
     }
-    voice.queue.push({text, characterId, messageId:data.id, audioPromise:null, audioUrl:null});
+    voice.queue.push({text, characterId, messageId:data.id, live2d:data.metadata?.live2d, receivedAt:Date.now(), audioPromise:null, audioUrl:null});
     resumeCapture();
     if (voice.playing) prefetchNext();
     playQueue();
@@ -719,6 +726,7 @@
   async function sendTranscript(text, visualFrames = []) {
     const target = voice.target;
     if (!target) throw new Error("通话目标不存在");
+    const live2d = requestLive2dContext(target.scope, target.conversationId, target.scope === "direct" ? target.characterId : undefined);
     const hasVisual = Array.isArray(visualFrames) && visualFrames.length > 0;
     let response;
     if (target.scope === "group") {
@@ -728,7 +736,7 @@
       response = await fetch(path, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(hasVisual ? {message:text, visual_frames:visualFrames} : {message:text}),
+        body: JSON.stringify({message:text, ...(live2d ? {live2d} : {}), ...(hasVisual ? {visual_frames:visualFrames} : {})}),
       });
     } else {
       const path = hasVisual ? "/v1/visual/direct/messages" : "/v1/chat/messages";
@@ -738,6 +746,7 @@
         body: JSON.stringify({
           message:text,
           character_id:target.characterId,
+          ...(live2d ? {live2d} : {}),
           conversation_id:target.conversationId,
           ...(hasVisual ? {visual_frames:visualFrames} : {}),
         }),
@@ -956,6 +965,7 @@
         // times -- three chances to drop the sentence the person was in the middle of.
         resumeCapture();
         setPhase("speaking", `${speakerName(item.characterId)} 正在说…`);
+        if (Date.now() - item.receivedAt <= 8000) CM.live2d?.onReply(item.characterId, item.live2d, item.messageId);
         const url = await scheduleSynthesis(item);
         prefetchNext();
         try {
@@ -1303,6 +1313,7 @@
     visualFramesForCurrentConversation,
     sendTextWithVisual,
     state:voice,
+    requestLive2dContext,
     stableSpeakerId,
     validateAsrTranscript,
   });

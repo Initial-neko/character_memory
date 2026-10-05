@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, model_validator
 
 from character_memory.persona_builder import PersonaDraft
+from character_memory.live2d_behavior import Live2DPresentationRequest
 
 
 SOFT_ACTIVE_CHARACTERS = 10
@@ -17,6 +18,7 @@ class ChatImageRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    live2d: Live2DPresentationRequest | None = None
     message: str = Field(default="", max_length=12000)
     sticker_id: str | None = Field(default=None, max_length=64)
     image: ChatImageRequest | None = None

@@ -7,6 +7,7 @@ from typing import Any, Callable
 from character_memory.domain.models import Event, EventType
 from character_memory.llm.usage import llm_usage_scope
 from character_memory.runtime.context import compile_context
+from character_memory.live2d_behavior import presentation_scope, presentation_prompt
 
 
 def _ms(started: float) -> float:
@@ -93,6 +94,7 @@ def evaluate_reaction(
     )
     if context_suffix:
         context += context_suffix
+    context += presentation_prompt(event)
     timings["context_ms"] = _ms(stage)
 
     resolved_session = session_id or str(
@@ -127,7 +129,7 @@ def evaluate_reaction(
         purpose = f"{purpose}_VISION"
 
     stage = time.perf_counter()
-    with llm_usage_scope(
+    with presentation_scope(event), llm_usage_scope(
         feature=feature,
         purpose=purpose,
         character_id=event.character_id,

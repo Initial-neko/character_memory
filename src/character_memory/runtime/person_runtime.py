@@ -12,6 +12,7 @@ from character_memory.application.action_materialization import materialize_expr
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.person_context import PersonContextBuilder
 from character_memory.runtime.reaction_engine import evaluate_reaction
+from character_memory.live2d_behavior import behavior_metadata
 from character_memory.runtime.sticker_retrieval import StickerRetriever
 from character_memory.visual_runtime import direct_visual_available, generate_direct_visual_action
 
@@ -618,6 +619,7 @@ class PersonRuntime:
                             "source_event_id": event.id,
                             "source_event_type": event.event_type.value,
                             "conversation_id": conversation_id,
+                            **behavior_metadata(event, action),
                         },
                     )
                     if materialized is None:

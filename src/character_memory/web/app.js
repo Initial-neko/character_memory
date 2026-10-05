@@ -485,7 +485,8 @@
     const sentCharacter = CM.state.characterId;
     const conversationId = CM.conversationIdFor(sentCharacter);
     CM.connectDirectStream();
-    const result = await CM.api("/v1/chat/messages", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, ...payload})});
+    const live2d = CM.features.voice?.requestLive2dContext?.("direct", conversationId, sentCharacter);
+    const result = await CM.api("/v1/chat/messages", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, ...payload, ...(live2d ? {live2d} : {})})});
     if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) CM.mergeDirectMessage(result.message);
     return result;
   };

@@ -93,7 +93,9 @@ def test_voice_call_can_minimize_without_stopping_capture():
 
 def test_voice_group_tts_uses_current_character_speaker_avatar_and_prefetch_slot():
     script = Path("src/character_memory/web/voice.js").read_text(encoding="utf-8")
-    assert 'voice.queue.push({text, characterId, messageId:data.id, audioPromise:null, audioUrl:null})' in script
+    assert 'voice.queue.push({text, characterId, messageId:data.id,' in script
+    assert 'audioPromise:null, audioUrl:null' in script
+    assert 'live2d:data.metadata?.live2d' in script
     assert 'voice.currentSpeakerId = item.characterId' in script
     assert 'const speakerId = stableSpeakerId(item.characterId)' in script
     assert 'speaker_id:speakerId' in script

@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from character_memory.live2d_behavior import Live2DPresentationRequest, bind_presentation
 
 from character_memory.application.async_conversation import direct_channel
 from character_memory.application.chat_service import build_user_event
@@ -34,6 +35,7 @@ class VisualFrameRequest(BaseModel):
 
 
 class DirectVisualMessageRequest(BaseModel):
+    live2d: Live2DPresentationRequest | None = None
     message: str = Field(min_length=1, max_length=12000)
     visual_frames: list[VisualFrameRequest] = Field(min_length=1, max_length=5)
     character_id: str = "rin"
@@ -42,6 +44,7 @@ class DirectVisualMessageRequest(BaseModel):
 
 
 class GroupVisualMessageRequest(BaseModel):
+    live2d: Live2DPresentationRequest | None = None
     message: str = Field(min_length=1, max_length=12000)
     visual_frames: list[VisualFrameRequest] = Field(min_length=1, max_length=5)
     mentions: list[str] = Field(default_factory=list, max_length=4)
@@ -274,6 +277,9 @@ def attach_visual_capture_routes(app):
         )
         event.content = f"{event.content}\n[实时视觉：本轮同时提供 {len(frame_urls)} 张按时间顺序采集的摄像头/屏幕关键帧，请结合图像本体理解。]".strip()
         event.metadata["display_text"] = req.message.strip()
+        presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, [req.character_id])
+        if presentation:
+            event.metadata["live2d"] = presentation
         event.metadata["visual_capture"] = visual_metadata
         event = access.store().append_event(event)
         scheduler().enqueue_direct(
@@ -328,6 +334,9 @@ def attach_visual_capture_routes(app):
         event.content = f"{event.content}\n[实时视觉：本轮同时提供 {len(frame_urls)} 张按时间顺序采集的摄像头/屏幕关键帧，请结合图像本体理解。]".strip()
         event.metadata["visual_capture"] = visual_metadata
         try:
+            presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, group.member_ids)
+            if presentation:
+                event.metadata["live2d"] = presentation
             event = repository.append_user_event(event)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="group not found") from exc

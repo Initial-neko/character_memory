@@ -62,6 +62,10 @@
     <div class="voice-call-card">
       <section class="voice-call-identity">
         <div id="voiceLive2dStage" class="voice-live2d-stage hidden" aria-label="Live2D 角色画面"></div>
+        <div id="voiceLive2dControls" class="voice-live2d-controls hidden">
+          <label>动作 <select id="voiceLive2dMotion" title="播放当前模型自带的动作，不改变通话状态" aria-label="Live2D 动作"></select></label>
+          <label>表情 <select id="voiceLive2dExpression" title="切换当前模型自带的表情；选择普通可恢复模型的普通表情" aria-label="Live2D 表情"></select></label>
+        </div>
         <div id="voiceCallAvatar" class="voice-call-avatar">R</div>
         <div id="voiceLive2dMessage" class="voice-live2d-message hidden" role="status" aria-live="polite"></div>
         <h2 id="voiceCallName">Rin</h2>
@@ -70,7 +74,7 @@
         <div id="voiceCallMetrics" class="voice-call-metrics"></div>
         <div class="voice-visual-controls" aria-label="通话媒体控制">
           <button id="voiceMicButton" class="voice-visual-button" type="button" title="关闭麦克风" aria-pressed="false">🎙 麦克风</button>
-          <button id="voiceLive2dButton" class="voice-visual-button" type="button" title="切换 Live2D 角色画面" aria-pressed="false">Live2D</button>
+          <button id="voiceLive2dButton" class="voice-visual-button" type="button" title="开启或关闭 Live2D 画面、自动动作与自动表情" aria-pressed="false">Live2D</button>
           <button id="voiceCameraButton" class="voice-visual-button" type="button" title="开启前置摄像头视频">📷 开启视频</button>
           <button id="voiceScreenButton" class="voice-visual-button" type="button" title="选择标签页、窗口或整个屏幕">🖥 屏幕</button>
           <button id="voiceVisualStopButton" class="voice-visual-button stop hidden" type="button">关闭共享</button>
@@ -130,6 +134,7 @@
   <script src="/static/intent.js" defer></script>
   <script src="/static/visual_capture.js" defer></script>
   <script src="/static/asr_stream.js" defer></script>
+  <script src="/static/live2d_behavior.js" defer></script>
   <script src="/static/live2d.js" defer></script>
   <script src="/static/voice.js" defer></script>
   <script src="/static/dictation.js" defer></script>

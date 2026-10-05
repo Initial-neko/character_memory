@@ -12,6 +12,7 @@ from character_memory.application.incoming_message import normalize_user_fact
 from character_memory.domain.models import ActionType, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.runtime.reaction_engine import evaluate_reaction
+from character_memory.live2d_behavior import behavior_metadata
 from character_memory.visual_runtime import direct_visual_available
 
 
@@ -356,6 +357,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "source_conversation_event_id": source_event.id,
                     "mentions": list(mentioned_ids or []),
                     "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
+                    "live2d": source_event.metadata.get("live2d"),
                 },
             )
             evaluation = evaluate_reaction(
@@ -469,6 +471,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                             "source_conversation_event_id": source_event.id,
                             "autonomous": bool(autonomous),
                             "source": "GROUP_AUTONOMY" if autonomous else "USER_TURN",
+                            **behavior_metadata(synthetic, action),
                         },
                     )
                     if materialized is None:

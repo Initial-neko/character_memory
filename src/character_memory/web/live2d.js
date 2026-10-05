@@ -120,7 +120,8 @@
         },
       };
     } catch (error) {
-      const canvas = app.canvas;
+      let canvas = null;
+      try { canvas = app.canvas; } catch (_) {}
       try { app.destroy(true, {children: true}); } catch (_) {}
       try { canvas?.remove(); } catch (_) {}
       throw error;

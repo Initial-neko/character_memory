@@ -146,6 +146,36 @@ def test_api_png_import_reloads_global_assets_and_bad_sheet_keeps_library(tmp_pa
         store.close()
 
 
+def staggered_sheet():
+    """3x3 sheet whose three columns place their rows at different heights.
+
+    Generated sheets routinely stagger the vertical placement per column. No
+    full-width row is then transparent near the thirds, while every column band
+    still has a clean gutter.
+    """
+    width, height = 30, 120
+    pixels = bytearray(width * height * 4)
+    for col, spans in ((0, ((20, 43), (48, 76), (81, 110))),
+                       (1, ((20, 36), (41, 70), (75, 104))),
+                       (2, ((20, 33), (53, 82), (87, 112)))):
+        for start, stop in spans:
+            for y in range(start, stop):
+                for x in range(col * 10 + 1, col * 10 + 9):
+                    offset = (y * width + x) * 4
+                    pixels[offset:offset + 4] = bytes((col * 70, 90, 120, 255))
+    return png(width, height, pixels)
+
+
+def test_staggered_column_rows_are_cut_per_band():
+    with zipfile.ZipFile(BytesIO(sticker_sheet_bundle(staggered_sheet()))) as archive:
+        sizes = [struct.unpack('>II', archive.read(row['filename'])[16:24])
+                 for row in json.loads(archive.read('all_tags.json'))]
+    # 8px wide art plus the 2px transparent padding on every side; the three
+    # columns keep their own row heights.
+    assert sizes == [(12, 27), (12, 20), (12, 17), (12, 32), (12, 33),
+                     (12, 33), (12, 33), (12, 33), (12, 29)]
+
+
 def test_generated_non_divisible_sheet_with_tiny_alpha_noise_is_split():
     width, height = 31, 32
     pixels = bytearray(width * height * 4)

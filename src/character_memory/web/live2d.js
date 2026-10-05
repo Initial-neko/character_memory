@@ -114,13 +114,15 @@
         resume() { fit(); app.ticker?.start(); },
         destroy() {
           observer.disconnect();
+          const canvas = app.canvas;
           app.destroy(true, {children: true});
-          if (app.canvas?.parentNode) app.canvas.remove();
+          canvas?.remove();
         },
       };
     } catch (error) {
+      const canvas = app.canvas;
       try { app.destroy(true, {children: true}); } catch (_) {}
-      try { app.canvas?.remove(); } catch (_) {}
+      try { canvas?.remove(); } catch (_) {}
       throw error;
     }
   }

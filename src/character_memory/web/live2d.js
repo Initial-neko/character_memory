@@ -15,7 +15,6 @@
   };
   let enabled = false;
   let characterId = null;
-  let loadedId = null;
   let generation = 0;
   let renderer = null;
   let paused = false;
@@ -129,7 +128,6 @@
   function release() {
     const previous = renderer;
     renderer = null;
-    loadedId = null;
     if (previous) {
       try { previous.destroy(); } catch (error) {
         console.warn("[live2d] renderer disposal failed", error);
@@ -159,7 +157,6 @@
         return;
       }
       renderer = candidate;
-      loadedId = id;
       present(true);
       setMessage("");
       if (paused) renderer.pause();
@@ -179,7 +176,7 @@
 
   function setCharacter(id) {
     const next = id || null;
-    if (next === characterId && (loadedId === next || !enabled)) return;
+    if (next === characterId) return;
     characterId = next;
     if (enabled) mount(next);
   }

@@ -108,7 +108,7 @@
       const observer = new ResizeObserver(fit);
       observer.observe(dom.stage);
       fit();
-      try { model.motion?.("Idle", 0); } catch (_) {}
+      try { model.motion?.("Idle", 0)?.catch?.(() => {}); } catch (_) {}
       return {
         pause() { app.ticker?.stop(); },
         resume() { fit(); app.ticker?.start(); },

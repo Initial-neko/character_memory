@@ -2,8 +2,8 @@
 # Usage: bash scripts/setup-live2d-web.sh /path/to/CubismSdkForWeb/Core/live2dcubismcore.min.js
 # The proprietary Cubism Core must be obtained separately from Live2D.
 set -euo pipefail
-ROOT="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
-CORE="\${1:-}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CORE="${1:-}"
 if [[ -z "$CORE" || ! -f "$CORE" ]]; then
   echo "Provide the path to a licensed Cubism 5 SDK for Web Core JS file." >&2
   exit 2

@@ -60,3 +60,6 @@ personas/cute/
 # tracked; this one is a plan for a change rather than a finding about the current
 # project, and should be promoted to docs/current/ when its work lands.
 docs/research/GSV_TTS_INTEGRATION.md
+
+# Optional user-installed Cubism Core / Pixi browser runtime; never publish proprietary SDK files.
+src/character_memory/web/vendor/live2d/

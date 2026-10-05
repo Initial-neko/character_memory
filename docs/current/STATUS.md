@@ -38,7 +38,8 @@ An open PR never upgrades a capability to SHIPPED.
 | Dev Console | SHIPPED | Common/advanced/diagnostic layers, runtime diagnostics and LLM Usage Explorer. |
 | LLM Usage telemetry | SHIPPED | Requests vs logical calls, provider/model/feature attribution, token coverage, retries/errors and latency. |
 | Media/TTS Runtime | SHIPPED | SenseVoice batch ASR plus Paraformer streaming-session support; Dictation/Call prefer streaming when health advertises it and retain batch fallback. Sherpa/Kokoro/Edge/GSV formal TTS routing remains supported. |
-| Mobile browser access | SHIPPED baseline | Private Tailscale Serve path remains the supported browser deployment path. |\n| Native Android client | IN PROGRESS | The separate `character_memory_android` repository contains the V1 chat/voice/sticker/visual client source and synthetic CI coverage. Device pairing/scoped credentials, canonical Direct identity/cross-device state, real-device media/background acceptance and release hardening are still outstanding. Native iOS is not implemented. |
+| Mobile browser access | SHIPPED baseline | Private Tailscale Serve path remains the supported browser deployment path. |
+| Native Android client | IN PROGRESS | The separate `character_memory_android` repository contains the V1 chat/voice/sticker/visual client source and synthetic CI coverage. Device pairing/scoped credentials, canonical Direct identity/cross-device state, real-device media/background acceptance and release hardening are still outstanding. Native iOS is not implemented. |
 
 ## Current validation work
 

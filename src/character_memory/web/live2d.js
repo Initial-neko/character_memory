@@ -12,11 +12,15 @@
     card: document.querySelector(".voice-call-card"),
     toggle: document.getElementById("voiceLive2dButton"),
     message: document.getElementById("voiceLive2dMessage"),
+    controls: document.getElementById("voiceLive2dControls"),
+    motion: document.getElementById("voiceLive2dMotion"),
+    expression: document.getElementById("voiceLive2dExpression"),
   };
   let enabled = false;
   let characterId = null;
   let generation = 0;
   let renderer = null;
+  let pendingRenderer = null;
   let paused = false;
   const scriptLoads = new Map();
 
@@ -38,6 +42,7 @@
     dom.stage?.classList.toggle("ready", Boolean(ready));
     dom.stage?.classList.toggle("hidden", !enabled);
     if (dom.avatar) dom.avatar.classList.toggle("hidden", Boolean(ready));
+    dom.controls?.classList.toggle("hidden", !ready);
   }
 
   function loadScript(src) {
@@ -72,15 +77,13 @@
     return pixi;
   }
 
-  async function createRenderer(url) {
+  async function createRenderer(url, request) {
     const pixi = await ensureRuntime();
+    if (request !== generation || !enabled) throw new Error("模型加载已取消");
     if (!dom.stage) throw new Error("缺少 Live2D 容器");
     const {Live2DModel, Live2DPlugin} = pixi.live2d;
     if (Live2DPlugin) pixi.extensions.add(Live2DPlugin);
-    const app = new pixi.Application();
-    let model = null;
-    try {
-      await app.init({
+    const options = {
         resizeTo: dom.stage,
         backgroundAlpha: 0,
         preference: "webgl",
@@ -88,11 +91,60 @@
         antialias: true,
         autoDensity: true,
         resolution: Math.min(window.devicePixelRatio || 1, 2),
+    };
+    const modern = typeof pixi.Application.prototype.init === "function";
+    const app = modern ? new pixi.Application() : new pixi.Application(options);
+    let model = null;
+    let observer = null;
+    let canvas = null;
+    let disposed = false;
+    let appReleased = false;
+    const destroy = () => {
+      disposed = true;
+      observer?.disconnect();
+      observer = null;
+      if (!appReleased) {
+        try { app.destroy(true, {children: true}); appReleased = true; } catch (_) {}
+      }
+      canvas?.remove();
+    };
+    const loading = {destroy};
+    pendingRenderer = loading;
+    try {
+      // Local Purism deployment uses Pixi 6; the official deployment uses Pixi 8.
+      if (modern) await app.init(options);
+      canvas = app.canvas || app.view;
+      if (disposed) { destroy(); throw new Error("模型加载已取消"); }
+      dom.stage.appendChild(canvas);
+      model = await Live2DModel.from(url, {
+        autoInteract: false,
+        ...(modern ? {} : {autoUpdate: false}),
       });
-      dom.stage.appendChild(app.canvas);
-      model = await Live2DModel.from(url);
+      if (disposed) {
+        model.destroy?.({children: true});
+        throw new Error("模型加载已取消");
+      }
+      if (!modern) {
+        // Share the app's lifecycle; Pixi 0.4 defaults to an independent shared ticker.
+        app.ticker.add(() => model.update(app.ticker.deltaMS));
+        app.ticker.maxFPS = 30;
+      }
       model.anchor?.set(0.5, 0.5);
       app.stage.addChild(model);
+      const overrides = new Map();
+      const core = model.internalModel.coreModel;
+      const parameters = core._model?.parameters;
+      const parameterRange = id => {
+        const index = parameters?.ids?.indexOf(id) ?? core.getParameterIndex?.(id) ?? -1;
+        if (index < 0 || (parameters && index >= parameters.ids.length)) return null;
+        const min = parameters?.minimumValues?.[index] ?? core.getParameterMinimumValue?.(index);
+        const max = parameters?.maximumValues?.[index] ?? core.getParameterMaximumValue?.(index);
+        return Number.isFinite(min) && Number.isFinite(max) ? {min, max} : null;
+      };
+      // Apply after motion/physics and before Core evaluation, using the existing ticker.
+      model.internalModel.on("beforeModelUpdate", () => {
+        for (const [id, value] of overrides) core.setParameterValueById(id, value);
+      });
 
       const fit = () => {
         const w = dom.stage.clientWidth;
@@ -105,30 +157,40 @@
         model.scale.set(scale);
         model.position.set(w / 2, h / 2);
       };
-      const observer = new ResizeObserver(fit);
+      observer = new ResizeObserver(fit);
       observer.observe(dom.stage);
       fit();
       try { model.motion?.("Idle", 0)?.catch?.(() => {}); } catch (_) {}
       return {
+        controls() {
+          const settings = model.internalModel.settings;
+          return {motions: Object.keys(settings?.motions || {}), expressions: (settings?.expressions || []).map(item => item.Name || item.name)};
+        },
+        startMotion(group, index = 0) { return model.motion(group, index, 3); },
+        setExpression(name) { return model.expression(name); },
+        setParameter(id, value) {
+          const range = parameterRange(id);
+          if (!range || !Number.isFinite(value)) return false;
+          overrides.set(id, Math.max(range.min, Math.min(range.max, value)));
+          return true;
+        },
+        clearParameter(id) { return overrides.delete(id); },
         pause() { app.ticker?.stop(); },
         resume() { fit(); app.ticker?.start(); },
-        destroy() {
-          observer.disconnect();
-          const canvas = app.canvas;
-          app.destroy(true, {children: true});
-          canvas?.remove();
-        },
+        destroy,
       };
     } catch (error) {
-      let canvas = null;
-      try { canvas = app.canvas; } catch (_) {}
-      try { app.destroy(true, {children: true}); } catch (_) {}
-      try { canvas?.remove(); } catch (_) {}
+      destroy();
       throw error;
+    } finally {
+      if (pendingRenderer === loading) pendingRenderer = null;
     }
   }
 
   function release() {
+    const loading = pendingRenderer;
+    pendingRenderer = null;
+    loading?.destroy();
     const previous = renderer;
     renderer = null;
     if (previous) {
@@ -154,12 +216,24 @@
         throw new Error("当前角色尚未配置 Live2D 模型");
       }
       if (request !== generation || !enabled) return;
-      candidate = await createRenderer(data.model_url);
+      candidate = await createRenderer(data.model_url, request);
       if (request !== generation || !enabled || id !== characterId) {
         candidate.destroy();
         return;
       }
       renderer = candidate;
+      const controls = renderer.controls();
+      for (const [select, names] of [[dom.motion, controls.motions], [dom.expression, controls.expressions]]) {
+        if (!select) continue;
+        select.replaceChildren();
+        for (const name of ["", ...names]) {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name || "请选择";
+          select.appendChild(option);
+        }
+        select.disabled = !names.length;
+      }
       present(true);
       setMessage("");
       if (paused) renderer.pause();
@@ -219,7 +293,24 @@
   }
 
   dom.toggle?.addEventListener("click", toggle);
+  const interact = (method, select) => {
+    select?.addEventListener("change", () => {
+      if (!select.value || !renderer) return;
+      Promise.resolve(renderer[method](select.value)).catch(error => {
+        console.warn("[live2d] interaction failed", error);
+        setMessage("模型交互失败：" + (error.message || "未知错误"));
+      });
+    });
+  };
+  interact("startMotion", dom.motion);
+  interact("setExpression", dom.expression);
   updateButton();
   present(false);
-  CM.live2d = {setCharacter, pause, resume, stop, toggle};
+  CM.live2d = {
+    setCharacter, pause, resume, stop, toggle,
+    startMotion: (group, index = 0) => renderer?.startMotion(group, index) ?? Promise.resolve(false),
+    setExpression: name => renderer?.setExpression(name) ?? Promise.resolve(false),
+    setParameter: (id, value) => renderer?.setParameter(id, value) ?? false,
+    clearParameter: id => renderer?.clearParameter(id) ?? false,
+  };
 })();

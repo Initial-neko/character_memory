@@ -62,6 +62,10 @@
     <div class="voice-call-card">
       <section class="voice-call-identity">
         <div id="voiceLive2dStage" class="voice-live2d-stage hidden" aria-label="Live2D 角色画面"></div>
+        <div id="voiceLive2dControls" class="voice-live2d-controls hidden">
+          <label>动作 <select id="voiceLive2dMotion" title="播放当前模型自带的动作，不改变通话状态" aria-label="Live2D 动作"></select></label>
+          <label>表情 <select id="voiceLive2dExpression" title="切换当前模型自带的表情；选择普通可恢复模型的普通表情" aria-label="Live2D 表情"></select></label>
+        </div>
         <div id="voiceCallAvatar" class="voice-call-avatar">R</div>
         <div id="voiceLive2dMessage" class="voice-live2d-message hidden" role="status" aria-live="polite"></div>
         <h2 id="voiceCallName">Rin</h2>

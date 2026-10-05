@@ -97,6 +97,9 @@
 .voice-live2d-message { font-size: 12px; color: #c4cfdf; margin: 0 auto 8px; overflow-wrap: anywhere; }
 .voice-live2d-message.hidden { display: none; }
 .voice-call-avatar.hidden { display: none; }
+.voice-live2d-controls { display: flex; gap: 8px; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
+.voice-live2d-controls.hidden { display: none; }
+.voice-live2d-controls select { max-width: 140px; padding: 4px; color: inherit; background: #252b38; border: 1px solid #596276; border-radius: 6px; }
 @media (max-width: 700px) {
   .voice-call-card.live2d-on { width: 100%; grid-template-columns: 1fr; grid-template-rows: minmax(0, 58vh) minmax(118px, 1fr); }
   .voice-live2d-stage { height: min(32vh, 290px); }

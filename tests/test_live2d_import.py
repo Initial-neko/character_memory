@@ -130,3 +130,22 @@ def test_invalid_pixel_stream_preserves_previous_binding(client):
     response = upload(client, package(extra={'export/textures/texture.png': png}))
     assert response.status_code == 400
     assert client.get('/v1/characters/rin/live2d').json()['model_url'] == before['model_url']
+
+
+def test_decompression_bomb_preserves_previous_binding(client, monkeypatch):
+    before = upload(client, package()).json()
+    monkeypatch.setattr(Image, 'MAX_IMAGE_PIXELS', 1)
+    assert upload(client, package()).status_code == 400
+    assert client.get('/v1/characters/rin/live2d').json()['model_url'] == before['model_url']
+
+
+def test_missing_image_dependency_does_not_break_metadata(client, monkeypatch):
+    import builtins
+    original = builtins.__import__
+    def without_pillow(name, *args, **kwargs):
+        if name == 'PIL':
+            raise ImportError('Pillow unavailable')
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', without_pillow)
+    assert client.get('/v1/characters/rin/live2d').status_code == 200
+    assert upload(client, package()).status_code == 503

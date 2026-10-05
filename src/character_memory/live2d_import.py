@@ -9,8 +9,6 @@ import stat
 import uuid
 import zipfile
 
-from PIL import Image
-
 MAX_EXPANDED_BYTES = 256 * 1024 * 1024
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_FILES = 512
@@ -66,6 +64,7 @@ def publish(folder, value):
 
 def import_model(folder: Path, content: bytes):
     """Validate before touching the binding. Never extract arbitrary ZIP paths."""
+    from PIL import Image
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             entries = archive.infolist()
@@ -151,7 +150,7 @@ def import_model(folder: Path, content: bytes):
                     with Image.open(io.BytesIO(data)) as image:
                         image.load()
                 assets[relative] = data
-    except (zipfile.BadZipFile, RuntimeError, OSError, UnicodeError, TypeError, AttributeError, KeyError, RecursionError) as exc:
+    except (zipfile.BadZipFile, RuntimeError, OSError, UnicodeError, TypeError, AttributeError, KeyError, RecursionError, Image.DecompressionBombError) as exc:
         raise ValueError("模型 ZIP 或资源损坏，请重新导出") from exc
     version = uuid.uuid4().hex
     versions = (folder / "_versions").resolve()

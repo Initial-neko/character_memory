@@ -1,4 +1,4 @@
-"""Read-only Live2D model assets for the existing browser call surface.
+"""Character-scoped Live2D assets and validated local ZIP bindings.
 
 Operators place trusted, exported Cubism model families in media/live2d/<character_id>.
 This is deliberately not a generic upload or remote-URL proxy.
@@ -9,7 +9,6 @@ from pathlib import Path
 import hashlib
 import json
 from urllib.parse import quote
-from starlette.requests import Request
 
 from character_memory.live2d_import import active_manifest, import_model, publish, safe_path
 
@@ -91,6 +90,7 @@ def attach_live2d_routes(app, root: Path, character_profiles):
     from fastapi import HTTPException
     from fastapi.responses import FileResponse
     from starlette.concurrency import run_in_threadpool
+    from starlette.requests import Request
 
     root = Path(root)
     app.state.live2d_root = root
@@ -118,8 +118,7 @@ def attach_live2d_routes(app, root: Path, character_profiles):
             "capabilities": model_capabilities(root, character_id),
         }
 
-    @app.post("/v1/characters/{character_id}/live2d")
-    async def upload_model(character_id: str, request: Request):
+    async def upload_model(character_id: str, request):
         ensure_character(character_id)
         content = bytearray()
         async for chunk in request.stream():
@@ -132,7 +131,13 @@ def attach_live2d_routes(app, root: Path, character_profiles):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except OSError as exc:
             raise HTTPException(status_code=507, detail="模型保存失败，原绑定保持不变，请检查存储空间和权限") from exc
+        except ImportError as exc:
+            raise HTTPException(status_code=503, detail="模型导入需要 API 环境的 Pillow 图像校验依赖") from exc
         return {**live2d_metadata(character_id), **imported}
+
+    # Resolve locally so importing presentation metadata keeps API dependencies optional.
+    upload_model.__annotations__["request"] = Request
+    app.post("/v1/characters/{character_id}/live2d")(upload_model)
 
     @app.delete("/v1/characters/{character_id}/live2d")
     def unbind_model(character_id: str):

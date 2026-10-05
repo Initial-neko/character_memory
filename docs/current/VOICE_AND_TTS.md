@@ -22,6 +22,36 @@ Live2D is a presentation of the **existing** Person/voice call, not a second Voi
 3. Locate the configured media_dir (otherwise the directory next to db_path, in media/). Put a **complete model family** in media/live2d/<character_id>/, with model3.json or <name>.model3.json at the top level. Preserve texture subdirectories and all relative resource references. Obtain <character_id> from GET /v1/characters.
 4. Do not commit the user's models or original PSD. The model discovery endpoint returns available=false when no model is present. The read-only asset route is limited to a character's model directory and common Cubism asset extensions.
 
+### 在页面绑定、更换和解绑
+
+在侧边栏当前角色的「人物操作（···）」中选择 **Live2D 模型**，上传 ZIP 后点击「导入并绑定」或「更换模型」。管理抽屉显示当前入口文件名、动作组和表情数量。只有操作指定的角色受影响，普通头像保持不变；通话中绑定改变会重载当前渲染器，不重新拨号。解除绑定后恢复图片头像。
+
+导入入口为 `POST /v1/characters/{character_id}/live2d`，请求体是 ZIP 原始字节（`Content-Type: application/zip`）；解绑为同一路径的 `DELETE`。上传上限 64 MiB，解压总量 256 MiB、最多 512 个条目、单文件 64 MiB、JSON 1 MiB、纹理 32M 像素。ZIP 允许一个外层文件夹，但必须只有一个 model3.json 入口。服务端检查清单、所有引用、MOC3 头/版本、JSON 与图像解码，拒绝路径越界、符号链接、大小写重名、加密 ZIP 和脚本。只保存清单及其引用的运行资源；PSD/CMO3 原稿留在模型制作目录。结构检查不等于模型美术或 GPU 兼容验收。
+
+每次成功导入创建不可变 `_versions/<id>/` 资源目录，原子更新角色目录的 `_binding.json`；资源 URL 带版本目录，防止通话混用新旧文件。校验或发布失败保留旧绑定。解绑只更新指针，旧模型资源继续保留供正在运行的实例读取；旧版本不会自动清理，批量更换后应在结束相关通话并备份后按本地存储策略清理。没有指针时兼容原有手工目录。管理页面使用当前绑定，角色归档与普通头像不受影响。
+
+### 图片到可用模型的制作流程
+
+模型制作仍是独立工具链，不在应用启动或通话时执行。建议按下列阶段保留可重复证据：
+
+1. **原图**：保存 GPT 生成的 PNG 和 SHA256。检查面部、手脚是否完整，姿势是否适合绑定。上传第三方前确认当前图片和服务是用户指定的。
+2. **在线 See-Through**：对用户给定实例 `https://ljsabc-see-through.ms.show` 先探测 API/MCP 是否可用，再通过 Gradio `/inference` 切分。默认 `resolution=1024`、`seed=42`、`tblr_split=false`，分辨率范围 768–1536、步长 64，seed 0–9999。保存原始 PSD、图层预览、输入哈希、参数和调用结果。MCP 地址为 `/gradio_api/mcp/`，不要追加 `/sse`。服务地址、鉴权与限流可能变化；403 或失败不能当作切分成功，不自动改用其他服务。
+3. **PSD 预检**：RGB/8-bit、透明背景、独立头发/身体，确认 face、eyewhite、irides、eyelash、mouth 等图层语义。最大张口、口腔与眼睛素材不足时标记部位；只对工作副本修正，不改原 PSD。优先用建模工具自身映射能力。
+4. **绑定和导出**：独立 JDK 21+ 环境运行 Auto_Vtb_beta CLI，保留 CMO3 原工程和整套 MOC3/model3/纹理/动作/表情/物理。若上游 GUI 依赖缺失，必须明确记录 headless 核心导出路径及差异，不能伪造预览成功。
+5. **扫描与修正**：检查真实 MOC3 在睁眼/半闭眼/闭眼、闭嘴/半张嘴/张嘴、轻微转头下的脸部放大图。瞳孔消失先定位蒙版、绘制顺序、透明度、Core 状态；闭眼断线检查素材与网格；嘴巴不可见检查素材颜色/口腔及形变。根据问题局部修正，重新导出并记录前后差异。每张新 PSD 都要重新诊断，不能套用旧模型的坐标或颜色。
+6. **资源包与角色绑定**：验证全部相对引用、非空文件、关键参数与 MOC 版本，把单套运行资源打成 ZIP，通过上述管理抽屉绑定角色。确认真实通话里的显示、待机和表情，再测试更换/解绑/失败回退。TTS 口型单独验收。
+
+独立工具环境的普通 API 例子（按实际可用的 gradio_client 版本执行；不加入应用 Runtime 依赖）：
+
+```python
+from gradio_client import Client, handle_file
+client = Client("https://ljsabc-see-through.ms.show")
+psd, layers = client.predict(image=handle_file("character.png"), resolution=1024,
+                            seed=42, tblr_split=False, api_name="/inference")
+```
+
+参见 [Gradio Python Client](https://www.gradio.app/guides/getting-started-with-the-python-client) 和 [Gradio MCP](https://www.gradio.app/guides/building-mcp-server-with-gradio)。本地 PNG→在线 PSD 的完整生成、排队耗时和限流需要实际图片验证；既有 PSD 导出成功不能替代该验证。
+
 ### Install the optional browser runtime
 
 可使用本地开源组合 **Purism Core v1.1.0 + PixiJS 6.5.10 + pixi-live2d-display 0.4.0**。这是独立于官方 Core 的实现，不代表官方 Cubism 兼容认证。已生成的 MOC5 模型仍按上述资源目录导入，不需要重新导出。
@@ -66,7 +96,7 @@ CM.live2d.clearParameter("ParamAngleX");
 
 `setParameter` 返回布尔值：模型未加载、参数不存在或值不是有限数时返回 `false`；有效值会限制在模型自身的最小/最大范围，并在每一帧动作和物理计算之后、Core 求值之前应用。覆盖持续到 `clearParameter` 或模型销毁，所以测试后应清除覆盖，否则待机动作不能控制该参数。动作/表情接口返回 Promise；未加载时结果为 `false`，资源异常可能 reject，由调用方处理。参数列表可查 `.cdi3.json`，实际范围来自模型 Core。常用眼睛参数为 `ParamEyeLOpen`/`ParamEyeROpen`，嘴巴为 `ParamMouthOpenY`，范围因模型而异。
 
-这些参数用于展示测试，尚未连接 TTS。嘴巴开口和眼睛质量取决于 PSD 素材、绑定和模型自身；运行时调参不能补齐缺失的口腔素材。更换模型时替换角色目录内整套资源，删除旧入口避免多个入口歧义，然后切回头像再打开 Live2D。不要修改原始 PSD。
+这些参数用于展示测试，尚未连接 TTS。嘴巴开口和眼睛质量取决于 PSD 素材、绑定和模型自身；运行时调参不能补齐缺失的口腔素材。更换模型优先使用角色管理入口上传新 ZIP，成功后通话自动重载。手动目录配置仅适用于未使用管理绑定指针的旧部署；一旦通过管理入口导入或解绑，必须通过同一入口重新绑定，不能只覆盖旧目录文件。不要修改原始 PSD。
 
 - Start the existing Character Runtime, enter a **direct** voice call, click **Live2D**, and verify actual animation with your local model. No model, runtime, or WebGL 2 → explanatory status and unchanged portrait/voice call.
 - Group calls use the current speaker's model if present. 自动回答提示的 P0 验收范围是单聊；群聊换发言人会重新加载模型，自动提示可能跳过，保留待机与头像回退，不保证群聊逐条自动动作。 Minimizing pauses drawing; restoring resumes it; hangup destroys the display. Webcam and screen-share inputs are unaffected.

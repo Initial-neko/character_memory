@@ -158,6 +158,7 @@
     expand: () => applyDesktopState(false),
     toggle: () => applyDesktopState(sidebar.dataset.mode !== "compact"),
     rememberCharacter,
+    closeMobile: () => setMobileOpen(false),
     sync,
   });
 })();

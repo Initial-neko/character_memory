@@ -312,3 +312,5 @@ message_content.js      Direct/Group shared message body renderer
 
 
 Live2D 通话展示：`live2d_web.py` 负责本地资源发现/安全路径与能力清单，`live2d_behavior.py` 负责本轮 Person 展示上下文和可选回答提示。`web/live2d.js` 持有渲染器，`web/live2d_behavior.js` 负责自动动作/表情、冷却与过期提示；`web/voice.js` 保持通话和音频调度 ownership。
+
+模型管理由 `live2d_import.py` 负责 ZIP 结构/资源校验与原子绑定；`web/live2d_models.js` 在角色菜单提供导入、更换和解绑，成功变更通过 `live2dModelChanged` 通知当前展示。旧版本资源保留策略及制作流程由 [Voice & TTS](VOICE_AND_TTS.md) 维护。

@@ -321,6 +321,9 @@
   }
 
   dom.toggle?.addEventListener("click", toggle);
+  CM.on?.("live2dModelChanged", ({characterId: id}) => {
+    if (id === characterId && enabled) mount(id);
+  });
   const interact = (method, select) => {
     select?.addEventListener("change", () => {
       if (!select.value || !renderer) return;

@@ -19,7 +19,7 @@ async function check(version) {
     destroy(){destroyed++;}
   }
   if (version===8) App.prototype.init=async function(){};
-  const CM={};
+  const events={}; const CM={on(name,fn){events[name]=fn;}};
   const sandbox={window:{CM,Live2DCubismCore:{},WebGL2RenderingContext:function(){},devicePixelRatio:1,PIXI:{VERSION:version+'.0.0',Application:App,live2d:{Live2DModel:{async from(url,options){
     assert.equal(options?.autoInteract,false,'pointer following must be disabled');
     if(version===6) assert.equal(options.autoUpdate,false,'use the call ticker');
@@ -68,17 +68,23 @@ async function check(version) {
   CM.live2d.clearParameter('ParamMouthOpenY'); models[0].core.last=null;
   models[0].handlers.beforeModelUpdate(); assert.equal(models[0].core.last,null);
   CM.live2d.pause(); CM.live2d.resume(); assert.equal(pauses,1); assert.equal(resumes,1);
-  CM.live2d.stop(); assert.equal(destroyed,1); assert.equal(observers,0);
+  const oldIdentity=CM.live2d.requestContext();
+  events.live2dModelChanged({characterId:"school"}); await flush();
+  assert.equal(models.length,2,"replacement reloads one renderer within the existing call");
+  assert.notEqual(CM.live2d.requestContext().token,oldIdentity.token);
+  assert.equal(CM.live2d.onReply("school",{...oldIdentity,motion:"Nod"},"old-after-replace"),false);
+  assert.equal(destroyed,1);
+  CM.live2d.stop(); assert.equal(destroyed,2); assert.equal(observers,0);
   assert.equal(CM.live2d.setParameter('ParamMouthOpenY',1),false);
   assert.equal(CM.live2d.requestContext(),null);
   assert.equal(CM.live2d.onReply("school",{...identity,motion:"Nod"},"late-event"),false);
   CM.live2d.setCharacter('school'); let release; pending=new Promise(r=>release=r);
   CM.live2d.toggle(); await flush(); CM.live2d.stop();
-  assert.equal(destroyed,2,'hangup must release the app even while model download is pending');
+  assert.equal(destroyed,3,'hangup must release the app even while model download is pending');
   release(); await flush();
-  assert.equal(destroyed,2,'late-loaded renderer must be destroyed'); assert.equal(observers,0);
+  assert.equal(destroyed,3,'late-loaded renderer must be destroyed'); assert.equal(observers,0);
   pending=null; fail=true; CM.live2d.setCharacter('missing'); CM.live2d.toggle(); await flush();
-  assert.equal(models.length,2,'missing model retains portrait without renderer');
+  assert.equal(models.length,3,'missing model retains portrait without renderer');
   return {pixi:version,pass:true,destroyed,observers};
 }
 function checkMasks() {

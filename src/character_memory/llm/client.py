@@ -1,4 +1,5 @@
 from __future__ import annotations
+from character_memory.live2d_behavior import presentation_schema
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -509,7 +510,7 @@ class OpenAICompatibleModel(PersonModel):
 
     @staticmethod
     def _system_prompt(schema: type[BaseModel]) -> str:
-        if schema is PersonReaction:
+        if issubclass(schema, PersonReaction):
             return (
                 "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State、Available Stickers、Available Images 和 Behavioral Contract。"
                 "返回一个 JSON 对象。actions 是必填的顶层字段；actions 必须可以是空数组，即使决定沉默也必须显式输出 actions=[]。actions 中每个对象使用 type 字段表示动作类型，不要使用 action 字段；文本动作使用 message 字段，不要使用 text 字段。"
@@ -531,7 +532,7 @@ class OpenAICompatibleModel(PersonModel):
     @staticmethod
     def _repair_prompt(schema: type[BaseModel], error: Exception) -> str:
         """Build a schema-specific repair request after structured validation fails."""
-        if schema is PersonReaction:
+        if issubclass(schema, PersonReaction):
             return (
                 "上一份 JSON 不符合 PersonReaction。只修正结构，不扩写内容："
                 "顶层必须显式包含 actions，不能省略；没有想回复时写 actions=[]；不要返回 {type:'json_object'} 一类包装对象。"
@@ -684,26 +685,26 @@ class OpenAICompatibleModel(PersonModel):
         ).value
 
     def react(self, context: str) -> PersonReaction:
-        return self._call(context, PersonReaction)
+        return self._call(context, presentation_schema())
 
     def react_for_session(self, context: str, session_id: str) -> PersonReaction:
-        return self._call(context, PersonReaction, conversation_id=session_id)
+        return self._call(context, presentation_schema(), conversation_id=session_id)
 
     def react_with_images_for_session(self, context: str, image_data_urls: list[str], session_id: str) -> PersonReaction:
         return self._call(
             context,
-            PersonReaction,
+            presentation_schema(),
             conversation_id=session_id,
             image_data_urls=image_data_urls,
         )
 
     def react_call_for_session(self, context: str, session_id: str) -> ModelCallResult:
-        return self._call_result(context, PersonReaction, conversation_id=session_id)
+        return self._call_result(context, presentation_schema(), conversation_id=session_id)
 
     def react_call_with_images_for_session(self, context: str, image_data_urls: list[str], session_id: str) -> ModelCallResult:
         return self._call_result(
             context,
-            PersonReaction,
+            presentation_schema(),
             conversation_id=session_id,
             image_data_urls=image_data_urls,
         )

@@ -483,8 +483,9 @@
   async function commitSend(groupId, payload) {
     if (!groupId) return;
     connectStream(groupId);
+    const live2d = CM.features.voice?.requestLive2dContext?.("group", groupId);
     try {
-      const result = await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/messages`, {method:"POST", body:JSON.stringify(payload)});
+      const result = await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/messages`, {method:"POST", body:JSON.stringify({...payload, ...(live2d ? {live2d} : {})})});
       if (CM.isGroupConversation() && groupId === activeId()) {
         mergeMessage(result.message);
         renderHistory(historyState.messages);

@@ -21,6 +21,10 @@
   let generation = 0;
   let renderer = null;
   let pendingRenderer = null;
+  let behavior = null;
+  let presentation = null;
+  let phase = "idle";
+  let tokenSequence = 0;
   let paused = false;
   const scriptLoads = new Map();
 
@@ -161,13 +165,22 @@
       observer.observe(dom.stage);
       fit();
       try { model.motion?.("Idle", 0)?.catch?.(() => {}); } catch (_) {}
+      const cancelPendingExpression = () => {
+        const manager = model.internalModel.motionManager?.expressionManager;
+        // Pixi display 0.4 does not cancel a pending load when the current
+        // expression is selected again. Explicitly invalidate that reservation.
+        if (manager && "reserveExpressionIndex" in manager) manager.reserveExpressionIndex = -1;
+        return manager;
+      };
       return {
         controls() {
           const settings = model.internalModel.settings;
           return {motions: Object.keys(settings?.motions || {}), expressions: (settings?.expressions || []).map(item => item.Name || item.name)};
         },
         startMotion(group, index = 0) { return model.motion(group, index, 3); },
-        setExpression(name) { return model.expression(name); },
+        cancelPendingExpression,
+        setExpression(name) { cancelPendingExpression(); return model.expression(name); },
+        resetExpression() { cancelPendingExpression()?.resetExpression?.(); },
         setParameter(id, value) {
           const range = parameterRange(id);
           if (!range || !Number.isFinite(value)) return false;
@@ -188,6 +201,10 @@
   }
 
   function release() {
+    behavior?.destroy();
+    behavior = null;
+    presentation = null;
+    if (dom.stage) delete dom.stage.dataset.live2dBehavior;
     const loading = pendingRenderer;
     pendingRenderer = null;
     loading?.destroy();
@@ -222,6 +239,15 @@
         return;
       }
       renderer = candidate;
+      if (data.capabilities && CM.createLive2DBehavior) {
+        const token = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${++tokenSequence}`;
+        presentation = {token, character_id: id, revision: data.capabilities.revision};
+        behavior = CM.createLive2DBehavior(renderer, data.capabilities, {token, characterId: id}, state => {
+          if (dom.stage) dom.stage.dataset.live2dBehavior = JSON.stringify({characterId: id, ...state});
+        });
+        behavior.phase(phase);
+        if (paused) behavior.pause();
+      }
       const controls = renderer.controls();
       for (const [select, names] of [[dom.motion, controls.motions], [dom.expression, controls.expressions]]) {
         if (!select) continue;
@@ -273,12 +299,14 @@
 
   function pause() {
     paused = true;
+    behavior?.pause();
     renderer?.pause();
   }
 
   function resume() {
     paused = false;
     renderer?.resume();
+    behavior?.resume();
   }
 
   function stop() {
@@ -296,6 +324,7 @@
   const interact = (method, select) => {
     select?.addEventListener("change", () => {
       if (!select.value || !renderer) return;
+      behavior?.manual();
       Promise.resolve(renderer[method](select.value)).catch(error => {
         console.warn("[live2d] interaction failed", error);
         setMessage("模型交互失败：" + (error.message || "未知错误"));
@@ -308,8 +337,11 @@
   present(false);
   CM.live2d = {
     setCharacter, pause, resume, stop, toggle,
-    startMotion: (group, index = 0) => renderer?.startMotion(group, index) ?? Promise.resolve(false),
-    setExpression: name => renderer?.setExpression(name) ?? Promise.resolve(false),
+    requestContext: id => enabled && renderer && presentation && (!id || id === characterId) ? {...presentation} : null,
+    setPhase(next) { phase = next; behavior?.phase(next); },
+    onReply(id, hint, eventId) { return id === characterId ? behavior?.reply(hint, eventId) ?? false : false; },
+    startMotion(group, index = 0) { behavior?.manual(); return renderer?.startMotion(group, index) ?? Promise.resolve(false); },
+    setExpression(name) { behavior?.manual(); return renderer?.setExpression(name) ?? Promise.resolve(false); },
     setParameter: (id, value) => renderer?.setParameter(id, value) ?? false,
     clearParameter: id => renderer?.clearParameter(id) ?? false,
   };

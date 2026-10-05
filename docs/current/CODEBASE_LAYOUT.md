@@ -309,3 +309,6 @@ message_content.js      Direct/Group shared message body renderer
 | Settings | `envfile.py` → `settings_store.py` → `settings_server.py` → `web/settings.*` |
 | Dev Console | `dev_server.py` → `web/dev*.{html,js,css}` |
 | TTS Lab | `tts_lab.py` → `web/tts_lab.*` |
+
+
+Live2D 通话展示：`live2d_web.py` 负责本地资源发现/安全路径与能力清单，`live2d_behavior.py` 负责本轮 Person 展示上下文和可选回答提示。`web/live2d.js` 持有渲染器，`web/live2d_behavior.js` 负责自动动作/表情、冷却与过期提示；`web/voice.js` 保持通话和音频调度 ownership。

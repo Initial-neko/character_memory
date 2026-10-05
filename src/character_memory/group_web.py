@@ -5,6 +5,7 @@ import logging
 import threading
 
 from pydantic import BaseModel, Field, model_validator
+from character_memory.live2d_behavior import Live2DPresentationRequest
 
 from character_memory.application.group_conversation_service import GroupConversationService
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
@@ -45,6 +46,7 @@ class GroupImageRequest(BaseModel):
 
 
 class GroupChatRequest(BaseModel):
+    live2d: Live2DPresentationRequest | None = None
     message: str = Field(default="", max_length=12000)
     sticker_id: str | None = Field(default=None, max_length=64)
     image: GroupImageRequest | None = None

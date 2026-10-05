@@ -5,7 +5,7 @@ const source = fs.readFileSync(require('node:path').join(__dirname, '../src/char
 async function check(version) {
   const elements = new Map();
   const el = id => elements.get(id) || elements.set(id, {
-    classList: {toggle(){}, remove(){}}, setAttribute(){}, addEventListener(){},
+    dataset:{}, classList: {toggle(){}, remove(){}}, setAttribute(){}, addEventListener(){},
     clientWidth:400, clientHeight:350, children:[], replaceChildren(){this.children=[];}, appendChild(x){this.children.push(x);},
   }).get(id);
   let destroyed=0, pauses=0, resumes=0, observers=0, pending=null, fail=false;
@@ -25,17 +25,42 @@ async function check(version) {
     if(version===6) assert.equal(options.autoUpdate,false,'use the call ticker');
     if(pending) await pending;
     const handlers={};
+    const manager={reserveExpressionIndex:-1,resetExpression(){this.reserveExpressionIndex=-1;}};
+    let resolveExpression;
     const core={_model:{parameters:{ids:['ParamMouthOpenY'],minimumValues:[0],maximumValues:[1]}},setParameterValueById(id,value){this.last=[id,value];}};
-    const m={width:100,height:200,anchor:{set(){}},position:{set(){}},scale:{x:1,y:1,set(x){this.x=x;this.y=x;}},internalModel:{coreModel:core,on(name,fn){handlers[name]=fn;}},motion:async (...args)=>{m.motionArgs=args;return true;},expression:async name=>{m.expressionName=name;return true;},handlers,core};
+    const m={width:100,height:200,anchor:{set(){}},position:{set(){}},scale:{x:1,y:1,set(x){this.x=x;this.y=x;}},internalModel:{coreModel:core,motionManager:{expressionManager:manager},on(name,fn){handlers[name]=fn;}},motion:async (...args)=>{m.motionArgs=args;return true;},expression:async name=>{
+      if(name===m.expressionName) return false;
+      manager.reserveExpressionIndex=name;
+      if(name==="Slow") await new Promise(resolve=>{resolveExpression=resolve;});
+      if(manager.reserveExpressionIndex!==name) return false;
+      manager.reserveExpressionIndex=-1; m.expressionName=name; return true;
+    },finishExpression:()=>resolveExpression(),handlers,core};
     models.push(m); return m;
-  }}}}},document:{getElementById:el,querySelector:el,createElement:()=>({})},ResizeObserver:class{constructor(){observers++;}observe(){}disconnect(){observers--;}},fetch:async()=>({ok:true,json:async()=>({available:!fail,model_url:'/model.model3.json'})}),console:{warn(){}}};
+  }}}}},document:{getElementById:el,querySelector:el,createElement:()=>({})},ResizeObserver:class{constructor(){observers++;}observe(){}disconnect(){observers--;}},setTimeout,clearTimeout,fetch:async()=>({ok:true,json:async()=>({available:!fail,model_url:'/model.model3.json',capabilities:{revision:"a".repeat(64),motions:["Idle","Nod"],expressions:["惊讶"]}})}),console:{warn(){}}};
+  vm.runInNewContext(fs.readFileSync(require("node:path").join(__dirname,"../src/character_memory/web/live2d_behavior.js"),"utf8"),sandbox);
   vm.runInNewContext(source,sandbox);
   const flush=async()=>{for(let i=0;i<12;i++) await new Promise(resolve=>setImmediate(resolve));};
   CM.live2d.setCharacter('school'); CM.live2d.toggle(); await flush();
   assert.equal(models.length,1);
+  const identity=CM.live2d.requestContext("school");
+  assert.ok(identity,"one toggle enables reply presentation");
+  assert.equal(CM.live2d.requestContext("other"),null);
+  assert.equal(JSON.parse(el("voiceLive2dStage").dataset.live2dBehavior).automatic,true);
+  assert.equal(CM.live2d.onReply("school",{...identity,motion:"Nod"},"event-1"),true);
+  await flush(); assert.equal(models[0].motionArgs[0],"Nod");
   assert.equal(await CM.live2d.startMotion('Nod',0),true);
   assert.equal(await CM.live2d.setExpression('惊讶'),true);
   assert.equal(models[0].expressionName,'惊讶');
+  const slow=CM.live2d.setExpression("Slow");
+  await CM.live2d.setExpression("惊讶"); // already active: SDK would not cancel old load
+  models[0].finishExpression();
+  assert.equal(await slow,false);
+  assert.equal(models[0].expressionName,"惊讶","late expression cannot override current manual/reset expression");
+  const slowBeforeMotion=CM.live2d.setExpression("Slow");
+  await CM.live2d.startMotion("Nod");
+  models[0].finishExpression();
+  assert.equal(await slowBeforeMotion,false,"manual motion cancels pending automatic expression");
+  assert.equal(models[0].expressionName,"惊讶");
   assert.equal(CM.live2d.setParameter('ParamMouthOpenY',9),true);
   models[0].handlers.beforeModelUpdate(); assert.deepEqual(models[0].core.last,['ParamMouthOpenY',1]);
   assert.equal(CM.live2d.setParameter('missing',1),false);
@@ -45,6 +70,8 @@ async function check(version) {
   CM.live2d.pause(); CM.live2d.resume(); assert.equal(pauses,1); assert.equal(resumes,1);
   CM.live2d.stop(); assert.equal(destroyed,1); assert.equal(observers,0);
   assert.equal(CM.live2d.setParameter('ParamMouthOpenY',1),false);
+  assert.equal(CM.live2d.requestContext(),null);
+  assert.equal(CM.live2d.onReply("school",{...identity,motion:"Nod"},"late-event"),false);
   CM.live2d.setCharacter('school'); let release; pending=new Promise(r=>release=r);
   CM.live2d.toggle(); await flush(); CM.live2d.stop();
   assert.equal(destroyed,2,'hangup must release the app even while model download is pending');

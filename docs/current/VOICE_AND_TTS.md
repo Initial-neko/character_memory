@@ -47,7 +47,9 @@ This explicitly installs **PixiJS 8.13.1** and **untitled-pixi-live2d-engine 1.4
 
 ### 控制模型的交互
 
-进入角色的通话页，点击 **Live2D**。模型加载后自动播放 `Idle`，保留模型的自然摆动、呼吸和眨眼；默认关闭鼠标/触摸跟随，移动指针或点击画面不会驱动模型转头。画面下方的 **动作** 和 **表情** 只列出当前模型的资源，选择后立即播放。动作选择播放对应组的第一个动作，表情选择使用导出的名称（如 `普通`、`微笑`、`惊讶`）。空列表表示模型没有这些资源。收起通话暂停绘制，恢复后继续；切回头像、挂断或切换角色时释放旧模型。操作不重新发起通话，也不改变麦克风、摄像头或共享屏幕状态。
+进入角色的通话页，点击 **Live2D**。模型加载后自动播放 `Idle`，保留模型的自然摆动、呼吸和眨眼；默认关闭鼠标/触摸跟随，移动指针或点击画面不会驱动模型转头。同一个开关还会启用自动动作和自动表情，无需额外开关。正式回答可以按人物情绪附带真实资源提示；不强制每句话都做动作。关闭 Live2D、加载失败或挂断时同时停止自动提示、定时器与绘制。画面下方的 **动作** 和 **表情** 只列出当前模型的资源，选择后立即播放。动作选择播放对应组的第一个动作，表情选择使用导出的名称（如 `普通`、`微笑`、`惊讶`）。空列表表示模型没有这些资源。收起通话暂停绘制，恢复后继续；切回头像、挂断或切换角色时释放旧模型。操作不重新发起通话，也不改变麦克风、摄像头或共享屏幕状态。
+
+自动动作最短间隔为 2.5 秒；自动表情保持 5 秒后恢复 `普通`/Neutral，缺少中性资源时使用运行时的表情重置。手动选择优先 5 秒，手动表情保持到下一次选择或自动表情。收起时只保留最近一条提示，恢复时丢弃超过 8 秒的旧提示；播放队列中的提示同样限时。等待/收音状态只有模型带 Thinking/Think 或 Listening/Listen 动作时才播放，其他模型继续 Idle。
 
 需要改变默认摆动时，先保留资源副本，再修改 `model3.json` 中 `Motions.Idle` 引用的 `.motion3.json`：曲线的参数 ID 决定影响哪个部位，关键帧时间决定速度，参数值决定幅度，`Meta.Loop` 决定是否循环。物理摆动还受 `.physics3.json` 控制，改动后需要重新加载和视觉检查，不能只凭 JSON 有效就判断动作正确。固定某个角度可使用下述参数覆盖；恢复默认动作时清除覆盖。Purism 路线将更新绑定到同一个通话绘制时钟，限制为最多 30 FPS；加载中挂断也会立即释放已创建的绘制应用，迟到模型不会恢复画面。
 
@@ -67,7 +69,7 @@ CM.live2d.clearParameter("ParamAngleX");
 这些参数用于展示测试，尚未连接 TTS。嘴巴开口和眼睛质量取决于 PSD 素材、绑定和模型自身；运行时调参不能补齐缺失的口腔素材。更换模型时替换角色目录内整套资源，删除旧入口避免多个入口歧义，然后切回头像再打开 Live2D。不要修改原始 PSD。
 
 - Start the existing Character Runtime, enter a **direct** voice call, click **Live2D**, and verify actual animation with your local model. No model, runtime, or WebGL 2 → explanatory status and unchanged portrait/voice call.
-- Group calls use the current speaker's model if present. Minimizing pauses drawing; restoring resumes it; hangup destroys the display. Webcam and screen-share inputs are unaffected.
+- Group calls use the current speaker's model if present. 自动回答提示的 P0 验收范围是单聊；群聊换发言人会重新加载模型，自动提示可能跳过，保留待机与头像回退，不保证群聊逐条自动动作。 Minimizing pauses drawing; restoring resumes it; hangup destroys the display. Webcam and screen-share inputs are unaffected.
 
 **Validation boundary:** source and API tests can run without a GPU or proprietary Core. Real .moc3 animation must be tested in Chrome and Android WebView with an SDK/runtime installation and a locally exported model. A passing source contract test is not a claim that rendering has been verified on device.
 

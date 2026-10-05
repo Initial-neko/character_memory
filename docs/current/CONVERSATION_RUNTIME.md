@@ -32,6 +32,12 @@ Character reaction 由 `ReactionScheduler` 异步处理，通过 SSE 推给前�
 
 Visual Capture 是例外中的“transient payload”：Camera/Screen frame bytes 不作为普通聊天附件持久化，只把必要 metadata 写进 Event，并把 image data URLs 传给本轮模型 Vision context。
 
+### Optional Live2D presentation metadata
+
+上述四种正式异步请求可携带 `live2d: {token, character_id, revision}`，仅当通话正在该会话中、模型成功加载且 Live2D 开启时由前端附带。它是本轮展示上下文，不是人物配置或第二次模型调用。服务器重新从本地模型清单读取可用动作/表情，并校验角色属于该单聊/群聊以及清单 SHA256 revision；缺失、旧 revision 或错角色按普通回答处理。
+
+已验证的资源能力随源 Event metadata 保存；当前发言人物可以在已有 action 的可选 `live2d` 字段中返回 `motion`/`expression`。服务端仅把存在的资源名连同 token、character_id、revision 写入输出 Event 的 `metadata.live2d`，SSE 使用现有消息事件传输。非法或空提示被忽略，不阻止文本回复；前端再次校验模型身份和 token，避免关掉开关或挂断后迟到事件重新驱动画面。群聊只给与当前模型角色相符的发言人提供提示能力，其余发言人沿用普通回答。
+
 ## 2. Burst window
 
 Scheduler 使用短窗口把连续快速输入看成一组先后事实，而不是机械“一句话一定对应一次回复”。

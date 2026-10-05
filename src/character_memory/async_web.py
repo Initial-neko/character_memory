@@ -1,4 +1,5 @@
 from __future__ import annotations
+from character_memory.live2d_behavior import bind_presentation
 
 import asyncio
 from datetime import datetime
@@ -227,6 +228,11 @@ def attach_async_routes(app):
             sticker=selected_sticker,
             image=selected_image,
         )
+        # Presentation is auxiliary to the immutable user fact, and resource names
+        # are derived on the server instead of trusting browser-supplied lists.
+        presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, [req.character_id])
+        if presentation:
+            event.metadata["live2d"] = presentation
         event = store.append_event(event)
         scheduler.enqueue_direct(
             req.character_id,
@@ -285,6 +291,9 @@ def attach_async_routes(app):
             mentions=mentions,
         )
         try:
+            presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, group.member_ids)
+            if presentation:
+                event.metadata["live2d"] = presentation
             event = repository.append_user_event(event)
         except KeyError as exc:
             if selected_image is not None:

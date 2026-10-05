@@ -193,6 +193,7 @@
       if (dom.context) dom.context.textContent = "单聊通话";
       if (dom.dockTitle) dom.dockTitle.textContent = name;
     }
+    CM.live2d?.setCharacter(target.scope === "group" ? speakingId : target.characterId);
   }
 
   function updateCallButton() {
@@ -465,6 +466,7 @@
     voice.minimized = true;
     dom.overlay?.classList.add("hidden");
     dom.dock?.classList.remove("hidden");
+    CM.live2d?.pause();
   }
 
   function expandCall() {
@@ -473,6 +475,7 @@
     dom.dock?.classList.add("hidden");
     dom.overlay?.classList.remove("hidden");
     renderCallIdentity();
+    CM.live2d?.resume();
   }
 
   function rms(samples) {
@@ -1196,6 +1199,7 @@
       voice.ttsTail = Promise.resolve();
       voice.currentAudio = null;
       voice.currentSpeakerId = null;
+      CM.live2d?.stop();
       voice.lastMetrics = {};
       voice.preRoll = [];
       voice.chunks = [];
@@ -1231,6 +1235,7 @@
 
   async function stopCall() {
     voice.active = false;
+    CM.live2d?.stop();
     voice.recoveryPending = false;
     voice.recoveryGeneration += 1;
     stopPeriodicVisualObservation();

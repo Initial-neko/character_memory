@@ -976,6 +976,7 @@ function makeElement() {
     scrollTop: 0,
     scrollHeight: 0,
     addEventListener: silent,
+    setAttribute: silent,
     appendChild(child) { this.children.push(child); return child; },
     append(...items) { this.children.push(...items); },
     remove: silent,

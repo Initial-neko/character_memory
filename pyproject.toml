@@ -81,6 +81,7 @@ character_memory = [
   "web/*.html",
   "web/*.js",
   "web/*.css",
+  "web/*.png",
   "web/stickers/default/*.yaml",
   "web/stickers/default/*.svg",
 ]

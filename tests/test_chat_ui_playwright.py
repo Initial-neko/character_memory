@@ -357,6 +357,11 @@ def test_voice_call_mobile_layout_is_viewport_bounded_and_scrollable(chat):
     page = chat
     page.set_viewport_size({"width": 390, "height": 844})
 
+    page.evaluate("document.querySelector('#voiceCallOverlay').classList.remove('hidden')")
+    expect(page.locator('#voiceCallLog')).not_to_be_visible()
+    page.locator('#voiceHistoryButton').click()
+    expect(page.locator('#voiceCallLog')).to_be_visible()
+
     report = page.evaluate(
         """() => {
           const overlay = document.querySelector('#voiceCallOverlay');
@@ -407,3 +412,5 @@ def test_voice_call_mobile_layout_is_viewport_bounded_and_scrollable(chat):
     assert report["transcript"]["overflowY"] in {"auto", "scroll"}
     assert report["transcript"]["scrollHeight"] > report["transcript"]["clientHeight"]
     assert report["actions"]["bottom"] <= report["viewport"]["height"] + 1
+    page.locator('#voiceHistoryButton').click()
+    expect(page.locator('#voiceCallLog')).not_to_be_visible()

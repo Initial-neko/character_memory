@@ -414,3 +414,51 @@ def test_voice_call_mobile_layout_is_viewport_bounded_and_scrollable(chat):
     assert report["actions"]["bottom"] <= report["viewport"]["height"] + 1
     page.locator('#voiceHistoryButton').click()
     expect(page.locator('#voiceCallLog')).not_to_be_visible()
+
+
+@pytest.mark.parametrize('template', ['index.html', 'settings.html', 'dev.html', 'tts_lab.html'])
+def test_shared_pages_hide_tracks_without_disabling_scroll(page, chat_server, template):
+    import re
+
+    html = (ROOT / 'src/character_memory/web' / template).read_text(encoding='utf-8')
+    html = re.sub(r'<script\b[^>]*>.*?</script>', '', html, flags=re.S)
+    page.goto(chat_server)
+    page.set_content(html.replace('<head>', f'<head><base href="{chat_server}/">'))
+    page.wait_for_load_state('networkidle')
+    report = page.evaluate("""() => {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;inset:0 auto auto 0;width:100px;height:100px;overflow:auto';
+      const content = document.createElement('div');
+      content.style.cssText = 'width:400px;height:400px';
+      probe.append(content); document.body.append(probe);
+      probe.scrollTop = 80; probe.scrollLeft = 80;
+      return {track:getComputedStyle(probe).scrollbarWidth,
+              webkit:getComputedStyle(probe,'::-webkit-scrollbar').display,
+              top:probe.scrollTop,left:probe.scrollLeft};
+    }""")
+    assert report == {'track': 'none', 'webkit': 'none', 'top': 80, 'left': 80}
+
+
+@pytest.mark.parametrize('mode', ['', 'stage-immersive', 'stage-immersive stage-visual stage-character-overlay'])
+@pytest.mark.parametrize('height', [600, 720, 900])
+def test_desktop_call_controls_fit_without_page_overflow(chat, mode, height):
+    page = chat
+    page.set_viewport_size({'width': 1280, 'height': height})
+    report = page.evaluate("""mode => {
+      const overlay = document.querySelector('#voiceCallOverlay');
+      overlay.classList.remove('hidden');
+      const card = overlay.querySelector('.voice-call-card');
+      card.className += ' ' + mode;
+      const identity = overlay.querySelector('.voice-call-identity');
+      const actions = overlay.querySelector('.voice-call-actions');
+      const box = el => {const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom};};
+      return {card:box(card),actions:box(actions),height:innerHeight,width:innerWidth,
+              identityClient:identity.clientHeight,identityScroll:identity.scrollHeight,
+              pageWidth:document.documentElement.scrollWidth,
+              track:getComputedStyle(identity).scrollbarWidth};
+    }""", mode)
+    assert report['pageWidth'] <= report['width'], report
+    assert report['card']['left'] >= 0 and report['card']['right'] <= report['width'], report
+    assert report['actions']['bottom'] <= report['card']['bottom'] <= height, report
+    assert report['identityScroll'] <= report['identityClient'] + 1, report
+    assert report['track'] == 'none', report

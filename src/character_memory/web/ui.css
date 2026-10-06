@@ -15,6 +15,10 @@
  * colour, a radius or a button padding, use the token instead.
  */
 
+/* Keep scrolling available without native tracks on every shared UI page. */
+html, body, * { scrollbar-width: none; }
+::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
 /* --- tokens ---------------------------------------------------------------- */
 
 :root {

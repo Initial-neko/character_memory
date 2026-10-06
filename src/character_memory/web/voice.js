@@ -271,6 +271,7 @@
   function updateVisualUi(snapshot = null) {
     const value = snapshot || voice.visualSession?.getState?.() || {active:false, source:null, candidateCount:0};
     const active = Boolean(value.active);
+    CM.callStage?.setVisual(value);
     dom.camera?.classList.toggle("active", active && value.source === "CAMERA");
     dom.screen?.classList.toggle("active", active && value.source === "DISPLAY");
     dom.visualStop?.classList.toggle("hidden", !active);
@@ -456,6 +457,7 @@
     dom.log.querySelector(".voice-call-log-empty")?.remove();
     const line = document.createElement("div");
     line.className = `voice-call-line ${role}`;
+    CM.callStage?.setSubtitle(role, text);
     const label = role === "user" ? "你" : speakerName(actorId);
     const labelEl = document.createElement("span");
     labelEl.className = "voice-call-line-role";
@@ -946,6 +948,7 @@
     await new Promise((resolve, reject) => {
       const audio = new Audio(url);
       voice.currentAudio = audio;
+      audio.muted = Boolean(voice.speakerMuted);
       audio.onended = resolve;
       audio.onerror = reject;
       audio.play().catch(reject);
@@ -1209,6 +1212,12 @@
       voice.ttsTail = Promise.resolve();
       voice.currentAudio = null;
       voice.currentSpeakerId = null;
+      voice.speakerMuted = false;
+      const speaker = document.getElementById("voiceSpeakerButton");
+      speaker?.setAttribute("aria-pressed", "true");
+      if (speaker) speaker.textContent = "扬声器";
+      CM.callStage?.setHistory(false);
+      CM.callStage?.setSubtitle("assistant", "这里显示实时字幕");
       CM.live2d?.stop();
       voice.lastMetrics = {};
       voice.preRoll = [];
@@ -1286,6 +1295,12 @@
     updateCallButton();
   }
 
+  document.getElementById("voiceSpeakerButton")?.addEventListener("click", event => {
+    voice.speakerMuted = !voice.speakerMuted;
+    if (voice.currentAudio) voice.currentAudio.muted = voice.speakerMuted;
+    event.currentTarget.setAttribute("aria-pressed", String(!voice.speakerMuted));
+    event.currentTarget.textContent = voice.speakerMuted ? "扬声器已静音" : "扬声器";
+  });
   dom.button?.addEventListener("click", startCall);
   dom.mic?.addEventListener("click", () => toggleMicrophone().catch(error => alert("无法切换麦克风：" + error.message)));
   dom.minimize?.addEventListener("click", minimizeCall);

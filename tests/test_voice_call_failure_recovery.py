@@ -21,7 +21,7 @@ const silent = () => {};
 
 function element() {
   return {
-    classList:{add:silent, remove:silent, toggle:silent},
+    dataset:{}, classList:{add:silent, remove:silent, toggle:silent},
     textContent:"", innerHTML:"", title:"", disabled:false,
     scrollTop:0, scrollHeight:0,
     addEventListener:silent,
@@ -37,6 +37,7 @@ const document = {
     if (!elements.has(id)) elements.set(id, element());
     return elements.get(id);
   },
+  querySelector:() => document.getElementById("call-card"),
   createElement:() => element(),
 };
 
@@ -128,10 +129,21 @@ sandbox.window.clearInterval = sandbox.clearInterval;
 const context = vm.createContext(sandbox);
 vm.runInContext(sharedAudioSource, context, {filename:"media_audio.js"});
 vm.runInContext(source, context, {filename:"voice.js"});
+vm.runInContext(fs.readFileSync(require("path").join(require("path").dirname(process.argv[2]), "call_stage.js"), "utf8"), context, {filename:"call_stage.js"});
 
 async function main() {
   const feature = CM.features.voice;
   await feature.start();
+  const identity = feature.state.target;
+  const streamCount = sources.length;
+  CM.callStage.setLive2d(true);
+  CM.callStage.setVisual({active:true,source:"DISPLAY"});
+  CM.callStage.setHistory(true);
+  CM.callStage.setHistory(false);
+  CM.callStage.setVisual({active:false});
+  CM.callStage.setLive2d(false);
+  if (!feature.state.active || feature.state.target !== identity || sources.length !== streamCount)
+    throw new Error("stage switches must preserve active voice session and SSE source");
   feature.state.pendingTurns.push({text:"别漏掉我刚才说的", visualFrames:[], asrMs:12});
   sources[0].emit("character_event", {
     id:1, character_id:"haru", content:"上一轮回答", metadata:{action:"MESSAGE"},

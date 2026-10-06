@@ -43,6 +43,7 @@
 
   function present(ready) {
     dom.card?.classList.toggle("live2d-on", Boolean(ready));
+    CM.callStage?.setLive2d(Boolean(ready));
     dom.stage?.classList.toggle("ready", Boolean(ready));
     dom.stage?.classList.toggle("hidden", !enabled);
     if (dom.avatar) dom.avatar.classList.toggle("hidden", Boolean(ready));
@@ -157,9 +158,11 @@
         app.renderer.resize(w, h);
         const modelWidth = Math.max(1, model.width / (model.scale.x || 1));
         const modelHeight = Math.max(1, model.height / (model.scale.y || 1));
-        const scale = Math.min(w * 0.92 / modelWidth, h * 0.94 / modelHeight);
+        const inset = dom.card?.classList?.contains?.("stage-character-overlay");
+        const scale = inset ? Math.min(w * 2.3 / modelWidth, h * 2.6 / modelHeight)
+          : Math.min(w * 1.25 / modelWidth, h * 1.75 / modelHeight);
         model.scale.set(scale);
-        model.position.set(w / 2, h / 2);
+        model.position.set(w / 2, modelHeight * scale / 2 + h * 0.025);
       };
       observer = new ResizeObserver(fit);
       observer.observe(dom.stage);
@@ -340,6 +343,7 @@
   present(false);
   CM.live2d = {
     setCharacter, pause, resume, stop, toggle,
+    isEnabled: () => enabled,
     requestContext: id => enabled && renderer && presentation && (!id || id === characterId) ? {...presentation} : null,
     setPhase(next) { phase = next; behavior?.phase(next); },
     onReply(id, hint, eventId) { return id === characterId ? behavior?.reply(hint, eventId) ?? false : false; },

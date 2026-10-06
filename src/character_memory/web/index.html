@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="/static/visual_capture.css">
   <link rel="stylesheet" href="/static/mobile_access.css">
   <link rel="stylesheet" href="/static/chat_refine.css">
+  <link rel="stylesheet" href="/static/call_stage.css">
 </head>
 <body>
   <div class="workspace">
@@ -61,11 +62,6 @@
   <div id="voiceCallOverlay" class="voice-call-overlay hidden" role="dialog" aria-modal="true" aria-label="语音/视频通话">
     <div class="voice-call-card">
       <section class="voice-call-identity">
-        <div id="voiceLive2dStage" class="voice-live2d-stage hidden" aria-label="Live2D 角色画面"></div>
-        <div id="voiceLive2dControls" class="voice-live2d-controls hidden">
-          <label>动作 <select id="voiceLive2dMotion" title="播放当前模型自带的动作，不改变通话状态" aria-label="Live2D 动作"></select></label>
-          <label>表情 <select id="voiceLive2dExpression" title="切换当前模型自带的表情；选择普通可恢复模型的普通表情" aria-label="Live2D 表情"></select></label>
-        </div>
         <div id="voiceCallAvatar" class="voice-call-avatar">R</div>
         <div id="voiceLive2dMessage" class="voice-live2d-message hidden" role="status" aria-live="polite"></div>
         <h2 id="voiceCallName">Rin</h2>
@@ -74,14 +70,12 @@
         <div id="voiceCallMetrics" class="voice-call-metrics"></div>
         <div class="voice-visual-controls" aria-label="通话媒体控制">
           <button id="voiceMicButton" class="voice-visual-button" type="button" title="关闭麦克风" aria-pressed="false">🎙 麦克风</button>
+          <button id="voiceSpeakerButton" class="voice-visual-button" type="button" title="开启或静音扬声器，保留通话和字幕" aria-pressed="true">扬声器</button>
+          <button id="voiceAvatarButton" class="voice-visual-button" type="button" title="恢复头像展示，不重新拨号">头像</button>
           <button id="voiceLive2dButton" class="voice-visual-button" type="button" title="开启或关闭 Live2D 画面、自动动作与自动表情" aria-pressed="false">Live2D</button>
           <button id="voiceCameraButton" class="voice-visual-button" type="button" title="开启前置摄像头视频">📷 开启视频</button>
           <button id="voiceScreenButton" class="voice-visual-button" type="button" title="选择标签页、窗口或整个屏幕">🖥 屏幕</button>
           <button id="voiceVisualStopButton" class="voice-visual-button stop hidden" type="button">关闭共享</button>
-        </div>
-        <div id="voiceVisualPanel" class="voice-visual-panel hidden">
-          <video id="voiceVisualPreview" class="voice-visual-preview" muted autoplay playsinline></video>
-          <div id="voiceVisualStatus" class="voice-visual-status">视频未开启 · 点击“开启视频”使用前置摄像头</div>
         </div>
         <div class="voice-call-actions">
           <button id="voiceMinimizeButton" class="voice-minimize" type="button">收起</button>
@@ -89,7 +83,18 @@
         </div>
       </section>
       <section class="voice-call-detail" aria-label="当前语音对话">
-        <div class="voice-call-detail-head"><strong>当前对话</strong><span>语音内容会同时写入聊天历史</span></div>
+        <div class="voice-call-detail-head"><strong id="voiceStageTitle">当前对话</strong><span>语音内容会同时写入聊天历史</span><button id="voiceHistoryButton" type="button" aria-expanded="false" title="展开或收起通话文字记录">聊天记录</button></div>
+        <div class="voice-stage-scene" aria-label="通话主舞台">        <div id="voiceLive2dStage" class="voice-live2d-stage hidden" aria-label="Live2D 角色画面"></div>
+        <div id="voiceLive2dControls" class="voice-live2d-controls hidden">
+          <label>动作 <select id="voiceLive2dMotion" title="播放当前模型自带的动作，不改变通话状态" aria-label="Live2D 动作"></select></label>
+          <label>表情 <select id="voiceLive2dExpression" title="切换当前模型自带的表情；选择普通可恢复模型的普通表情" aria-label="Live2D 表情"></select></label>
+        </div>
+        <div id="voiceVisualPanel" class="voice-visual-panel hidden">
+          <video id="voiceVisualPreview" class="voice-visual-preview" muted autoplay playsinline></video>
+          <div id="voiceVisualStatus" class="voice-visual-status">视频未开启 · 点击“开启视频”使用前置摄像头</div>
+        </div>
+</div>
+        <div class="voice-stage-caption"><span id="voiceStageSubtitle">开始说话后，这里显示实时字幕。</span><button id="voiceStageOptionsButton" type="button" title="展开当前模型的动作和表情">···</button></div>
         <div id="voiceCallLog" class="voice-call-log" aria-live="polite"></div>
         <div id="voiceCallTranscript" class="voice-call-transcript">可语音，也可关闭麦克风后只共享屏幕；共享期间在聊天框发送文字会自动附带当前关键帧。</div>
       </section>
@@ -135,6 +140,7 @@
   <script src="/static/intent.js" defer></script>
   <script src="/static/visual_capture.js" defer></script>
   <script src="/static/asr_stream.js" defer></script>
+  <script src="/static/call_stage.js" defer></script>
   <script src="/static/live2d_behavior.js" defer></script>
   <script src="/static/live2d.js" defer></script>
   <script src="/static/voice.js" defer></script>

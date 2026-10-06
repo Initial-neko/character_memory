@@ -15,6 +15,12 @@
 
 Live2D is a presentation of the **existing** Person/voice call, not a second Voice Agent or an ASR/TTS provider. This first slice adds a Live2D toggle to the browser call and retains the current static avatar, capture, playback, camera, screen sharing and dock as fallbacks. It does **not** perform PSD rigging or TTS lip-sync yet.
 
+### 通话舞台与展示模式
+
+桌面通话左侧保留人物、麦克风、扬声器、展示选择和挂断控制。开启 Live2D 后，右侧完整区域成为角色舞台，字幕位于底部半透明浮层；聊天记录通过按钮打开临时浮层。摄像头或已授权屏幕共享占据主画面，已开启的 Live2D 位于右下角。关闭视觉输入恢复之前的角色展示。
+
+`web/call_stage.js` 只持有展示状态和 Renderer 转发接口（`setCharacterState`、`playAction`、`setExpression`）；不创建通话、麦克风、摄像头或屏幕捕获。`voice.js` 继续拥有唯一通话生命周期，切换舞台保留目标、SSE 和音频调度。扬声器按钮仅静音本次通话输出，不更改 TTS 请求；新通话恢复输出。既有回复元数据驱动的 Live2D 行为、冷却和过期过滤保持原链路。
+
 ### Provide a model
 
 1. Use See-Through to produce a layered PSD. Check face/eyes/hair and that the mouth artwork can open.

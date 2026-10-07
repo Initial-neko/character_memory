@@ -57,6 +57,29 @@ PATCH /v1/rss/sources/{source_id}
 POST  /v1/rss/sources/{source_id}/refresh
 GET   /v1/rss/items
 GET   /v1/rss/items/{item_id}
+GET   /v1/rss/categories
+```
+
+### Article queries (shared desktop / future Android contract)
+
+`GET /v1/rss/items` supports three deterministic queries without a model:
+
+- Today's latest: `?period=today`. Today means the publication date in UTC+08:00, midnight inclusive to next midnight exclusive. Fetch time never makes an old or undated article today's news.
+- Related titles: `?q=React`. Literal substring match on the title only, ignoring ASCII case. `%` and `_` are literal characters, not SQL wildcards. Leading/trailing whitespace is stripped; max 200 characters.
+- Article type: `?category=ai` (also `technology`, `development`, `product`). Categories match any of their preset title keywords. `/v1/rss/categories` returns IDs, labels, keywords and the matching rule. Types can overlap; this is not semantic classification.
+
+Filters combine with AND and may also combine with `source_id`. `period` defaults to `all` for existing API clients; the desktop page explicitly requests `today` by default. Invalid period, category or cursor is rejected with HTTP 400/422.
+
+The response retains `items` and adds `has_more`, `next_before_id`, and `query` (effective period, keyword, category, source, date and timezone). Each item retains its stable ID, source, title, summary, normalized feed content, image/original URL, publication time and fetch time. There is no automatic full-article extraction from the original website.
+
+`limit` is 1–100 (default 60). For another page, send the preceding response's `next_before_id` and the same filters. The cursor resolves to the article's `(COALESCE(publication_time, fetch_time), id)` sort key, so out-of-order insertion does not drop articles. Undated items stay in `all` with fetch time as the sorting fallback and are explicitly labelled as undated in the UI.
+
+Examples:
+
+```text
+/v1/rss/items?period=today&limit=30
+/v1/rss/items?period=all&q=React
+/v1/rss/items?period=today&category=ai
 ```
 
 ## UI
@@ -64,7 +87,9 @@ GET   /v1/rss/items/{item_id}
 The V1 surface intentionally stays small:
 
 1. RSS subscription list: add, enable/disable, manual refresh and status.
-2. Information feed: compact image/text cards inspired by Xiaohongshu density.
-3. Article detail: normalized text plus original-link escape hatch.
+2. Information feed: two-column image/text cards, today's latest by default, all-history toggle, title search, preset type filters and incremental pagination. Narrow widths below 380px use one column.
+3. Article detail: normalized Feed content with an explicit excerpt caveat, original link, retry on failure, keyboard activation and Escape/back return preserving the feed's filters, position and focus.
+
+The main application's external-information entry remains directly below Space. Source management shows article counts, fetch/success times and concrete errors. Loading/empty/error states are separate, failed requests can be retried, and stale feed/detail/source-list responses cannot overwrite newer navigation. If a `today` pagination response reports a different effective date, the page reloads the first page instead of mixing dates. API consumers can apply the same rule using `query.date`. Closing an in-progress add dialog does not cancel the backend write; its late result updates subscriptions without closing a newly opened dialog. This layer still does not connect Characters or implement native Android screens.
 
 No dashboards, recommendations, analytics, tag management or AI summaries are part of V1.

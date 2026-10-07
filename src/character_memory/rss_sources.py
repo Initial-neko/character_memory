@@ -29,6 +29,21 @@ DEFAULT_RSS_SOURCES = (
     ("OpenAI News", "https://openai.com/news/rss.xml"),
 )
 
+# Fixed UTC+08 avoids requiring an IANA timezone database on Windows.
+RSS_TIMEZONE = timezone(timedelta(hours=8))
+RSS_CATEGORIES = (
+    {"id": "ai", "label": "AI", "keywords": ["AI", "人工智能", "GPT", "大模型", "机器学习", "机器人", "OpenAI"]},
+    {"id": "technology", "label": "技术", "keywords": ["技术", "科技", "计算机", "芯片", "开源", "网络", "数据库"]},
+    {"id": "development", "label": "开发", "keywords": ["开发", "编程", "代码", "程序", "API", "React", "Python", "Coding", "工程"]},
+    {"id": "product", "label": "产品", "keywords": ["产品", "应用", "设计", "工具", "体验", "发布", "上线"]},
+)
+
+
+def rss_today(now: datetime | None = None) -> datetime:
+    return (now or datetime.now(timezone.utc)).astimezone(RSS_TIMEZONE).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    )
+
 
 class _TextExtractor(HTMLParser):
     def __init__(self) -> None:
@@ -350,16 +365,46 @@ class RssRepository:
                 inserted += max(0, int(cur.rowcount or 0))
         return inserted
 
-    def list_items(self, *, source_id: int | None = None, limit: int = 60, before_id: int | None = None) -> list[dict]:
-        limit = max(1, min(100, int(limit)))
+    def list_items(
+        self, *, source_id: int | None = None, limit: int = 60,
+        before_id: int | None = None, period: str = "all", q: str = "",
+        category: str | None = None, now: datetime | None = None,
+    ) -> list[dict]:
+        # Routes request one extra item to determine has_more (public max: 100).
+        limit = max(1, min(101, int(limit)))
         where = ["1=1"]
         args: list = []
+        if period not in {"all", "today"}:
+            raise ValueError("period 必须是 all 或 today")
+        if period == "today":
+            start = rss_today(now)
+            where.append("i.published_at_epoch>=? AND i.published_at_epoch<?")
+            args.extend([epoch_us(start), epoch_us(start + timedelta(days=1))])
+        query = str(q or "").strip()
+        if len(query) > 200:
+            raise ValueError("标题关键词最多 200 字")
+        if query:
+            where.append("instr(lower(i.title), lower(?))>0")
+            args.append(query)
+        if category:
+            definition = next((item for item in RSS_CATEGORIES if item["id"] == category), None)
+            if definition is None:
+                raise ValueError("未知文章类型")
+            where.append("(" + " OR ".join("instr(lower(i.title), lower(?))>0" for _ in definition["keywords"]) + ")")
+            args.extend(definition["keywords"])
         if source_id is not None:
             where.append("i.source_id=?")
             args.append(int(source_id))
         if before_id is not None:
-            where.append("i.id<?")
-            args.append(int(before_id))
+            with self.store._lock:
+                anchor = self.store.conn.execute(
+                    "SELECT COALESCE(published_at_epoch,fetched_at_epoch) AS sort_epoch FROM rss_items WHERE id=?",
+                    (int(before_id),),
+                ).fetchone()
+            if anchor is None:
+                raise ValueError("分页游标对应的文章不存在")
+            where.append("(COALESCE(i.published_at_epoch,i.fetched_at_epoch),i.id)<(?,?)")
+            args.extend([anchor["sort_epoch"], int(before_id)])
         sql = (
             "SELECT i.*,s.name AS source_name FROM rss_items i JOIN rss_sources s ON s.id=i.source_id "
             f"WHERE {' AND '.join(where)} "

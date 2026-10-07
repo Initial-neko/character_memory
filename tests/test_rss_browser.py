@@ -41,18 +41,21 @@ def rss_server(tmp_path_factory):
 
 
 @pytest.fixture
-def rss_page(rss_server):
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as playwright:
-        options = {"headless": True}
-        if os.getenv("RSS_BROWSER_EXECUTABLE"):
-            options["executable_path"] = os.environ["RSS_BROWSER_EXECUTABLE"]
-        browser = playwright.chromium.launch(**options)
-        page = browser.new_page(viewport={"width": 1280, "height": 900})
-        page.set_default_timeout(4000)
-        page.goto(rss_server + "/sources")
-        yield page
-        browser.close()
+def rss_page(rss_server, page):
+    """The page comes from pytest-playwright, not from a browser of our own.
+
+    Running ``sync_playwright()`` here fails the moment this file shares a
+    session with the other browser tests: the plugin drives its own sync API
+    inside an asyncio loop, and playwright then refuses to start a second one
+    ("It looks like you are using Playwright Sync API inside the asyncio
+    loop"). It passes when this file runs alone, which is exactly how it
+    shipped green and then failed the first time CI ran it. The same trap is
+    recorded in tests/test_character_archive_notice_playwright.py.
+    """
+    page.set_default_timeout(4000)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(rss_server + "/sources")
+    yield page
 
 
 def test_default_today_search_category_and_detail_return(rss_page):

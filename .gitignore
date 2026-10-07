@@ -63,3 +63,7 @@ docs/research/GSV_TTS_INTEGRATION.md
 
 # Optional user-installed Cubism Core / Pixi browser runtime; never publish proprietary SDK files.
 src/character_memory/web/vendor/live2d/
+
+# Local browser-run screenshots (tests/test_mobile_views_playwright.py writes here
+# when no artifact directory is configured). CI uploads them as a build artifact.
+artifacts/

@@ -131,6 +131,15 @@ uv run character-stack
 
 `character-stack` 会复用已经健康运行的服务。修改 Runtime 代码后如果行为仍像旧版本，请先结束旧进程再重新启动，避免复用旧服务。
 
+停止同一个 checkout 里正在跑的 stack：
+
+```bash
+uv run character-stack --stop     # 优雅停机，子进程按启动的逆序收掉
+uv run character-stack --status   # 只报告是否在跑
+```
+
+启动中的 launcher 会把 pid 写到 `.debug-output/stack.pid`；`--stop` 借它找到进程，并通过 `.debug-output/stack.stop` 请它自己退出，所以不需要知道 stack 的进程结构，也不用 `Ctrl+C`。请求 20 秒内没被响应时（比如旧版本、卡死的子进程）才会强制结束整棵进程树。
+
 可选：
 
 ```bash
@@ -138,6 +147,12 @@ uv run character-stack --open chat
 uv run character-stack --open settings
 uv run character-stack --open tts
 uv run character-stack --no-browser
+```
+
+也可以走包装脚本，或者在资源管理器里双击 `scripts\stack-start.cmd` / `scripts\stack-stop.cmd`：
+
+```bash
+bash scripts/stack.sh status | start | stop | restart
 ```
 
 ## 常用测试

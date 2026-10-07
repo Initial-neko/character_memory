@@ -219,17 +219,108 @@ def _spawn(name: str, command: list[str], env: dict[str, str]) -> subprocess.Pop
     return subprocess.Popen(command, cwd=ROOT, env=env)
 
 
+#: A launcher that is running owns these. `--stop` finds it through the pid
+#: file and asks it to shut down through the stop file, so the children go down
+#: the same reversed, terminated-not-killed way Ctrl+C takes them down. Nothing
+#: outside this module has to know how the stack is laid out.
+STACK_STATE_DIR = ROOT / ".debug-output"
+PID_FILE = STACK_STATE_DIR / "stack.pid"
+STOP_FILE = STACK_STATE_DIR / "stack.stop"
+
+
+def _process_alive(pid: int) -> bool:
+    """Whether a pid is still running.
+
+    Not ``os.kill(pid, 0)``: on Windows any signal but CTRL_C_EVENT is handed to
+    TerminateProcess, so probing that way would kill the process being probed.
+    """
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        return True
+    done = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {int(pid)}", "/NH"],
+        capture_output=True, text=True, check=False,
+    )
+    return str(int(pid)) in done.stdout
+
+
+def _force_kill_tree(pid: int) -> None:
+    subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True, check=False)
+
+
+def stop_running_stack(
+    *,
+    pid_file: Path = PID_FILE,
+    stop_file: Path = STOP_FILE,
+    timeout: float = 20.0,
+    is_alive=_process_alive,
+    force_kill=_force_kill_tree,
+) -> str:
+    """Ask a running launcher to stop, and report what happened."""
+    if not pid_file.exists():
+        return "stack: not running"
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        pid_file.unlink(missing_ok=True)
+        stop_file.unlink(missing_ok=True)
+        return "stack: not running (removed an unreadable pid file)"
+    if not is_alive(pid):
+        pid_file.unlink(missing_ok=True)
+        stop_file.unlink(missing_ok=True)
+        return "stack: not running (pid {pid} is gone)".format(pid=pid)
+
+    stop_file.parent.mkdir(parents=True, exist_ok=True)
+    stop_file.write_text("stop\n", encoding="utf-8")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not pid_file.exists():
+            return "stack: stopped"
+        time.sleep(0.2)
+
+    # The launcher is alive but ignored the request (older build, hung child).
+    # Take the tree down the hard way rather than leaving the ports held.
+    force_kill(pid)
+    pid_file.unlink(missing_ok=True)
+    stop_file.unlink(missing_ok=True)
+    return f"stack: forced stop (pid {pid} did not exit within {timeout:g}s)"
+
+
+def stack_status(*, pid_file: Path = PID_FILE, is_alive=_process_alive) -> str:
+    if not pid_file.exists():
+        return "stack: not running"
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return "stack: pid file is unreadable"
+    if not is_alive(pid):
+        return f"stack: not running (stale pid file for pid {pid})"
+    return f"stack: running (pid {pid})"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="character-stack")
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--open", choices=("dev", "chat", "settings", "tts"), default="dev")
+    parser.add_argument("--stop", action="store_true", help="stop the stack this checkout is running, then exit")
+    parser.add_argument("--status", action="store_true", help="report whether this checkout's stack is running, then exit")
     parser.add_argument(
         "--mobile-origin",
         default=None,
         help="exact HTTPS browser origin on port 443 allowed to call Media Runtime",
     )
     args = parser.parse_args()
+
+    if args.stop:
+        print(stop_running_stack(), flush=True)
+        return
+    if args.status:
+        print(stack_status(), flush=True)
+        return
 
     try:
         mobile_origin = _normalize_mobile_origin(args.mobile_origin)
@@ -346,6 +437,11 @@ def main() -> None:
         )
 
     owned: list[tuple[str, subprocess.Popen]] = []
+    STACK_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    # Claim before the first child exists, so `--stop` works during a startup
+    # that later fails, and drop any request left over from a previous run.
+    STOP_FILE.unlink(missing_ok=True)
+    PID_FILE.write_text(f"{os.getpid()}\n", encoding="utf-8")
     try:
         for name, health_url, command, env in specs:
             # Listening is enough to mean "already running" here: a sidecar that
@@ -410,6 +506,11 @@ def main() -> None:
             webbrowser.open(targets[args.open])
 
         while True:
+            if STOP_FILE.exists():
+                # `--stop` in another process; fall through to the same orderly
+                # shutdown Ctrl+C takes.
+                print("\nstack: stop requested", flush=True)
+                break
             for name, process in owned:
                 code = process.poll()
                 if code is not None:
@@ -430,6 +531,8 @@ def main() -> None:
                 process.wait(timeout=remaining)
             except subprocess.TimeoutExpired:
                 process.kill()
+        PID_FILE.unlink(missing_ok=True)
+        STOP_FILE.unlink(missing_ok=True)
         if owned:
             print("stack: stopped", flush=True)
 

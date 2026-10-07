@@ -50,7 +50,7 @@ uv run character-stack
 bash scripts/sync-all.sh
 ```
 
-`character-stack` 只负责编排；各服务仍是独立进程。它会复用已经健康运行的服务，因此修改代码后需要确认旧进程确实已经重启。
+`character-stack` 只负责编排；各服务仍是独立进程。它会复用已经健康运行的服务，因此修改代码后需要确认旧进程确实已经重启。运行中的 launcher 把 pid 写在 `.debug-output/stack.pid`，`--stop` 通过 `.debug-output/stack.stop` 请它自己按启动的逆序收掉子进程；`--status` 只报告状态。两者都作用于当前 checkout，不依赖外部的进程树探测。
 
 `:9002` 在 V1 同时承担 Provider Runtime 与 TTS Workbench。Workbench 还承载 optional VoiceDesign UI，但 Qwen3 VoiceDesign 本身不是正式聊天 Provider。正式 Provider id/默认 voice/device lifecycle metadata 集中在 `tts_registry.py`，避免 Config / Settings / Media / Workbench 各自维护一份名单。
 

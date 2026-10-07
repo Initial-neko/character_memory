@@ -1,5 +1,5 @@
 (() => {
-  const state = {view:"feed", period:"today", q:"", category:"", sources:[], items:[],
+  const state = {view:"feed", period:"today", q:"", category:"", sourceId:"", sources:[], items:[],
     next:null, feedDate:null, feedRequest:0, sourceRequest:0, modalVersion:0, articleRequest:0,
     loading:false, retryAppend:false, articleOrigin:null};
   const $ = selector => document.querySelector(selector);
@@ -75,7 +75,8 @@
     document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
     $("#feedView").classList.toggle("hidden", !isFeed);
     $("#sourcesView").classList.toggle("hidden", !isSources);
-    $("#viewTitle").textContent = view === "feed" ? "外部信息" : "RSS 订阅";
+    const source = state.sources.find(source => String(source.id) === state.sourceId);
+    $("#viewTitle").textContent = view === "feed" ? (source?.name || "外部信息") : "RSS 订阅";
     $("#viewSubtitle").textContent = view === "feed" ? "来自你订阅的信息源" : "管理订阅、开关和抓取状态";
   };
   const loadSources = async () => {
@@ -84,8 +85,20 @@
     try {
       const data = await api("/v1/rss/sources");
       if (request !== state.sourceRequest) return;
-      state.sources = data.sources || []; renderSources(); feedback("source", "");
-    } catch (error) { if (request === state.sourceRequest) feedback("source", `加载失败：${error.message}`, true); }
+      state.sources = data.sources || []; renderSources(); renderSourceNavigation(); setView(state.view);
+      $("#feedSourcesStatus").textContent = ""; feedback("source", "");
+    } catch (error) {
+      if (request === state.sourceRequest) {
+        feedback("source", `加载失败：${error.message}`, true);
+        $("#feedSourcesStatus").replaceChildren(document.createTextNode("订阅源加载失败 "));
+        const retry = document.createElement("button"); retry.type = "button"; retry.id = "retrySourceNavigation"; retry.textContent = "重试";
+        $("#feedSourcesStatus").append(retry);
+      }
+    }
+  };
+  const renderSourceNavigation = () => {
+    $("#feedSources").innerHTML = [{id:"", name:"全部订阅"}, ...state.sources].map(source =>
+      `<button type="button" data-feed-source="${source.id}" aria-pressed="${String(source.id) === state.sourceId}" title="${escapeHtml(source.name)}"><span>${escapeHtml(source.name)}</span>${source.id ? `<small>${source.item_count || 0}</small>` : ""}</button>`).join("");
   };
   const renderSources = () => {
     $("#sourceList").innerHTML = state.sources.length ? state.sources.map(source => `
@@ -116,6 +129,7 @@
     feedback("feed", append ? "加载更多…" : "加载文章中…");
     if (!append) { state.items = []; state.next = null; $("#feedGrid").replaceChildren(); $("#loadMoreButton").classList.add("hidden"); }
     const params = new URLSearchParams({period:state.period, limit:"30"});
+    if (state.sourceId) params.set("source_id", state.sourceId);
     if (state.q) params.set("q", state.q);
     if (state.category) params.set("category", state.category);
     if (append) params.set("before_id", state.next);
@@ -163,6 +177,13 @@
         ${image && !item.content_html?.includes("<img ") ? `<img class="article-image" src="${escapeHtml(imageSrc(item.id, image))}" alt="" referrerpolicy="no-referrer">` : ""}
         <p class="article-note">以下是 Feed 提供的内容，可能为摘要或节选；完整内容请查看原文。</p>`;
       $("#articleBody").append(articleContent(item));
+      const footer = document.createElement("footer"); footer.className = "article-original";
+      if (url) {
+        const link = document.createElement("a"); link.href = url; link.target = "_blank";
+        link.rel = "noopener noreferrer"; link.textContent = "查看原文 ↗"; footer.append(link);
+      } else footer.textContent = "该 Feed 未提供可用的原文地址。";
+      const time = document.createElement("span"); time.textContent = item.published_at ? fmtTime(item.published_at) : "发布时间未知";
+      footer.append(time); $("#articleBody").append(footer);
     } catch (error) {
       if (request === state.articleRequest) $("#articleBody").innerHTML = `<p role="alert">加载失败：${escapeHtml(error.message)}</p><button type="button" data-article-retry="${itemId}">重试</button>`;
     }
@@ -184,6 +205,15 @@
   };
   document.addEventListener("click", event => {
     const target = event.target, view = target.closest("[data-view]");
+    const source = target.closest("[data-feed-source]");
+    if (source) {
+      state.sourceId = source.dataset.feedSource; state.period = state.sourceId ? "all" : "today";
+      document.querySelectorAll("[data-feed-source]").forEach(button => button.setAttribute("aria-pressed", String(button === source)));
+      setView("feed");
+      document.querySelectorAll("[data-period]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.period === state.period)));
+      loadFeed(); return;
+    }
+    if (target.closest("#retrySourceNavigation")) { loadSources(); return; }
     if (view) { setView(view.dataset.view); return; }
     const period = target.closest("[data-period]");
     if (period) {
@@ -278,5 +308,5 @@
       if (version === state.modalVersion) { submit.disabled = false; submit.textContent = "添加订阅"; }
     }
   });
-  loadSources(); loadCategories(); loadFeed();
+  renderSourceNavigation(); loadSources(); loadCategories(); loadFeed();
 })();

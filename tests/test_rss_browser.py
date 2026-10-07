@@ -291,3 +291,53 @@ def test_image_proxy_preserves_recorded_unicode_url(rss_page):
     expect(page.locator('.article-rich img')).to_be_visible()
     page.wait_for_function('document.querySelector(".article-rich img").naturalWidth > 0')
     assert requested == [raw]
+
+
+def test_subscription_navigation_scopes_search_and_pagination(rss_page, rss_server):
+    from playwright.sync_api import expect
+    page = rss_page
+    response = page.request.post(rss_server + '/v1/rss/sources', data={
+        'feed_url': 'https://93.184.216.34/navigation.xml', 'name': '筛选验收源',
+    })
+    assert response.ok
+    source = response.json()['source']
+    first_source = next(s for s in page.request.get(rss_server + '/v1/rss/sources').json()['sources'] if s['id'] == 1)
+    page.reload()
+    selected = page.locator(f'[data-feed-source="{source["id"]}"]')
+    selected.click()
+    expect(selected).to_be_focused()
+    expect(selected).to_have_attribute('aria-pressed', 'true')
+    expect(page.locator('[data-period="all"]')).to_have_attribute('aria-pressed', 'true')
+    expect(page.locator('.feed-card')).to_have_count(1)
+    expect(page.locator('#feedGrid')).to_contain_text('新增产品文章')
+    expect(page.locator('#viewTitle')).to_have_text(source['name'])
+    page.locator('[data-feed-source="1"]').click()
+    expect(page.locator('.feed-card')).to_have_count(30)
+    page.locator('#loadMoreButton').click()
+    expect(page.locator('.feed-card')).to_have_count(first_source['item_count'])
+    assert set(page.locator('.feed-source').all_text_contents()) == {first_source['name']}
+    page.locator('#feedSearch').fill('React')
+    page.locator('#feedSearchForm').evaluate('form => form.requestSubmit()')
+    page.locator('[data-category="development"]').click()
+    expect(page.locator('.feed-card')).to_have_count(1)
+    page.locator('.feed-card').click()
+    page.locator('#closeArticleButton').click()
+    expect(page.locator('[data-feed-source="1"]')).to_have_attribute('aria-pressed', 'true')
+    expect(page.locator('#feedSearch')).to_have_value('React')
+    page.locator('[data-feed-source=""]').click()
+    expect(page.locator('#viewTitle')).to_have_text('外部信息')
+    expect(page.locator('.feed-card')).to_have_count(1)
+    page.set_viewport_size({'width': 390, 'height': 844})
+    expect(page.locator('[data-feed-source="1"]')).to_be_visible()
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
+
+def test_original_link_is_below_article_content(rss_page):
+    from playwright.sync_api import expect
+    page = rss_page
+    page.locator('[data-item-id="1"]').click()
+    footer = page.locator('#articleBody .article-original')
+    footer.scroll_into_view_if_needed()
+    expect(footer.get_by_role('link', name='查看原文')).to_have_attribute('href', 'https://example.com/article/0')
+    expect(footer.get_by_role('link')).to_have_attribute('target', '_blank')
+    assert footer.evaluate('el => el.previousElementSibling.classList.contains("article-rich")')

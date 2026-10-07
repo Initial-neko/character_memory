@@ -228,6 +228,10 @@ The existing Web `voice.js` performs ASR → chat/visual message 202 → SSE rea
 - Periodic direct observation accepts **one DISPLAY frame** as `visual_frame` and may reply `{accepted:false,reason:"DISABLED"|"BUSY"|"DUPLICATE_FRAME"|"INTERVAL"|"HOURLY_LIMIT"|...}`. Only direct display observations are supported; **camera periodic observation and group periodic observation are not currently promised**.
 - Android CameraX / MediaProjection own the actual capture; they should sample, detect changes, encode, bound buffering and obtain explicit OS screen-recording consent. A POST endpoint **cannot** acquire device screens.
 
+### RSS external information — implemented in source
+
+Android consumes Core-owned RSS data and collection through the CORE origin. See [RSS Sources](RSS_SOURCES.md) for the complete query and sanitized-content contract; deployment OpenAPI must be checked before integration. GET/POST `/v1/rss/sources`, PATCH/DELETE `/v1/rss/sources/{id}`, POST `/v1/rss/sources/{id}/restore`, POST `/v1/rss/sources/{id}/refresh`, GET `/v1/rss/categories`, GET `/v1/rss/items`, GET `/v1/rss/items/{id}` and GET `/v1/rss/items/{id}/image?url=...` are the client surface. Source GET accepts `include_cancelled=true` for recovery UI. Cancel retains historical articles; restore reuses the same source and immediately fetches. Add/restore already perform the immediate fetch and return `{source,refresh}`; failed fetch preserves subscription. Clients must never run a second grabber, copy the facts database, or automatically replay subscription writes. Android image requests pass the original recorded URL through the Core image endpoint. Characters do not automatically consume these items.
+
 ## 7. Missing contracts (PROPOSED, not implemented)
 
 | Proposed capability | Suggested contract | Blocking? |

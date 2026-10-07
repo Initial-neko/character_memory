@@ -26,8 +26,8 @@ def attach_rss_routes(app, web_dir, repository, service, *, default_interval_min
         return FileResponse(web_dir / "sources.html")
 
     @app.get("/v1/rss/sources")
-    def list_sources():
-        return {"sources": repository.list_sources()}
+    def list_sources(include_cancelled: bool = False):
+        return {"sources": repository.list_sources(include_cancelled=include_cancelled)}
 
     @app.post("/v1/rss/sources")
     def create_source(payload: CreateRssSourceRequest):
@@ -50,15 +50,36 @@ def attach_rss_routes(app, web_dir, repository, service, *, default_interval_min
 
     @app.patch("/v1/rss/sources/{source_id}")
     def update_source(source_id: int, payload: UpdateRssSourceRequest):
-        source = repository.set_enabled(source_id, payload.enabled)
+        try:
+            source = repository.set_enabled(source_id, payload.enabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if source is None:
             raise HTTPException(status_code=404, detail="RSS source not found")
         return {"source": source}
 
+    @app.delete("/v1/rss/sources/{source_id}")
+    def cancel_source(source_id: int):
+        source = repository.cancel_source(source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="RSS source not found")
+        return {"source": source, "unsubscribed": True, "history_retained": True}
+
+    @app.post("/v1/rss/sources/{source_id}/restore")
+    def restore_source(source_id: int):
+        source = repository.restore_source(source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="RSS source not found")
+        refresh = service.refresh_source(source_id)
+        return {"source": repository.get_source(source_id), "refresh": refresh}
+
     @app.post("/v1/rss/sources/{source_id}/refresh")
     def refresh_source(source_id: int):
-        if repository.get_source(source_id) is None:
+        source = repository.get_source(source_id)
+        if source is None:
             raise HTTPException(status_code=404, detail="RSS source not found")
+        if source["cancelled_at"]:
+            raise HTTPException(status_code=409, detail="该来源已取消订阅，请先恢复订阅")
         return service.refresh_source(source_id)
 
     @app.get("/v1/rss/categories")

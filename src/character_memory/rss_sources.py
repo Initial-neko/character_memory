@@ -210,6 +210,10 @@ def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
     return ParsedFeed(title=feed_title[:240], site_url=urljoin(feed_url, site_url)[:2000], items=items)
 
 
+class RssSubscriptionChanged(ValueError):
+    pass
+
+
 class RssRepository:
     MIGRATION = "rss/001-sources-and-items"
 
@@ -220,11 +224,16 @@ class RssRepository:
         self.store.conn.create_function("rss_keyword_match", 2, keyword_matches, deterministic=True)
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema)
         self.store.apply_schema_migration("rss/002-rich-content", self._add_rich_content)
+        self.store.apply_schema_migration("rss/003-subscription-lifecycle", self._add_subscription_lifecycle)
         if seed_defaults:
             self.seed_defaults()
 
     def _add_rich_content(self) -> None:
         self.store._ensure_column_locked("rss_items", "content_html", "TEXT NOT NULL DEFAULT ''")
+
+    def _add_subscription_lifecycle(self) -> None:
+        self.store._ensure_column_locked("rss_sources", "cancelled_at", "TEXT")
+        self.store._ensure_column_locked("rss_sources", "subscription_generation", "INTEGER NOT NULL DEFAULT 0")
 
     def _create_schema(self) -> None:
         self.store.conn.executescript(
@@ -288,6 +297,8 @@ class RssRepository:
             "feed_url": str(row["feed_url"]),
             "site_url": str(row["site_url"] or ""),
             "enabled": bool(row["enabled"]),
+            "cancelled_at": row["cancelled_at"],
+            "subscription_generation": int(row["subscription_generation"]),
             "fetch_interval_minutes": float(row["fetch_interval_minutes"]),
             "last_fetch_at": row["last_fetch_at"],
             "last_success_at": row["last_success_at"],
@@ -310,11 +321,11 @@ class RssRepository:
             "fetched_at": row["fetched_at"],
         }
 
-    def list_sources(self) -> list[dict]:
+    def list_sources(self, *, include_cancelled: bool = False) -> list[dict]:
         with self.store._lock:
             rows = self.store.conn.execute(
                 "SELECT s.*, (SELECT COUNT(*) FROM rss_items i WHERE i.source_id=s.id) AS item_count "
-                "FROM rss_sources s ORDER BY s.id"
+                "FROM rss_sources s " + ("" if include_cancelled else "WHERE s.cancelled_at IS NULL ") + "ORDER BY s.id"
             ).fetchall()
         result = []
         for row in rows:
@@ -339,6 +350,11 @@ class RssRepository:
         now = datetime.now().astimezone()
         try:
             with self.store.transaction():
+                existing = self.store.conn.execute("SELECT id,cancelled_at FROM rss_sources WHERE feed_url=?", (normalized[:2000],)).fetchone()
+                if existing is not None:
+                    if existing["cancelled_at"] is None:
+                        raise ValueError("这个 RSS 已经订阅")
+                    return self.restore_source(int(existing["id"]))
                 cur = self.store.conn.execute(
                     "INSERT INTO rss_sources(name,feed_url,enabled,fetch_interval_minutes,created_at,created_at_epoch) "
                     "VALUES(?,?,?,?,?,?)",
@@ -353,12 +369,34 @@ class RssRepository:
 
     def set_enabled(self, source_id: int, enabled: bool) -> dict | None:
         with self.store.transaction():
+            source = self.get_source(source_id)
+            if source is not None and source["cancelled_at"]:
+                raise ValueError("该来源已取消订阅，请先恢复订阅")
             self.store.conn.execute("UPDATE rss_sources SET enabled=? WHERE id=?", (int(bool(enabled)), int(source_id)))
         return self.get_source(source_id)
 
-    def mark_fetch(self, source_id: int, *, now: datetime, error: str = "", title: str = "", site_url: str = "") -> None:
+    def cancel_source(self, source_id: int) -> dict | None:
+        with self.store.transaction():
+            self.store.conn.execute(
+                "UPDATE rss_sources SET cancelled_at=?,enabled=0,subscription_generation=subscription_generation+1 "
+                "WHERE id=? AND cancelled_at IS NULL",
+                (datetime.now().astimezone().isoformat(), int(source_id)),
+            )
+        return self.get_source(source_id)
+
+    def restore_source(self, source_id: int) -> dict | None:
+        with self.store.transaction():
+            self.store.conn.execute(
+                "UPDATE rss_sources SET cancelled_at=NULL,enabled=1,subscription_generation=subscription_generation+1 "
+                "WHERE id=? AND cancelled_at IS NOT NULL", (int(source_id),),
+            )
+        return self.get_source(source_id)
+
+    def mark_fetch(self, source_id: int, *, now: datetime, error: str = "", title: str = "", site_url: str = "", expected_generation: int | None = None) -> None:
         success = not error
         with self.store.transaction():
+            if expected_generation is not None:
+                self._check_subscription(source_id, expected_generation)
             self.store.conn.execute(
                 "UPDATE rss_sources SET "
                 "name=CASE WHEN ?<>'' THEN ? ELSE name END,"
@@ -375,9 +413,16 @@ class RssRepository:
                 ),
             )
 
-    def upsert_items(self, source_id: int, items: list[ParsedFeedItem], *, fetched_at: datetime) -> int:
+    def _check_subscription(self, source_id: int, generation: int) -> None:
+        source = self.get_source(source_id)
+        if source is None or source["cancelled_at"] or source["subscription_generation"] != generation:
+            raise RssSubscriptionChanged("订阅状态已改变，本次抓取结果已丢弃")
+
+    def upsert_items(self, source_id: int, items: list[ParsedFeedItem], *, fetched_at: datetime, expected_generation: int | None = None) -> int:
         inserted = 0
         with self.store.transaction():
+            if expected_generation is not None:
+                self._check_subscription(source_id, expected_generation)
             for item in items:
                 rich_html = parse_article_content(item.content_html, base_url=item.url)[1] if item.content_html else ""
                 existing = self.store.conn.execute(
@@ -554,19 +599,26 @@ class RssService:
         source = self.repository.get_source(source_id)
         if source is None:
             raise KeyError("RSS source not found")
+        if source["cancelled_at"]:
+            return {"ok": False, "source_id": source_id, "inserted": 0, "seen": 0, "error": "该来源已取消订阅"}
+        generation = source["subscription_generation"]
         now = datetime.now().astimezone()
         try:
             document = parse_feed(self._fetch_text(source["feed_url"]), feed_url=source["feed_url"])
-            inserted = self.repository.upsert_items(source_id, document.items, fetched_at=now)
+            inserted = self.repository.upsert_items(source_id, document.items, fetched_at=now, expected_generation=generation)
             self.repository.mark_fetch(
                 source_id,
                 now=now,
                 title=document.title or source["name"],
                 site_url=document.site_url,
+                expected_generation=generation,
             )
             return {"ok": True, "source_id": source_id, "inserted": inserted, "seen": len(document.items)}
         except Exception as exc:
-            self.repository.mark_fetch(source_id, now=now, error=str(exc))
+            try:
+                self.repository.mark_fetch(source_id, now=now, error=str(exc), expected_generation=generation)
+            except RssSubscriptionChanged:
+                pass
             logger.warning("rss.refresh failed source=%s url=%s error=%s", source_id, source["feed_url"], exc)
             return {"ok": False, "source_id": source_id, "inserted": 0, "seen": 0, "error": str(exc)}
 

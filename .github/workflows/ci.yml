@@ -111,7 +111,7 @@ jobs:
       - name: Run browser smoke
         env:
           RUN_PLAYWRIGHT: "1"
-        run: uv run pytest -q tests/test_p0_17b_playwright.py tests/test_p0_17c_playwright.py tests/test_chat_ui_playwright.py tests/test_settings_playwright.py tests/test_world_browser_playwright.py tests/test_character_archive_notice_playwright.py tests/test_dev_console_playwright.py tests/test_group_failure_playwright.py tests/test_ensemble_recovery_playwright.py tests/test_space_reconciliation_playwright.py tests/test_mobile_views_playwright.py tests/test_sticker_removal_playwright.py --browser chromium --junitxml=artifacts/core-visual-evidence/junit-browser-smoke.xml
+        run: uv run pytest -q tests/test_p0_17b_playwright.py tests/test_p0_17c_playwright.py tests/test_chat_ui_playwright.py tests/test_settings_playwright.py tests/test_world_browser_playwright.py tests/test_character_archive_notice_playwright.py tests/test_dev_console_playwright.py tests/test_group_failure_playwright.py tests/test_ensemble_recovery_playwright.py tests/test_space_reconciliation_playwright.py tests/test_mobile_views_playwright.py tests/test_sticker_removal_playwright.py tests/test_rss_browser.py --browser chromium --junitxml=artifacts/core-visual-evidence/junit-browser-smoke.xml
 
       - name: Upload browser visual evidence and test results
         if: always()

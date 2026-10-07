@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+from typing import Literal
+
+from character_memory.rss_sources import RSS_CATEGORIES, rss_today
 
 
 class CreateRssSourceRequest(BaseModel):
@@ -57,18 +60,44 @@ def attach_rss_routes(app, web_dir, repository, service, *, default_interval_min
             raise HTTPException(status_code=404, detail="RSS source not found")
         return service.refresh_source(source_id)
 
-    @app.get("/v1/rss/items")
-    def list_items(
-        source_id: int | None = Query(default=None),
-        limit: int = Query(default=60, ge=1, le=100),
-        before_id: int | None = Query(default=None),
-    ):
+    @app.get("/v1/rss/categories")
+    def list_categories():
         return {
-            "items": repository.list_items(
-                source_id=source_id,
-                limit=limit,
-                before_id=before_id,
+            "categories": RSS_CATEGORIES,
+            # Not plain substring: a Latin keyword only matches on a word
+            # boundary, so `ai` no longer hits "email" and `API` no longer hits
+            # "rapid". Chinese keywords still match as substrings.
+            "match": "title_matches_any_keyword",
+        }
+
+    @app.get("/v1/rss/items", summary="按发布时间、标题关键词和类型查询 RSS 文章")
+    def list_items(
+        source_id: int | None = Query(default=None, ge=1),
+        limit: int = Query(default=60, ge=1, le=100),
+        before_id: int | None = Query(default=None, ge=1, description="上一页最后一篇文章的 ID，按时间和 ID 联合排序"),
+        period: Literal["all", "today"] = Query(default="all", description="today 按 UTC+08:00 当天发布时间筛选，未知发布时间不纳入"),
+        q: str = Query(default="", max_length=200, description="标题字面包含匹配，忽略英文大小写；不搜索正文"),
+        category: str | None = Query(default=None, description="/v1/rss/categories 提供的类型 ID，按标题关键词匹配"),
+    ):
+        start = rss_today()
+        try:
+            items = repository.list_items(
+                source_id=source_id, limit=limit + 1, before_id=before_id,
+                period=period, q=q, category=category, now=start,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        has_more = len(items) > limit
+        page = items[:limit]
+        return {
+            "items": page,
+            "has_more": has_more,
+            "next_before_id": page[-1]["id"] if has_more else None,
+            "query": {
+                "period": period, "q": q.strip(), "category": category,
+                "source_id": source_id, "timezone": "UTC+08:00",
+                "date": start.date().isoformat() if period == "today" else None,
+            },
         }
 
     @app.get("/v1/rss/items/{item_id}")

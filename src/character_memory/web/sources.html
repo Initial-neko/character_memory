@@ -21,18 +21,31 @@
     <main class="rss-main">
       <header class="rss-header">
         <div>
-          <h1 id="viewTitle">信息流</h1>
-          <p id="viewSubtitle">来自你订阅的信息源</p>
+          <h1 id="viewTitle">外部信息</h1>
+          <p id="viewSubtitle">今日最新 · 来自你订阅的信息源</p>
         </div>
         <button id="addSourceButton" class="primary-button" type="button">＋ 添加订阅</button>
       </header>
 
       <section id="feedView" class="rss-view">
-        <div id="feedEmpty" class="rss-empty hidden">还没有文章，先刷新一个订阅源。</div>
+        <form id="feedSearchForm" class="feed-search" role="search">
+          <input id="feedSearch" type="search" maxlength="200" placeholder="按标题搜索关联文章…" aria-label="标题关键词">
+          <button type="submit">搜索</button>
+        </form>
+        <div class="feed-periods" aria-label="文章时间范围">
+          <button type="button" data-period="today" aria-pressed="true">今日最新</button>
+          <button type="button" data-period="all" aria-pressed="false">全部文章</button>
+        </div>
+        <div id="feedCategories" class="feed-categories" aria-label="文章类型"></div>
+        <p id="feedHint" class="feed-hint">按北京时间的发布时间排序 · 类型按标题关键词筛选</p>
+        <div class="feed-feedback" aria-live="polite"><span id="feedStatus" role="status"></span><button id="retryFeedButton" class="hidden" type="button">重试</button></div>
+        <div id="feedEmpty" class="rss-empty hidden"></div>
         <div id="feedGrid" class="feed-grid"></div>
+        <button id="loadMoreButton" class="load-more hidden" type="button">加载更多</button>
       </section>
 
       <section id="sourcesView" class="rss-view hidden">
+        <div class="feed-feedback" aria-live="polite"><span id="sourceStatus" role="status"></span><button id="retrySourcesButton" class="hidden" type="button">重试</button></div>
         <div id="sourceList" class="source-list"></div>
       </section>
     </main>
@@ -51,8 +64,8 @@
     </form>
   </div>
 
-  <aside id="articlePanel" class="article-panel hidden" aria-hidden="true">
-    <header><button id="closeArticleButton" class="icon-button" type="button">←</button><a id="articleExternalLink" target="_blank" rel="noreferrer">原文 ↗</a></header>
+  <aside id="articlePanel" class="article-panel hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-label="文章详情">
+    <header><button id="closeArticleButton" class="icon-button" type="button" aria-label="返回信息流">←</button><a id="articleExternalLink" target="_blank" rel="noopener noreferrer">原文 ↗</a></header>
     <div id="articleBody" class="article-body"></div>
   </aside>
 

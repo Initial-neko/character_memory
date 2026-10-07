@@ -155,6 +155,8 @@ def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
         image = content_image or summary_image or ""
         if image:
             image = urljoin(link or feed_url, image)
+            if urlparse(image).scheme not in {"http", "https"}:
+                image = ""
         identity = guid or link or f"{title}|{published.isoformat() if published else ''}|{summary_text[:240]}"
         key = sha256(identity.encode("utf-8", errors="ignore")).hexdigest()
         items.append(

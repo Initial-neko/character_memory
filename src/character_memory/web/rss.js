@@ -35,11 +35,13 @@
 
   const setView = view => {
     state.view = view;
+    const isFeed = view === "feed";
+    const isSources = view === "sources";
     document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
-    $("#feedView").classList.toggle("hidden", view !== "feed");
-    $("#sourcesView").classList.toggle("hidden", view !== "sources");
-    $("#viewTitle").textContent = view === "feed" ? "信息流" : "RSS 订阅";
-    $("#viewSubtitle").textContent = view === "feed" ? "来自你订阅的信息源" : "管理订阅、开关和抓取状态";
+    $("#feedView").classList.toggle("hidden", !isFeed);
+    $("#sourcesView").classList.toggle("hidden", !isSources);
+    $("#viewTitle").textContent = isFeed ? "信息流" : "RSS 订阅";
+    $("#viewSubtitle").textContent = isFeed ? "来自你订阅的信息源" : "管理订阅、开关和抓取状态";
   };
 
   const loadSources = async () => {

@@ -18,6 +18,7 @@ from character_memory.server import create_server_app
 # must outrank async_reactions so the wake producer stops before the SSE hub it
 # feeds is closed.
 WORKERS_IN_START_ORDER = [
+    "rss_sources",
     "proactive_dispatch",
     "world_activity",
     "space_autonomy",

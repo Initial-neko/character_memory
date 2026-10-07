@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from hashlib import sha256
-from html import unescape
-from html.parser import HTMLParser
+from html import escape
 import logging
 import threading
 import time
@@ -15,7 +14,8 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-from character_memory.remote_media import ensure_public_http_url
+from character_memory.remote_media import ensure_public_http_url, _sniff_image_mime
+from character_memory.rss_content import parse_article_content
 from character_memory.time_utils import epoch_us, parse_datetime
 
 
@@ -45,37 +45,6 @@ def rss_today(now: datetime | None = None) -> datetime:
     )
 
 
-class _TextExtractor(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self.first_image: str | None = None
-
-    def handle_data(self, data: str) -> None:
-        value = " ".join(data.split())
-        if value:
-            self.parts.append(value)
-
-    def handle_starttag(self, tag: str, attrs) -> None:
-        if tag.lower() != "img" or self.first_image:
-            return
-        for key, value in attrs:
-            if key.lower() == "src" and value:
-                self.first_image = str(value).strip()
-                break
-
-
-def _plain_text(value: str, *, limit: int = 12000) -> tuple[str, str | None]:
-    parser = _TextExtractor()
-    try:
-        parser.feed(value or "")
-        parser.close()
-    except Exception:
-        pass
-    text = unescape(" ".join(parser.parts)).strip()
-    return text[:limit], parser.first_image
-
-
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].lower()
 
@@ -91,6 +60,23 @@ def _child_text(node: ET.Element, names: Iterable[str]) -> str:
 def _all_children(node: ET.Element, name: str) -> list[ET.Element]:
     target = name.lower()
     return [child for child in list(node) if _local_name(child.tag) == target]
+
+
+def _xml_markup(node: ET.Element) -> str:
+    tag = _local_name(node.tag)
+    attrs = "".join(f' {key}="{escape(value, quote=True)}"' for key, value in node.attrib.items() if not key.startswith("{"))
+    inner = escape(node.text or "") + "".join(_xml_markup(child) + escape(child.tail or "") for child in node)
+    return f"<{tag}{attrs}>{inner}</{tag}>"
+
+
+def _content_markup(node: ET.Element, names: set[str], base_url: str) -> tuple[str, str]:
+    for child in node:
+        if _local_name(child.tag) in names and not child.tag.startswith("{http://search.yahoo.com/mrss/}"):
+            base = urljoin(base_url, child.attrib.get("{http://www.w3.org/XML/1998/namespace}base", ""))
+            if len(child):
+                return "".join(_xml_markup(element) for element in child), base
+            return child.text or "", base
+    return "", base_url
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -119,6 +105,7 @@ class ParsedFeedItem:
     url: str
     image_url: str
     published_at: datetime | None
+    content_html: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,6 +117,7 @@ class ParsedFeed:
 
 def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
     root = ET.fromstring(xml_text)
+    root_base = urljoin(feed_url, root.attrib.get("{http://www.w3.org/XML/1998/namespace}base", ""))
     root_name = _local_name(root.tag)
     if root_name == "rss":
         channel = next((item for item in list(root) if _local_name(item.tag) == "channel"), root)
@@ -152,6 +140,7 @@ def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
 
     items: list[ParsedFeedItem] = []
     for entry in entries[:200]:
+        entry_base = urljoin(root_base, entry.attrib.get("{http://www.w3.org/XML/1998/namespace}base", ""))
         title = _child_text(entry, {"title"}) or "无标题"
         guid = _child_text(entry, {"guid", "id"})
         link = _child_text(entry, {"link"})
@@ -162,11 +151,13 @@ def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
                 if href and rel in {"", "alternate"}:
                     link = href
                     break
-        link = urljoin(feed_url, link) if link else ""
-        summary_html = _child_text(entry, {"description", "summary"})
-        content_html = _child_text(entry, {"encoded", "content"}) or summary_html
-        summary_text, summary_image = _plain_text(summary_html, limit=1200)
-        content_text, content_image = _plain_text(content_html, limit=12000)
+        link = urljoin(entry_base, link) if link else ""
+        summary_html, summary_base = _content_markup(entry, {"description", "summary"}, link or entry_base)
+        raw_content, content_base = _content_markup(entry, {"encoded", "content"}, link or entry_base)
+        summary_text, _, summary_image = parse_article_content(summary_html, base_url=summary_base)
+        content_text, content_html, content_image = parse_article_content(
+            raw_content or summary_html, base_url=content_base if raw_content else summary_base,
+        )
         published = _parse_time(_child_text(entry, {"pubdate", "published", "updated", "date"}))
         image = content_image or summary_image or ""
         if image:
@@ -184,6 +175,7 @@ def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
                 url=link[:2000],
                 image_url=image[:2000],
                 published_at=published,
+                content_html=content_html,
             )
         )
     return ParsedFeed(title=feed_title[:240], site_url=urljoin(feed_url, site_url)[:2000], items=items)
@@ -195,8 +187,12 @@ class RssRepository:
     def __init__(self, store, *, seed_defaults: bool = False) -> None:
         self.store = store
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema)
+        self.store.apply_schema_migration("rss/002-rich-content", self._add_rich_content)
         if seed_defaults:
             self.seed_defaults()
+
+    def _add_rich_content(self) -> None:
+        self.store._ensure_column_locked("rss_items", "content_html", "TEXT NOT NULL DEFAULT ''")
 
     def _create_schema(self) -> None:
         self.store.conn.executescript(
@@ -275,6 +271,7 @@ class RssRepository:
             "title": str(row["title"]),
             "summary": str(row["summary"] or ""),
             "content_text": str(row["content_text"] or ""),
+            "content_html": str(row["content_html"] or ""),
             "url": str(row["url"] or ""),
             "image_url": str(row["image_url"] or ""),
             "published_at": row["published_at"],
@@ -350,16 +347,27 @@ class RssRepository:
         inserted = 0
         with self.store.transaction():
             for item in items:
+                rich_html = parse_article_content(item.content_html, base_url=item.url)[1] if item.content_html else ""
+                existing = self.store.conn.execute(
+                    "SELECT id FROM rss_items WHERE source_id=? AND item_key=?", (int(source_id), item.key),
+                ).fetchone()
+                if existing is not None:
+                    self.store.conn.execute(
+                        # Keep the original publication/sort key stable across content repairs.
+                        "UPDATE rss_items SET title=?,summary=?,content_text=?,content_html=?,url=?,image_url=? WHERE id=?",
+                        (item.title, item.summary, item.content_text, rich_html, item.url, item.image_url, existing["id"]),
+                    )
+                    continue
                 cur = self.store.conn.execute(
                     "INSERT OR IGNORE INTO rss_items("
                     "source_id,item_key,title,summary,content_text,url,image_url,published_at,published_at_epoch,fetched_at,fetched_at_epoch"
-                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    ",content_html) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         int(source_id), item.key, item.title, item.summary, item.content_text,
                         item.url, item.image_url,
                         item.published_at.isoformat() if item.published_at else None,
                         epoch_us(item.published_at) if item.published_at else None,
-                        fetched_at.isoformat(), epoch_us(fetched_at),
+                        fetched_at.isoformat(), epoch_us(fetched_at), rich_html,
                     ),
                 )
                 inserted += max(0, int(cur.rowcount or 0))
@@ -466,6 +474,22 @@ class RssService:
             self.client.close()
 
     def _fetch_text(self, url: str) -> str:
+        body, encoding = self._fetch_payload(url)
+        try:
+            return body.decode(encoding, errors="replace")
+        except LookupError:
+            return body.decode("utf-8", errors="replace")
+
+    def fetch_image(self, url: str) -> tuple[bytes, str]:
+        body, _ = self._fetch_payload(url)
+        mime = _sniff_image_mime(body)
+        if not mime and len(body) >= 16 and body[4:8] == b"ftyp" and any(brand in body[8:32] for brand in (b"avif", b"avis")):
+            mime = "image/avif"
+        if not mime:
+            raise ValueError("RSS 图片不是支持的 PNG/JPEG/GIF/WebP/AVIF 格式")
+        return body, mime
+
+    def _fetch_payload(self, url: str) -> tuple[bytes, str]:
         deadline = time.monotonic() + self.total_timeout_seconds
         current = url
         for _ in range(4):
@@ -491,10 +515,7 @@ class RssService:
                     if time.monotonic() > deadline:
                         raise TimeoutError("RSS 抓取超过总时限")
                 encoding = response.charset_encoding or "utf-8"
-                try:
-                    return bytes(body).decode(encoding, errors="replace")
-                except LookupError:
-                    return bytes(body).decode("utf-8", errors="replace")
+                return bytes(body), encoding
         raise RuntimeError("RSS 重定向次数过多")
 
     def refresh_source(self, source_id: int) -> dict:

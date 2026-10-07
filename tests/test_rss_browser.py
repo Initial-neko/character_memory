@@ -247,3 +247,44 @@ def test_cancel_pending_add_does_not_close_new_dialog(rss_page):
     held[0].fulfill(status=200, json={"source": {"id": 999}, "refresh": {"ok": True}})
     expect(page.locator("#sourceModal")).to_be_visible()
     expect(page.locator("#sourceUrl")).to_have_value("https://93.184.216.34/new-draft.xml")
+
+
+def test_article_displays_paragraphs_headings_lists_and_inline_images(rss_page):
+    from playwright.sync_api import expect
+    page = rss_page
+    expect(page.locator(".feed-card")).to_have_count(30)
+    page.locator('[data-item-id="1"]').click()
+    expect(page.locator("#articleBody h2")).to_have_text("正文小标题")
+    expect(page.locator(".article-rich p")).to_have_count(3)
+    expect(page.locator(".article-rich li")).to_have_count(2)
+    expect(page.locator(".article-rich img")).to_have_count(2)
+    expect(page.locator(".article-rich img").first).to_be_visible()
+    assert page.locator(".article-rich img").first.evaluate("img => img.complete && img.naturalWidth > 0")
+    # The source's first image belongs in the body once, not again as a detail hero.
+    expect(page.locator(".article-image")).to_have_count(0)
+    evidence = os.getenv("RSS_EVIDENCE_DIR")
+    if evidence:
+        page.screenshot(path=str(Path(evidence) / "formatted-content.png"))
+
+
+def test_image_proxy_preserves_recorded_unicode_url(rss_page):
+    from playwright.sync_api import expect
+    page = rss_page
+    raw = 'https://EXAMPLE.COM/中文 photo.png'
+    requested = []
+    def article(route):
+        response = route.fetch()
+        data = response.json()
+        data['item']['content_html'] = f'<p>中文图片</p><img src="{raw}">'
+        data['item']['image_url'] = raw
+        route.fulfill(response=response, json=data)
+    def image(route):
+        from urllib.parse import parse_qs, urlparse
+        requested.append(parse_qs(urlparse(route.request.url).query)['url'][0])
+        route.fulfill(status=200, content_type='image/png', body=__import__('base64').b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jCwkAAAAASUVORK5CYII='))
+    page.route('**/v1/rss/items/1', article)
+    page.route('**/v1/rss/items/1/image?*', image)
+    page.locator('[data-item-id="1"]').click()
+    expect(page.locator('.article-rich img')).to_be_visible()
+    page.wait_for_function('document.querySelector(".article-rich img").naturalWidth > 0')
+    assert requested == [raw]

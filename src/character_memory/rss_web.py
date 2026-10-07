@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 from character_memory.rss_sources import RSS_CATEGORIES, rss_today
+from character_memory.rss_content import article_image_urls
 
 
 class CreateRssSourceRequest(BaseModel):
@@ -18,7 +19,7 @@ class UpdateRssSourceRequest(BaseModel):
 
 def attach_rss_routes(app, web_dir, repository, service, *, default_interval_minutes: float = 60.0) -> None:
     from fastapi import HTTPException, Query
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, Response
 
     @app.get("/sources")
     def sources_page():
@@ -100,3 +101,19 @@ def attach_rss_routes(app, web_dir, repository, service, *, default_interval_min
         if item is None:
             raise HTTPException(status_code=404, detail="RSS item not found")
         return {"item": item}
+
+    @app.get("/v1/rss/items/{item_id}/image")
+    def item_image(item_id: int, url: str = Query(max_length=2000)):
+        item = repository.get_item(item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="RSS item not found")
+        allowed = article_image_urls(item.get("content_html", "")) | {item["image_url"]}
+        if not url or url not in allowed:
+            raise HTTPException(status_code=404, detail="图片不属于这篇 RSS 文章")
+        try:
+            body, mime = service.fetch_image(url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="RSS 原始图片暂时无法加载") from exc
+        return Response(body, media_type=mime, headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"})

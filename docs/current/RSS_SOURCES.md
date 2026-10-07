@@ -54,6 +54,8 @@ GET   /sources
 GET   /v1/rss/sources
 POST  /v1/rss/sources
 PATCH /v1/rss/sources/{source_id}
+DELETE /v1/rss/sources/{source_id}
+POST  /v1/rss/sources/{source_id}/restore
 POST  /v1/rss/sources/{source_id}/refresh
 GET   /v1/rss/items
 GET   /v1/rss/items/{item_id}
@@ -61,7 +63,15 @@ GET   /v1/rss/items/{item_id}/image?url=...
 GET   /v1/rss/categories
 ```
 
-### Article queries (shared desktop / future Android contract)
+### Subscription lifecycle
+
+Cancelling with `DELETE /v1/rss/sources/{source_id}` retains the source ID and all historical articles, sets `cancelled_at`, disables fetching and returns `{source,unsubscribed:true,history_retained:true}`. Repeated cancellation is idempotent; an unknown source returns 404. Default source listing hides cancelled sources; `?include_cancelled=true` includes them for restoration UI. Existing article queries still include their history.
+
+`POST /v1/rss/sources/{source_id}/restore` restores the same identity, enables collection and immediately fetches once, returning `{source,refresh}` just like creation. Adding a cancelled Feed URL also restores its original identity; adding an active duplicate remains an error. Fetch failure preserves the subscription and returns `refresh.ok=false`. Clients must not issue another automatic refresh after add/restore. PATCH is a temporary enable/disable switch and cannot restore cancellation (409). Manual refresh of a cancelled source returns 409.
+
+The additive `rss/003-subscription-lifecycle` migration retains existing rows. Every cancel/restore increments a generation; a fetch that started before cancellation cannot write results or fetch status after cancellation or restoration. Historical articles committed before cancellation remain available.
+
+### Article query behavior
 
 `GET /v1/rss/items` supports three deterministic queries without a model:
 

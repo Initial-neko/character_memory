@@ -29,6 +29,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .rss-nav button.active { background:#efedff; color:#5548e8; font-weight:650; }
 
 .rss-main { grid-column:2; padding:30px 34px 60px; width:min(1180px,100%); margin:0 auto; }
+.rss-view { min-width:0; }
 .rss-header { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:24px; }
 .rss-header h1 { margin:0; font-size:28px; }
 .rss-header p { margin:8px 0 0; color:#7b808a; font-size:14px; }

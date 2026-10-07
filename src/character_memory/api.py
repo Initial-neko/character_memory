@@ -41,6 +41,8 @@ from character_memory.logging_utils import configure_logging
 from character_memory.live2d_web import attach_live2d_routes
 from character_memory.media import MediaStorage
 from character_memory.persona_builder import PersonaDraft
+from character_memory.rss_sources import RssRepository, RssScheduler, RssService
+from character_memory.rss_web import attach_rss_routes
 from character_memory.runtime_services import CharacterRuntimeAccess, build_runtime_services
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.web_assets import attach_static_assets
@@ -108,6 +110,14 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     # shutdown handlers. Feature modules reach it through
     # web_lifecycle.background_services(app).
     background = BackgroundServices()
+    rss_repository = RssRepository(read_store)
+    rss_service = RssService(rss_repository)
+    rss_scheduler = RssScheduler(
+        rss_service,
+        poll_seconds=float(getattr(settings, "rss_poll_seconds", 60.0)),
+        enabled=bool(getattr(settings, "rss_enabled", True)) and own_bundle,
+    )
+    background.register("rss_sources", start=rss_scheduler.start, stop=rss_scheduler.stop)
     runtime_error: str | None = None
     runtime_loading = False
     init_lock = threading.Lock()
@@ -484,5 +494,6 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     attach_core_resource_routes(app, route_access)
     attach_live2d_routes(app, resolve_media_dir(settings) / "live2d", character_profiles)
     attach_core_direct_routes(app, route_access)
+    attach_rss_routes(app, web_dir, rss_repository, rss_service)
 
     return app

@@ -274,6 +274,19 @@ space_audience_size: 5
 space_scheduler_poll_seconds: 60
 
 # -----------------------------------------------------------------------------
+# RSS / External Sources
+# -----------------------------------------------------------------------------
+
+# Deterministic RSS/Atom collection. This layer does not call the Character LLM.
+rss_enabled: true
+
+# How often the process checks whether one source's own interval is due.
+rss_poll_seconds: 60
+
+# Default interval assigned to newly added subscriptions.
+rss_default_fetch_interval_minutes: 60
+
+# -----------------------------------------------------------------------------
 # World Activity
 # -----------------------------------------------------------------------------
 

@@ -5,7 +5,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from character_memory.rss_sources import ParsedFeedItem, RssRepository, RssService
+from character_memory.rss_sources import (
+    ParsedFeedItem,
+    RssRepository,
+    RssService,
+    keyword_matches,
+)
 from character_memory.rss_web import attach_rss_routes
 from character_memory.storage.sqlite import SQLiteStore
 
@@ -104,3 +109,31 @@ def test_today_http_exposes_effective_date_and_timezone(rss):
     assert payload["query"]["timezone"] == "UTC+08:00"
     assert len(payload["query"]["date"]) == 10
     assert all(i["published_at"] is not None for i in payload["items"])
+
+
+def test_latin_category_keywords_need_a_word_boundary():
+    # Substring matching made these three hit AI/development by accident.
+    assert keyword_matches("Email 推送设计", "AI") is False
+    assert keyword_matches("Train 时刻表", "AI") is False
+    assert keyword_matches("Rapid growth 报告", "API") is False
+    assert keyword_matches("AI 新品发布", "AI") is True
+    assert keyword_matches("GPT API 开发指南", "API") is True
+    # A hyphen is a boundary, not a word character.
+    assert keyword_matches("React-Native 教程", "React") is True
+    # Chinese has no word boundary to anchor to, so it stays substring.
+    assert keyword_matches("技术文章 04", "技术") is True
+
+
+def test_category_filter_applies_the_boundary_rule_through_sql(tmp_path):
+    store = SQLiteStore(tmp_path / "boundary.db")
+    now = datetime(2026, 10, 7, 10, tzinfo=timezone.utc)
+    try:
+        repository = RssRepository(store)
+        source = repository.create_source("https://example.com/rss", name="边界源")
+        for key, title in (("email", "Email 推送设计"), ("train", "Train 时刻表"), ("ai", "AI 新品发布")):
+            repository.upsert_items(source["id"], [ParsedFeedItem(
+                key=key, title=title, summary="", content_text="", url="", image_url="", published_at=now,
+            )], fetched_at=now)
+        assert [i["title"] for i in repository.list_items(category="ai")] == ["AI 新品发布"]
+    finally:
+        store.close()

@@ -66,7 +66,7 @@ GET   /v1/rss/categories
 
 - Today's latest: `?period=today`. Today means the publication date in UTC+08:00, midnight inclusive to next midnight exclusive. Fetch time never makes an old or undated article today's news.
 - Related titles: `?q=React`. Literal substring match on the title only, ignoring ASCII case. `%` and `_` are literal characters, not SQL wildcards. Leading/trailing whitespace is stripped; max 200 characters.
-- Article type: `?category=ai` (also `technology`, `development`, `product`). Categories match any of their preset title keywords. `/v1/rss/categories` returns IDs, labels, keywords and the matching rule. Types can overlap; this is not semantic classification.
+- Article type: `?category=ai` (also `technology`, `development`, `product`). Categories match any of their preset title keywords. `/v1/rss/categories` returns IDs, labels, keywords and the matching rule (`title_matches_any_keyword`). A Latin keyword only matches on a word boundary, so `ai` does not hit "email" and `API` does not hit "rapid"; Chinese keywords match as substrings, since Chinese has no word boundary to anchor to. Types can overlap; this is not semantic classification.
 
 Filters combine with AND and may also combine with `source_id`. `period` defaults to `all` for existing API clients; the desktop page explicitly requests `today` by default. Invalid period, category or cursor is rejected with HTTP 400/422.
 

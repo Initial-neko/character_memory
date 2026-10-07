@@ -45,6 +45,35 @@ def rss_today(now: datetime | None = None) -> datetime:
     )
 
 
+def _is_ascii_word_char(char: str) -> bool:
+    return char.isascii() and char.isalnum()
+
+
+def keyword_matches(title: str, keyword: str) -> bool:
+    """Whether a title carries a keyword, not a fragment of a longer word.
+
+    Chinese keywords have no word boundary to anchor to, so they keep matching
+    as substrings ("技术" is meant to hit "技术文章"). Latin keywords are a
+    different matter: plain substring matching made ``ai`` hit "**ai**l" and
+    "tr**ai**n", and ``API`` hit "r**api**d", so those must sit on a boundary.
+    """
+    haystack = str(title or "").lower()
+    needle = str(keyword or "").strip().lower()
+    if not needle:
+        return False
+    if not needle.isascii():
+        return needle in haystack
+    start = haystack.find(needle)
+    while start != -1:
+        before = haystack[start - 1] if start > 0 else ""
+        end = start + len(needle)
+        after = haystack[end] if end < len(haystack) else ""
+        if not _is_ascii_word_char(before) and not _is_ascii_word_char(after):
+            return True
+        start = haystack.find(needle, start + 1)
+    return False
+
+
 class _TextExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -194,6 +223,9 @@ class RssRepository:
 
     def __init__(self, store, *, seed_defaults: bool = False) -> None:
         self.store = store
+        # Category filtering has to happen in SQL to keep paging correct, and
+        # the boundary rule below is not expressible in plain SQLite.
+        self.store.conn.create_function("rss_keyword_match", 2, keyword_matches, deterministic=True)
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema)
         if seed_defaults:
             self.seed_defaults()
@@ -390,7 +422,7 @@ class RssRepository:
             definition = next((item for item in RSS_CATEGORIES if item["id"] == category), None)
             if definition is None:
                 raise ValueError("未知文章类型")
-            where.append("(" + " OR ".join("instr(lower(i.title), lower(?))>0" for _ in definition["keywords"]) + ")")
+            where.append("(" + " OR ".join("rss_keyword_match(i.title, ?)=1" for _ in definition["keywords"]) + ")")
             args.extend(definition["keywords"])
         if source_id is not None:
             where.append("i.source_id=?")

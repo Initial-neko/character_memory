@@ -62,7 +62,13 @@ def attach_rss_routes(app, web_dir, repository, service, *, default_interval_min
 
     @app.get("/v1/rss/categories")
     def list_categories():
-        return {"categories": RSS_CATEGORIES, "match": "title_contains_any_keyword"}
+        return {
+            "categories": RSS_CATEGORIES,
+            # Not plain substring: a Latin keyword only matches on a word
+            # boundary, so `ai` no longer hits "email" and `API` no longer hits
+            # "rapid". Chinese keywords still match as substrings.
+            "match": "title_matches_any_keyword",
+        }
 
     @app.get("/v1/rss/items", summary="按发布时间、标题关键词和类型查询 RSS 文章")
     def list_items(

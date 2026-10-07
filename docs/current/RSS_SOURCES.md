@@ -57,6 +57,7 @@ PATCH /v1/rss/sources/{source_id}
 POST  /v1/rss/sources/{source_id}/refresh
 GET   /v1/rss/items
 GET   /v1/rss/items/{item_id}
+GET   /v1/rss/items/{item_id}/image?url=...
 GET   /v1/rss/categories
 ```
 
@@ -88,7 +89,9 @@ The V1 surface intentionally stays small:
 
 1. RSS subscription list: add, enable/disable, manual refresh and status.
 2. Information feed: two-column image/text cards, today's latest by default, all-history toggle, title search, preset type filters and incremental pagination. Narrow widths below 380px use one column.
-3. Article detail: normalized Feed content with an explicit excerpt caveat, original link, retry on failure, keyboard activation and Escape/back return preserving the feed's filters, position and focus.
+3. Article detail: sanitized Feed HTML preserving paragraphs, headings, lists, links and inline images, with an explicit excerpt caveat, original link, retry on failure, keyboard activation and Escape/back return preserving the feed's filters, position and focus.
+
+`content_html` is added by the repeatable `rss/002-rich-content` migration. `content_text` retains paragraph line breaks for API consumers. Refresh repairs existing articles in place without changing their IDs, first fetch or first publication times, keeping pagination sort keys stable. Old rows use their plain text until the next source refresh. Feed images are displayed through the item image endpoint, which only accepts URLs recorded on that article, checks public HTTP targets and redirects, applies the same size/deadline bounds and validates raster file signatures (PNG/JPEG/GIF/WebP/AVIF). Scripts, embedded frames, styles and event attributes are removed. Image failures remain visible with a retry action. Feeds providing only an excerpt or no image remain incomplete; no original-site scraping or invented cover is performed.
 
 The main application's external-information entry remains directly below Space. Source management shows article counts, fetch/success times and concrete errors. Loading/empty/error states are separate, failed requests can be retried, and stale feed/detail/source-list responses cannot overwrite newer navigation. If a `today` pagination response reports a different effective date, the page reloads the first page instead of mixing dates. API consumers can apply the same rule using `query.date`. Closing an in-progress add dialog does not cancel the backend write; its late result updates subscriptions without closing a newly opened dialog. This layer still does not connect Characters or implement native Android screens.
 

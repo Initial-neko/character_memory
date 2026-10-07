@@ -24,7 +24,8 @@ for index in range(38):
     title = titles[index] if index < len(titles) else f"技术文章 {index:02d}"
     repository.upsert_items(source["id"], [ParsedFeedItem(
         key=str(index), title=title, summary="这是 Feed 提供的摘要，用于检查卡片阅读与详情返回。",
-        content_text="这是 Feed 提供的内容。原文链接保留，未将摘要宣称为完整正文。",
+        content_text="这是 Feed 提供的内容。\n\n第二段内容。",
+        content_html='<h2>正文小标题</h2><p>这是 Feed 提供的内容。</p><p>第二段内容。</p><ul><li>第一项</li><li>第二项</li></ul><img src="https://93.184.216.34/cover.png" alt="正文第一张"><p>图片之间的段落</p><img src="https://93.184.216.34/cover.png" alt="正文第二张">',
         url=f"https://example.com/article/{index}", image_url="/test/cover.svg" if index % 2 == 0 else "",
         published_at=today - timedelta(minutes=index),
     )], fetched_at=now)
@@ -39,6 +40,9 @@ repository.mark_fetch(source["id"], now=now)
 
 
 def upstream(request):
+    if request.url.path == "/cover.png":
+        import base64
+        return httpx.Response(200, content=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jCwkAAAAASUVORK5CYII='), headers={"content-type":"image/png"})
     if request.url.path == "/fail.xml":
         return httpx.Response(500)
     return httpx.Response(200, text='''<rss version="2.0"><channel><title>新增验收源</title>

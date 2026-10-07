@@ -9,6 +9,43 @@
     try { const url = new URL(raw, location.href); return ["http:","https:"].includes(url.protocol) ? url.href : ""; }
     catch { return ""; }
   };
+  const imageSrc = (itemId, url) => {
+    if (new URL(url, location.href).origin === location.origin) return url;
+    return `/v1/rss/items/${itemId}/image?${new URLSearchParams({url})}`;
+  };
+  const articleContent = item => {
+    const root = document.createElement("div");
+    if (!item.content_html) {
+      root.className = "article-text";
+      root.textContent = item.content_text || item.summary || "该 Feed 没有提供内容，请打开原文阅读。";
+      return root;
+    }
+    root.className = "article-rich";
+    const allowed = new Set(["p","div","h1","h2","h3","h4","h5","h6","br","hr","ul","ol","li","blockquote","pre","code","strong","b","em","i","a","img","figure","figcaption","table","thead","tbody","tr","th","td"]);
+    const drop = new Set(["script","style","iframe","object","embed","svg","math","template","noscript","head"]);
+    const documentSource = new DOMParser().parseFromString(item.content_html, "text/html");
+    const copy = (node, parent) => {
+      if (node.nodeType === Node.TEXT_NODE) { parent.append(document.createTextNode(node.textContent)); return; }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.localName.toLowerCase();
+      if (drop.has(tag)) return;
+      if (!allowed.has(tag)) { node.childNodes.forEach(child => copy(child, parent)); return; }
+      const clean = document.createElement(tag);
+      if (tag === "img") {
+        const url = node.getAttribute("src") || "";
+        if (!url || !safeUrl(url)) return;
+        clean.src = imageSrc(item.id, url); clean.alt = node.getAttribute("alt") || "";
+        clean.loading = "lazy"; clean.referrerPolicy = "no-referrer";
+      } else if (tag === "a") {
+        const url = node.getAttribute("href") ? safeUrl(node.getAttribute("href")) : "";
+        if (url) { clean.href = url; clean.target = "_blank"; clean.rel = "noopener noreferrer"; }
+      }
+      node.childNodes.forEach(child => copy(child, clean));
+      parent.append(clean);
+    };
+    documentSource.body.childNodes.forEach(child => copy(child, root));
+    return root;
+  };
   const api = async (url, options = {}) => {
     const response = await fetch(url, {...options, headers:{"Content-Type":"application/json", ...(options.headers || {})}});
     if (!response.ok) {
@@ -63,9 +100,9 @@
       </article>`).join("") : '<div class="rss-empty">还没有订阅源，点击“添加订阅”开始。</div>';
   };
   const renderCards = items => items.map(item => {
-    const image = item.image_url ? safeUrl(item.image_url) : "";
+    const image = item.image_url && safeUrl(item.image_url) ? item.image_url : "";
     return `<article class="feed-card" tabindex="0" role="button" aria-label="阅读 ${escapeHtml(item.title)}" data-item-id="${item.id}">
-      ${image ? `<img src="${escapeHtml(image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
+      ${image ? `<img src="${escapeHtml(imageSrc(item.id, image))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
       <div class="feed-card-copy"><h2>${escapeHtml(item.title)}</h2>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}
         <div class="feed-meta"><span class="feed-source">${escapeHtml(item.source_name)}</span><span>${escapeHtml(item.published_at ? fmtTime(item.published_at) : "发布时间未知")}</span></div>
       </div></article>`;
@@ -119,13 +156,13 @@
     try {
       const {item} = await api(`/v1/rss/items/${itemId}`);
       if (request !== state.articleRequest) return;
-      const url = item.url ? safeUrl(item.url) : "", image = item.image_url ? safeUrl(item.image_url) : "";
+      const url = item.url ? safeUrl(item.url) : "", image = item.image_url && safeUrl(item.image_url) ? item.image_url : "";
       $("#articleExternalLink").href = url || "#"; $("#articleExternalLink").classList.toggle("hidden", !url);
       $("#articleBody").innerHTML = `<h1>${escapeHtml(item.title)}</h1>
         <div class="article-byline">${escapeHtml(item.source_name)} · ${escapeHtml(item.published_at ? fmtTime(item.published_at) : "发布时间未知")}</div>
-        ${image ? `<img class="article-image" src="${escapeHtml(image)}" alt="" referrerpolicy="no-referrer">` : ""}
-        <p class="article-note">以下是 Feed 提供的内容，可能为摘要或节选；完整内容请查看原文。</p>
-        <div class="article-text">${escapeHtml(item.content_text || item.summary || "该 Feed 没有提供内容，请打开原文阅读。")}</div>`;
+        ${image && !item.content_html?.includes("<img ") ? `<img class="article-image" src="${escapeHtml(imageSrc(item.id, image))}" alt="" referrerpolicy="no-referrer">` : ""}
+        <p class="article-note">以下是 Feed 提供的内容，可能为摘要或节选；完整内容请查看原文。</p>`;
+      $("#articleBody").append(articleContent(item));
     } catch (error) {
       if (request === state.articleRequest) $("#articleBody").innerHTML = `<p role="alert">加载失败：${escapeHtml(error.message)}</p><button type="button" data-article-retry="${itemId}">重试</button>`;
     }
@@ -167,6 +204,14 @@
     const refresh = target.closest("[data-source-refresh]");
     if (refresh) { refreshSource(refresh); return; }
     if (target.closest("#retryCategoriesButton")) loadCategories();
+    const imageRetry = target.closest("[data-image-retry]");
+    if (imageRetry) {
+      const image = document.createElement("img");
+      image.className = imageRetry.dataset.imageClass || "";
+      image.alt = imageRetry.dataset.imageAlt || "";
+      image.src = imageRetry.dataset.imageRetry;
+      imageRetry.closest(".image-failure").replaceWith(image);
+    }
   });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") {
@@ -184,7 +229,15 @@
       if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }
   });
-  document.addEventListener("error", event => { if (event.target.matches?.(".feed-card img, .article-image")) event.target.remove(); }, true);
+  document.addEventListener("error", event => {
+    const image = event.target;
+    if (!image.matches?.(".feed-card img, .article-image, .article-rich img")) return;
+    const notice = document.createElement("span"); notice.className = "image-failure";
+    notice.textContent = image.alt ? `${image.alt} · 图片暂时无法加载 ` : "图片暂时无法加载 ";
+    const retry = document.createElement("button"); retry.type = "button"; retry.textContent = "重试";
+    retry.dataset.imageRetry = image.src; retry.dataset.imageClass = image.className; retry.dataset.imageAlt = image.alt;
+    notice.append(retry); image.replaceWith(notice);
+  }, true);
   document.addEventListener("change", async event => {
     const toggle = event.target.closest("[data-source-toggle]");
     if (!toggle) return;

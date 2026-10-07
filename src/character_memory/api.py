@@ -494,6 +494,12 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     attach_core_resource_routes(app, route_access)
     attach_live2d_routes(app, resolve_media_dir(settings) / "live2d", character_profiles)
     attach_core_direct_routes(app, route_access)
-    attach_rss_routes(app, web_dir, rss_repository, rss_service)
+    attach_rss_routes(
+        app,
+        web_dir,
+        rss_repository,
+        rss_service,
+        default_interval_minutes=float(getattr(settings, "rss_default_fetch_interval_minutes", 60.0)),
+    )
 
     return app

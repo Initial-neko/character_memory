@@ -19,6 +19,7 @@ from character_memory.server import create_server_app
 # feeds is closed.
 WORKERS_IN_START_ORDER = [
     "proactive_dispatch",
+    "rss_sources",
     "world_activity",
     "space_autonomy",
     "encounter_scheduler",

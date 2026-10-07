@@ -29,6 +29,7 @@ Historical material never overrides current code or `docs/current/`.
 | [MEMORY](current/MEMORY.md) | Durable facts, admission, recall and provenance. |
 | [CONVERSATION_RUNTIME](current/CONVERSATION_RUNTIME.md) | Direct/Group delivery, SSE, durable Voice Messages and Stickers. |
 | [SOCIAL_WORLD](current/SOCIAL_WORLD.md) | Character Space, World Pulse and Personal Browse. |
+| [RSS_SOURCES](current/RSS_SOURCES.md) | RSS/Atom external-source ingestion, storage and UI boundary. |
 | [VISUAL](current/VISUAL.md) | Camera/Screen capture, ImageGen and Avatar sources. |
 | [VOICE_AND_TTS](current/VOICE_AND_TTS.md) | ASR/TTS runtime, providers, Workbench, GSV and Qwen tooling. |
 | [SETTINGS_CENTER](current/SETTINGS_CENTER.md) | Persistent configuration and secret/apply semantics. |

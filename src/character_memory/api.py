@@ -41,6 +41,7 @@ from character_memory.logging_utils import configure_logging
 from character_memory.live2d_web import attach_live2d_routes
 from character_memory.media import MediaStorage
 from character_memory.persona_builder import PersonaDraft
+from character_memory.rss_runtime import attach_rss_runtime
 from character_memory.runtime_services import CharacterRuntimeAccess, build_runtime_services
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.web_assets import attach_static_assets
@@ -484,5 +485,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     attach_core_resource_routes(app, route_access)
     attach_live2d_routes(app, resolve_media_dir(settings) / "live2d", character_profiles)
     attach_core_direct_routes(app, route_access)
+    attach_rss_runtime(
+        app,
+        web_dir,
+        read_store,
+        background,
+        settings,
+        own_bundle=own_bundle,
+    )
 
     return app

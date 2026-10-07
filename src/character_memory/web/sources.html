@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>外部信息 · Character Memory</title>
+  <link rel="stylesheet" href="/static/ui.css">
+  <link rel="stylesheet" href="/static/rss.css">
+</head>
+<body>
+  <div class="rss-shell">
+    <aside class="rss-sidebar">
+      <a class="rss-brand" href="/"><span class="rss-brand-mark">CM</span><span>Character Memory</span></a>
+      <nav class="rss-nav">
+        <a href="/">⌂ <span>首页</span></a>
+        <button class="active" type="button" data-view="feed">◎ <span>信息流</span></button>
+        <button type="button" data-view="sources">◉ <span>RSS 订阅</span></button>
+      </nav>
+    </aside>
+
+    <main class="rss-main">
+      <header class="rss-header">
+        <div>
+          <h1 id="viewTitle">信息流</h1>
+          <p id="viewSubtitle">来自你订阅的信息源</p>
+        </div>
+        <button id="addSourceButton" class="primary-button" type="button">＋ 添加订阅</button>
+      </header>
+
+      <section id="feedView" class="rss-view">
+        <div id="feedEmpty" class="rss-empty hidden">还没有文章，先刷新一个订阅源。</div>
+        <div id="feedGrid" class="feed-grid"></div>
+      </section>
+
+      <section id="sourcesView" class="rss-view hidden">
+        <div id="sourceList" class="source-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="sourceModal" class="rss-modal hidden" role="dialog" aria-modal="true" aria-labelledby="sourceModalTitle">
+    <form id="sourceForm" class="rss-modal-card">
+      <div class="modal-head">
+        <div><h2 id="sourceModalTitle">添加 RSS 订阅</h2><p>输入 RSS 或 Atom 地址</p></div>
+        <button id="closeSourceModal" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <label>RSS 地址<input id="sourceUrl" type="url" required placeholder="https://example.com/feed.xml"></label>
+      <label>名称（可选）<input id="sourceName" type="text" placeholder="留空则使用 Feed 标题"></label>
+      <div id="sourceFormError" class="form-error hidden"></div>
+      <div class="modal-actions"><button type="button" id="cancelSourceButton">取消</button><button class="primary-button" type="submit">添加订阅</button></div>
+    </form>
+  </div>
+
+  <aside id="articlePanel" class="article-panel hidden" aria-hidden="true">
+    <header><button id="closeArticleButton" class="icon-button" type="button">←</button><a id="articleExternalLink" target="_blank" rel="noreferrer">原文 ↗</a></header>
+    <div id="articleBody" class="article-body"></div>
+  </aside>
+
+  <script src="/static/rss.js" defer></script>
+</body>
+</html>

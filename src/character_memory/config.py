@@ -197,6 +197,10 @@ class Settings(BaseModel):
     rss_enabled: bool = True
     rss_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
     rss_default_fetch_interval_minutes: float = Field(default=60.0, ge=10.0, le=10080.0)
+    # Off by default: seeding inserts subscriptions into whatever database is
+    # already there, and the scheduler then starts talking to those third-party
+    # hosts without the user ever asking for them.
+    rss_seed_default_sources: bool = False
 
     # World Activity is intentionally decoupled from Space publishing cadence.
     # Pulse refresh/discussion and Personal Browse each keep their own durable

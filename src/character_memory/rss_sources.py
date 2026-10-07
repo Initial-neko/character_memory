@@ -8,6 +8,7 @@ from html import unescape
 from html.parser import HTMLParser
 import logging
 import threading
+import time
 from typing import Iterable
 from urllib.parse import urljoin, urlparse
 import xml.etree.ElementTree as ET
@@ -176,7 +177,7 @@ def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
 class RssRepository:
     MIGRATION = "rss/001-sources-and-items"
 
-    def __init__(self, store, *, seed_defaults: bool = True) -> None:
+    def __init__(self, store, *, seed_defaults: bool = False) -> None:
         self.store = store
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema)
         if seed_defaults:
@@ -397,8 +398,21 @@ class RssRepository:
 
 
 class RssService:
-    def __init__(self, repository: RssRepository, *, timeout_seconds: float = 15.0, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        repository: RssRepository,
+        *,
+        timeout_seconds: float = 15.0,
+        total_timeout_seconds: float = 20.0,
+        max_response_bytes: int = 4 * 1024 * 1024,
+        client: httpx.Client | None = None,
+    ) -> None:
         self.repository = repository
+        # A per-operation timeout cannot bound a whole fetch: a peer that sends
+        # one byte just inside the read window keeps every operation "on time"
+        # forever. The deadline below covers one fetch including its redirects.
+        self.total_timeout_seconds = float(total_timeout_seconds)
+        self.max_response_bytes = int(max_response_bytes)
         self.client = client or httpx.Client(timeout=timeout_seconds, follow_redirects=False, headers={"User-Agent": "character-memory-rss/1.0"})
         self._owns_client = client is None
 
@@ -407,20 +421,35 @@ class RssService:
             self.client.close()
 
     def _fetch_text(self, url: str) -> str:
+        deadline = time.monotonic() + self.total_timeout_seconds
         current = url
         for _ in range(4):
             ensure_public_http_url(current)
-            response = self.client.get(current)
-            if response.status_code in {301, 302, 303, 307, 308}:
-                target = response.headers.get("location")
-                if not target:
-                    raise RuntimeError("RSS 重定向缺少 Location")
-                current = urljoin(current, target)
-                continue
-            response.raise_for_status()
-            if len(response.content) > 4 * 1024 * 1024:
-                raise ValueError("RSS 响应超过 4 MiB")
-            return response.text
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("RSS 抓取超过总时限")
+            # Streamed, so an endless or oversized body is cut off at the byte
+            # budget instead of being buffered whole before the size check.
+            with self.client.stream("GET", current, timeout=remaining) as response:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    target = response.headers.get("location")
+                    if not target:
+                        raise RuntimeError("RSS 重定向缺少 Location")
+                    current = urljoin(current, target)
+                    continue
+                response.raise_for_status()
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    body.extend(chunk)
+                    if len(body) > self.max_response_bytes:
+                        raise ValueError("RSS 响应超过 4 MiB")
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("RSS 抓取超过总时限")
+                encoding = response.charset_encoding or "utf-8"
+                try:
+                    return bytes(body).decode(encoding, errors="replace")
+                except LookupError:
+                    return bytes(body).decode("utf-8", errors="replace")
         raise RuntimeError("RSS 重定向次数过多")
 
     def refresh_source(self, source_id: int) -> dict:

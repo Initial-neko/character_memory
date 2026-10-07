@@ -20,7 +20,12 @@ def attach_rss_runtime(
     lifecycle, but it does not depend on CharacterRuntime or the model.
     """
 
-    repository = RssRepository(store)
+    # Seeding stays opt-in: it writes rows into an existing database and the
+    # scheduler then starts fetching those hosts on its own.
+    repository = RssRepository(
+        store,
+        seed_defaults=bool(getattr(settings, "rss_seed_default_sources", False)),
+    )
     service = RssService(repository)
     scheduler = RssScheduler(
         service,

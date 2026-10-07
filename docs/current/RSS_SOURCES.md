@@ -28,12 +28,14 @@ This keeps external collection separate from Character cognition. A later change
 
 ## Default subscriptions
 
-The first run seeds:
+`rss_seed_default_sources` is `false`. A fresh database starts with an empty subscription list, and upgrading never inserts anything on its own. Setting it to `true` seeds:
 
 - 阮一峰的网络日志 — `https://www.ruanyifeng.com/blog/atom.xml`
 - AIHOT 日报 — `https://aihot.news/feed/daily.xml`
 - hex2077.dev — `https://hex2077.dev/rss-zh-CN.xml`
 - OpenAI News — `https://openai.com/news/rss.xml`
+
+Seeding is opt-in because it writes into whatever database is already there, and the scheduler then starts talking to those hosts without the user asking for them.
 
 `rsshub.app` itself is not a feed. Users can add any concrete RSSHub route through the normal “添加订阅” dialog.
 
@@ -42,6 +44,8 @@ The first run seeds:
 `RssScheduler` is process-local and polls for sources whose own fetch interval has expired. Fetching starts after the first poll instead of blocking application startup. Manual refresh remains immediate.
 
 User-supplied URLs pass the same public-http target guard used by existing remote media paths. Redirect destinations are checked again.
+
+One fetch is bounded twice: a 4 MiB response budget enforced while the body is still streaming, and a whole-fetch deadline (`total_timeout_seconds`, 20 s) that also covers its redirects. The per-operation httpx timeout alone cannot bound a peer that keeps sending just inside the read window.
 
 ## HTTP
 

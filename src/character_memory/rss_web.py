@@ -6,14 +6,14 @@ from pydantic import BaseModel, Field
 class CreateRssSourceRequest(BaseModel):
     feed_url: str = Field(min_length=1, max_length=2000)
     name: str = Field(default="", max_length=240)
-    fetch_interval_minutes: float = Field(default=60.0, ge=10.0, le=10080.0)
+    fetch_interval_minutes: float | None = Field(default=None, ge=10.0, le=10080.0)
 
 
 class UpdateRssSourceRequest(BaseModel):
     enabled: bool
 
 
-def attach_rss_routes(app, web_dir, repository, service) -> None:
+def attach_rss_routes(app, web_dir, repository, service, *, default_interval_minutes: float = 60.0) -> None:
     from fastapi import HTTPException, Query
     from fastapi.responses import FileResponse
 
@@ -31,7 +31,7 @@ def attach_rss_routes(app, web_dir, repository, service) -> None:
             source = repository.create_source(
                 payload.feed_url,
                 name=payload.name,
-                interval_minutes=payload.fetch_interval_minutes,
+                interval_minutes=payload.fetch_interval_minutes or default_interval_minutes,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

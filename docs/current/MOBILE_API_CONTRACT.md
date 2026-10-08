@@ -180,7 +180,7 @@ For group use `scope=group&conversation_id=<group_id>`, no `character_id` requir
 
 The server supports the HTTP `Last-Event-ID` header for transient SSE resume. **It is NOT a durable cross-restart event log**. On first connect, reconnect, app resume or scope change, GET the durable history page and merge/dedupe by persisted message/event IDs. Do not assume every response must generate a model message; `actions=[]` (silence) is valid. Manage stream lifecycle separately for direct and group.
 
-**Current cross-client gap:** Web `web/app.js` creates a per-character `conversation_id` in browser `localStorage`. Android must not independently invent a conflicting ID and assume perfect cross-device SSE routing. A Core-owned migration/identity contract is proposed in section 7; before it lands, the Android consumer must implement and test a deliberate compatibility strategy.
+**Intended separation (2026-10-08):** Web `web/app.js` and Android use client-local Direct `conversation_id` choices. Cross-device history merging, canonical identity and shared read cursors are **not planned**. Each client must scope its own SSE subscription, durable-history reconciliation and duplicate suppression to its own conversation ID; no Web ↔ Android shared Direct session is promised.
 
 ### VOICE_MESSAGE payload fields — existing Core behavior
 
@@ -232,19 +232,19 @@ The existing Web `voice.js` performs ASR → chat/visual message 202 → SSE rea
 
 Android consumes Core-owned RSS data and collection through the CORE origin. See [RSS Sources](RSS_SOURCES.md) for the complete query and sanitized-content contract; deployment OpenAPI must be checked before integration. GET/POST `/v1/rss/sources`, PATCH/DELETE `/v1/rss/sources/{id}`, POST `/v1/rss/sources/{id}/restore`, POST `/v1/rss/sources/{id}/refresh`, GET `/v1/rss/categories`, GET `/v1/rss/items`, GET `/v1/rss/items/{id}` and GET `/v1/rss/items/{id}/image?url=...` are the client surface. Source GET accepts `include_cancelled=true` for recovery UI. Cancel retains historical articles; restore reuses the same source and immediately fetches. Add/restore already perform the immediate fetch and return `{source,refresh}`; failed fetch preserves subscription. Clients must never run a second grabber, copy the facts database, or automatically replay subscription writes. Android image requests pass the original recorded URL through the Core image endpoint. Characters do not automatically consume these items.
 
-## 7. Missing contracts (PROPOSED, not implemented)
+## 7. Optional/future contracts (PROPOSED or explicitly not planned)
 
 | Proposed capability | Suggested contract | Blocking? |
 |---|---|---|
 | Pair / revoke native device | one-time pair request + scoped device credential + revoke / expiry | **Required before exposing native privileged calls**; not currently callable |
-| Canonical direct conversation ID | server-owned get-or-create or migration mapping; preserve old Web IDs | **Required for trustworthy Web ↔ Android live consistency** |
-| Cross-device read cursor | per-user/per-conversation last-read durable cursor | optional initial UI; required before claiming synchronized unread |
+| Canonical direct conversation ID | **NOT PLANNED:** no unified Web/Android Direct ID or legacy Web migration | out of scope by user decision (2026-10-08) |
+| Cross-device read cursor | **NOT PLANNED:** no synchronized cross-device unread cursor | out of scope; local client notification state may still exist |
 | Device capability / diagnostics | app version, last seen, mic/camera/screen capability, operational status | after basic end-to-end connectivity |
 | Background notification delivery | explicit push transport and opt-in; do not assume SSE is Android background push | phased enhancement, not existing |
 | Multipart media upload | bounded binary upload + asset ID accepted by message API | optional optimization; current data URL is already callable |
 | Native capture session binding | explicit target ownership and revocation if capture continues while Web UI changes target | required for cross-app/background screen capture if not bound by active call |
 
-**Names/paths above are intentionally NOT frozen.** Author Core RFC + tests before declaring a new endpoint `CURRENT`. Device tokens must be scoped, stored using Android Keystore, revocable and unable to call PC-local Dev/Settings/Secret APIs. Tailnet membership alone does not define product roles. Existing Web clients must remain functional during migration.
+**Names/paths above are intentionally NOT frozen.** Author Core RFC + tests before declaring a new endpoint `CURRENT`. Device tokens must be scoped, stored using Android Keystore, revocable and unable to call PC-local Dev/Settings/Secret APIs. Tailnet membership alone does not define product roles. Existing Web clients must remain functional when optional security contracts are implemented; no cross-client Direct identity migration is planned.
 
 ## 8. Change process and integration acceptance
 

@@ -225,3 +225,42 @@ def test_pulse_records_topic_encounter_without_claiming_full_page_read(tmp_path)
     assert event.metadata["observation_lifecycle"]["cognition_status"] == "NOT_REQUESTED"
     assert store.list_memories("c00") == []
     store.close()
+
+
+def test_two_connections_first_migration_serializes_before_reading_marker(tmp_path):
+    from threading import Event as Signal
+    path = tmp_path / "cold.sqlite"
+    first = SQLiteStore(path)
+    second = SQLiteStore(path)
+    first_read = Signal()
+    second_read = Signal()
+    original_first = first._migration_applied_locked
+    original_second = second._migration_applied_locked
+    def read_first(name):
+        value = original_first(name)
+        if name == "world/003-observation-lifecycle":
+            first_read.set()
+            second_read.wait(0.2)
+        return value
+    def read_second(name):
+        value = original_second(name)
+        if name == "world/003-observation-lifecycle":
+            second_read.set()
+        return value
+    first._migration_applied_locked = read_first
+    second._migration_applied_locked = read_second
+    def submit(store):
+        event, created = retain_world_observation(store, observation(), observation_key="cold")
+        return event.id, created
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first_result = pool.submit(submit, first)
+            assert first_read.wait(2)
+            second_result = pool.submit(submit, second)
+            results = [first_result.result(), second_result.result()]
+        assert results[0][0] == results[1][0] and sum(created for _, created in results) == 1
+        assert second_read.is_set()
+        assert len(first.list_events("a")) == 1
+    finally:
+        first.close()
+        second.close()

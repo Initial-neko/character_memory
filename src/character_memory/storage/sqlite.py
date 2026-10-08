@@ -59,7 +59,7 @@ class SQLiteStore:
         )
         return result
 
-    def apply_schema_migration(self, name: str, migrate):
+    def apply_schema_migration(self, name: str, migrate, *, immediate: bool = False):
         """Run one idempotent migration once for this SQLite database.
 
         Feature modules such as group chat can share the same migration ledger
@@ -67,7 +67,7 @@ class SQLiteStore:
         The callback is executed under the store lock and committed atomically
         with the migration marker.
         """
-        with self.transaction():
+        with self.transaction(immediate=immediate):
             return self._run_migration_locked(name, migrate)
 
     def list_schema_migrations(self) -> list[str]:
@@ -422,11 +422,11 @@ class SQLiteStore:
             self.conn.commit()
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, immediate: bool = False):
         with self._lock:
             outer = self._tx_depth == 0
             if outer:
-                self.conn.execute("BEGIN")
+                self.conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             self._tx_depth += 1
             try:
                 yield
@@ -496,6 +496,7 @@ class SQLiteStore:
                 f"CREATE UNIQUE INDEX IF NOT EXISTS idx_world_observation_key "
                 f"ON events(character_id, {key_expr}) WHERE event_type='WORLD_OBSERVATION'"
             ),
+            immediate=True,
         )
         with self._lock:
             cur = self.conn.execute(

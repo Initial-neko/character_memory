@@ -670,7 +670,10 @@ local result with its original key returns the stored event and does not rerun
 cognition or duplicate derived Memory. Reusing a key for different content,
 time or sources is rejected. The additive `world/003-observation-lifecycle`
 migration creates an index over existing Event metadata; legacy unkeyed rows
-are untouched. Older readers continue to use the existing Event schema, and
+are untouched. At the outermost transaction, this migration takes the SQLite
+writer lock before checking its marker, serializing first-use concurrent setup.
+An existing caller-owned deferred transaction cannot be upgraded by an inner
+transaction; callers own that outer transaction and its concurrency discipline. Older readers continue to use the existing Event schema, and
 the index can remain during rollback.
 
 This deduplicates local retained-result submission, not earlier Search, Browser,

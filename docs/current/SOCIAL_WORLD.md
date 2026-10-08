@@ -592,7 +592,8 @@ prevents immediate catch-up, and the unfinished receipt requires investigation.
 
 `world_cost_saving_enabled` defaults to false. When enabled it doubles only the
 background Personal Browse interval, retaining the original page budget and
-appraisal quality. It does not change manual browsing, Pulse, Space, chat,
+appraisal quality. For optional RSS reading it also reduces candidates/selections
+from 8/2 to 4/1. It does not change manual browsing cadence, Pulse, Space, chat,
 permissions or recovery guarantees. Configuration changes require restart;
 the durable clock re-arms from the current time without catch-up. The existing
 idle planning gate remains active in both modes.
@@ -637,6 +638,7 @@ world_pulse_commenter_count: 4
 
 world_browse_enabled: true
 world_cost_saving_enabled: false
+world_rss_reading_enabled: false
 world_browse_interval_minutes: 30
 world_browse_max_pages: 2
 world_activity_poll_seconds: 60
@@ -716,3 +718,14 @@ plan or Appraisal calls. A crash before cognition finishes leaves REQUESTED /
 PENDING as an unknown outcome; it must not trigger automatic provider replay.
 The committed runtime trace and lifecycle distinguish completed cognition.
 Execution opportunity recovery and budget contracts remain a separate boundary.
+
+### Local RSS choice in Personal Browse
+
+When `world_rss_reading_enabled` is enabled and eligible local candidates exist,
+Personal Browse uses `PersonalWorldReadPlan` for NO_ACTION / WEB_SEARCH / READ_RSS.
+The existing World opportunity, durable decision/appraisal phases and bounded
+CapabilityExecutor remain the owners. READ_RSS reads local Feed text only and
+uses one batch appraisal; actual source snapshots and per-person reading state
+are specified in RSS_SOURCES. Disabled or empty candidates use the original
+Web path. This adds no Direct/Group search or reading permission, automatic
+publication, long-term Memory admission or second character decision model.

@@ -13,7 +13,8 @@ RSS / Atom
   -> Sources UI
 ```
 
-V1 deliberately stops here.
+Collection deliberately stops at shared storage. The optional personal reading
+path below consumes selected local items through World; it does not change ingestion.
 
 RSS ingestion does **not**:
 
@@ -24,7 +25,8 @@ RSS ingestion does **not**:
 - send Direct messages;
 - expose a generic Tool to a Character.
 
-This keeps external collection separate from Character cognition. A later change can decide how selected `rss_items` become perception input without changing RSS storage.
+This keeps external collection separate from Character cognition. Merely collecting
+an article never establishes that any Character read it.
 
 ## Default subscriptions
 
@@ -105,6 +107,51 @@ The V1 surface intentionally stays small:
 
 `content_html` is added by the repeatable `rss/002-rich-content` migration. `content_text` retains paragraph line breaks for API consumers. Refresh repairs existing articles in place without changing their IDs, first fetch or first publication times, keeping pagination sort keys stable. Old rows use their plain text until the next source refresh. Feed images are displayed through the item image endpoint, which only accepts URLs recorded on that article, checks public HTTP targets and redirects, applies the same size/deadline bounds and validates raster file signatures (PNG/JPEG/GIF/WebP/AVIF). Scripts, embedded frames, styles and event attributes are removed. Image failures remain visible with a retry action. Feeds providing only an excerpt or no image remain incomplete; no original-site scraping or invented cover is performed.
 
-The main application's external-information entry remains directly below Space. Source management shows article counts, fetch/success times and concrete errors. Loading/empty/error states are separate, failed requests can be retried, and stale feed/detail/source-list responses cannot overwrite newer navigation. If a `today` pagination response reports a different effective date, the page reloads the first page instead of mixing dates. API consumers can apply the same rule using `query.date`. Closing an in-progress add dialog does not cancel the backend write; its late result updates subscriptions without closing a newly opened dialog. This layer still does not connect Characters or implement native Android screens.
+The main application's external-information entry remains directly below Space. Source management shows article counts, fetch/success times and concrete errors. Loading/empty/error states are separate, failed requests can be retried, and stale feed/detail/source-list responses cannot overwrite newer navigation. If a `today` pagination response reports a different effective date, the page reloads the first page instead of mixing dates. API consumers can apply the same rule using `query.date`. Closing an in-progress add dialog does not cancel the backend write; its late result updates subscriptions without closing a newly opened dialog. This Sources UI does not claim personal Character readership or implement native Android screens.
 
 No dashboards, recommendations, analytics, tag management or AI summaries are part of V1.
+
+## Optional Character personal reading
+
+`world_rss_reading_enabled` defaults false and requires Character Runtime restart.
+When enabled, the existing World BROWSE opportunity can offer up to eight local
+items from enabled, noncancelled sources. The character chooses `NO_ACTION`,
+`WEB_SEARCH` or `READ_RSS`; choosing RSS can select up to two offered IDs. A
+single bounded batch appraisal processes all successfully read items. There is
+no original-site fetch, per-item summary model, additional Scheduler or automatic
+Memory, Direct message or Space publication. Disabled or empty candidates retain
+the original Web schema/prompt and model call count. The existing daily Browse
+budget and idle gate apply. Saving mode reduces RSS candidates to four and
+selected items to one, preserving the same appraisal semantics.
+
+`world_rss_readings` is a character-local ledger keyed by character and stable
+item ID, separate from shared `rss_items`. Local reading atomically checks source
+enabled/cancellation/generation state, claims the personal item and records the
+actual text snapshot. Only IDs from the saved candidate set may execute. A
+cancel/restore after selection invalidates the old generation. Concurrent
+opportunities cannot read the same personal item. Another character has its own
+independent chance to select it.
+
+Each receipt retains source and item identity, original URL, Feed publication and
+actual read times, a hash of the stored title/URL/summary/text, the number of
+characters read/available and truncation status. At most 12,000 text characters
+are read across a batch. `RSS_FEED_TEXT` explicitly means local Feed content,
+which may only be an excerpt; it never means full original-page readership.
+Titles, URLs and text are untrusted data rather than execution instructions.
+
+`STARTED` has no automatic replay after an unknown interruption. Successful local
+application marks each item `APPLIED` (a sourced `PERSONAL_RSS` observation) or
+`IGNORED` (no personal observation); both exclude the item from future candidates.
+A confirmed `FAILED` item is eligible for one later attempt through another
+normal opportunity, with a total limit of two. This does not buy an automatic
+retry. A saved batch appraisal can retry the local transaction without repeating
+selection, reading or appraisal; events, item outcomes and the opportunity result
+commit together. Failed/missing/duplicate/unknown appraisal identities cannot
+produce fabricated observations. Memory admission remains the existing policy;
+this path requests no extra cognition call.
+
+New eligible content is a bounded idle-gate signal derived from candidate IDs,
+source generations and content hashes. Fetch/error timestamps and unchanged
+refreshes do not wake the model. Gate inspection itself makes no model or network
+calls, and it never bypasses the existing due clock/daily ceiling. Read/ignored
+items are not a recurring wake source.

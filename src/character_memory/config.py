@@ -227,6 +227,7 @@ class Settings(BaseModel):
     world_browse_enabled: bool = True
     # Optional background cadence reduction; permission and correctness do not depend on it.
     world_cost_saving_enabled: bool = False
+    world_rss_reading_enabled: bool = False
     world_browse_interval_minutes: float = Field(default=30.0, ge=10.0, le=10080.0)
     world_browse_max_pages: int = Field(default=2, ge=1, le=4)
     # Browse ceiling for one character per local day. Every browse spends one

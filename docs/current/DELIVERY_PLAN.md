@@ -116,13 +116,13 @@ judgments, and dependent milestones cannot merge on an unaccepted predecessor.
 | M0 | Isolated Character cost/call baseline | Merged in #249 | Accepted at 43e0512; CI green | No live-provider or Persona claim |
 | M1 | Historical observations, lifecycle and behavior contract | Merged in #250, #251, #252 and #254 | F04/F01/lifecycle and legacy metadata supplement accepted; CI green | Live Persona quality pending |
 | M2 | Finite Intent deferral | Merged in #253 | Accepted at a632121; CI green | Live-provider quality pending |
-| M3 | Minimal World Web execution/feedback contract | Implemented in this change | Independent acceptance pending | Live browser/provider quality pending |
-| M4 | RSS personal reading through existing World opportunity | Planned | Not started | Not started |
+| M3 | Minimal World Web execution/feedback contract | Implemented in #255/#256 | Accepted at bb3c682; integration CI pending | Live browser/provider quality pending |
+| M4 | RSS personal reading through existing World opportunity | Implemented in this change | Independent acceptance pending | Live-provider / human quality pending |
 | M5 | Integrated compatibility, cost and opt-in rollout | Planned | Not started | Not started |
 
 The optional World saving switch defaults off and changes only background browse
-cadence. Permission, idempotence and failure safety apply in both modes. RSS
-personal reading remains planned; shared RSS collection is not personal experience.
+cadence. Permission, idempotence and failure safety apply in both modes. Optional RSS
+personal reading defaults off; shared RSS collection is not personal experience.
 Acceptance must use its own configuration, database and process ownership;
 formal service startup and restoring an acceptance database over formal data
 are not part of automated milestone validation.

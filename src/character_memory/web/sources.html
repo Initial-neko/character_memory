@@ -52,6 +52,11 @@
       <section id="sourcesView" class="rss-view hidden">
         <div class="feed-feedback" aria-live="polite"><span id="sourceStatus" role="status"></span><button id="retrySourcesButton" class="hidden" type="button">重试</button></div>
         <div id="sourceList" class="source-list"></div>
+        <section id="cancelledSourceSection" class="cancelled-sources hidden" aria-label="已取消订阅">
+          <h2>已取消的订阅</h2>
+          <p>停止抓取，但保留既有文章。恢复后继续使用原订阅 ID。</p>
+          <div id="cancelledSourceList" class="source-list"></div>
+        </section>
       </section>
     </main>
   </div>

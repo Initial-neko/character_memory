@@ -45,6 +45,8 @@ Seeding is opt-in because it writes into whatever database is already there, and
 
 User-supplied URLs pass the same public-http target guard used by existing remote media paths. Redirect destinations are checked again.
 
+Feeds containing DOCTYPE/ENTITY declarations are rejected before XML parsing, and article/origin URLs are normalized to credential-free HTTP(S). During shutdown, in-flight fetching may finish its network read, but it cannot write to the closed SQLite store. The HTTP client is closed when the last active fetch returns.
+
 One fetch is bounded twice: a 4 MiB response budget enforced while the body is still streaming, and a whole-fetch deadline (`total_timeout_seconds`, 20 s) that also covers its redirects. The per-operation httpx timeout alone cannot bound a peer that keeps sending just inside the read window.
 
 ## HTTP
@@ -97,7 +99,7 @@ Examples:
 
 The V1 surface intentionally stays small:
 
-1. RSS subscription list: add, enable/disable, manual refresh and status.
+1. RSS subscription list: add, enable/disable, manual refresh, confirmed cancellation and restoration (including historical article retention), and status.
 2. Information feed: two-column image/text cards, today's latest by default, all-history toggle, title search, preset type filters and incremental pagination. A sidebar lists real subscriptions and their article counts. Selecting a source opens its full history and scopes search, type filters and pagination to that source; selecting all subscriptions restores today's view. Source changes reset pagination and ignore older responses, while retaining keyword/type filters. Narrow widths below 380px use one column.
 3. Article detail: sanitized Feed HTML preserving paragraphs, headings, lists, links and inline images, with an explicit excerpt caveat, original links in the header and below the content, retry on failure, keyboard activation and Escape/back return preserving the source, other feed filters, position and focus. The bottom original link opens the article's HTTP(S) URL in a new tab; missing/unsafe URLs show an unavailable notice instead.
 

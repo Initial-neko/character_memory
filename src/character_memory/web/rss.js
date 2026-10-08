@@ -1,5 +1,5 @@
 (() => {
-  const state = {view:"feed", period:"today", q:"", category:"", sourceId:"", sources:[], items:[],
+  const state = {view:"feed", period:"today", q:"", category:"", sourceId:"", sources:[], cancelledSources:[], cancelCandidate:null, items:[],
     next:null, feedDate:null, feedRequest:0, sourceRequest:0, modalVersion:0, articleRequest:0,
     loading:false, retryAppend:false, articleOrigin:null};
   const $ = selector => document.querySelector(selector);
@@ -83,9 +83,16 @@
     const request = ++state.sourceRequest;
     feedback("source", "加载订阅中…");
     try {
-      const data = await api("/v1/rss/sources");
+      const data = await api("/v1/rss/sources?include_cancelled=true");
       if (request !== state.sourceRequest) return;
-      state.sources = data.sources || []; renderSources(); renderSourceNavigation(); setView(state.view);
+      const all = data.sources || [];
+      state.sources = all.filter(source => !source.cancelled_at);
+      state.cancelledSources = all.filter(source => !!source.cancelled_at);
+      if (state.sourceId && !state.sources.some(source => String(source.id) === state.sourceId)) {
+        state.sourceId = ""; state.period = "today"; loadFeed();
+      }
+      if (state.cancelCandidate && !state.sources.some(source => String(source.id) === state.cancelCandidate)) state.cancelCandidate = null;
+      renderSources(); renderSourceNavigation(); setView(state.view);
       $("#feedSourcesStatus").textContent = ""; feedback("source", "");
     } catch (error) {
       if (request === state.sourceRequest) {
@@ -101,16 +108,31 @@
       `<button type="button" data-feed-source="${source.id}" aria-pressed="${String(source.id) === state.sourceId}" title="${escapeHtml(source.name)}"><span>${escapeHtml(source.name)}</span>${source.id ? `<small>${source.item_count || 0}</small>` : ""}</button>`).join("");
   };
   const renderSources = () => {
-    $("#sourceList").innerHTML = state.sources.length ? state.sources.map(source => `
+    const renderRow = (source, cancelled = false) => `
       <article class="source-row" data-source-id="${source.id}">
         <div><h3>${escapeHtml(source.name)}</h3><div class="source-url" title="${escapeHtml(source.feed_url)}">${escapeHtml(source.feed_url)}</div>
           <div class="source-info"><span>${source.item_count || 0} 篇</span>
             <span>最近抓取：${escapeHtml(fmtTime(source.last_fetch_at))}</span><span>最近成功：${escapeHtml(fmtTime(source.last_success_at))}</span>
             ${source.last_error ? `<span class="source-error">抓取失败：${escapeHtml(source.last_error)}</span>` : ""}
           </div></div>
-        <div class="source-actions"><label class="switch"><input type="checkbox" data-source-toggle="${source.id}" aria-label="启用 ${escapeHtml(source.name)}" ${source.enabled ? "checked" : ""}><span></span></label>
-          <button type="button" data-source-refresh="${source.id}">刷新</button></div>
-      </article>`).join("") : '<div class="rss-empty">还没有订阅源，点击“添加订阅”开始。</div>';
+        <div class="source-actions">${cancelled
+          ? `<button type="button" data-source-restore="${source.id}">恢复订阅</button>`
+          : `<label class="switch"><input type="checkbox" data-source-toggle="${source.id}" aria-label="启用 ${escapeHtml(source.name)}" ${source.enabled ? "checked" : ""}><span></span></label>
+             <button type="button" data-source-refresh="${source.id}">刷新</button>
+             <button type="button" class="source-cancel" data-source-cancel="${source.id}">取消订阅</button>`}
+        </div>
+        ${!cancelled && state.cancelCandidate === String(source.id)
+          ? `<div class="source-confirmation" role="group" aria-label="确认取消订阅">
+               <span>确认取消“${escapeHtml(source.name)}”？历史文章将保留。</span>
+               <button type="button" class="source-confirm-cancel" data-source-confirm-cancel="${source.id}">确认取消</button>
+               <button type="button" data-source-keep="${source.id}">保留订阅</button>
+             </div>` : ""}
+      </article>`;
+    $("#sourceList").innerHTML = state.sources.length
+      ? state.sources.map(source => renderRow(source)).join("")
+      : '<div class="rss-empty">还没有有效订阅，点击“添加订阅”开始。</div>';
+    $("#cancelledSourceSection").classList.toggle("hidden", !state.cancelledSources.length);
+    $("#cancelledSourceList").innerHTML = state.cancelledSources.map(source => renderRow(source, true)).join("");
   };
   const renderCards = items => items.map(item => {
     const image = item.image_url && safeUrl(item.image_url) ? item.image_url : "";
@@ -233,6 +255,30 @@
     if (card) { openArticle(card.dataset.itemId, card); return; }
     const refresh = target.closest("[data-source-refresh]");
     if (refresh) { refreshSource(refresh); return; }
+    const cancel = target.closest("[data-source-cancel]");
+    if (cancel) { state.cancelCandidate = cancel.dataset.sourceCancel; renderSources(); return; }
+    if (target.closest("[data-source-keep]")) { state.cancelCandidate = null; renderSources(); return; }
+    const confirmed = target.closest("[data-source-confirm-cancel]");
+    const restore = target.closest("[data-source-restore]");
+    if (confirmed || restore) {
+      const action = confirmed || restore, id = confirmed ? action.dataset.sourceConfirmCancel : action.dataset.sourceRestore;
+      const method = confirmed ? "DELETE" : "POST";
+      const url = confirmed ? `/v1/rss/sources/${id}` : `/v1/rss/sources/${id}/restore`;
+      action.disabled = true;
+      (async () => {
+        try {
+          const result = await api(url, {method});
+          state.cancelCandidate = null;
+          await Promise.all([loadSources(), loadFeed()]);
+          if (restore && result.refresh && !result.refresh.ok) {
+            feedback("source", `订阅已恢复，抓取失败：${result.refresh.error || "未知错误"}`, true);
+          } else feedback("source", confirmed ? "已取消订阅；历史文章已保留。" : "订阅已恢复。");
+        } catch (error) {
+          feedback("source", `订阅操作失败：${error.message}`, true);
+        } finally { action.disabled = false; }
+      })();
+      return;
+    }
     if (target.closest("#retryCategoriesButton")) loadCategories();
     const imageRetry = target.closest("[data-image-retry]");
     if (imageRetry) {

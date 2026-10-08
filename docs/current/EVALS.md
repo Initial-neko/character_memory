@@ -354,3 +354,34 @@ Settings Center 至少验证：
 - generated visual identity continuity。
 
 Judge Model 必须与 Person Runtime 解耦，避免“换 Judge 等于改产品行为”。
+
+## Character architecture baseline and milestone gates
+
+`tests/test_character_architecture_baseline.py` fixes the existing success-path
+cost contract through real runtime/context/search-observation/storage wiring:
+
+| Scenario | Business model calls | Other work |
+| --- | --- | --- |
+| Direct legal silence | one reaction | existing query embedding remains |
+| Personal Browse chooses no action | one plan | no search/fetch/appraisal |
+| Personal Browse receives no pages | one plan | no appraisal |
+| Personal Browse receives pages | one plan + one appraisal | keep=false creates no observation; keep=true creates sourced observation |
+| Idle or daily-budget gate | zero new calls | zero new query embedding/search/fetch |
+
+All providers in this suite are local and socket/DNS/HTTP access on its
+owning thread is rejected. The synchronous baseline starts no workers; this
+guard does not claim to validate future async/subprocess Provider isolation.
+The database is a pytest temporary fixture; no formal stack or user database is
+needed. `tests/test_llm_usage.py` separately verifies real client retry/request
+accounting using MockTransport. A logical call is not an HTTP-attempt count;
+missing token usage is unknown, not zero. Usage telemetry may be dropped when
+its database is locked and therefore must not authorize hard budget spending.
+
+Milestone acceptance uses an immutable candidate SHA, isolated checkout,
+temporary database and independent reviewer. Developer tests precede independent
+acceptance. Development of the next stage may overlap, but dependent changes
+cannot merge before prerequisite engineering acceptance. A changed candidate
+requires affected gates to run again; merge integration is checked separately.
+Engineering acceptance, target-machine validation and human Persona review are
+recorded separately. Human quality review does not block unrelated engineering
+work; it is required before final rollout. See DELIVERY_PLAN for current status.

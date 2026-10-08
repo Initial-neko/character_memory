@@ -1,6 +1,6 @@
 # Android / External Client API Contract (V1)
 
-> Status: **source-level IMPLEMENTED vs PROPOSED inventory**, reviewed on 2026-10-02 against feature source based on Core base `bb1f637323c4b6fe01e6fd494ca33aac58694ccb`. This feature branch is uncommitted, unmerged, and undeployed: added routes, including Space notifications, describe source behavior only and are not evidence of runtime OpenAPI or live availability. The machine-readable route inventory is source-checked; deployed runtime schemas remain authoritative. [Android consumer](https://github.com/Initial-neko/character_memory_android).
+> Status: **source-level IMPLEMENTED vs PROPOSED inventory**, reviewed on 2026-10-02 against feature source based on Core base `bb1f637323c4b6fe01e6fd494ca33aac58694ccb`. The original audit referenced an unmerged feature branch; that historical caveat does not describe the present main branch. Every route's live availability must be verified against the current deployed OpenAPI, not inferred solely from this document. The machine-readable route inventory is source-checked; deployed runtime schemas remain authoritative. [Android consumer](https://github.com/Initial-neko/character_memory_android).
 
 ## 1. Scope and ownership
 

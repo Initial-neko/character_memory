@@ -135,7 +135,9 @@ def test_production_eager_warmup_starts_runtime_without_waiting_for_first_chat(t
     with TestClient(app) as client:
         deadline = time.time() + 2
         health = client.get("/health").json()
-        while not health["runtime_loaded"] and time.time() < deadline:
+        # The bundle becomes visible before the initialization thread clears
+        # its loading flag in finally. Wait for the complete ready state.
+        while (not health["runtime_loaded"] or health["runtime_loading"]) and time.time() < deadline:
             time.sleep(0.01)
             health = client.get("/health").json()
 

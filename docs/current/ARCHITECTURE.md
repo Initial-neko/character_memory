@@ -525,3 +525,26 @@ logical calls are distinguished from HTTP requests and query embeddings.
 This proves the deterministic baseline, not live Persona quality or provider
 cost. Historical observation recall, finite Intent deferral and RSS personal
 reading require their own implementation and acceptance before being claimed.
+
+
+### Internal World capability execution contract
+
+`runtime/capability_execution.py` separates an already chosen request from its
+bounded execution. The composition caller supplies trusted character identity,
+opportunity identity, source event and constraints; the model supplies only the
+existing browse choice/query. Silence produces no request. This contract adds
+no second Character state, decision model, scheduler or retry loop.
+
+The current adapter accepts World WEB_SEARCH and delegates to the existing
+WorldObservationService Search/Browser path. Direct, Group and unknown
+capabilities are denied. Its additive `world/004-capability-executions` ledger
+reserves one attempt per opportunity before external work. Failure and timeout
+consume that allowance; an identical completed request returns its durable
+result. Reusing an ID with different inputs is denied. STARTED with no local
+receipt is reported as in-progress/interrupted and never automatically replayed.
+Provider-specific timeout and HTTP retry behavior remains with existing services;
+the one-attempt bound counts capability dispatches, not individual HTTP requests.
+
+The contract requires a production World consumer before it can be enabled or
+merged as an independent reusable execution boundary. It does not change Space,
+Media, Direct or Group execution permissions.

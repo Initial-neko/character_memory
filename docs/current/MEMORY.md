@@ -294,3 +294,16 @@ sources are not invented, the stored raw metadata is not rewritten, and such
 observations cannot qualify for the PUBLIC historical projection. This fallback
 only covers Event JSON metadata decoding, not arbitrary database corruption or
 all legacy SQL expressions. It does not add model calls or Memory admission.
+
+
+Chinese observation questions strip common recall framing and terminal question
+particles before bounded lexical matching, so a known source title can match
+without spaces (for example asking whether a character has read that title).
+This is not general Chinese segmentation or semantic paraphrase retrieval.
+Only actual personal observation events are queried, with existing character,
+time and public-projection filters and the four-result cap.
+
+Rendered experiences include a bounded stored RSS title and Feed-text scope,
+plus separately labeled source summary and personal observation. The existing
+4,000-character total budget still applies; full provenance remains outside the
+prompt. Optional malformed metadata does not manufacture a title or summary.

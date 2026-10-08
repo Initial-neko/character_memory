@@ -2,6 +2,7 @@
 from datetime import timedelta
 from pathlib import Path
 import socket
+import threading
 
 import httpx
 import pytest
@@ -47,13 +48,22 @@ class CountingModel(FakeModel):
 def baseline(tmp_path, monkeypatch):
     network_attempts = []
 
-    def reject_network(*args, **kwargs):
-        network_attempts.append(str(args[:1]))
-        raise AssertionError("baseline must not access network")
+    # Other suites can leave independent async browser callbacks running.
+    # This baseline starts no workers: guard its own synchronous call chain,
+    # rather than attributing another test's thread to this opportunity.
+    owner_thread = threading.get_ident()
 
-    monkeypatch.setattr(socket.socket, "connect", reject_network)
-    monkeypatch.setattr(socket, "getaddrinfo", reject_network)
-    monkeypatch.setattr(httpx.Client, "send", reject_network)
+    def scoped_guard(original):
+        def reject_network(*args, **kwargs):
+            if threading.get_ident() != owner_thread:
+                return original(*args, **kwargs)
+            network_attempts.append(str(args[:1]))
+            raise AssertionError("baseline must not access network")
+        return reject_network
+
+    monkeypatch.setattr(socket.socket, "connect", scoped_guard(socket.socket.connect))
+    monkeypatch.setattr(socket, "getaddrinfo", scoped_guard(socket.getaddrinfo))
+    monkeypatch.setattr(httpx.Client, "send", scoped_guard(httpx.Client.send))
     store, access, _ = make_access(tmp_path, count=1)
     access.settings.world_pulse_enabled = False
     model = CountingModel()
@@ -137,3 +147,23 @@ def test_baseline_rejects_accidental_http_provider(baseline):
     assert len(network_attempts) == 1
     network_attempts.clear()  # This case deliberately exercises the guard.
 
+
+
+def test_baseline_guard_does_not_capture_unrelated_mock_worker(baseline):
+    *_, network_attempts = baseline
+    results, errors = [], []
+
+    def unrelated_callback():
+        try:
+            with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as client:
+                results.append(client.get("https://unrelated.invalid").status_code)
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=unrelated_callback)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert errors == []
+    assert results == [200]
+    assert network_attempts == []

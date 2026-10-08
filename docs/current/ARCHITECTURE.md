@@ -518,7 +518,9 @@ purchase a second model judgment of the Character's willingness.
 
 The baseline is exercised by `tests/test_character_architecture_baseline.py`:
 real PersonRuntime, PersonContextBuilder, WorldObservationService and SQLite,
-with local model/search/fetch providers and a network rejection guard. Mock
+with local model/search/fetch providers and an owning-thread network rejection
+guard. The synchronous baseline starts no workers; unrelated callbacks from
+other test suites are not attributed to its opportunity. Mock
 logical calls are distinguished from HTTP requests and query embeddings.
 This proves the deterministic baseline, not live Persona quality or provider
 cost. Historical observation recall, finite Intent deferral and RSS personal

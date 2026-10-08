@@ -368,7 +368,9 @@ cost contract through real runtime/context/search-observation/storage wiring:
 | Personal Browse receives pages | one plan + one appraisal | keep=false creates no observation; keep=true creates sourced observation |
 | Idle or daily-budget gate | zero new calls | zero new query embedding/search/fetch |
 
-All providers in this suite are local and socket/DNS/HTTP access is rejected.
+All providers in this suite are local and socket/DNS/HTTP access on its
+owning thread is rejected. The synchronous baseline starts no workers; this
+guard does not claim to validate future async/subprocess Provider isolation.
 The database is a pytest temporary fixture; no formal stack or user database is
 needed. `tests/test_llm_usage.py` separately verifies real client retry/request
 accounting using MockTransport. A logical call is not an HTTP-attempt count;

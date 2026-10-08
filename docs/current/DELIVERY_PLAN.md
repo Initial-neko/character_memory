@@ -118,7 +118,7 @@ judgments, and dependent milestones cannot merge on an unaccepted predecessor.
 | M2 | Finite Intent deferral | Merged in #253 | Accepted at a632121; CI green | Live-provider quality pending |
 | M3 | Minimal World Web execution/feedback contract | Implemented in #255/#256 | Accepted at 367047d; merged #255/#256; CI green | Live browser/provider quality pending |
 | M4 | RSS personal reading through existing World opportunity | Implemented in #257 | Accepted at 6abaded; merged #257; CI green | Live-provider / human quality pending |
-| M5 | Integrated compatibility, cost and opt-in rollout | Lifecycle gates implemented; flags remain opt-in | Independent acceptance pending | Windows browser/short soak and bounded live samples recorded; human/post-reading/7-day quality pending |
+| M5 | Integrated compatibility, cost and opt-in rollout | Lifecycle gates implemented in #258; flags remain opt-in | Accepted at bb5a299: 215 regressions and 10 additional probes; CI green | Windows browser/short soak recorded; human accepted unread truthfulness and expression sample only; live post-reading quality, seven-day continuity and formal rollout pending |
 
 The optional World saving switch defaults off and changes only background browse
 cadence. Permission, idempotence and failure safety apply in both modes. Optional RSS

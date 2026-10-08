@@ -523,8 +523,9 @@ guard. The synchronous baseline starts no workers; unrelated callbacks from
 other test suites are not attributed to its opportunity. Mock
 logical calls are distinguished from HTTP requests and query embeddings.
 This proves the deterministic baseline, not live Persona quality or provider
-cost. Historical observation recall, finite Intent deferral and RSS personal
-reading require their own implementation and acceptance before being claimed.
+cost. Historical observation recall and finite Intent deferral have independent
+engineering gates; optional RSS reading and final live quality require their own
+acceptance before rollout.
 
 
 ### Internal World capability execution contract
@@ -532,7 +533,8 @@ reading require their own implementation and acceptance before being claimed.
 `runtime/capability_execution.py` separates an already chosen request from its
 bounded execution. The composition caller supplies trusted character identity,
 opportunity identity, source event and constraints; the model supplies only the
-existing browse choice/query. Silence produces no request. This contract adds
+browse choice/query or IDs from the server-provided RSS candidate set. Silence
+produces no request. This contract adds
 no second Character state, decision model, scheduler or retry loop.
 
 The current adapter accepts World WEB_SEARCH and delegates to the existing
@@ -545,6 +547,13 @@ receipt is reported as in-progress/interrupted and never automatically replayed.
 Provider-specific timeout and HTTP retry behavior remains with existing services;
 the one-attempt bound counts capability dispatches, not individual HTTP requests.
 
-The contract requires a production World consumer before it can be enabled or
-merged as an independent reusable execution boundary. It does not change Space,
+Personal Browse is the production consumer and preserves its existing decision
+and appraisal calls. This boundary does not change Space,
 Media, Direct or Group execution permissions.
+
+The World executor also accepts bounded `READ_RSS` requests from Personal Browse.
+Its adapter reads already-stored Feed text through `RssPersonalReading`, which
+owns character-local item claims/snapshots; RSS ingestion continues to own source
+and shared article data. The same durable execution allowance and result cache
+apply. Channel identity and item generations come from server context, not
+external text. This is not a general Tool registry or a second Character runtime.

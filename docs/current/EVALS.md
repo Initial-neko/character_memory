@@ -395,3 +395,10 @@ World lifecycle, configuration/settings and existing search-boundary suites.
 Compare exact schema/prompt text and logical calls on identical fixtures in
 normal mode. Fake providers cannot establish actual billed tokens or latency;
 live browser/provider and human Persona quality remain separate acceptance.
+
+`test_rss_world_perception.py` covers local RSS candidate bounds, source-generation
+changes, personal isolation, content signals, finite failure retries, concurrent
+claims, shared-executor reuse, two-item batch appraisal, optional silence/Web,
+invalid identities, interrupted appraisal, local commit recovery and exact
+original Web prompt/schema compatibility when RSS is disabled or empty. Local
+mocks prove call counts and durable effects, not human interest or billed tokens.

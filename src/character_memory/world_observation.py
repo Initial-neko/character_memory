@@ -39,7 +39,7 @@ def observation_lifecycle(event: Event, *, reading_scope: str = "WEB_PAGES", cog
     }
 
 
-def retain_world_observation(store, event: Event, *, observation_key: str | None = None, runtime=None) -> tuple[Event, bool]:
+def retain_world_observation(store, event: Event, *, observation_key: str | None = None, runtime=None, reading_scope: str = "WEB_PAGES") -> tuple[Event, bool]:
     """Retain an already appraised result, optionally using existing cognition.
 
     A repeated local submission never repeats cognition. REQUESTED after a crash
@@ -51,7 +51,7 @@ def retain_world_observation(store, event: Event, *, observation_key: str | None
     event = event.model_copy(update={"metadata": {
         **event.metadata,
         "observation_key": observation_key if observation_key is not None else uuid4().hex,
-        "observation_lifecycle": observation_lifecycle(event, cognition=runtime is not None),
+        "observation_lifecycle": observation_lifecycle(event, cognition=runtime is not None, reading_scope=reading_scope),
     }})
     saved, created = store.append_observation_once(event)
     if not created or runtime is None:

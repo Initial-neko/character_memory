@@ -55,9 +55,10 @@ class CapabilityExecutor:
     """
     MIGRATION = "world/004-capability-executions"
 
-    def __init__(self, store, web_observer):
+    def __init__(self, store, web_observer, *, rss_reader=None):
         self.store = store
         self.web_observer = web_observer
+        self.rss_reader = rss_reader
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema, immediate=True)
 
     def _create_schema(self):
@@ -76,7 +77,7 @@ class CapabilityExecutor:
     def _denial(request: CapabilityRequest) -> str:
         if request.channel != "WORLD":
             return "CHANNEL_DENIED"
-        if request.capability != "WEB_SEARCH":
+        if request.capability not in {"WEB_SEARCH", "READ_RSS"}:
             return "CAPABILITY_DENIED"
         if any(not isinstance(value, str) or not value.strip() or len(value) > 256
                for value in (request.request_id, request.character_id, request.opportunity_id)):
@@ -85,6 +86,23 @@ class CapabilityExecutor:
             return "INVALID_IDENTITY"
         if not isinstance(request.arguments, dict):
             return "INVALID_ARGUMENTS"
+        if request.capability == "READ_RSS":
+            items = request.arguments.get("items")
+            if (set(request.arguments) != {"items"} or not isinstance(items, list)
+                    or not 1 <= len(items) <= 2
+                    or any(not isinstance(item, dict) or set(item) != {"item_id", "source_generation"}
+                           or type(item["item_id"]) is not int or item["item_id"] < 1
+                           or type(item["source_generation"]) is not int or item["source_generation"] < 0
+                           for item in items)
+                    or len({item["item_id"] for item in items}) != len(items)):
+                return "INVALID_ARGUMENTS"
+            bounds = request.constraints
+            if (not isinstance(bounds, dict) or set(bounds) != {"max_items", "max_chars", "max_calls"}
+                    or any(type(value) is not int for value in bounds.values())
+                    or not 1 <= bounds["max_items"] <= 2 or len(items) > bounds["max_items"]
+                    or not 500 <= bounds["max_chars"] <= 12000 or not 0 <= bounds["max_calls"] <= 1):
+                return "INVALID_CONSTRAINTS"
+            return "BUDGET_EXHAUSTED" if bounds["max_calls"] == 0 else ""
         query = request.arguments.get("query")
         if set(request.arguments) != {"query"} or not isinstance(query, str) or not query.strip() or len(query) > 240:
             return "INVALID_ARGUMENTS"
@@ -133,19 +151,29 @@ class CapabilityExecutor:
                  json.dumps(payload, ensure_ascii=False, sort_keys=True), "STARTED", now.isoformat()),
             )
         try:
-            observed = self.web_observer.observe(
-                request.arguments["query"], max_pages=request.constraints["max_pages"],
-                max_chars_per_page=request.constraints["max_chars_per_page"],
-            )
-            pages = []
-            for item in (observed.get("observations") or [])[:request.constraints["max_pages"]]:
-                page = WorldObservation.model_validate(item)
-                page = page.model_copy(update={"content": page.content[:request.constraints["max_chars_per_page"]]})
-                pages.append(page.model_dump(mode="json"))
-            data = {"observations": pages, "search_results": int(observed.get("search_results") or 0),
-                    "errors": list(observed.get("errors") or [])}
-            result = CapabilityResult(request.request_id, "SUCCESS" if pages else "FAILED", data,
-                                      "" if pages else "NO_READABLE_CONTENT")
+            if request.capability == "READ_RSS":
+                if self.rss_reader is None:
+                    raise RuntimeError("RSS_READER_UNAVAILABLE")
+                data = self.rss_reader.read(
+                    request.character_id, request.request_id, request.arguments["items"],
+                    max_items=request.constraints["max_items"], max_chars=request.constraints["max_chars"], now=now,
+                )
+                result = CapabilityResult(request.request_id, "SUCCESS" if data["items"] else "FAILED", data,
+                                          "" if data["items"] else "NO_READABLE_CONTENT")
+            else:
+                observed = self.web_observer.observe(
+                    request.arguments["query"], max_pages=request.constraints["max_pages"],
+                    max_chars_per_page=request.constraints["max_chars_per_page"],
+                )
+                pages = []
+                for item in (observed.get("observations") or [])[:request.constraints["max_pages"]]:
+                    page = WorldObservation.model_validate(item)
+                    page = page.model_copy(update={"content": page.content[:request.constraints["max_chars_per_page"]]})
+                    pages.append(page.model_dump(mode="json"))
+                data = {"observations": pages, "search_results": int(observed.get("search_results") or 0),
+                        "errors": list(observed.get("errors") or [])}
+                result = CapabilityResult(request.request_id, "SUCCESS" if pages else "FAILED", data,
+                                          "" if pages else "NO_READABLE_CONTENT")
         except (TimeoutError, TimeoutException) as error:
             result = CapabilityResult(request.request_id, "TIMEOUT", reason=str(error)[:500])
         except Exception as error:

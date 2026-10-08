@@ -38,6 +38,7 @@ def evaluate_reaction(
     query: str | None = None,
     recent_events: list[Event] | None = None,
     recent_limit: int = 8,
+    observed_projection: str | None = None,
     exclude_event_id: int | None = None,
     last_chat_event: Event | None = None,
     sticker_query: str | None = None,
@@ -59,6 +60,7 @@ def evaluate_reaction(
         exclude_event_id=exclude_event_id,
         recent_events=recent_events,
         recent_limit=recent_limit,
+        observed_projection=observed_projection or ("PUBLIC" if event.event_type in {EventType.SPACE_POST_SEEN, EventType.SPACE_COMMENT_RECEIVED} else "PERSONAL"),
     )
     memories = person_context.memories
     state_before = person_context.mental_state
@@ -91,6 +93,7 @@ def evaluate_reaction(
         sticker_catalog=prompt_stickers,
         image_catalog=runtime.image_catalog,
         allow_generate_image=allow_generate_image,
+        observed_events=person_context.observed_events,
     )
     if context_suffix:
         context += context_suffix

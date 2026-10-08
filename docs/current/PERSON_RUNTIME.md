@@ -361,3 +361,13 @@ not generic private-chat media instructions, and cannot schedule private intents
 The server remains authoritative: illegal channel actions are discarded with
 `DROP_WRONG_CHANNEL` in runtime trace decisions. This does not disable the
 separate existing World Pulse public-comment workflow or expand media rights.
+
+### Observed-experience context projection
+
+The shared PersonContextSnapshot now carries `observed_events` separately from
+Memory and Recent Events. Direct reactions can recover matching past personal
+observations beyond the recent-event window. Group and public Space callers
+request the PUBLIC projection; their shared recent conversation facts are not
+mistakenly filtered out by another actor's character ID. World planning reuses
+the same bounded experience rendering. Observation recall never schedules a new
+browse, purchases a second reaction, or automatically writes Memory.

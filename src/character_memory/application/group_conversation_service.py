@@ -366,6 +366,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 query=recall_query,
                 recent_events=recent_events,
                 recent_limit=14,
+                observed_projection="PUBLIC",
                 sticker_query_builder=lambda recent: (
                     "\n".join(item.content.strip() for item in recent[-4:] if (item.content or "").strip())
                     or recall_query

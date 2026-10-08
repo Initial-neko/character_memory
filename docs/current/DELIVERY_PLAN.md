@@ -113,8 +113,8 @@ judgments, and dependent milestones cannot merge on an unaccepted predecessor.
 
 | Milestone | Scope | Implementation | Independent engineering acceptance | Target-machine / human acceptance |
 | --- | --- | --- | --- | --- |
-| M0 | Isolated Character cost/call baseline | Deterministic baseline tests | Pending fixed-commit review | No live-provider or Persona claim |
-| M1 | Historical observations, lifecycle and behavior contract | Planned | Not started | Not started |
+| M0 | Isolated Character cost/call baseline | Merged in #249 | Accepted at 43e0512; CI green | No live-provider or Persona claim |
+| M1 | Historical observations, lifecycle and behavior contract | F04 merged in #250; historical recall implemented; lifecycle alignment pending | F04 accepted; historical recall acceptance pending | Live Persona quality pending |
 | M2 | Finite Intent deferral | Planned | Not started | Not started |
 | M3 | Minimal World Web execution/feedback contract | Planned | Not started | Not started |
 | M4 | RSS personal reading through existing World opportunity | Planned | Not started | Not started |

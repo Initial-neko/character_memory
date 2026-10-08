@@ -29,12 +29,13 @@ NOW = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
 
 
 class FakeContextBuilder:
-    def build(self, character_id, query, *, at, recent_limit):
+    def build(self, character_id, query, *, at, recent_limit, observed_projection="PERSONAL"):
         return SimpleNamespace(
             persona=f"id: {character_id}\nname: {character_id}",
             mental_state="平静但有点好奇",
             memories=[],
             recent_events=[],
+            observed_events=[],
         )
 
 

@@ -630,3 +630,9 @@ Dev Console proxies the main manual operations and shows Pulse topics, comments,
 V1 does not attempt to infer a universal objective "global heat score". Aggregation sites already perform that upstream curation; World Pulse is a small normalization/summarization layer.
 
 V1 also does not automatically convert a Pulse topic into a Space post. A later Space opportunity sees the Person's recent World facts and still decides independently whether anything is worth publishing.
+
+Historical World observations are locally searchable through PersonContextBuilder.
+Personal Browse and World Pulse retain their distinct update strategies; recall
+is a read-only operation and does not revisit a website or perform appraisal.
+The personal/public projection applies to the new historical observation field,
+not a new World publication permission or automatic Memory policy.

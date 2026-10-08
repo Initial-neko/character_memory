@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import json
 import logging
+import re
 import sqlite3
 import struct
 import threading
@@ -687,6 +688,37 @@ class SQLiteStore:
             args.append(limit)
             rows = list(reversed(self.conn.execute(sql, args).fetchall()))
             return [self._event_from_row(r) for r in rows]
+
+    def recall_observed_events(self, character_id: str, query: str, *, at: datetime, limit: int = 4, projection: str = "PERSONAL") -> list[Event]:
+        """Local lexical recall of actual personal observations, never RSS inventory.
+
+        Match before limiting candidates; a relevant old event is not excluded
+        merely because many newer unrelated observations exist. No embedding or
+        external model is purchased here. This is not semantic paraphrase recall.
+        """
+        if projection not in {"PERSONAL", "PUBLIC"}:
+            raise ValueError("unknown observation projection")
+        normalized = str(query or "").lower()[:512]
+        for phrase in ("你上次", "我上次", "最近", "曾经", "读过的", "看过的", "阅读过", "是什么", "什么", "哪些", "文章", "关于", "我最近真实感兴趣", "可能会自己上网继续看的公开话题"):
+            normalized = normalized.replace(phrase, " ")
+        stopwords = {"what", "when", "where", "which", "about", "have", "read", "article", "did", "you", "the", "and", "recent", "personal", "context"}
+        terms = list(dict.fromkeys(term for term in re.findall(r"[a-z0-9][a-z0-9_-]{1,63}|[\u4e00-\u9fff]{2,32}", normalized) if term not in stopwords))[:8]
+        if not terms or limit <= 0:
+            return []
+        metadata = "CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END"
+        text = f"lower(content || ' ' || coalesce(json_extract({metadata}, '$.world_summary'), '') || ' ' || coalesce(json_extract({metadata}, '$.query'), '') || ' ' || coalesce(json_extract({metadata}, '$.sources'), ''))"
+        score = ' + '.join('CASE WHEN instr(search_text, ?) > 0 THEN ? ELSE 0 END' for _ in terms)
+        score_args = [value for term in terms for value in (term, len(term))]
+        public = f" AND json_extract({metadata}, '$.channel')='WORLD_PULSE'" if projection == "PUBLIC" else ""
+        sql = f"""WITH candidates AS (
+            SELECT *, {text} AS search_text FROM events
+            WHERE character_id=? AND event_type=? AND event_time_epoch<=?{public}
+        ), ranked AS (SELECT *, ({score}) AS relevance FROM candidates)
+        SELECT * FROM ranked WHERE relevance>0
+        ORDER BY relevance DESC,event_time_epoch DESC,id DESC LIMIT ?"""
+        with self._lock:
+            rows = self.conn.execute(sql, [character_id, EventType.WORLD_OBSERVATION.value, epoch_us(at), *score_args, min(4, int(limit))]).fetchall()
+            return [self._event_from_row(row) for row in rows]
 
     def latest_event_id(
         self,

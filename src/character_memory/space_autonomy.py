@@ -9,6 +9,7 @@ import threading
 
 from pydantic import BaseModel
 
+from character_memory.runtime.context import render_observed_experiences
 from character_memory.domain.models import (
     ActionType,
     Event,
@@ -197,6 +198,7 @@ class SpaceAutonomyService:
             query="最近发生的事情、重要关系、当前状态，以及我现在自然想关注或表达什么",
             at=now,
             recent_limit=16,
+            observed_projection="PUBLIC",
         )
         memory_text = "\n".join(
             f"- [{item.memory_type}] {item.content}" for item in person_context.memories
@@ -250,6 +252,9 @@ class SpaceAutonomyService:
 
 # Recent Events
 {event_text}
+
+# Observed Experiences
+{render_observed_experiences(person_context.observed_events)}
 
 # Current Time
 {now.isoformat()}

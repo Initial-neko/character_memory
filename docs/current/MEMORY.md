@@ -267,3 +267,23 @@ raw webpage text 仍然是 untrusted data，不直接进入 Memory 或最终 Spa
 - relationship-specific memory state 是否应成为独立层。
 
 这些应由 Eval、真实长期运行数据和性能测量决定，而不是先把架构画复杂。
+
+## Historical observed experiences
+
+PersonContextBuilder includes a separate bounded `observed_events` projection of
+actual WORLD_OBSERVATION events. It is not a Memory import and does not query RSS
+inventory. Local lexical matching happens across the character's past events
+before a result limit is applied, so unrelated newer activity does not itself
+exclude a matching old observation. At most four observations enter context,
+with a 4000-character display budget, source event IDs, observation timestamps
+and source references. Full source metadata remains on the event; oversized
+source display values may be truncated. This is keyword recall, not a promise
+of arbitrary semantic paraphrase retrieval, and adds no LLM or embedding call.
+
+PERSONAL reads the character's own observations. PUBLIC currently includes only
+explicit World Pulse public observations; Personal Browse, personal RSS and
+unknown legacy sources are excluded from the new public observation field.
+This does not claim to implement comprehensive privacy classification of all
+legacy Memory. Existing Memory admission and its future-time barrier remain.
+Caller-provided recent shared facts retain their actor identities but are
+filtered at the requested event time; explicit event exclusion is also applied.

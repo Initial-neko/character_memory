@@ -189,6 +189,12 @@ proactive_min_dispatch_interval_minutes: 60
 
 # Minimum delay applied to a newly-created future intent. 0 disables the floor.
 proactive_intent_min_delay_minutes: 10
+# 原 Intent 延期的最小间隔（分钟）；仍受原有效期、冷却和等待回复约束。
+proactive_intent_defer_min_minutes: 15
+# 一次延期允许的最长小时数；不延长 Intent 原始 expires_at。
+proactive_intent_defer_max_hours: 72
+# 同一 Intent 最多延期次数；0 表示不允许延期，不代表无限。
+proactive_intent_max_deferrals: 2
 
 # Maximum pending intents per character. 0 means unlimited.
 proactive_max_pending_intents: 20

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 
-from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, EventType
+from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, EventType, IntentResolutionKind
 from character_memory.time_utils import epoch_us
 
 
@@ -25,10 +25,14 @@ class ProactiveService:
     process-local so a restart cannot reset it.
     """
 
-    def __init__(self, store, chat_service=None, *, min_dispatch_interval_minutes: float = 60.0):
+    def __init__(self, store, chat_service=None, *, min_dispatch_interval_minutes: float = 60.0,
+                 defer_min_minutes: float = 15.0, defer_max_hours: float = 72.0, max_deferrals: int = 2):
         self.store = store
         self.chat = chat_service
         self.min_dispatch_interval = max(0.0, float(min_dispatch_interval_minutes))
+        self.defer_min_minutes = defer_min_minutes
+        self.defer_max_hours = defer_max_hours
+        self.max_deferrals = max_deferrals
 
     def _on_cooldown(self, character_id: str, now: datetime) -> bool:
         state = self.store.proactive_dispatch_state(character_id)
@@ -92,37 +96,65 @@ class ProactiveService:
             # One proactive intent per character per poll is enough. If multiple
             # intents are due, later polls can re-evaluate them after context has
             # changed instead of producing a burst of messages.
-            rows = list(self.store.due_intents(character_id, now))[:1]
-            if rows:
-                # Consumed before the provider call, like wake_service: a
-                # transient failure must not become a retry storm, and a round
-                # the model answers with silence still spent a full reaction.
-                self._note_dispatch(character_id, now, status="DISPATCHING", intent_id=int(rows[0]["id"]))
-            for row in rows:
+            claimed = self.store.claim_due_intent(
+                character_id, now, next_allowed_at=now + timedelta(minutes=self.min_dispatch_interval),
+                interval_minutes=self.min_dispatch_interval,
+            )
+            for row in ([claimed] if claimed is not None else []):
                 intent_id = int(row["id"])
-                self.store.set_intent_status(intent_id, "PROCESSING")
                 try:
                     result = self.chat.dispatch_proactive_intent(
                         character_id=character_id,
                         intent_id=intent_id,
                         content=str(row["content"]),
                         at=now,
+                        intent_deferral_policy={
+                            "min_minutes": self.defer_min_minutes,
+                            "max_hours": self.defer_max_hours,
+                            "max_deferrals": self.max_deferrals,
+                            "deferrals_used": row["deferral_count"],
+                            "expires_at": row["expires_at"],
+                        },
                     )
                     action_types = {action.type for action in result.reaction.actions}
                     legacy = result.reaction.action.type if result.reaction.action is not None else ActionType.NO_ACTION
+                    resolution = result.reaction.intent_resolution
+                    resolution_reason = ""
                     if action_types & EXPRESSIVE_ACTIONS or legacy in EXPRESSIVE_ACTIONS:
                         status = "EXECUTED"
+                        if resolution is not None and resolution.kind != IntentResolutionKind.EXECUTE:
+                            resolution_reason = "EXPRESSION_CONFLICT"
+                    elif resolution is not None and resolution.kind == IntentResolutionKind.DEFER:
+                        deferred = self.store.defer_intent(
+                            intent_id, now=now, defer_hours=resolution.defer_hours,
+                            max_deferrals=self.max_deferrals, min_minutes=self.defer_min_minutes,
+                            max_hours=self.defer_max_hours, source_event_id=result.event.id,
+                        )
+                        status = deferred["status"]
+                        resolution_reason = deferred["resolution_reason"]
+                    elif resolution is not None and resolution.kind == IntentResolutionKind.ABANDON:
+                        status = "ABANDONED"
+                        resolution_reason = "ABANDON"
                     elif legacy == ActionType.DEFER:
-                        status = "DEFERRED"
+                        status = "ABANDONED"
+                        resolution_reason = "LEGACY_DEFER_WITHOUT_TIME"
                     else:
                         status = "SUPPRESSED"
-                    self.store.set_intent_status(intent_id, status)
+                        if resolution is not None:
+                            resolution_reason = "EXECUTE_WITHOUT_EXPRESSION"
+                    if resolution is None or resolution.kind != IntentResolutionKind.DEFER or status == "EXECUTED":
+                        if resolution_reason:
+                            self.store.record_intent_resolution(intent_id, now=now, status=status,
+                                                                decision=resolution_reason, source_event_id=result.event.id)
+                        else:
+                            self.store.set_intent_status(intent_id, status)
                     self._note_dispatch(character_id, now, status=status, intent_id=intent_id)
                     outcomes.append(
                         {
                             "intent_id": intent_id,
                             "character_id": character_id,
                             "status": status,
+                            "resolution_reason": resolution_reason,
                             "source_event_id": result.event.id,
                             "actions": [action.type.value for action in result.reaction.actions],
                         }

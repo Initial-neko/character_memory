@@ -13,6 +13,7 @@ EXPECTED_CORE_MIGRATIONS = [
     "core/007-memory-governance",
     "core/008-intent-embedding",
     "core/009-proactive-dispatch-state",
+    "core/010-intent-deferral",
 ]
 
 

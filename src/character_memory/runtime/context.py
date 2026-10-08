@@ -152,11 +152,13 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 
     proactive_contract = ""
     if event.event_type == EventType.PROACTIVE_INTENT:
-        proactive_contract = """
+        proactive_contract = f"""
 这是你之前留下的意图到期后的重新判断，不是用户刚发来消息。
-- 本轮只决定此刻是否执行、继续保持沉默，或彻底放弃这条意图。
+- 本轮可执行、沉默、有限延期或放弃。intent_resolution 只用于这条到期意图：{{"kind":"EXECUTE"}} 表示执行当前合法 actions；{{"kind":"ABANDON"}} 表示放弃；{{"kind":"DEFER","defer_hours":3}} 表示推迟原意图 3 小时，不创建新意图。
+- 延期时 actions 必须为 []；不得同时表达和延期。只有延期需要填写真实正数 defer_hours；服务端会校验延期范围、次数及原 expires_at，不会延长有效期。到期仅获得重新判断机会，仍受冷却和等待用户回复约束。
+- 当前延期许可：{event.metadata.get("intent_deferral_policy") or "由服务端配置限定"}。
 - 不要再留下新的未来意图：intent_candidates 必须为 []。在“意图到期”这一轮又产生一条新意图，会让同一个想法无限循环地重新到期。
-- 这件事如果确实还不适合现在做，“放弃”是正常且正确的选择；只是需要改天再提，就等下一次自然对话时重新形成意图。
+- 不适合继续做时可以放弃；不要为了保留意图强行表达或无限延期。
 """
 
     action_contract = f"""actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。VOICE_MESSAGE 是你真的开口说给对方听，文字只是这条语音的转写——语气、停顿、笑意本身就是内容的一部分，那是打字给不了的。想用就用：不需要等对方先发语音，也不需要等到什么特别的时候。懒得打字、手上正忙、想让对方听见你是什么语气，或者一段话连着说比拆成好几条文字更顺，这时候语音就是最自然的表达。一个 VOICE_MESSAGE 的 message 必须是一段完整连续表达，即使包含多句话也保持为一个 action，不要为了语音拆句，也不要为了展示功能而发语音。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时这些候选就是你可以自然使用的表达资源，不需要等用户先发表情包；聊天事件里可以单独使用 STICKER，也可以 MESSAGE + STICKER。当前事件如需表情应使用 {sticker_action_name}，sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用表情。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。"""

@@ -396,6 +396,9 @@ class PersonRuntime:
         happening silently.
         """
         dropped: list[dict] = []
+        if reaction.intent_resolution is not None and event.event_type != EventType.PROACTIVE_INTENT:
+            dropped.append({"type": "INTENT_RESOLUTION", "decision": "DROP_INTENT_RESOLUTION_WRONG_CHANNEL"})
+            reaction = reaction.model_copy(update={"intent_resolution": None})
         if reaction.intent_candidates and event.event_type in _NO_SELF_INTENT_EVENTS:
             self_loop = event.event_type == EventType.PROACTIVE_INTENT
             dropped.extend(
@@ -666,6 +669,7 @@ class PersonRuntime:
                     "memory_candidates": [candidate.model_dump(mode="json") for candidate in reaction.memory_candidates],
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,
+                    "intent_resolution": reaction.intent_resolution.model_dump(mode="json") if reaction.intent_resolution is not None else None,
                     "intent_candidates": [candidate.model_dump(mode="json") for candidate in reaction.intent_candidates],
                     "intent_decisions": intent_decisions,
                     "created_intent_ids": created_intent_ids,

@@ -8,7 +8,8 @@ import sqlite3
 import struct
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import math
 from pathlib import Path
 from typing import Any
 
@@ -307,6 +308,7 @@ class SQLiteStore:
             self._run_migration_locked("core/007-memory-governance", self._migrate_memory_governance_locked)
             embedding_added = self._run_migration_locked("core/008-intent-embedding", self._migrate_intent_embedding_locked)
             self._run_migration_locked("core/009-proactive-dispatch-state", self._migrate_proactive_dispatch_state_locked)
+            self._run_migration_locked("core/010-intent-deferral", self._migrate_intent_deferral_locked)
             compat_migrated = self._migrate_legacy_action_traces_incremental_locked()
             self.conn.commit()
             if intent_added:
@@ -931,6 +933,91 @@ class SQLiteStore:
             self.conn.execute("INSERT INTO mental_states(character_id,content,updated_at,updated_at_epoch,source_event_id) VALUES(?,?,?,?,?) ON CONFLICT(character_id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at,updated_at_epoch=excluded.updated_at_epoch,source_event_id=excluded.source_event_id WHERE mental_states.updated_at_epoch IS NULL OR excluded.updated_at_epoch>=mental_states.updated_at_epoch", (character_id, normalized, updated_at.isoformat(), stamp, source_event_id))
             self._maybe_commit()
             return True
+
+    def _migrate_intent_deferral_locked(self):
+        self._ensure_column_locked("intents", "deferral_count", "INTEGER NOT NULL DEFAULT 0")
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS intent_deferral_audit("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,intent_id INTEGER NOT NULL,"
+            "decided_at TEXT NOT NULL,decision TEXT NOT NULL,"
+            "old_earliest_at TEXT,new_earliest_at TEXT,source_event_id INTEGER)"
+        )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_intent_deferral_audit ON intent_deferral_audit(intent_id,id)")
+
+    def claim_due_intent(self, character_id: str, now: datetime, *, next_allowed_at: datetime,
+                         interval_minutes: float) -> dict | None:
+        """Claim and consume cooldown in one transaction before any provider call."""
+        stamp = epoch_us(now)
+        with self.transaction():
+            cursor = self.conn.execute(
+                "UPDATE intents SET status='PROCESSING' WHERE id=("
+                "SELECT id FROM intents WHERE character_id=? AND status='PENDING' "
+                "AND earliest_at_epoch<=? AND expires_at_epoch>=? ORDER BY earliest_at_epoch,id LIMIT 1) "
+                "AND status='PENDING' AND NOT EXISTS(SELECT 1 FROM proactive_dispatch_state "
+                "WHERE character_id=? AND next_allowed_at_epoch>?) RETURNING *",
+                (character_id, stamp, stamp, character_id, stamp),
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            if row is None:
+                return None
+            self.mark_proactive_dispatch(character_id, now, next_allowed_at, status="DISPATCHING",
+                                         intent_id=row["id"], interval_minutes=interval_minutes)
+            return dict(row)
+
+    def record_intent_resolution(self, intent_id: int, *, now: datetime, status: str,
+                                 decision: str, source_event_id=None) -> None:
+        with self.transaction():
+            changed = self.conn.execute("UPDATE intents SET status=? WHERE id=? AND status='PROCESSING'", (status, intent_id))
+            if not changed.rowcount:
+                raise ValueError("only the claimed PROCESSING intent can be resolved")
+            self.conn.execute(
+                "INSERT INTO intent_deferral_audit(intent_id,decided_at,decision,source_event_id) VALUES(?,?,?,?)",
+                (intent_id, now.isoformat(), decision, source_event_id),
+            )
+
+    def defer_intent(self, intent_id: int, *, now: datetime, defer_hours: float | None,
+                     max_deferrals: int = 2, min_minutes: float = 15, max_hours: float = 72,
+                     source_event_id=None) -> dict:
+        with self.transaction():
+            # A no-op write obtains the SQLite writer lock before reading the row.
+            self.conn.execute("UPDATE intents SET status=status WHERE id=? AND status='PROCESSING'", (intent_id,))
+            row = self.conn.execute("SELECT * FROM intents WHERE id=?", (intent_id,)).fetchone()
+            if row is None or row["status"] != "PROCESSING":
+                raise ValueError("only the claimed PROCESSING intent can be deferred")
+            reason = "DEFERRED"
+            next_at = None
+            if defer_hours is None:
+                reason = "MISSING_DEFER_TIME"
+            elif not math.isfinite(defer_hours) or not min_minutes / 60 <= defer_hours <= max_hours:
+                reason = "OUT_OF_RANGE"
+            elif row["deferral_count"] >= max_deferrals:
+                reason = "MAX_DEFERRALS"
+            else:
+                next_at = now + timedelta(hours=defer_hours)
+                if epoch_us(next_at) > row["expires_at_epoch"]:
+                    reason = "BEYOND_EXPIRY"
+            status = "PENDING" if reason == "DEFERRED" else "ABANDONED"
+            if status == "PENDING":
+                self.conn.execute(
+                    "UPDATE intents SET earliest_at=?,earliest_at_epoch=?,status='PENDING',deferral_count=deferral_count+1 WHERE id=?",
+                    (next_at.isoformat(), epoch_us(next_at), intent_id),
+                )
+            else:
+                self.conn.execute("UPDATE intents SET status='ABANDONED' WHERE id=?", (intent_id,))
+            self.conn.execute(
+                "INSERT INTO intent_deferral_audit(intent_id,decided_at,decision,old_earliest_at,new_earliest_at,source_event_id) "
+                "VALUES(?,?,?,?,?,?)",
+                (intent_id, now.isoformat(), reason, row["earliest_at"], next_at.isoformat() if status == "PENDING" else None, source_event_id),
+            )
+            return {"status": status, "resolution_reason": reason,
+                    "earliest_at": next_at.isoformat() if status == "PENDING" else row["earliest_at"]}
+
+    def intent_deferral_audit(self, intent_id: int) -> list[dict]:
+        with self._lock:
+            return [dict(row) for row in self.conn.execute(
+                "SELECT * FROM intent_deferral_audit WHERE intent_id=? ORDER BY id", (intent_id,)
+            ).fetchall()]
 
     def add_intent(self, character_id, content, preferred_action, created_at, earliest_at, expires_at, reason="", *, source_event_id=None, embedding=None):
         with self._lock:

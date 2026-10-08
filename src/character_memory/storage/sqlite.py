@@ -450,7 +450,14 @@ class SQLiteStore:
 
     @staticmethod
     def _event_from_row(r) -> Event:
-        return Event(id=r["id"], character_id=r["character_id"], event_type=EventType(r["event_type"]), event_time=parse_datetime(r["event_time"]), content=r["content"], metadata=json.loads(r["metadata_json"]))
+        try:
+            metadata = json.loads(r["metadata_json"])
+        except (ValueError, TypeError):
+            metadata = None
+        if not isinstance(metadata, dict):
+            logger.warning("storage.event invalid_metadata event_id=%s", r["id"])
+            metadata = {"metadata_status": "INVALID"}
+        return Event(id=r["id"], character_id=r["character_id"], event_type=EventType(r["event_type"]), event_time=parse_datetime(r["event_time"]), content=r["content"], metadata=metadata)
 
     @staticmethod
     def _media_from_row(r) -> MediaAsset:

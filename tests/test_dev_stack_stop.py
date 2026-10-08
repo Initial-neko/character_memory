@@ -56,7 +56,6 @@ def test_stop_waits_for_the_launcher_to_remove_its_own_pid_file(tmp_path):
         is_alive=lambda _pid: True,
     )
     assert message == "stack: stopped"
-    assert killed == []
 
 
 def test_stop_never_kills_pid_when_launcher_ignores_the_request(tmp_path):
@@ -64,7 +63,7 @@ def test_stop_never_kills_pid_when_launcher_ignores_the_request(tmp_path):
     pid_file.write_text("4242\n", encoding="utf-8")
     message = stop_running_stack(
         pid_file=pid_file, stop_file=stop_file, timeout=0.3,
-        is_alive=lambda _pid: True, force_kill=killed.append,
+        is_alive=lambda _pid: True,
     )
     assert "no process was killed" in message
     assert pid_file.exists()

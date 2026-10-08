@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from character_memory.domain.models import Event, Memory
+from character_memory.time_utils import epoch_us
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,7 @@ class PersonContextSnapshot:
     mental_state: str
     memories: list[Memory]
     recent_events: list[Event]
+    observed_events: list[Event] = field(default_factory=list)
 
 
 class PersonContextBuilder:
@@ -36,6 +38,7 @@ class PersonContextBuilder:
         recent_events: list[Event] | None = None,
         exclude_event_id: int | None = None,
         recent_limit: int = 8,
+        observed_projection: str = "PERSONAL",
     ) -> PersonContextSnapshot:
         memories = self.recall.recall(character_id, str(query or "").strip() or "recent personal context", now=at)
         if recent_events is None:
@@ -44,10 +47,12 @@ class PersonContextBuilder:
                 recent = [item for item in recent if item.id != exclude_event_id]
             recent = recent[-recent_limit:]
         else:
-            recent = list(recent_events)[-recent_limit:]
+            recent = [item for item in recent_events if epoch_us(item.event_time) <= epoch_us(at) and (exclude_event_id is None or item.id != exclude_event_id)][-recent_limit:]
+        observed = self.store.recall_observed_events(character_id, query, at=at, projection=observed_projection)
         return PersonContextSnapshot(
             persona=self.persona,
             mental_state=self.store.get_mental_state(character_id, at=at),
             memories=memories,
             recent_events=recent,
+            observed_events=observed,
         )

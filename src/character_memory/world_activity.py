@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, model_validator
 
+from character_memory.runtime.context import render_observed_experiences
 from character_memory.domain.models import Event, EventType
 from character_memory.group_store import GroupRepository
 from character_memory.llm.usage import llm_usage_scope
@@ -783,6 +784,9 @@ Rendered text:
 # Relevant Memories
 {self._memory_text(context)}
 
+# Observed Experiences
+{render_observed_experiences(context.observed_events)}
+
 # World Pulse Topic
 Title: {topic["title"]}
 Category: {topic.get("category") or "other"}
@@ -886,6 +890,7 @@ Summary: {topic["summary"]}
                 query=f"{topic['title']} {topic['summary']}",
                 at=now,
                 recent_limit=10,
+                observed_projection="PUBLIC",
             )
             take_session = f"world-pulse-comment:{topic_id}:{character_id}"
             with llm_usage_scope(
@@ -963,6 +968,9 @@ Summary: {topic["summary"]}
 
 # Relevant Memories
 {self._memory_text(context)}
+
+# Observed Experiences
+{render_observed_experiences(context.observed_events)}
 
 这是一次独立于发 Space 的“自己上网看看”机会。
 它不是发帖任务，也不要求每次都搜索。

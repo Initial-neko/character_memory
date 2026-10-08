@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timezone
+import json
 
 from character_memory.domain.models import EventType
 
@@ -30,6 +31,24 @@ def _relationship_time_text(event, last_chat_event) -> str:
     return f"- 上次聊天时间：{previous.isoformat()}\n- 距离上次聊天：{gap}\n- 不要机械地说‘好久不见’；只有 Persona、记忆和当前语境真的需要时才提及时间或旧事。"
 
 
+def render_observed_experiences(events, budget: int = 4000) -> str:
+    selected = list(events or [])[:4]
+    if not selected:
+        return "- 无"
+    quota = (budget - len(selected)) // len(selected)
+    chunks = []
+    for item in selected:
+        sources = item.metadata.get("sources") or []
+        if not isinstance(sources, list):
+            sources = [sources]
+        # Full provenance remains on the returned Event/trace, outside Prompt.
+        source_text = json.dumps([str(value)[:240] for value in sources[:2]], ensure_ascii=False)
+        header = f"[event_id={item.id} observed_at={item.event_time.isoformat()} sources={source_text}]\n"
+        content = str(item.content or "")[:max(0, quota-len(header))]
+        chunks.append((header+content)[:quota])
+    return "\n".join(chunks)
+
+
 def compile_context(
     persona: str,
     mental_state: str,
@@ -40,6 +59,7 @@ def compile_context(
     sticker_catalog=None,
     image_catalog=None,
     allow_generate_image: bool = False,
+    observed_events=None,
 ) -> str:
     relationship = [m for m in memories if m.memory_type.upper() in {"USER", "SHARED"}]
     other = [m for m in memories if m not in relationship]
@@ -49,6 +69,7 @@ def compile_context(
         "\n".join(f"- {e.event_time.isoformat()} {e.event_type.value}: {e.content}" for e in (recent_events or []))
         or "- 无"
     )
+    observed = render_observed_experiences(observed_events)
     has_stickers = bool(sticker_catalog and sticker_catalog.stickers)
     stickers = sticker_catalog.prompt_text() if sticker_catalog is not None else "- 无合适候选"
     has_images = bool(image_catalog and image_catalog.images)
@@ -165,6 +186,9 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 
 # Recent Events
 {recent}
+
+# Observed Experiences
+{observed}
 
 # Available Stickers
 {stickers}

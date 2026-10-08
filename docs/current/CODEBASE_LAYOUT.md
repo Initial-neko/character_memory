@@ -316,3 +316,12 @@ Live2D 通话展示：`live2d_web.py` 负责本地资源发现/安全路径与�
 `web/call_stage.js` 管理 Avatar / Live2D / Video / ScreenShare 展示状态及 Renderer 转发；`web/call_stage.css` 管理舞台、底部字幕和按需历史浮层，`web/call-room.png` 是展示背景。它们不拥有 capture 或通话 Session。
 
 模型管理由 `live2d_import.py` 负责 ZIP 结构/资源校验与原子绑定；`web/live2d_models.js` 在角色菜单提供导入、更换和解绑，成功变更通过 `live2dModelChanged` 通知当前展示。旧版本资源保留策略及制作流程由 [Voice & TTS](VOICE_AND_TTS.md) 维护。
+
+### Character life observation page
+
+- `character_life.py`: read-only durable event/state/Memory/Intent projection and pagination; no runtime execution.
+- `character_life_web.py`: Core-owned `/life` and per-character observation GET route.
+- `web/life.html`, `life.js`, `life.css`: dedicated timeline, source/detail and state comparison UI.
+- `tests/test_character_life.py`, `test_character_life_browser.py`: provenance/isolation/paging contracts and explicit isolated browser checks.
+
+The owning durable observation contract is [MEMORY](MEMORY.md); `life/` continues to own the separate frozen simulator.

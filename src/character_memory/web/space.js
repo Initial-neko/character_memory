@@ -972,4 +972,7 @@
   });
 
   CM.registerFeature("space", {open, close, reload:loadFeed});
+  CM.on("ready", () => {
+    if (new URLSearchParams(location.search).get("view") === "space") return open(null);
+  });
 })();

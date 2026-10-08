@@ -671,6 +671,14 @@ class PersonRuntime:
                     "created_intent_ids": created_intent_ids,
                     "timings": timings,
                 }
+                if event.event_type == EventType.WORLD_OBSERVATION and "observation_lifecycle" in event.metadata:
+                    life = dict(event.metadata["observation_lifecycle"])
+                    life.update(cognition_status="COMPLETED", memory_status="EVALUATED",
+                                mental_state_updated=trace["mental_state_updated"],
+                                created_memory_ids=list(created_memory_ids))
+                    event = event.model_copy(update={"metadata": {**event.metadata, "observation_lifecycle": life}})
+                    self.store.update_event_metadata(int(event.id), event.metadata)
+                    trace["event"] = event.model_dump(mode="json")
                 trace_id = self.store.add_runtime_trace(event.character_id, int(event.id), event.event_time, trace)
                 action_summary = ",".join(action.type.value for action in reaction.actions) or ActionType.NO_REPLY.value
                 self.store.append_event(

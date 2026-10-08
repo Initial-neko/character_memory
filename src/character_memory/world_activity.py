@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, model_validator
 
+from character_memory.world_observation import observation_lifecycle, retain_world_observation
 from character_memory.runtime.context import render_observed_experiences
 from character_memory.domain.models import Event, EventType
 from character_memory.group_store import GroupRepository
@@ -844,7 +845,7 @@ Summary: {topic["summary"]}
         outcomes = []
 
         def observation_event(character_id: str, comment_text: str) -> Event:
-            return Event(
+            event = Event(
                 character_id=character_id,
                 event_type=EventType.WORLD_OBSERVATION,
                 event_time=now,
@@ -860,6 +861,10 @@ Summary: {topic["summary"]}
                     "conversation_id": f"world-pulse:{topic_id}:{character_id}",
                 },
             )
+            return event.model_copy(update={"metadata": {
+                **event.metadata,
+                "observation_lifecycle": observation_lifecycle(event, reading_scope="WORLD_PULSE_TOPIC"),
+            }})
 
         for character_id in candidates:
             previous = self.repository.get_comment(topic_id, character_id)
@@ -1075,7 +1080,7 @@ personal_note 写“这次浏览对我有什么意义”，不是复制新闻标
 
         event_id = None
         if appraisal.keep:
-            event = self.access.store().append_event(
+            event, _ = retain_world_observation(self.access.store(),
                 Event(
                     character_id=character_id,
                     event_type=EventType.WORLD_OBSERVATION,
@@ -1083,6 +1088,7 @@ personal_note 写“这次浏览对我有什么意义”，不是复制新闻标
                     content=appraisal.personal_note or appraisal.summary,
                     metadata={
                         "channel": "PERSONAL_BROWSE",
+                        "content_kind": "PERSONAL_NOTE" if appraisal.personal_note else "APPRAISED_SUMMARY",
                         "query": plan.query,
                         "world_summary": appraisal.summary,
                         "sources": [item.url for item in observations],
@@ -1114,6 +1120,8 @@ personal_note 写“这次浏览对我有什么意义”，不是复制新闻标
             "summary": appraisal.summary,
             "personal_note": appraisal.personal_note,
             "source_event_id": event_id,
+            "appraisal_status": "KEPT" if appraisal.keep else "IGNORED",
+            "observation_lifecycle": event.metadata["observation_lifecycle"] if event_id is not None else None,
         }
 
 

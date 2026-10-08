@@ -209,7 +209,7 @@ External page content is always untrusted data. Raw rendered text is only suppli
 The four dispositions mean:
 
 - IGNORE: no memory admission and no public expression context;
-- MEMORY: only the appraisal safe summary is sent through the same PersonRuntime as a WORLD_OBSERVATION event;
+- MEMORY: only a nonempty first-person `personal_memory` is retained as a WORLD_OBSERVATION and sent through the existing PersonRuntime; the safe summary alone is not admitted;
 - EXPRESS: no forced memory; only safe summary/expression angle/source links are offered to the final SpacePostPlan;
 - MEMORY_AND_EXPRESS: both paths are allowed.
 
@@ -636,3 +636,48 @@ Personal Browse and World Pulse retain their distinct update strategies; recall
 is a read-only operation and does not revisit a website or perform appraisal.
 The personal/public projection applies to the new historical observation field,
 not a new World publication permission or automatic Memory policy.
+
+
+### Retained observation lifecycle
+
+New retained World events carry `observation_lifecycle` version 1 in their
+existing metadata: reading scope/status, appraisal status, observed time,
+recorded time, cognition status, Memory evaluation status and created Memory
+IDs. The event's time is the actual encounter time supplied by the opportunity;
+publication timestamps are not encounter times. Legacy metadata remains
+unchanged and must not be inferred as completed cognition.
+
+Personal Browse `keep=true` records a real `WEB_PAGES` encounter without a
+second cognition call or automatic Memory. `content_kind=PERSONAL_NOTE` marks
+the appraisal's personal interpretation; `APPRAISED_SUMMARY` marks its fallback
+summary. `keep=false` reports `appraisal_status=IGNORED` in the existing run
+result and creates no personal event. Browser or appraisal failure creates no
+successful observation. World Pulse records `WORLD_PULSE_TOPIC`, meaning the
+person encountered the shared topic and commented, not that they read every
+linked page. Existing Pulse comment/event atomicity and recovery are retained.
+
+Space MEMORY / MEMORY_AND_EXPRESS retains the first-person observation before
+using the existing PersonRuntime cognition and Memory Admission. Completed
+cognition metadata, Mental State, admitted Memory and runtime trace commit in
+one transaction. Failed cognition preserves the true encounter, marks cognition
+FAILED and Memory NOT_COMPLETED, and does not fabricate a successful update.
+A failure after that transaction cannot relabel committed cognition as failed.
+No additional model call or public/private expression is introduced.
+
+A nonempty per-result `observation_key` is unique per character for retained
+observations. New physical readings receive new keys; resubmitting the same
+local result with its original key returns the stored event and does not rerun
+cognition or duplicate derived Memory. Reusing a key for different content,
+time or sources is rejected. The additive `world/003-observation-lifecycle`
+migration creates an index over existing Event metadata; legacy unkeyed rows
+are untouched. At the outermost transaction, this migration takes the SQLite
+writer lock before checking its marker, serializing first-use concurrent setup.
+An existing caller-owned deferred transaction cannot be upgraded by an inner
+transaction; callers own that outer transaction and its concurrency discipline. Older readers continue to use the existing Event schema, and
+the index can remain during rollback.
+
+This deduplicates local retained-result submission, not earlier Search, Browser,
+plan or Appraisal calls. A crash before cognition finishes leaves REQUESTED /
+PENDING as an unknown outcome; it must not trigger automatic provider replay.
+The committed runtime trace and lifecycle distinguish completed cognition.
+Execution opportunity recovery and budget contracts remain a separate boundary.

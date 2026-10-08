@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from uuid import uuid4
 from urllib.parse import urlparse
 
-from character_memory.domain.models import WorldObservation
+from character_memory.domain.models import Event, EventType, WorldObservation
 from character_memory.search import SearchProvider, WebFetcher
 
 
@@ -20,6 +22,56 @@ logger = logging.getLogger("character_memory.world_observation")
 # browser timeout. The common case is unchanged: when the top-ranked candidates
 # render, exactly ``max_pages`` pages are opened, in one batch.
 EXTRA_FETCH_ATTEMPTS = 2
+
+
+def observation_lifecycle(event: Event, *, reading_scope: str = "WEB_PAGES", cognition: bool = False) -> dict:
+    """Actual encounter time differs from publication time and persistence time."""
+    return {
+        "version": 1,
+        "reading_scope": reading_scope,
+        "reading_status": "SUCCEEDED",
+        "appraisal_status": "KEPT",
+        "observed_at": event.event_time.isoformat(),
+        "recorded_at": datetime.now().astimezone().isoformat(),
+        "cognition_status": "REQUESTED" if cognition else "NOT_REQUESTED",
+        "memory_status": "PENDING" if cognition else "NOT_REQUESTED",
+        "created_memory_ids": [],
+    }
+
+
+def retain_world_observation(store, event: Event, *, observation_key: str | None = None, runtime=None) -> tuple[Event, bool]:
+    """Retain an already appraised result, optionally using existing cognition.
+
+    A repeated local submission never repeats cognition. REQUESTED after a crash
+    means the outcome is unknown; recovery must inspect trace rather than replay
+    a provider call automatically. Upstream search/appraisal are not deduplicated.
+    """
+    if event.event_type != EventType.WORLD_OBSERVATION:
+        raise ValueError("only WORLD_OBSERVATION can be retained")
+    event = event.model_copy(update={"metadata": {
+        **event.metadata,
+        "observation_key": observation_key if observation_key is not None else uuid4().hex,
+        "observation_lifecycle": observation_lifecycle(event, cognition=runtime is not None),
+    }})
+    saved, created = store.append_observation_once(event)
+    if not created or runtime is None:
+        return saved, created
+    try:
+        outcome = runtime.handle(saved, persist_event=False)
+    except Exception:
+        current = store.get_event(saved.id)
+        life = dict(current.metadata["observation_lifecycle"])
+        # A later delivery failure must not relabel already committed cognition.
+        if life["cognition_status"] != "COMPLETED":
+            life.update(cognition_status="FAILED", memory_status="NOT_COMPLETED")
+            store.update_event_metadata(saved.id, {**current.metadata, "observation_lifecycle": life})
+        raise
+    current = store.get_event(saved.id)
+    life = dict(current.metadata["observation_lifecycle"])
+    life.update(cognition_status="COMPLETED", memory_status="EVALUATED",
+                created_memory_ids=list(outcome.created_memory_ids))
+    store.update_event_metadata(saved.id, {**current.metadata, "observation_lifecycle": life})
+    return store.get_event(saved.id), True
 
 
 def _ordered_candidates(candidates, *, limit: int) -> list[tuple[str, object]]:

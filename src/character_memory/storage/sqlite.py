@@ -59,7 +59,7 @@ class SQLiteStore:
         )
         return result
 
-    def apply_schema_migration(self, name: str, migrate):
+    def apply_schema_migration(self, name: str, migrate, *, immediate: bool = False):
         """Run one idempotent migration once for this SQLite database.
 
         Feature modules such as group chat can share the same migration ledger
@@ -67,7 +67,7 @@ class SQLiteStore:
         The callback is executed under the store lock and committed atomically
         with the migration marker.
         """
-        with self.transaction():
+        with self.transaction(immediate=immediate):
             return self._run_migration_locked(name, migrate)
 
     def list_schema_migrations(self) -> list[str]:
@@ -422,11 +422,11 @@ class SQLiteStore:
             self.conn.commit()
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, immediate: bool = False):
         with self._lock:
             outer = self._tx_depth == 0
             if outer:
-                self.conn.execute("BEGIN")
+                self.conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             self._tx_depth += 1
             try:
                 yield
@@ -482,6 +482,42 @@ class SQLiteStore:
             )
             self._maybe_commit()
             return event.model_copy(update={"id": cur.lastrowid})
+
+    def append_observation_once(self, event: Event) -> tuple[Event, bool]:
+        """Persist a retained reading result once; legacy events have no key."""
+        key = event.metadata.get("observation_key")
+        if event.event_type != EventType.WORLD_OBSERVATION or not isinstance(key, str) or not key.strip():
+            raise ValueError("a WORLD_OBSERVATION and a nonempty observation_key are required")
+        safe_json = "CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END"
+        key_expr = f"json_extract({safe_json}, '$.observation_key')"
+        self.apply_schema_migration(
+            "world/003-observation-lifecycle",
+            lambda: self.conn.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS idx_world_observation_key "
+                f"ON events(character_id, {key_expr}) WHERE event_type='WORLD_OBSERVATION'"
+            ),
+            immediate=True,
+        )
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO events(character_id,event_type,event_time,event_time_epoch,content,metadata_json) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                (event.character_id, event.event_type.value, event.event_time.isoformat(),
+                 epoch_us(event.event_time), event.content, json.dumps(event.metadata, ensure_ascii=False)),
+            )
+            self._maybe_commit()
+            if cur.rowcount:
+                return event.model_copy(update={"id": cur.lastrowid}), True
+            row = self.conn.execute(
+                f"SELECT * FROM events WHERE character_id=? AND event_type='WORLD_OBSERVATION' AND {key_expr}=?",
+                (event.character_id, key),
+            ).fetchone()
+            existing = self._event_from_row(row)
+            if (existing.content != event.content or epoch_us(existing.event_time) != epoch_us(event.event_time)
+                    or any(existing.metadata.get(name) != event.metadata.get(name)
+                           for name in ("channel", "query", "sources", "source_domains"))):
+                raise ValueError("observation_key already belongs to a different reading result")
+            return existing, False
 
     def get_event(self, event_id: int) -> Event | None:
         with self._lock:

@@ -214,6 +214,7 @@ SETTING_HELP: dict[str, str] = {
     "world_pulse_max_topics": "一次 Pulse 刷新最多保留/暴露的主题数量。",
     "world_pulse_commenter_count": "一个 Pulse Topic 最多邀请多少角色独立判断是否评论。",
     "world_browse_enabled": "是否允许每个角色独立进行 Personal Browse。",
+    "world_cost_saving_enabled": "默认关闭。开启后后台 Browse 间隔为基准的 2 倍；手动浏览、Pulse、Space 和聊天不变。重启 Character Runtime 后生效。",
     "world_browse_interval_minutes": "同一角色两次 Personal Browse Opportunity 的间隔。",
     "world_browse_max_pages": "一次 Personal Browse 最多打开并读取的公网页面数。",
     "world_browse_daily_max": "每个角色每天最多执行多少次 Personal Browse；0 = 不限。",
@@ -726,6 +727,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "help": "只是候选人数；每个角色仍可独立判断保持沉默。",
             },
             {"name": "world_browse_enabled", "label": "Personal Browse", "type": "checkbox", "level": "advanced"},
+            {"name": "world_cost_saving_enabled", "label": "Optional World Cost Saving", "type": "checkbox", "level": "advanced"},
             {
                 "name": "world_browse_interval_minutes",
                 "label": "Personal Browse Interval (min)",

@@ -385,3 +385,13 @@ requires affected gates to run again; merge integration is checked separately.
 Engineering acceptance, target-machine validation and human Persona review are
 recorded separately. Human quality review does not block unrelated engineering
 work; it is required before final rollout. See DELIVERY_PLAN for current status.
+
+World Web execution gates are exercised in `test_capability_execution.py` and
+`test_world_execution_integration.py`: channel/argument/budget denial, stable
+request identity, cached results across restart, interrupted outcomes without
+replay, concurrent connections, atomic local observation commit, and saving-mode
+cadence changes without catch-up. Run these with the Character baseline,
+World lifecycle, configuration/settings and existing search-boundary suites.
+Compare exact schema/prompt text and logical calls on identical fixtures in
+normal mode. Fake providers cannot establish actual billed tokens or latency;
+live browser/provider and human Persona quality remain separate acceptance.

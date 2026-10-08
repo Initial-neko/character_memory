@@ -114,15 +114,15 @@ judgments, and dependent milestones cannot merge on an unaccepted predecessor.
 | Milestone | Scope | Implementation | Independent engineering acceptance | Target-machine / human acceptance |
 | --- | --- | --- | --- | --- |
 | M0 | Isolated Character cost/call baseline | Merged in #249 | Accepted at 43e0512; CI green | No live-provider or Persona claim |
-| M1 | Historical observations, lifecycle and behavior contract | Merged in #250, #251 and #252 | F04 and F01 accepted; lifecycle accepted at 7ab8d9f; CI green | Live Persona quality pending |
-| M2 | Finite Intent deferral | Implemented in this change | Independent acceptance pending | Live-provider quality pending |
-| M3 | Minimal World Web execution/feedback contract | Planned | Not started | Not started |
+| M1 | Historical observations, lifecycle and behavior contract | Merged in #250, #251, #252 and #254 | F04/F01/lifecycle and legacy metadata supplement accepted; CI green | Live Persona quality pending |
+| M2 | Finite Intent deferral | Merged in #253 | Accepted at a632121; CI green | Live-provider quality pending |
+| M3 | Minimal World Web execution/feedback contract | Implemented in this change | Independent acceptance pending | Live browser/provider quality pending |
 | M4 | RSS personal reading through existing World opportunity | Planned | Not started | Not started |
 | M5 | Integrated compatibility, cost and opt-in rollout | Planned | Not started | Not started |
 
-A future optional World saving policy must preserve normal-mode quality and
-remain separate from permission, idempotence and failure safety. No saving
-switch, RSS personal reading or new shared executor is implemented by M0.
+The optional World saving switch defaults off and changes only background browse
+cadence. Permission, idempotence and failure safety apply in both modes. RSS
+personal reading remains planned; shared RSS collection is not personal experience.
 Acceptance must use its own configuration, database and process ownership;
 formal service startup and restoring an acceptance database over formal data
 are not part of automated milestone validation.

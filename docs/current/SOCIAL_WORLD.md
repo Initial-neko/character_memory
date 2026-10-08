@@ -563,6 +563,40 @@ The clock also has a daily ceiling. `world_browse_daily_max` bounds how many tim
 
 Zero-LLM idle deferrals are only scheduler state transitions: they do not create a `BROWSE` run row and therefore do not consume the daily ceiling. Real browse-plan attempts remain in the World Activity run ledger; a run whose search later fails still counts as an attempt because the character's browsing opportunity was actually spent.
 
+#### Durable execution and recovery
+
+Personal Browse uses the existing `PersonalBrowsePlan` and appraisal schemas.
+A server-issued `world-run:<run_id>` identifies each opportunity; separate
+manual clicks have separate `BROWSE_MANUAL` runs even in the same minute.
+Manual browsing retains its existing limits and does not consume the background
+`BROWSE` daily ceiling. The scheduler atomically reserves its next clock and
+quota before planning, including across independent SQLite connections.
+
+`world_browse_decisions` records planning, execution feedback and appraisal.
+A chosen Web request uses the bounded World executor described in ARCHITECTURE;
+Search/Browser remain the existing providers with their URL and timeout defenses.
+No action needs one plan and no executor; readable pages need one plan plus one
+appraisal. No additional character-intent model or embedding is introduced.
+`keep=false` preserves execution facts but creates no personal observation.
+
+The phases are `PLANNING -> PLANNED -> APPRAISING -> APPRAISED -> APPLIED`;
+confirmed model/provider failures end as `FAILED`. An applied result is reused
+without providers. A saved appraisal can retry only the final local transaction,
+which commits its retained observation and result together. The observation key
+is the capability request ID, and metadata retains the opportunity and request
+lineage. Interrupted planning, execution or appraisal has an unknown outcome;
+it is not automatically replayed or presented as a successful encounter.
+This is local effect idempotence, not an exactly-once promise for external
+providers. A process death can leave a run `RUNNING`; the reserved future clock
+prevents immediate catch-up, and the unfinished receipt requires investigation.
+
+`world_cost_saving_enabled` defaults to false. When enabled it doubles only the
+background Personal Browse interval, retaining the original page budget and
+appraisal quality. It does not change manual browsing, Pulse, Space, chat,
+permissions or recovery guarantees. Configuration changes require restart;
+the durable clock re-arms from the current time without catch-up. The existing
+idle planning gate remains active in both modes.
+
 ### Scheduling
 
 `WorldActivityScheduler` owns three independent durable clocks:
@@ -602,6 +636,7 @@ world_pulse_max_topics: 8
 world_pulse_commenter_count: 4
 
 world_browse_enabled: true
+world_cost_saving_enabled: false
 world_browse_interval_minutes: 30
 world_browse_max_pages: 2
 world_activity_poll_seconds: 60

@@ -483,6 +483,41 @@ class SQLiteStore:
             self._maybe_commit()
             return event.model_copy(update={"id": cur.lastrowid})
 
+    def append_observation_once(self, event: Event) -> tuple[Event, bool]:
+        """Persist a retained reading result once; legacy events have no key."""
+        key = event.metadata.get("observation_key")
+        if event.event_type != EventType.WORLD_OBSERVATION or not isinstance(key, str) or not key.strip():
+            raise ValueError("a WORLD_OBSERVATION and a nonempty observation_key are required")
+        safe_json = "CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END"
+        key_expr = f"json_extract({safe_json}, '$.observation_key')"
+        self.apply_schema_migration(
+            "world/003-observation-lifecycle",
+            lambda: self.conn.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS idx_world_observation_key "
+                f"ON events(character_id, {key_expr}) WHERE event_type='WORLD_OBSERVATION'"
+            ),
+        )
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO events(character_id,event_type,event_time,event_time_epoch,content,metadata_json) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                (event.character_id, event.event_type.value, event.event_time.isoformat(),
+                 epoch_us(event.event_time), event.content, json.dumps(event.metadata, ensure_ascii=False)),
+            )
+            self._maybe_commit()
+            if cur.rowcount:
+                return event.model_copy(update={"id": cur.lastrowid}), True
+            row = self.conn.execute(
+                f"SELECT * FROM events WHERE character_id=? AND event_type='WORLD_OBSERVATION' AND {key_expr}=?",
+                (event.character_id, key),
+            ).fetchone()
+            existing = self._event_from_row(row)
+            if (existing.content != event.content or epoch_us(existing.event_time) != epoch_us(event.event_time)
+                    or any(existing.metadata.get(name) != event.metadata.get(name)
+                           for name in ("channel", "query", "sources", "source_domains"))):
+                raise ValueError("observation_key already belongs to a different reading result")
+            return existing, False
+
     def get_event(self, event_id: int) -> Event | None:
         with self._lock:
             row = self.conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()

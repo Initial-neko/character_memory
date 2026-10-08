@@ -9,6 +9,7 @@ import threading
 
 from pydantic import BaseModel
 
+from character_memory.world_observation import retain_world_observation
 from character_memory.runtime.context import render_observed_experiences
 from character_memory.domain.models import (
     ActionType,
@@ -443,7 +444,7 @@ expression_angle 只在需要 EXPRESS 时填写，描述人物自然会从什么
             and appraisal.personal_memory
         ):
             try:
-                cognition = runtime.handle(
+                observation, _ = retain_world_observation(self.access.store(),
                     Event(
                         character_id=character_id,
                         event_type=EventType.WORLD_OBSERVATION,
@@ -459,9 +460,12 @@ expression_angle 只在需要 EXPRESS 时填写，描述人物自然会从什么
                                 f"world:{character_id}:{now.isoformat(timespec='minutes')}:{source.lower()}"
                             ),
                         },
-                    )
+                    ),
+                    runtime=runtime,
                 )
-                result["created_memory_ids"] = list(cognition.created_memory_ids)
+                result["source_event_id"] = observation.id
+                result["observation_lifecycle"] = observation.metadata["observation_lifecycle"]
+                result["created_memory_ids"] = list(observation.metadata["observation_lifecycle"]["created_memory_ids"])
             except Exception as exc:
                 logger.warning("space.world cognition_failed character=%s error=%s", character_id, exc)
                 result["errors"].append({"stage": "memory", "error": str(exc)[:800]})

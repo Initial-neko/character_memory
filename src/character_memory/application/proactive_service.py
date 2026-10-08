@@ -34,6 +34,14 @@ class ProactiveService:
         self.defer_max_hours = defer_max_hours
         self.max_deferrals = max_deferrals
 
+    @classmethod
+    def from_settings(cls, store, chat_service, settings):
+        return cls(store, chat_service,
+                   min_dispatch_interval_minutes=settings.proactive_min_dispatch_interval_minutes,
+                   defer_min_minutes=settings.proactive_intent_defer_min_minutes,
+                   defer_max_hours=settings.proactive_intent_defer_max_hours,
+                   max_deferrals=settings.proactive_intent_max_deferrals)
+
     def _on_cooldown(self, character_id: str, now: datetime) -> bool:
         state = self.store.proactive_dispatch_state(character_id)
         if state is None:

@@ -249,3 +249,13 @@ def test_cooldown_still_blocks_short_deferral_after_it_becomes_due(tmp_path):
     assert service.dispatch_due(["a"], NOW + timedelta(minutes=15)) == []
     assert len(chat.calls) == 1
     store.close()
+
+
+def test_proactive_settings_factory_uses_configured_policy():
+    from character_memory.config import Settings
+    settings = Settings(proactive_min_dispatch_interval_minutes=120,
+                        proactive_intent_defer_min_minutes=30,
+                        proactive_intent_defer_max_hours=6, proactive_intent_max_deferrals=1)
+    service = ProactiveService.from_settings(None, None, settings)
+    assert service.min_dispatch_interval == 120
+    assert service.defer_min_minutes == 30 and service.defer_max_hours == 6 and service.max_deferrals == 1

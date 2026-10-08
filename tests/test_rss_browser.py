@@ -341,3 +341,30 @@ def test_original_link_is_below_article_content(rss_page):
     expect(footer.get_by_role('link', name='查看原文')).to_have_attribute('href', 'https://example.com/article/0')
     expect(footer.get_by_role('link')).to_have_attribute('target', '_blank')
     assert footer.evaluate('el => el.previousElementSibling.classList.contains("article-rich")')
+def test_cancel_and_restore_subscription_in_desktop_ui(rss_page, rss_server):
+    from playwright.sync_api import expect
+    page = rss_page
+    source = page.request.get(rss_server + "/v1/rss/sources").json()["sources"][0]
+    source_id = source["id"]
+    original = page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]
+    assert original
+
+    page.locator('[data-view="sources"]').click()
+    row = page.locator(f'[data-source-id="{source_id}"]')
+    row.locator("[data-source-cancel]").click()
+    expect(row.locator("[data-source-confirm-cancel]")).to_be_visible()
+    row.locator("[data-source-keep]").click()
+    expect(row.locator("[data-source-confirm-cancel]")).to_have_count(0)
+
+    row.locator("[data-source-cancel]").click()
+    row.locator("[data-source-confirm-cancel]").click()
+    cancelled = page.locator(f'#cancelledSourceList [data-source-id="{source_id}"]')
+    expect(cancelled.get_by_role("button", name="恢复订阅")).to_be_visible()
+    assert source_id not in [s["id"] for s in page.request.get(rss_server + "/v1/rss/sources").json()["sources"]]
+    assert len(page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]) == len(original)
+
+    cancelled.locator("[data-source-restore]").click()
+    expect(page.locator(f'#sourceList [data-source-id="{source_id}"] [data-source-cancel]')).to_be_visible()
+    restored = page.request.get(rss_server + "/v1/rss/sources").json()["sources"]
+    assert any(s["id"] == source_id for s in restored)
+    assert len(page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]) == len(original)

@@ -222,7 +222,7 @@ def test_old_source_snapshot_does_not_overwrite_refresh(rss_page):
         else:
             route.continue_()
 
-    page.route("**/v1/rss/sources", hold_first)
+    page.route("**/v1/rss/sources?*", hold_first)
     toggle = page.locator("[data-source-toggle]").first
     toggle.set_checked(not toggle.is_checked())
     expect(page.locator("#sourceStatus")).to_contain_text("加载订阅")
@@ -348,6 +348,7 @@ def test_cancel_and_restore_subscription_in_desktop_ui(rss_page, rss_server):
     source_id = source["id"]
     original = page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]
     assert original
+    original_ids = {item["id"] for item in original}
 
     page.locator('[data-view="sources"]').click()
     row = page.locator(f'[data-source-id="{source_id}"]')
@@ -361,10 +362,10 @@ def test_cancel_and_restore_subscription_in_desktop_ui(rss_page, rss_server):
     cancelled = page.locator(f'#cancelledSourceList [data-source-id="{source_id}"]')
     expect(cancelled.get_by_role("button", name="恢复订阅")).to_be_visible()
     assert source_id not in [s["id"] for s in page.request.get(rss_server + "/v1/rss/sources").json()["sources"]]
-    assert len(page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]) == len(original)
+    assert original_ids <= {item["id"] for item in page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]}
 
     cancelled.locator("[data-source-restore]").click()
     expect(page.locator(f'#sourceList [data-source-id="{source_id}"] [data-source-cancel]')).to_be_visible()
     restored = page.request.get(rss_server + "/v1/rss/sources").json()["sources"]
     assert any(s["id"] == source_id for s in restored)
-    assert len(page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]) == len(original)
+    assert original_ids <= {item["id"] for item in page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]}

@@ -744,8 +744,9 @@ class SQLiteStore:
         if projection not in {"PERSONAL", "PUBLIC"}:
             raise ValueError("unknown observation projection")
         normalized = str(query or "").lower()[:512]
-        for phrase in ("你上次", "我上次", "最近", "曾经", "读过的", "看过的", "阅读过", "是什么", "什么", "哪些", "文章", "关于", "我最近真实感兴趣", "可能会自己上网继续看的公开话题"):
+        for phrase in ("你上次", "我上次", "最近", "曾经", "读过的", "看过的", "阅读过", "是什么", "什么", "哪些", "文章", "关于", "我最近真实感兴趣", "可能会自己上网继续看的公开话题", "有没有", "是否", "实际", "刚才", "读过", "看过", "记得"):
             normalized = normalized.replace(phrase, " ")
+        normalized = re.sub(r"[吗呢](?=$|[？?。，,！!])", " ", normalized)
         stopwords = {"what", "when", "where", "which", "about", "have", "read", "article", "did", "you", "the", "and", "recent", "personal", "context"}
         terms = list(dict.fromkeys(term for term in re.findall(r"[a-z0-9][a-z0-9_-]{1,63}|[\u4e00-\u9fff]{2,32}", normalized) if term not in stopwords))[:8]
         if not terms or limit <= 0:

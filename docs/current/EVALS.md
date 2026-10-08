@@ -442,3 +442,11 @@ failures, not synthesized `NO_ACTION`. This complements typed fake-model tests,
 which cannot detect provider field-name drift. Live review must compare the
 raw structured choice with the persisted canonical decision before interpreting
 silence or read frequency as character autonomy.
+
+
+`test_observed_chinese_recall.py` covers natural unspaced Chinese title questions
+after thirty ordinary events, real Direct context inclusion, private/public/time
+boundaries, unknown-title negatives, optional metadata and bounded rendering of
+source title/scope/summary. A successful execution receipt alone is insufficient:
+live follow-up must prove the observation enters context and is not denied or
+confused with the user's own activities.

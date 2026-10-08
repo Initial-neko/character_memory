@@ -43,8 +43,22 @@ def render_observed_experiences(events, budget: int = 4000) -> str:
             sources = [sources]
         # Full provenance remains on the returned Event/trace, outside Prompt.
         source_text = json.dumps([str(value)[:240] for value in sources[:2]], ensure_ascii=False)
-        header = f"[event_id={item.id} observed_at={item.event_time.isoformat()} sources={source_text}]\n"
-        content = str(item.content or "")[:max(0, quota-len(header))]
+        reading = item.metadata.get("rss_reading")
+        reading = reading if isinstance(reading, dict) else {}
+        title = reading.get("title")
+        title_text = f" title={json.dumps(title[:180], ensure_ascii=False)}" if isinstance(title, str) and title else ""
+        scope = reading.get("content_scope")
+        scope_text = f" scope={json.dumps(scope[:24])}" if isinstance(scope, str) and scope else ""
+        header = f"[event_id={item.id} observed_at={item.event_time.isoformat()} sources={source_text}{title_text}{scope_text}]\n"
+        content = str(item.content or "")
+        remaining = max(0, quota-len(header))
+        summary = item.metadata.get("world_summary")
+        if isinstance(summary, str) and summary.strip() and summary.strip() != content.strip():
+            summary_label = "\n来源内容摘要："
+            note_limit = max(0, (remaining-len(summary_label)) // 2)
+            content = content[:note_limit] + summary_label + summary[:max(0, remaining-note_limit-len(summary_label))]
+        else:
+            content = content[:remaining]
         chunks.append((header+content)[:quota])
     return "\n".join(chunks)
 

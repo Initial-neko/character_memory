@@ -138,7 +138,7 @@ uv run character-stack --stop     # 优雅停机，子进程按启动的逆序�
 uv run character-stack --status   # 只报告是否在跑
 ```
 
-启动中的 launcher 会把 pid 写到 `.debug-output/stack.pid`；`--stop` 借它找到进程，并通过 `.debug-output/stack.stop` 请它自己退出，所以不需要知道 stack 的进程结构，也不用 `Ctrl+C`。请求 20 秒内没被响应时（比如旧版本、卡死的子进程）才会强制结束整棵进程树。
+启动中的 launcher 会把 pid 写到 `.debug-output/stack.pid`；`--stop` 借它找到进程，并通过 `.debug-output/stack.stop` 请它自己退出，所以不需要知道 stack 的进程结构，也不用 `Ctrl+C`。如果 20 秒内没有收到停机确认，会报告超时并保留状态文件，不会仅根据可能过期的 PID 强杀进程，以免误杀其他程序。再次启动前可以执行 `--status` / `--stop` 检查并清理旧状态。
 
 可选：
 

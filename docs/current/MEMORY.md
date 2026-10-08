@@ -287,3 +287,10 @@ This does not claim to implement comprehensive privacy classification of all
 legacy Memory. Existing Memory admission and its future-time barrier remain.
 Caller-provided recent shared facts retain their actor identities but are
 filtered at the requested event time; explicit event exclusion is also applied.
+
+Invalid or non-object legacy Event metadata is exposed as `metadata_status=INVALID`
+when decoding Events. IDs, content and encounter time remain intact; missing
+sources are not invented, the stored raw metadata is not rewritten, and such
+observations cannot qualify for the PUBLIC historical projection. This fallback
+only covers Event JSON metadata decoding, not arbitrary database corruption or
+all legacy SQL expressions. It does not add model calls or Memory admission.

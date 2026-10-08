@@ -118,3 +118,27 @@ def test_supplied_shared_facts_keep_actor_identity_without_personal_event_id(sto
     snapshot = PersonContextBuilder(store, LocalRecall(), 'persona').build('a', query='公开', at=NOW, recent_events=[shared], observed_projection='PUBLIC')
     assert snapshot.recent_events == [shared]
     assert shared.id is None
+
+
+@pytest.mark.parametrize("raw", ["{broken", "[]", "null", "42"])
+@pytest.mark.parametrize("ordinary_events", [0, 30])
+def test_legacy_invalid_metadata_preserves_fact_without_inventing_provenance(store, raw, ordinary_events):
+    event = observe(store)
+    store.conn.execute("UPDATE events SET metadata_json=? WHERE id=?", (raw, event.id))
+    store.conn.commit()
+    for index in range(ordinary_events):
+        store.append_event(Event(character_id="a", event_type=EventType.USER_MESSAGE,
+                                 event_time=NOW + timedelta(minutes=index+1), content="普通聊天"))
+    snapshot = PersonContextBuilder(store, LocalRecall(), "persona").build(
+        "a", query="长期记忆", at=NOW + timedelta(hours=1))
+    observed = snapshot.observed_events[0]
+    assert observed.id == event.id and observed.content == event.content and observed.event_time == event.event_time
+    assert observed.metadata == {"metadata_status": "INVALID"}
+    assert store.conn.execute("SELECT metadata_json FROM events WHERE id=?", (event.id,)).fetchone()[0] == raw
+    assert store.recall_observed_events("a", "长期记忆", at=NOW, projection="PUBLIC") == []
+    assert store.list_memories("a") == []
+    rendered = compile_context(persona="persona", mental_state="", memories=[],
+                               event=Event(character_id="a", event_type=EventType.USER_MESSAGE,
+                                           event_time=NOW + timedelta(hours=1), content="长期记忆"),
+                               observed_events=snapshot.observed_events)
+    assert "sources=[]" in rendered and "https://example.com/memory" not in rendered

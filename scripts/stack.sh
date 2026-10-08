@@ -2,8 +2,8 @@
 # Start / stop / restart / inspect the local Character Memory stack.
 #
 # This is a thin wrapper: the launcher itself owns the process handling. It
-# writes .debug-output/stack.pid while it runs and shuts its children down in
-# reverse order when it sees .debug-output/stack.stop, so `--stop` does not have
+# exclusively claims .debug-output/stack.pid while it runs and shuts children
+# down in reverse order when it sees .debug-output/stack.stop, so `--stop` does not have
 # to guess at a process tree from the outside.
 #
 #   bash scripts/stack.sh status

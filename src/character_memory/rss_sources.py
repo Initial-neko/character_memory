@@ -6,6 +6,7 @@ from email.utils import parsedate_to_datetime
 from hashlib import sha256
 from html import escape
 import logging
+import re
 import threading
 import time
 from typing import Iterable
@@ -15,7 +16,7 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from character_memory.remote_media import ensure_public_http_url, _sniff_image_mime
-from character_memory.rss_content import parse_article_content
+from character_memory.rss_content import article_url, parse_article_content
 from character_memory.time_utils import epoch_us, parse_datetime
 
 
@@ -145,6 +146,10 @@ class ParsedFeed:
 
 
 def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
+    # ElementTree may expand entities before the 4 MiB fetch limit can help.
+    # DTDs are unnecessary for RSS/Atom; refuse them before parsing untrusted XML.
+    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)\b", xml_text, flags=re.IGNORECASE):
+        raise ValueError("RSS XML 禁止 DOCTYPE/ENTITY 声明")
     root = ET.fromstring(xml_text)
     root_base = urljoin(feed_url, root.attrib.get("{http://www.w3.org/XML/1998/namespace}base", ""))
     root_name = _local_name(root.tag)
@@ -180,7 +185,7 @@ def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
                 if href and rel in {"", "alternate"}:
                     link = href
                     break
-        link = urljoin(entry_base, link) if link else ""
+        link = article_url(link, entry_base) if link else ""
         summary_html, summary_base = _content_markup(entry, {"description", "summary"}, link or entry_base)
         raw_content, content_base = _content_markup(entry, {"encoded", "content"}, link or entry_base)
         summary_text, _, summary_image = parse_article_content(summary_html, base_url=summary_base)
@@ -207,7 +212,7 @@ def parse_feed(xml_text: str, *, feed_url: str = "") -> ParsedFeed:
                 content_html=content_html,
             )
         )
-    return ParsedFeed(title=feed_title[:240], site_url=urljoin(feed_url, site_url)[:2000], items=items)
+    return ParsedFeed(title=feed_title[:240], site_url=article_url(site_url, feed_url), items=items)
 
 
 class RssSubscriptionChanged(ValueError):
@@ -545,10 +550,23 @@ class RssService:
         self.max_response_bytes = int(max_response_bytes)
         self.client = client or httpx.Client(timeout=timeout_seconds, follow_redirects=False, headers={"User-Agent": "character-memory-rss/1.0"})
         self._owns_client = client is None
+        # close() must not interrupt an in-flight fetch or allow it to access a
+        # SQLite store that the application is about to close.
+        self._lifecycle_lock = threading.RLock()
+        self._closing = False
+        self._closed = False
+        self._active_fetches = 0
+
+    def _close_if_idle_locked(self) -> None:
+        if self._closing and not self._active_fetches and not self._closed:
+            self._closed = True
+            if self._owns_client:
+                self.client.close()
 
     def close(self) -> None:
-        if self._owns_client:
-            self.client.close()
+        with self._lifecycle_lock:
+            self._closing = True
+            self._close_if_idle_locked()
 
     def _fetch_text(self, url: str) -> str:
         body, encoding = self._fetch_payload(url)
@@ -567,6 +585,18 @@ class RssService:
         return body, mime
 
     def _fetch_payload(self, url: str) -> tuple[bytes, str]:
+        with self._lifecycle_lock:
+            if self._closing:
+                raise RuntimeError("RSS 服务已停止")
+            self._active_fetches += 1
+        try:
+            return self._fetch_payload_active(url)
+        finally:
+            with self._lifecycle_lock:
+                self._active_fetches -= 1
+                self._close_if_idle_locked()
+
+    def _fetch_payload_active(self, url: str) -> tuple[bytes, str]:
         deadline = time.monotonic() + self.total_timeout_seconds
         current = url
         for _ in range(4):
@@ -596,7 +626,11 @@ class RssService:
         raise RuntimeError("RSS 重定向次数过多")
 
     def refresh_source(self, source_id: int) -> dict:
-        source = self.repository.get_source(source_id)
+        stopped = {"ok": False, "source_id": source_id, "inserted": 0, "seen": 0, "error": "RSS 服务已停止"}
+        with self._lifecycle_lock:
+            if self._closing:
+                return stopped
+            source = self.repository.get_source(source_id)
         if source is None:
             raise KeyError("RSS source not found")
         if source["cancelled_at"]:
@@ -605,26 +639,35 @@ class RssService:
         now = datetime.now().astimezone()
         try:
             document = parse_feed(self._fetch_text(source["feed_url"]), feed_url=source["feed_url"])
-            inserted = self.repository.upsert_items(source_id, document.items, fetched_at=now, expected_generation=generation)
-            self.repository.mark_fetch(
-                source_id,
-                now=now,
-                title=document.title or source["name"],
-                site_url=document.site_url,
-                expected_generation=generation,
-            )
+            # Serialize the final DB write with shutdown. A fetch may finish
+            # after shutdown, but it must never touch the closed SQLite store.
+            with self._lifecycle_lock:
+                if self._closing:
+                    return stopped
+                inserted = self.repository.upsert_items(source_id, document.items, fetched_at=now, expected_generation=generation)
+                self.repository.mark_fetch(
+                    source_id, now=now, title=document.title or source["name"],
+                    site_url=document.site_url, expected_generation=generation,
+                )
             return {"ok": True, "source_id": source_id, "inserted": inserted, "seen": len(document.items)}
         except Exception as exc:
-            try:
-                self.repository.mark_fetch(source_id, now=now, error=str(exc), expected_generation=generation)
-            except RssSubscriptionChanged:
-                pass
+            with self._lifecycle_lock:
+                if self._closing:
+                    return stopped
+                try:
+                    self.repository.mark_fetch(source_id, now=now, error=str(exc), expected_generation=generation)
+                except RssSubscriptionChanged:
+                    pass
             logger.warning("rss.refresh failed source=%s url=%s error=%s", source_id, source["feed_url"], exc)
             return {"ok": False, "source_id": source_id, "inserted": 0, "seen": 0, "error": str(exc)}
 
     def refresh_due(self) -> list[dict]:
         now = datetime.now().astimezone()
-        return [self.refresh_source(source["id"]) for source in self.repository.due_sources(now)]
+        with self._lifecycle_lock:
+            if self._closing:
+                return []
+            due = self.repository.due_sources(now)
+        return [self.refresh_source(source["id"]) for source in due]
 
 
 class RssScheduler:

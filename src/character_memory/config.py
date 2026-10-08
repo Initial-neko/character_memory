@@ -134,6 +134,10 @@ class Settings(BaseModel):
     # Server-side floor for a new intent's earliest_at. The model was never told
     # this field exists, so its default of 0 used to mean "due on the next poll".
     proactive_intent_min_delay_minutes: float = Field(default=10.0, ge=0.0, le=1440.0)
+    # Deferral changes the original intent's schedule, never its expiry.
+    proactive_intent_defer_min_minutes: float = Field(default=15.0, ge=1.0, le=60.0)
+    proactive_intent_defer_max_hours: float = Field(default=72.0, ge=1.0, le=168.0)
+    proactive_intent_max_deferrals: int = Field(default=2, ge=0, le=10)
     # Hard ceiling on PENDING intents per character. 0 disables the ceiling.
     proactive_max_pending_intents: int = Field(default=20, ge=0, le=200)
     # A new intent that repeats one from the recent window is dropped instead of

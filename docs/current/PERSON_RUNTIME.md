@@ -272,7 +272,42 @@ otherwise -> write, with earliest_at >= server floor
 - `PROACTIVE_INTENT` 是自环的那条边：一轮“到期重判”如果又能留下新 Intent，而新 Intent 的 `earliest_at` 落在同一轮或下一轮，就形成永不停止的 LLM 循环。Memory / Mental State 仍照常接受，只切断 Intent 这一条回流边。
 - Space / World 被排除是另一回事：它们的 Intent 到期后会走成**私聊**主动消息（`dispatch_proactive_intent` 用该人物最近的会话 ID），也就是“在朋友圈看到评论”变成“私聊找用户说话”，属于跨渠道串味。这与 WORLD_OBSERVATION 只更新认知、不对外表达的既有边界一致。
 
-`DEFER` 目前只写 `status='DEFERRED'` 而**不重排 `earliest_at`**，而 `due_intents` 只查 `PENDING`，所以被延后的 Intent 不会再被取到。也就是说“延后到明早”这条路径当前并不存在，`earliest_hours` 才是唯一的时机表达方式。补全 `DEFER` 是独立工作，不在准入层。
+### 原 Intent 的有限延期
+
+到期重判仍是原 PersonRuntime 的一次 reaction。可选 `intent_resolution`
+只适用于 `PROACTIVE_INTENT`：`EXECUTE` 使用当前合法表达，`ABANDON` 终结，
+`DEFER` 配合真实 `defer_hours` 修改原 Intent 的 `earliest_at`，重新置为
+`PENDING`。ID、内容、原有效期不变，不创建相同的新 Intent。没有这个字段
+的旧输出仍按表达或沉默处理；非 proactive 输出的 resolution 被清除，Trace
+记录 `DROP_INTENT_RESOLUTION_WRONG_CHANNEL`。
+
+默认最小延期 15 分钟、单次最多 72 小时、同 Intent 最多 2 次。对应
+`proactive_intent_defer_min_minutes` / `proactive_intent_defer_max_hours` /
+`proactive_intent_max_deferrals` 是正式 Settings，重启 Character Runtime 后
+生效；次数为 0 明确禁止延期。当前配置、已用次数和原 expires_at 随到期
+事件传入 Prompt，服务端仍做最终校验。超过原有效期、次数、范围或缺少
+延期时间时终结为 `ABANDONED`，留下原因，不猜一个时间。
+
+合法表达优先于矛盾的延期/放弃，记录 `EXPRESSION_CONFLICT`，不会在表达后
+重复排期。`EXECUTE` 没有合法表达仍是 `SUPPRESSED`，不伪造执行成功。
+合法旧 `ActionType.DEFER` 没有时间，终结并记录
+`LEGACY_DEFER_WITHOUT_TIME`；已有历史 `DEFERRED` 行不自动复活。
+损坏的可选 resolution 按放弃处理，不因为这个附属字段额外购买修复调用，
+也不丢掉同一输出的合法表达。
+
+`core/010-intent-deferral` 只增加 `deferral_count` 和
+`intent_deferral_audit`。排期、计数和审计在同一事务提交；时间 ISO/epoch
+保持一致，审计包含旧/新时间、决策原因及源 Event ID。模型的结构化
+resolution 也进入 Runtime Trace。旧行和原时间保留，旧查询继续使用
+`PENDING`，但旧版本再次处理延期时会恢复旧语义，因此二进制降级行为
+不能视作已经验收。
+
+调度以条件 UPDATE 原子领取 `PROCESSING`，并在同一事务消耗每人物冷却，
+再调用模型；双连接竞争不会分别领取同一 Intent 或绕过正冷却。
+延期后的到期只是获得重新判断资格，仍受冷却和等待用户回复限制。
+进程中断遗留的 `PROCESSING` 不自动重放模型，需要检查源事件/Trace 后
+人工处理；其他独立 PENDING 意图仍由原冷却规则控制。此处不新增循环、
+额外意愿识别模型或跨渠道执行权限。
 
 ### 派发节奏
 

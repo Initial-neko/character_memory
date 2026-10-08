@@ -316,7 +316,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         if not character_ids or not gate.has_due(character_ids, now):
             return []
         current = get_bundle()
-        service = ProactiveService(current.store, current.chat, min_dispatch_interval_minutes=cooldown_minutes)
+        service = ProactiveService.from_settings(current.store, current.chat, settings)
         outcomes = service.dispatch_due(character_ids, now)
 
         # Proactive intents bypass ReactionScheduler generation, but their

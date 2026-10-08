@@ -269,6 +269,17 @@ class IntentCandidate(BaseModel):
         return self
 
 
+class IntentResolutionKind(str, Enum):
+    EXECUTE = "EXECUTE"
+    DEFER = "DEFER"
+    ABANDON = "ABANDON"
+
+
+class IntentResolution(BaseModel):
+    kind: IntentResolutionKind
+    defer_hours: float | None = None
+
+
 class PersonReaction(BaseModel):
     # Internal/debug summaries are intentionally sparse. They are safe summaries,
     # never raw hidden chain-of-thought.
@@ -285,6 +296,7 @@ class PersonReaction(BaseModel):
 
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=6)
     intent_candidates: list[IntentCandidate] = Field(default_factory=list, max_length=4)
+    intent_resolution: IntentResolution | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -326,6 +338,15 @@ class PersonReaction(BaseModel):
             except (ValidationError, TypeError, ValueError):
                 continue
         normalized["intent_candidates"] = intents
+
+        raw_resolution = normalized.get("intent_resolution")
+        if raw_resolution is not None:
+            try:
+                normalized["intent_resolution"] = IntentResolution.model_validate(raw_resolution)
+            except (ValidationError, TypeError, ValueError):
+                # Malformed optional scheduling metadata must not buy a repair
+                # call or invalidate an otherwise legal outward message.
+                normalized["intent_resolution"] = IntentResolution(kind=IntentResolutionKind.ABANDON)
 
         # Keep the outward action contract strict. If actions themselves are bad,
         # the repair path still gets a chance; only optional metadata is softened.

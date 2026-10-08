@@ -150,6 +150,7 @@ class ChatService:
         intent_id: int,
         content: str,
         at: datetime,
+        intent_deferral_policy: dict | None = None,
     ):
         """Re-evaluate one due persisted intent as an ordinary Runtime event."""
 
@@ -172,6 +173,7 @@ class ChatService:
                     content=f"之前留下的意图：{content}。现在重新判断是否自然执行、保持沉默或放弃。",
                     metadata={
                         "intent_id": intent_id,
+                        "intent_deferral_policy": intent_deferral_policy,
                         "conversation_id": conversation_id,
                     },
                 )

@@ -45,6 +45,21 @@ result = person_runtime.handle(event)
 
 用户消息、Group shared fact、TIME_TICK、Intent 等仍复用同一个 Person Runtime，不建立彼此独立的人格状态。
 
+## Experience grounding
+
+Shared reaction prompts distinguish concrete personal history from user accounts,
+external material and imagined possibilities. Persona may establish canonical
+background and preferences, but an occupation or interest does not establish a
+new recent action or result. Concrete first-person experience must refer to
+explicit Persona history, actual participated events or sourced observations;
+user stories and RSS examples cannot become the character's own experiences.
+The same distinction applies to cognitive and future-intent candidates.
+
+This is a model-facing instruction in the existing single reaction call, not a
+semantic verifier or a guarantee that all provider output is factual. Runtime
+permissions and durable execution receipts remain server-enforced; live review
+must separately check unsupported first-person statements and their sources.
+
 ## 2. PersonReaction contract
 
 当前主 contract：

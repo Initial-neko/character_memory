@@ -329,6 +329,8 @@ world_pulse_commenter_count: 4
 
 # Whether per-character autonomous public-web browsing is enabled.
 world_browse_enabled: true
+# 默认关闭；开启只将后台 Personal Browse 间隔变为配置的 2 倍；不影响手动、Pulse、Space 或聊天。
+world_cost_saving_enabled: false
 
 # Minutes between Personal Browse opportunities for each active character.
 world_browse_interval_minutes: 30

@@ -78,6 +78,7 @@ def compile_context(
         EventType.PROACTIVE_INTENT: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；也可以放弃或延后",
         EventType.SPACE_POST_SEEN: f"只允许 SPACE_LIKE / SPACE_COMMENT{space_sticker_action}；也可以 actions=[] 表示看到了但不互动",
         EventType.SPACE_COMMENT_RECEIVED: f"只允许 SPACE_COMMENT{space_sticker_action} 回复这条评论；也可以 actions=[] 不回复",
+        EventType.WORLD_OBSERVATION: "actions=[]；不允许聊天或 Space 对外表达",
         EventType.VISUAL_OBSERVATION: f"0~2 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；多数普通画面变化应保持沉默",
     }.get(event.event_type, f"0~3 个 MESSAGE / EMOJI{resource_actions}；也可以没有对外表达")
     generate_contract = ""
@@ -137,6 +138,15 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 - 这件事如果确实还不适合现在做，“放弃”是正常且正确的选择；只是需要改天再提，就等下一次自然对话时重新形成意图。
 """
 
+    action_contract = f"""actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。VOICE_MESSAGE 是你真的开口说给对方听，文字只是这条语音的转写——语气、停顿、笑意本身就是内容的一部分，那是打字给不了的。想用就用：不需要等对方先发语音，也不需要等到什么特别的时候。懒得打字、手上正忙、想让对方听见你是什么语气，或者一段话连着说比拆成好几条文字更顺，这时候语音就是最自然的表达。一个 VOICE_MESSAGE 的 message 必须是一段完整连续表达，即使包含多句话也保持为一个 action，不要为了语音拆句，也不要为了展示功能而发语音。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时这些候选就是你可以自然使用的表达资源，不需要等用户先发表情包；聊天事件里可以单独使用 STICKER，也可以 MESSAGE + STICKER。当前事件如需表情应使用 {sticker_action_name}，sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用表情。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。"""
+    intent_contract = f"""只有确实存在未来行动意图时才填写 intent_candidates，否则保持空数组。每一项的形状是 {{"content": "...", "preferred_action": "PROACTIVE_MESSAGE", "earliest_hours": 8, "expires_hours": 48}}：content 是你以后想做的事；earliest_hours 表示“从现在起至少多少小时后才适合做这件事”，0 表示不必等；expires_hours 表示过了多久这条意图就作废。想做“明早再问”这类有时机的表达时，earliest_hours 要填真实间隔（明早约 8-14），不要一边写“明早”一边把最早时间填成 0。服务端会保证一个最小等待，填 0 不会被立即执行。同一件事不要重复留下多条意图。"""
+    if event.event_type == EventType.WORLD_OBSERVATION:
+        action_contract = "本轮 actions 必须为 []；可以更新认知，但不能产生聊天或 Space 表达。"
+        intent_contract = "本轮 intent_candidates=[]；观察事件不能安排未来对外意图。"
+    elif event.event_type in {EventType.SPACE_POST_SEEN, EventType.SPACE_COMMENT_RECEIVED}:
+        action_contract = "actions 只能使用本事件允许的 Space 动作或 []；最多 3 个，不强制互动。SPACE_STICKER 只能引用当前候选的真实 sticker_id。"
+        intent_contract = "本轮 intent_candidates=[]；公开互动不创建未来私聊意图。"
+
     relationship_time = _relationship_time_text(event, last_chat_event)
     return f"""# Identity / Persona
 {persona}
@@ -173,7 +183,7 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 {world_contract}
 {visual_observation_contract}
 {proactive_contract}
-actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。VOICE_MESSAGE 是你真的开口说给对方听，文字只是这条语音的转写——语气、停顿、笑意本身就是内容的一部分，那是打字给不了的。想用就用：不需要等对方先发语音，也不需要等到什么特别的时候。懒得打字、手上正忙、想让对方听见你是什么语气，或者一段话连着说比拆成好几条文字更顺，这时候语音就是最自然的表达。一个 VOICE_MESSAGE 的 message 必须是一段完整连续表达，即使包含多句话也保持为一个 action，不要为了语音拆句，也不要为了展示功能而发语音。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时这些候选就是你可以自然使用的表达资源，不需要等用户先发表情包；聊天事件里可以单独使用 STICKER，也可以 MESSAGE + STICKER。当前事件如需表情应使用 {sticker_action_name}，sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用表情。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。
+{action_contract}
 {generate_contract}
 如果当前事件包含用户上传的真实图片，模型会同时收到图片本体；应根据实际视觉内容回应，不要从文件名臆测。
 如果确实没有想回复的内容，直接 actions=[]。不要为了礼貌、活跃度或“完成任务”硬补一句话。
@@ -182,6 +192,6 @@ actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE�
 perception / reaction 是给开发者和可选 UI 使用的安全摘要，不是隐藏思维链；有明确内容时尽量各写一句很短的摘要，没有必要时可以留空。
 mental_state_update 只在本轮确实产生了值得延续的心理变化时填写；否则留空，系统会沿用上一状态。
 只把未来确实值得想起的内容放进 memory_candidates；普通寒暄、一次性琐事、重复事实不要写。没有值得记忆的内容就保持空数组。
-只有确实存在未来行动意图时才填写 intent_candidates，否则保持空数组。每一项的形状是 {{"content": "...", "preferred_action": "PROACTIVE_MESSAGE", "earliest_hours": 8, "expires_hours": 48}}：content 是你以后想做的事；earliest_hours 表示“从现在起至少多少小时后才适合做这件事”，0 表示不必等；expires_hours 表示过了多久这条意图就作废。想做“明早再问”这类有时机的表达时，earliest_hours 要填真实间隔（明早约 8-14），不要一边写“明早”一边把最早时间填成 0。服务端会保证一个最小等待，填 0 不会被立即执行。同一件事不要重复留下多条意图。
+{intent_contract}
 当前版本没有外部信息工具；不知道实时事实时可以承认不知道或自然询问，不要假装已经查询过。
 """

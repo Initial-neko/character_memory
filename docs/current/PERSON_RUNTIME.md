@@ -351,3 +351,13 @@ Developer Trace 可以保存/展示：
 ## Optional call presentation on the same reaction
 
 Live2D 展示能力由源 Event 的已验证 `metadata.live2d` 决定，仅在当前角色相符时附加可用动作和表情名。Reaction Engine 在同一个正式 LLM 调用的上下文作用域中使用兼容 PersonReaction 的可选 action.live2d schema；未开启时继续原有 schema 和 prompt。提示不拥有业务调度，不新增动作消息，也不触发第二次 LLM 调用。资源白名单与 SSE 展示契约见 [Conversation Runtime](CONVERSATION_RUNTIME.md)，前端生命周期见 [Voice & TTS](VOICE_AND_TTS.md)。
+
+### Channel-specific prompt permission
+
+WORLD_OBSERVATION explicitly declares `actions=[]` and `intent_candidates=[]`.
+Its cognition prompt does not include the ordinary chat voice/image/action
+instructions. Space reactions likewise receive their permitted public actions,
+not generic private-chat media instructions, and cannot schedule private intents.
+The server remains authoritative: illegal channel actions are discarded with
+`DROP_WRONG_CHANNEL` in runtime trace decisions. This does not disable the
+separate existing World Pulse public-comment workflow or expand media rights.

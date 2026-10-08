@@ -237,3 +237,35 @@ def test_candidate_embedding_failure_does_not_swallow_valid_reply(tmp_path):
     assert trace is not None
     assert trace["memory_decisions"][0]["decision"] == "SKIP_EMBEDDING_ERROR"
     assert trace["memory_decisions"][0]["error"] == "candidate embedding failed"
+
+@pytest.mark.parametrize("event_type", [EventType.WORLD_OBSERVATION, EventType.SPACE_POST_SEEN, EventType.SPACE_COMMENT_RECEIVED])
+def test_non_chat_context_does_not_offer_generic_chat_media_actions(event_type):
+    from character_memory.runtime.context import compile_context
+
+    context = compile_context("persona", "", [], Event(character_id="rin", event_type=event_type, event_time=datetime.now(timezone.utc), content="真实观察"))
+    assert "通常用 MESSAGE" not in context
+    assert "VOICE_MESSAGE 是你真的开口" not in context
+    if event_type == EventType.WORLD_OBSERVATION:
+        allowed_line = next(line for line in context.splitlines() if line.startswith("本事件允许的对外表达："))
+        assert "actions=[]" in allowed_line
+        assert "MESSAGE" not in allowed_line
+        assert "intent_candidates=[]" in context
+
+
+def test_world_observation_rejects_message_and_traces_channel_reason(tmp_path):
+    class WrongChannelModel(FakeModel):
+        @staticmethod
+        def _reaction():
+            return PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="不应该发出")])
+
+    store = SQLiteStore(tmp_path / "world-contract.db")
+    try:
+        embedding = DeterministicEmbedding()
+        runtime = PersonRuntime(store, VectorRecall(store, embedding), embedding, WrongChannelModel(), "persona")
+        result = runtime.handle(Event(character_id="rin", event_type=EventType.WORLD_OBSERVATION, event_time=datetime.now(timezone.utc), content="看过公开文章", metadata={"channel": "PERSONAL_BROWSE"}))
+        assert result.reaction.actions == []
+        assert store.list_chat_events("rin") == []
+        assert store.get_runtime_trace(result.event.id)["channel_decisions"] == [{"type": "MESSAGE", "decision": "DROP_WRONG_CHANNEL"}]
+
+    finally:
+        store.close()

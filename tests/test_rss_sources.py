@@ -166,3 +166,69 @@ def test_source_enable_disable(tmp_path):
         assert disabled["enabled"] is False
     finally:
         store.close()
+@pytest.mark.parametrize("declaration", [
+    '<!DOCTYPE rss [<!ENTITY x "expanded">]>',
+    '<!doctype rss SYSTEM "https://example.org/schema.dtd">',
+])
+def test_untrusted_feed_rejects_dtd_and_entities(declaration):
+    malicious = '<?xml version="1.0"?>' + declaration + '<rss><channel><title>&x;</title></channel></rss>'
+    with pytest.raises(ValueError, match="DOCTYPE/ENTITY"):
+        parse_feed(malicious, feed_url="https://example.com/feed.xml")
+
+
+def test_feed_rejects_non_http_article_and_site_urls():
+    feed = """<rss><channel><title>Links</title><link>javascript:alert(1)</link>
+    <item><title>Bad</title><guid>one</guid><link>javascript:alert(1)</link></item>
+    <item><title>Credentials</title><guid>two</guid><link>https://a:b@example.org/x</link></item>
+    <item><title>Relative</title><guid>three</guid><link>/safe</link></item>
+    </channel></rss>"""
+    parsed = parse_feed(feed, feed_url="https://example.com/rss.xml")
+    assert parsed.site_url == ""
+    assert [item.url for item in parsed.items] == ["", "", "https://example.com/safe"]
+
+
+def test_fetch_refuses_redirect_to_private_network(tmp_path):
+    seen = []
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "http://169.254.169.254/latest/meta-data"})
+
+    store = SQLiteStore(tmp_path / "private-redirect.db")
+    try:
+        service = RssService(RssRepository(store), client=_streaming_client(handler))
+        with pytest.raises(ValueError, match="non-public"):
+            service._fetch_text("https://93.184.216.34/feed.xml")
+        assert len(seen) == 1
+    finally:
+        store.close()
+
+
+def test_shutdown_during_fetch_never_reopens_closed_sqlite(tmp_path):
+    from threading import Event, Thread
+
+    store = SQLiteStore(tmp_path / "inflight.db")
+    repo = RssRepository(store)
+    source = repo.create_source("https://93.184.216.34/feed.xml")
+    started, finish = Event(), Event()
+    responses = []
+
+    def handler(_request):
+        started.set()
+        assert finish.wait(5), "test fetch was not released"
+        return httpx.Response(200, text=RSS_SAMPLE)
+
+    service = RssService(repo, client=_streaming_client(handler))
+    worker = Thread(target=lambda: responses.append(service.refresh_source(source["id"])), daemon=True)
+    worker.start()
+    try:
+        assert started.wait(3), "fetch did not start"
+        service.close()
+        store.close()
+    finally:
+        finish.set()
+        worker.join(5)
+    assert not worker.is_alive()
+    assert responses == [{"ok": False, "source_id": source["id"], "inserted": 0,
+                          "seen": 0, "error": "RSS 服务已停止"}]
+    with pytest.raises(RuntimeError, match="已停止"):
+        service._fetch_text("https://93.184.216.34/feed.xml")

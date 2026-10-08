@@ -67,3 +67,6 @@ src/character_memory/web/vendor/live2d/
 # Local browser-run screenshots (tests/test_mobile_views_playwright.py writes here
 # when no artifact directory is configured). CI uploads them as a build artifact.
 artifacts/
+
+# Launcher state (stack.pid / stack.stop) and stack logs; local scratch.
+.debug-output/

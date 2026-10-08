@@ -157,3 +157,19 @@ source generations and content hashes. Fetch/error timestamps and unchanged
 refreshes do not wake the model. Gate inspection itself makes no model or network
 calls, and it never bypasses the existing due clock/daily ceiling. Read/ignored
 items are not a recurring wake source.
+
+### Personal reading decision protocol
+
+An enabled RSS opportunity requires an explicit `choice`: `NO_ACTION`,
+`WEB_SEARCH` or `READ_RSS`. The narrow provider alias `action` is normalized
+locally to the same choice (including casing), preserving selected item IDs
+without another model call. Missing, unknown or conflicting decisions fail
+validation rather than becoming silence; `WEB_SEARCH` requires a nonempty query.
+The RSS-only prompt names these JSON fields explicitly. Disabled/empty RSS keeps
+the original Personal Browse schema and prompt.
+
+Raw provider output and its parsed decision must be distinguished during live
+acceptance. A defaulted empty decision is not evidence that a character chose
+not to read. Existing completed receipts are not reinterpreted or replayed by
+this protocol change; source membership, generations, budgets and item limits
+remain server-enforced before actual execution.

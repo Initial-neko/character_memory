@@ -433,3 +433,12 @@ production deployment safety. Disable the optional RSS flag to roll back feature
 use while retaining compatible history; never replace a formal database with
 an acceptance fixture. Target rollout scope and human quality require explicit
 user acceptance after engineering gates.
+
+
+RSS decision protocol regression also uses the actual OpenAI-compatible client
+with local MockTransport JSON: a `READ_RSS` alias reaches one local read, one
+batch appraisal and a sourced observation; missing decisions become confirmed
+failures, not synthesized `NO_ACTION`. This complements typed fake-model tests,
+which cannot detect provider field-name drift. Live review must compare the
+raw structured choice with the persisted canonical decision before interpreting
+silence or read frequency as character autonomy.

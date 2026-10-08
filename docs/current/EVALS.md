@@ -402,3 +402,34 @@ claims, shared-executor reuse, two-item batch appraisal, optional silence/Web,
 invalid identities, interrupted appraisal, local commit recovery and exact
 original Web prompt/schema compatibility when RSS is disabled or empty. Local
 mocks prove call counts and durable effects, not human interest or billed tokens.
+
+### Character lifecycle integration
+
+`test_character_lifecycle.py` combines the real PersonRuntime, context builder,
+RSS selection/appraisal, observation persistence and subsequent Direct reaction.
+It verifies shared collection is not personal experience, a retained observation
+survives thirty ordinary events, temporal/private/public projections stay scoped,
+and turning RSS off preserves existing history and regular chat. The original
+RSS title is a local lexical recall key alongside its appraised content and
+sources; the query never searches shared unread article inventory. This is
+bounded lexical retrieval, not general semantic paraphrase recall.
+
+`evals/character_world_continuity.jsonl` supplies observable Direct follow-up
+cases for separately created non-private `lab_tech`, `lab_garden`, `lab_photo`
+runtimes. Establish real World choices and exact read/ignored receipts first,
+then apply the cases with timestamps consistent with that run. Do not pre-mark
+items read or seed invented observations to make an assertion pass. The existing
+EvalRunner checks action/message bounds; a human checks truth and personality
+against the actual receipt. Silence or choosing no article is valid; an all-idle
+live batch does not validate post-reading quality. No Judge LLM is required.
+
+Release gates combine existing Direct/Group/Space/Intent tests, World/RSS
+concurrency/restart/failure suites, old-schema fixture upgrades and configuration
+contracts. Run the complete deterministic suite and explicit browser suites
+against owned temporary databases/processes. Separate logical calls, HTTP
+attempts, token coverage, embedding and capability work. Local browser evidence
+and a bounded short worker soak do not establish seven-day continuity or
+production deployment safety. Disable the optional RSS flag to roll back feature
+use while retaining compatible history; never replace a formal database with
+an acceptance fixture. Target rollout scope and human quality require explicit
+user acceptance after engineering gates.

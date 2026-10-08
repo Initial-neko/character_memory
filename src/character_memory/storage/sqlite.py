@@ -751,7 +751,7 @@ class SQLiteStore:
         if not terms or limit <= 0:
             return []
         metadata = "CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END"
-        text = f"lower(content || ' ' || coalesce(json_extract({metadata}, '$.world_summary'), '') || ' ' || coalesce(json_extract({metadata}, '$.query'), '') || ' ' || coalesce(json_extract({metadata}, '$.sources'), ''))"
+        text = f"lower(content || ' ' || coalesce(json_extract({metadata}, '$.world_summary'), '') || ' ' || coalesce(json_extract({metadata}, '$.query'), '') || ' ' || coalesce(json_extract({metadata}, '$.sources'), '') || ' ' || coalesce(json_extract({metadata}, '$.rss_reading.title'), ''))"
         score = ' + '.join('CASE WHEN instr(search_text, ?) > 0 THEN ? ELSE 0 END' for _ in terms)
         score_args = [value for term in terms for value in (term, len(term))]
         public = f" AND json_extract({metadata}, '$.channel')='WORLD_PULSE'" if projection == "PUBLIC" else ""

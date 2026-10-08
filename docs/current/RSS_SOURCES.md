@@ -138,6 +138,8 @@ characters read/available and truncation status. At most 12,000 text characters
 are read across a batch. `RSS_FEED_TEXT` explicitly means local Feed content,
 which may only be an excerpt; it never means full original-page readership.
 Titles, URLs and text are untrusted data rather than execution instructions.
+The saved title can also retrieve that actual personal observation through local
+lexical recall, without searching unread shared articles.
 
 `STARTED` has no automatic replay after an unknown interruption. Successful local
 application marks each item `APPLIED` (a sourced `PERSONAL_RSS` observation) or

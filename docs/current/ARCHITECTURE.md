@@ -506,3 +506,20 @@ Dev Console 不持有云 API key，不是任意 URL/header 的 Postman 替代品
 Life Simulation 与 Streamlit Inspector 仍有正式入口，因此 V1 保留但冻结扩张。是否整体移除属于后续大版本决策，不做零碎删除。
 
 这些边界不是永远禁止，而是必须由真实瓶颈或产品 contract 证明必要。
+## Character execution evolution boundary
+
+The evolution target is Character + Shared Execution Runtime inside the existing
+Python process. This is an implementation boundary, not a second Character Agent:
+PersonRuntime remains the owner of reaction and derived cognition; existing
+channel-specific decision schemas and schedulers retain their business meaning.
+Any new execution contract must have a real capability consumer before it ships.
+It may validate permission, arguments, budget and execution facts, but must not
+purchase a second model judgment of the Character's willingness.
+
+The baseline is exercised by `tests/test_character_architecture_baseline.py`:
+real PersonRuntime, PersonContextBuilder, WorldObservationService and SQLite,
+with local model/search/fetch providers and a network rejection guard. Mock
+logical calls are distinguished from HTTP requests and query embeddings.
+This proves the deterministic baseline, not live Persona quality or provider
+cost. Historical observation recall, finite Intent deferral and RSS personal
+reading require their own implementation and acceptance before being claimed.

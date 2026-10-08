@@ -103,3 +103,26 @@ A release candidate may be promoted only when:
 7. `STATUS.md` and the owning domain docs match the code being tagged.
 
 Open feature work unrelated to these acceptance gates (for example experimental Space video generation) does not silently redefine the release baseline.
+
+## Character architecture convergence
+
+This workstream extends the existing PersonRuntime; planned rows are not shipped
+features. Each implementation PR must add its own fixed-commit acceptance
+result. Engineering gates are independent of live-provider and human-quality
+judgments, and dependent milestones cannot merge on an unaccepted predecessor.
+
+| Milestone | Scope | Implementation | Independent engineering acceptance | Target-machine / human acceptance |
+| --- | --- | --- | --- | --- |
+| M0 | Isolated Character cost/call baseline | Deterministic baseline tests | Pending fixed-commit review | No live-provider or Persona claim |
+| M1 | Historical observations, lifecycle and behavior contract | Planned | Not started | Not started |
+| M2 | Finite Intent deferral | Planned | Not started | Not started |
+| M3 | Minimal World Web execution/feedback contract | Planned | Not started | Not started |
+| M4 | RSS personal reading through existing World opportunity | Planned | Not started | Not started |
+| M5 | Integrated compatibility, cost and opt-in rollout | Planned | Not started | Not started |
+
+A future optional World saving policy must preserve normal-mode quality and
+remain separate from permission, idempotence and failure safety. No saving
+switch, RSS personal reading or new shared executor is implemented by M0.
+Acceptance must use its own configuration, database and process ownership;
+formal service startup and restoring an acceptance database over formal data
+are not part of automated milestone validation.

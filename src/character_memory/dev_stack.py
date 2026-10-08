@@ -247,8 +247,22 @@ def _process_alive(pid: int) -> bool:
     return str(int(pid)) in done.stdout
 
 
-def _force_kill_tree(pid: int) -> None:
-    subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True, check=False)
+def claim_stack_state(*, pid_file: Path = PID_FILE, stop_file: Path = STOP_FILE) -> None:
+    """Exclusively claim this checkout without overwriting another launcher.
+
+    A stale PID must be explicitly cleared with --stop. Never infer from a
+    recycled PID that a different process is our stack.
+    """
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with pid_file.open("x", encoding="utf-8") as owned:
+            owned.write(f"{os.getpid()}\n")
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "stack PID file already exists; run --status / --stop first "
+            "(or inspect a stale state file before removing it)"
+        ) from exc
+    stop_file.unlink(missing_ok=True)
 
 
 def stop_running_stack(
@@ -257,7 +271,6 @@ def stop_running_stack(
     stop_file: Path = STOP_FILE,
     timeout: float = 20.0,
     is_alive=_process_alive,
-    force_kill=_force_kill_tree,
 ) -> str:
     """Ask a running launcher to stop, and report what happened."""
     if not pid_file.exists():
@@ -281,12 +294,10 @@ def stop_running_stack(
             return "stack: stopped"
         time.sleep(0.2)
 
-    # The launcher is alive but ignored the request (older build, hung child).
-    # Take the tree down the hard way rather than leaving the ports held.
-    force_kill(pid)
-    pid_file.unlink(missing_ok=True)
-    stop_file.unlink(missing_ok=True)
-    return f"stack: forced stop (pid {pid} did not exit within {timeout:g}s)"
+    # A PID may have been recycled by Windows. Never blindly taskkill /T an
+    # unrelated process just because a stale state file named the same PID.
+    # Keep the stop request: a slow but genuine launcher can still honor it.
+    return f"stack: stop not acknowledged within {timeout:g}s (pid {pid}); no process was killed"
 
 
 def stack_status(*, pid_file: Path = PID_FILE, is_alive=_process_alive) -> str:
@@ -437,11 +448,12 @@ def main() -> None:
         )
 
     owned: list[tuple[str, subprocess.Popen]] = []
-    STACK_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    # Claim before the first child exists, so `--stop` works during a startup
-    # that later fails, and drop any request left over from a previous run.
-    STOP_FILE.unlink(missing_ok=True)
-    PID_FILE.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    # Claim the checkout atomically: a second launcher must not overwrite
+    # the first launcher's PID or later delete its control files.
+    try:
+        claim_stack_state()
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     try:
         for name, health_url, command, env in specs:
             # Listening is enough to mean "already running" here: a sidecar that

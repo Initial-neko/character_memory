@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 
 from character_memory.domain.models import WorldObservation
-from character_memory.runtime.capability_execution import CapabilityExecutor, CapabilityRequest, CapabilityResult
+from character_memory.runtime.capability_execution import CapabilityExecutor, CapabilityRequest, CapabilityResult, adapt_browse_decision
 from character_memory.time_utils import parse_datetime
 
 
@@ -17,11 +17,27 @@ class WorldBrowseRecovery:
         return {row[0] for row in self.store.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
     def _prepare(self, row):
-        from character_memory.world_activity import PersonalBrowseAppraisal, RssBatchAppraisal
+        # Exceptions may contain private provider payloads. Export only a stable code.
+        try:
+            return self._validated_receipt(row)
+        except Exception as error:
+            raise ValueError("INVALID_RECOVERY_RECEIPT") from error
+
+    def _validated_receipt(self, row):
+        from character_memory.world_activity import PersonalBrowseAppraisal, RssBatchAppraisal, PersonalBrowsePlan, PersonalWorldReadPlan
         now = parse_datetime(row['started_at'])
         snapshot = json.loads(row['plan_json'])
-        choice = snapshot['decision'].get('choice', 'WEB_SEARCH')
-        capability = 'READ_RSS' if choice == 'READ_RSS' else 'WEB_SEARCH'
+        decision = snapshot['decision']
+        if 'choice' in decision or 'action' in decision:
+            plan = PersonalWorldReadPlan.model_validate(decision)
+            if plan.choice == 'NO_ACTION' or decision.get('browse') is not True:
+                raise ValueError('NO_READING_DECISION')
+            capability = plan.choice
+        else:
+            plan = PersonalBrowsePlan.model_validate(decision)
+            if decision.get('browse') is not True or not plan.browse:
+                raise ValueError('NO_READING_DECISION')
+            capability = 'WEB_SEARCH' 
         request_id = f"{row['opportunity_id']}:{capability}:1"
         execution = self.store.conn.execute(
             "SELECT * FROM capability_executions WHERE request_id=? AND character_id=? AND opportunity_id=?",
@@ -33,6 +49,21 @@ class WorldBrowseRecovery:
         denial = CapabilityExecutor._denial(request)
         if denial or (request.request_id,request.character_id,request.opportunity_id,request.capability,request.source_event_id) != (request_id,row['character_id'],row['opportunity_id'],capability,row['source_event_id']):
             raise ValueError('EXECUTION_IDENTITY_OR_CONSTRAINT_MISMATCH')
+        if capability == 'WEB_SEARCH':
+            expected_request = adapt_browse_decision(
+                plan, character_id=row['character_id'], opportunity_id=row['opportunity_id'],
+                source_event_id=row['source_event_id'], max_pages=snapshot['max_pages'],
+                max_chars_per_page=snapshot['max_chars_per_page'])
+        else:
+            candidates = snapshot['rss_candidates']
+            if len(plan.item_ids) != len(candidates) or set(plan.item_ids) != {item['item_id'] for item in candidates}:
+                raise ValueError('RSS_SELECTION_MISMATCH')
+            expected_request = CapabilityRequest(request_id, row['character_id'], row['opportunity_id'],
+                row['source_event_id'], 'WORLD', 'READ_RSS',
+                {'items': [{'item_id': item['item_id'], 'source_generation': item['source_generation']} for item in candidates]},
+                {'max_items': snapshot['rss_max_items'], 'max_chars': 12000, 'max_calls': 1})
+        if request != expected_request:
+            raise ValueError('REQUEST_PLAN_MISMATCH')
         result = CapabilityResult(**json.loads(execution['result_json']))
         if result.request_id != request_id or result.status != 'SUCCESS' or not isinstance(result.data,dict):
             raise ValueError('INVALID_EXECUTION_RESULT')
@@ -41,6 +72,8 @@ class WorldBrowseRecovery:
             if request.arguments['query'] != snapshot['decision']['query']:
                 raise ValueError('QUERY_MISMATCH')
             pages = [WorldObservation.model_validate(item) for item in result.data['observations']]
+            if len(pages) > request.constraints['max_pages']:
+                raise ValueError('PAGE_LIMIT_MISMATCH')
             if not pages:raise ValueError('MISSING_READ_CONTENT')
             parsed = PersonalBrowseAppraisal.model_validate(appraisal)
             return now,snapshot,request,result,pages,int(parsed.keep)
@@ -51,7 +84,10 @@ class WorldBrowseRecovery:
             raise ValueError('RSS_ITEM_MISMATCH')
         if {item.item_id for item in parsed.items} != expected or len(parsed.items) != len(expected):
             raise ValueError('RSS_APPRAISAL_MISMATCH')
+        generations = {item['item_id']:item['source_generation'] for item in request.arguments['items']}
         for item in items:
+            if item.get('source_generation') != generations[item['item_id']]:
+                raise ValueError('RSS_GENERATION_MISMATCH')
             if item.get('content_scope') != 'RSS_FEED_TEXT' or not isinstance(item.get('content'),str) or not item['content'].strip():
                 raise ValueError('INVALID_RSS_READ_SCOPE')
             reading = self.store.conn.execute(
@@ -76,7 +112,7 @@ class WorldBrowseRecovery:
                     *_,kept=self._prepare(row)
                     entry.update(recoverable=True,kept_items=kept)
                 except Exception as error:
-                    entry.update(recoverable=False,reason=f'{type(error).__name__}: {error}'[:200])
+                    entry.update(recoverable=False,reason='INVALID_RECOVERY_RECEIPT')
                 candidates.append(entry)
             return {'candidates':candidates,'read_only':True}
 

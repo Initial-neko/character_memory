@@ -38,7 +38,7 @@ def test_bad_receipt_is_reported_without_partial_write(tmp_path,monkeypatch):
         store.conn.execute("UPDATE capability_executions SET request_json='{}'");store.conn.commit()
         recovery=WorldBrowseRecovery(store);changes=store.conn.total_changes
         assert not recovery.inspect()['candidates'][0]['recoverable']
-        with pytest.raises(TypeError):recovery.apply('recover-rss')
+        with pytest.raises(ValueError,match='INVALID_RECOVERY_RECEIPT'):recovery.apply('recover-rss')
         assert store.conn.total_changes==changes
         assert store.list_events('c00')==[]
         assert not store.conn.in_transaction

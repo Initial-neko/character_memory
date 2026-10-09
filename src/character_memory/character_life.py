@@ -197,8 +197,8 @@ class CharacterLifeReader:
             status=row['status'];content=text(row['content']);decision['basis']=text(row.get('reason')) or None
             now=datetime.now(timezone.utc)
             try:
-                earliest=parse_datetime(row['earliest_at']) if row.get('earliest_at') else None
-                expiry=parse_datetime(row['expires_at']) if row.get('expires_at') else None
+                earliest=parse_datetime(row['earliest_at'])
+                expiry=parse_datetime(row['expires_at']) if row.get('expires_at') is not None else None
                 due=status=='PENDING' and earliest is not None and earliest<=now and (expiry is None or expiry>now)
                 past_expiry=status=='PENDING' and expiry is not None and expiry<=now
             except (ValueError,TypeError):

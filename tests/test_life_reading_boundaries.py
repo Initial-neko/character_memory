@@ -26,3 +26,10 @@ def test_undated_records_reported_without_character_leak(store):
     store.conn.execute("UPDATE events SET event_time='broken' WHERE id IN (?,?)",[e.id,other.id]);store.conn.commit()
     page=CharacterLifeReader(store).timeline('a',day='2026-10-09')
     assert page['items']==[] and page['undated_count']==1
+
+
+def test_empty_required_intent_time_is_invalid(store):
+    store.add_intent('a','future','none',NOW,NOW,NOW)
+    store.conn.execute("UPDATE intents SET earliest_at=''");store.conn.commit()
+    item=CharacterLifeReader(store).timeline('a',view='intents')['items'][0]
+    assert item['intent']['time_status']=='INVALID' and not item['intent']['due']

@@ -51,7 +51,7 @@ class CharacterLifeReader:
             if 'space_posts' in tables:
                 sources.append(("post", "e.id", "e.created_at_epoch", "e.created_at", "e.content", "e.character_id=?", [character_id], "SELECT e.* FROM space_posts e"))
             if 'space_comments' in tables:
-                sources.append(("comment", "e.id", "e.created_at_epoch", "e.created_at", "e.content", "e.actor_type='CHARACTER' AND e.character_id=?", [character_id], "SELECT e.*,p.character_id AS post_author FROM space_comments e JOIN space_posts p ON p.id=e.post_id"))
+                sources.append(("comment", "e.id", "e.created_at_epoch", "e.created_at", "e.content", "e.actor_type='CHARACTER' AND e.character_id=?", [character_id], "SELECT e.*,CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END AS peer_id FROM space_comments e JOIN space_posts p ON p.id=e.post_id LEFT JOIN space_comments parent ON parent.id=e.reply_to_comment_id AND parent.post_id=e.post_id"))
             if 'world_browse_decisions' in tables:
                 sources.append(("world", "e.opportunity_id", "CAST((julianday(e.started_at)-2440587.5)*86400000000 AS INTEGER)", "e.started_at", "CASE WHEN json_valid(e.result_json) THEN coalesce(json_extract(e.result_json,'$.query'),'') ELSE '' END||e.error", "e.character_id=?", [character_id], "SELECT e.* FROM world_browse_decisions e"))
             if 'space_opportunity_runs' in tables:
@@ -85,16 +85,16 @@ class CharacterLifeReader:
                 if view == 'relationships':
                     if kind=='events': condition += " AND (e.event_type='USER_MESSAGE' OR (e.event_type='SPACE_COMMENT_RECEIVED' AND json_valid(e.metadata_json) AND json_extract(e.metadata_json,'$.commenter_id') IS NOT NULL))"
                     elif kind=='group': condition += " AND e.actor_type IN ('CHARACTER','USER') AND NOT(e.actor_type='CHARACTER' AND e.actor_id=?)"; params += [character_id]
-                    elif kind=='comment': condition += " AND p.character_id<>?"; params += [character_id]
+                    elif kind=='comment': condition += " AND (CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END)<>?"; params += [character_id]
                     else: continue
                     if peer:
                         if kind=='events':
                             condition += " AND ((e.event_type='USER_MESSAGE' AND ?='user') OR (json_valid(e.metadata_json) AND json_extract(e.metadata_json,'$.commenter_id')=?))"; params += [peer,peer]
                         elif kind=='group': condition += " AND e.actor_id=?"; params += [peer]
-                        elif kind=='comment': condition += " AND p.character_id=?"; params += [peer]
+                        elif kind=='comment': condition += " AND (CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END)=?"; params += [peer]
                 if view == 'changes':
                     if kind == 'events':
-                        condition += " AND (EXISTS(SELECT 1 FROM mental_state_history s WHERE s.character_id=e.character_id AND s.source_event_id=e.id) OR EXISTS(SELECT 1 FROM memories m WHERE m.character_id=e.character_id AND m.source_event_id=e.id))"
+                        condition += " AND (EXISTS(SELECT 1 FROM mental_state_history s WHERE s.character_id=e.character_id AND s.source_event_id=e.id) OR EXISTS(SELECT 1 FROM memories m WHERE m.character_id=e.character_id AND m.source_event_id=e.id AND CASE WHEN json_valid(m.metadata_json) THEN coalesce(upper(json_extract(m.metadata_json,'$.origin')),'') ELSE '' END<>'GROUP'))"
                     elif kind == 'group':
                         condition += " AND EXISTS(SELECT 1 FROM conversation_runtime_traces t WHERE t.character_id=? AND t.source_conversation_event_id=e.id AND json_valid(t.trace_json) AND (json_extract(t.trace_json,'$.mental_state_before')<>json_extract(t.trace_json,'$.mental_state_after') OR json_array_length(json_extract(t.trace_json,'$.created_memory_ids'))>0))"
                         params += [character_id]
@@ -141,9 +141,10 @@ class CharacterLifeReader:
             elif et=='CHARACTER_MESSAGE': title='表达了一条消息'
         if kind=='group':
             if row['actor_type'] not in ('USER','CHARACTER'): title='群聊自主机会'
-            participants=[{'id':row['actor_id'],'name':'用户' if row['actor_type']=='USER' else row['actor_id']}]
-        if kind=='comment' and row.get('post_author')!=character:
-            participants=[{'id':row['post_author'],'name':row['post_author']}]
+            if row['actor_type'] in ('USER','CHARACTER') and row['actor_id']!=character:
+                participants=[{'id':row['actor_id'],'name':'用户' if row['actor_type']=='USER' else row['actor_id']}]
+        if kind=='comment' and row.get('peer_id') and row['peer_id']!=character:
+            participants=[{'id':row['peer_id'],'name':row['peer_id']}]
         state=None
         if event_id:
             history=self.store.conn.execute("SELECT * FROM mental_state_history WHERE character_id=? AND source_event_id=? ORDER BY updated_at_epoch,id",[character,event_id]).fetchall()
@@ -154,10 +155,10 @@ class CharacterLifeReader:
             state={'before':text(trace.get('mental_state_before')) or None,'after':text(trace.get('mental_state_after')) or None}
         memories=[]
         if event_id:
-            rows=self.store.conn.execute("SELECT id,content,active,superseded_by FROM memories WHERE character_id=? AND source_event_id=? ORDER BY id LIMIT 50",[character,event_id]).fetchall()
+            rows=self.store.conn.execute("SELECT id,content,active,superseded_by FROM memories WHERE character_id=? AND source_event_id=? AND CASE WHEN json_valid(metadata_json) THEN coalesce(upper(json_extract(metadata_json,'$.origin')),'') ELSE '' END<>'GROUP' ORDER BY id LIMIT 50",[character,event_id]).fetchall()
             memories=[dict(r) for r in rows]
         elif kind=='group':
-            rows=self.store.conn.execute("SELECT id,content,active,superseded_by FROM memories WHERE character_id=? AND json_extract(metadata_json,'$.origin')='GROUP' AND CAST(json_extract(metadata_json,'$.source_conversation_event_id') AS INTEGER)=? AND json_extract(metadata_json,'$.conversation_id')=? LIMIT 50",[character,row['id'],row['conversation_id']]).fetchall()
+            rows=self.store.conn.execute("SELECT id,content,active,superseded_by FROM memories WHERE character_id=? AND upper(json_extract(CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END,'$.origin'))='GROUP' AND CAST(json_extract(CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END,'$.source_conversation_event_id') AS INTEGER)=? AND json_extract(CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END,'$.conversation_id')=? LIMIT 50",[character,row['id'],row['conversation_id']]).fetchall()
             memories=[dict(r) for r in rows]
         decision={'basis':text(trace.get('reaction')) or None,'result':None,'error':None}
         if trace:

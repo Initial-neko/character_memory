@@ -39,6 +39,8 @@ Optional sidecars are documented in `docs/current/`.
 
 ## Before opening a pull request
 
+Acceptance fixtures must use temporary configuration/database paths and isolated service origins. `config.example.yaml` uses a separate example database; it is not permission to point a second `create_dev_app`/Core at the formal database. Formal inspection uses read-only SQLite queries; backup uses the SQLite online backup API, never overwriting the formal database with an acceptance fixture.
+
 Run focused tests while developing, then run:
 
 ```bash

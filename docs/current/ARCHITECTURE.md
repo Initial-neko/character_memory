@@ -462,6 +462,8 @@ Lab 下拉选择只用于试听/benchmark，不会自动改变正式 TTS 默认�
 
 Dev Console 不持有云 API key，不是任意 URL/header 的 Postman 替代品。Secret 编辑归 Settings Center。
 
+LLM 用量 GET 使用 SQLite `mode=ro`，不建立或迁移正式库表；无数据库/无用量表时返回内存空视图。实际模型记账仍由写入 Recorder 拥有。示例配置使用独立 example 库；验收必须显式使用临时配置、临时数据库和隔离服务地址，不应启动第二个 Runtime 指向正式库。
+
 ## 16. Web UI
 
 正式聊天使用原生 HTML/CSS/JS，无 React 构建链。

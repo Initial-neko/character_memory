@@ -307,3 +307,17 @@ Rendered experiences include a bounded stored RSS title and Feed-text scope,
 plus separately labeled source summary and personal observation. The existing
 4,000-character total budget still applies; full provenance remains outside the
 prompt. Optional malformed metadata does not manufacture a title or summary.
+
+## Character life observer
+
+`/life` is an operator-facing, read-only view of real character records, separate from Dev Console and the frozen life simulator. `GET /v1/characters/{character_id}/life` projects Core events, actually participated Group events, own Space posts/comments and actual Space opportunity receipts, durable World decisions and future expression Intents. It does not initialize a character runtime, call a model, fetch external content, write schemas or create observations, Memory or Intent.
+
+The page offers a date (with client UTC offset), literal content/title search, channel filters, life/change/relationship/intent views and bounded keyset paging (default 30, maximum 50). Source identities are namespaced. Unknown characters are rejected, optional absent subsystem tables remain absent, invalid cursors/date/filter inputs are rejected. Records without usable persisted time cannot be placed in a dated timeline.
+
+State comparisons come from persisted Mental State versions or an existing Group trace's before/after values. Memory associations require matching character and the correct Core or Group provenance domain. A source-event association establishes provenance, not a general psychological cause. Already-saved model reaction summaries may be shown as recorded output; raw model responses, prompts, embeddings and hidden reasoning are not returned. A missing reason remains missing.
+
+A real decision opportunity may show no action, failure or refusal; an empty day is not labelled intentional silence. World reading scope is preserved (Feed text is not a fetched original page). The Intent view distinguishes plans and durable resolution/deferral audits from performed activity; current Intents remain future expression, not a general Goal Engine.
+
+Relationship records are actual received Direct messages, Group events processed by the selected character, or actual Space interactions with identifiable counterpart provenance. Peer filtering occurs before paging. An explicit Space reply uses the actual parent commenter as counterpart; an unavailable parent is not replaced with a guessed identity. Own Group messages do not create self relationships. Legacy Group Memory provenance is excluded from Core event matches even when numeric IDs collide, and malformed Memory metadata cannot establish a Group association. Membership alone is not proof of participation; no affection score or inferred relationship state is generated. The page uses the project's existing local Core API access boundary, rather than publishing a new public social feed.
+
+The screenshot's event-to-chat participation affordance is visibly marked as a next-stage capability and disabled. No synthetic daily summary, second Life Runtime or automatic memory admission is introduced.

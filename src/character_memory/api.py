@@ -44,6 +44,7 @@ from character_memory.persona_builder import PersonaDraft
 from character_memory.rss_runtime import attach_rss_runtime
 from character_memory.runtime_services import CharacterRuntimeAccess, build_runtime_services
 from character_memory.storage.sqlite import SQLiteStore
+from character_memory.character_life_web import attach_character_life_routes
 from character_memory.web_assets import attach_static_assets
 from character_memory.web_lifecycle import on_app_event
 
@@ -485,6 +486,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     attach_core_resource_routes(app, route_access)
     attach_live2d_routes(app, resolve_media_dir(settings) / "live2d", character_profiles)
     attach_core_direct_routes(app, route_access)
+    attach_character_life_routes(app, route_access)
     attach_rss_runtime(
         app,
         web_dir,

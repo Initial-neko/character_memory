@@ -60,6 +60,12 @@ def test_config_example_values_match_runtime_defaults():
     for name in sorted(expected):
         actual = payload[name]
         wanted = defaults[name]
+        # The example database is the sole intentional isolation exception;
+        # do not change the formal runtime default or waive other differences.
+        if name == 'db_path':
+            assert actual == 'data/character-memory.example.db'
+            assert wanted == 'data/character-memory.db'
+            continue
         # YAML keeps optional text overrides easy to edit with "", while the
         # runtime default uses None to mean "reuse the primary setting".
         if wanted is None and actual == "":

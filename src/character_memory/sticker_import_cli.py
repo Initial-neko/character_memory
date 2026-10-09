@@ -17,6 +17,7 @@ def main() -> int:
         help="Deprecated compatibility option. Sticker imports are global; the value is ignored after validation.",
     )
     parser.add_argument("--config", default="config.yaml", help="Character Memory config path")
+    parser.add_argument("--normalize-background", action="store_true", help="PNG only: remove exact solid-color border-connected background; same-color touching art may be removed. Strict grid validation remains.")
     args = parser.parse_args()
 
     settings = load_settings(args.config)
@@ -36,7 +37,7 @@ def main() -> int:
     persona_paths = [item["persona_path"] for item in profiles]
     payload = archive_path.read_bytes()
     if payload.startswith(b"\x89PNG\r\n\x1a\n") or archive_path.suffix.lower() == ".png":
-        payload = sticker_sheet_bundle(payload, pack_name=archive_path.stem)
+        payload = sticker_sheet_bundle(payload, pack_name=archive_path.stem, normalize_background=args.normalize_background)
     result = import_sticker_bundle(
         settings.persona_path,
         payload,

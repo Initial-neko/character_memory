@@ -92,7 +92,7 @@
     const scopeChoice = canBePrivate
       ? '<label class="sticker-auto-tag">导入到 <select data-sticker-scope><option value="global">公共池（所有角色可用）</option><option value="character">当前角色私有池</option></select></label>'
       : '<div class="sticker-import-help">群聊导入使用公共池。进入角色私聊后可选择专属表情池。</div>';
-    panel.innerHTML = `<div class="sticker-import-card"><div class="sticker-import-title">导入表情包</div><div class="sticker-import-file">${CM.escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div><div class="sticker-import-help">推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>；也支持带透明分隔的3×3 RGBA PNG 九宫图（最大16 MiB）。只有图片时可让 Vision 自动补标签。</div>${scopeChoice}<label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>只补缺失标签，不覆盖已有标注</small></span></label><div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="primary" data-sticker-import-confirm>导入</button></div></div>`;
+    panel.innerHTML = `<div class="sticker-import-card"><div class="sticker-import-title">导入表情包</div><div class="sticker-import-file">${CM.escapeHtml(file.name)} · ${(file.size / 1024 / 1024).toFixed(1)} MiB</div><div class="sticker-import-help">推荐 ZIP 内带 <code>all_tags.json</code> 或每组 <code>tags.json</code>；也支持带透明分隔的3×3 RGBA PNG 九宫图（最大16 MiB）。只有图片时可让 Vision 自动补标签。</div>${scopeChoice}${file.name.toLowerCase().endsWith(".png") ? '<label class="sticker-auto-tag"><input type="checkbox" data-sticker-normalize-background><span>纯色背景转透明 <small>仅清除与外边缘连通的同色背景；同色贴边图案可能被清除。复杂背景请先处理成透明 PNG。</small></span></label>' : ""}<label class="sticker-auto-tag"><input type="checkbox" data-sticker-auto-tag checked> <span>AI 自动补标签 <small>只补缺失标签，不覆盖已有标注</small></span></label><div class="sticker-import-actions"><button type="button" data-sticker-import-cancel>取消</button><button type="button" class="primary" data-sticker-import-confirm>导入</button></div></div>`;
   }
 
   function importError(payload, status) {
@@ -108,6 +108,7 @@
     const isPng = file.name.toLowerCase().endsWith(".png");
     if (!isPng && !file.name.toLowerCase().endsWith(".zip")) { panel.innerHTML = '<div class="error">请选择 ZIP 或透明九宫 PNG。</div>'; return; }
     if (file.size > (isPng ? 16 : 64) * 1024 * 1024) { panel.innerHTML = '<div class="error">PNG 不能超过16 MiB，ZIP 不能超过64 MiB。</div>'; return; }
+    const normalizeBackground = Boolean(panel.querySelector("[data-sticker-normalize-background]")?.checked);
     const autoTag = Boolean(panel.querySelector("[data-sticker-auto-tag]")?.checked);
     const selectedScope = panel.querySelector("[data-sticker-scope]")?.value || "global";
     const characterId = activeCharacterId();
@@ -116,7 +117,7 @@
       return;
     }
     panel.innerHTML = `<div class="sticker-loading"><strong>正在导入 ${CM.escapeHtml(file.name)}</strong><br><span>${autoTag ? "缺标签的图片会调用 Vision。" : "只读取 ZIP 内现有标签。"}</span></div>`;
-    const params = new URLSearchParams({filename:file.name, auto_tag:autoTag ? "true" : "false", scope:selectedScope});
+    const params = new URLSearchParams({filename:file.name, auto_tag:autoTag ? "true" : "false", scope:selectedScope, normalize_background:normalizeBackground ? "true" : "false"});
     if (selectedScope === "character") params.set("character_id", characterId);
     try {
       const response = await fetch(`/v1/stickers/import?${params.toString()}`, {method:"POST", headers:{"Content-Type":isPng ? "image/png" : "application/zip"}, body:file});

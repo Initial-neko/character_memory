@@ -133,9 +133,17 @@ def test_api_png_import_reloads_global_assets_and_bad_sheet_keeps_library(tmp_pa
             response = client.post('/v1/stickers/import?filename=cats.png&auto_tag=false', content=sheet(), headers={'Content-Type': 'image/png'})
             assert response.status_code == 200, response.text
             assert response.json()['imported'] == 9
+        from character_memory.sticker_sheet import _decode
+        w,h,opaque=_decode(sheet())
+        for pos in range(w*h):
+            if opaque[pos*4+3] == 0: opaque[pos*4:pos*4+4]=bytes((0,0,0,255))
+        opaque=png(w,h,opaque)
+        assert client.post('/v1/stickers/import?filename=opaque.png&auto_tag=false', content=opaque, headers={'Content-Type':'image/png'}).status_code == 400
+        response=client.post('/v1/stickers/import?filename=opaque.png&auto_tag=false&normalize_background=true', content=opaque, headers={'Content-Type':'image/png'})
+        assert response.status_code==200 and response.json()['imported']==9
         catalog = client.get('/v1/stickers').json()['stickers']
         imported = [item for item in catalog if item['pack_id'].startswith('sheet_')]
-        assert len(imported) == 9
+        assert len(imported) == 18
         assert all(client.get(item['url']).status_code == 200 for item in imported)
         response = client.post('/v1/stickers/import?filename=blank.png&auto_tag=false', content=sheet(True), headers={'Content-Type': 'image/png'})
         assert response.status_code == 400
@@ -194,3 +202,37 @@ def test_generated_non_divisible_sheet_with_tiny_alpha_noise_is_split():
         assert len(rows) == 9
         assert len({row['filename'] for row in rows}) == 9
         assert all(struct.unpack('>II', archive.read(row['filename'])[16:24]) == (8, 8) for row in rows)
+
+
+def test_explicit_solid_background_normalization_keeps_enclosed_same_color_pixels():
+    width=height=30
+    pixels=bytearray(bytes((0,0,0,255))*900)
+    for row in range(3):
+        for col in range(3):
+            for y in range(row*10+3,row*10+8):
+                for x in range(col*10+3,col*10+8):
+                    pos=(y*width+x)*4;pixels[pos:pos+4]=bytes((200,100,90,255))
+            pos=((row*10+5)*width+col*10+5)*4;pixels[pos:pos+4]=bytes((0,0,0,255))
+    source=png(width,height,pixels)
+    with pytest.raises(ValueError,match='transparent'):sticker_sheet_bundle(source)
+    bundle=sticker_sheet_bundle(source,normalize_background=True)
+    assert bundle==sticker_sheet_bundle(source,normalize_background=True)
+    with zipfile.ZipFile(BytesIO(bundle)) as archive:
+        rows=json.loads(archive.read('all_tags.json'));assert len(rows)==9
+        for row in rows:
+            # Crop is 9x9 (decoder intentionally requires >=18 for source sheets).
+            image=archive.read(row['filename'])
+            length=struct.unpack('>I',image[33:37])[0];raw=zlib.decompress(image[41:41+length])
+            stride=9*4+1
+            center=4*stride+1+4*4
+            assert raw[center:center+4]==bytes((0,0,0,255))
+            assert raw[4]==0
+
+
+def test_normalization_rejects_nonuniform_border_and_missing_gutters():
+    pixels=bytearray(bytes((0,0,0,255))*900);pixels[:4]=bytes((1,1,1,255))
+    with pytest.raises(ValueError,match='uniform'):sticker_sheet_bundle(png(30,30,pixels),normalize_background=True)
+    pixels=bytearray(bytes((0,0,0,255))*900)
+    for y in range(1,29):
+        for x in range(1,29):pixels[(y*30+x)*4:(y*30+x)*4+4]=bytes((255,0,0,255))
+    with pytest.raises(ValueError,match='transparent'):sticker_sheet_bundle(png(30,30,pixels),normalize_background=True)

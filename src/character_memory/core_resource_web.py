@@ -55,6 +55,7 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
         character_id: str | None = None,
         filename: str = "stickers.zip",
         auto_tag: bool = True,
+        normalize_background: bool = False,
         scope: str = "global",
     ):
         if scope not in {"global", "character"}:
@@ -73,7 +74,7 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
         started = time.perf_counter()
         try:
             if archive.startswith(b"\x89PNG\r\n\x1a\n") or filename.lower().endswith(".png"):
-                archive = sticker_sheet_bundle(archive, pack_name=pack_name)
+                archive = sticker_sheet_bundle(archive, pack_name=pack_name, normalize_background=normalize_background)
             result = import_sticker_bundle(
                 compatibility_persona,
                 archive,

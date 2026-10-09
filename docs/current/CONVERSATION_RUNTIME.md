@@ -962,3 +962,6 @@ Sticker 与 ImageGen 是不同资源路径：
 - 贴纸在私聊和群聊中渲染为同一个显式尺寸盒（`--sticker-size`），不随容器 shrink-to-fit 缩水。
 
 相关回归清单见 [`EVALS.md`](EVALS.md)。
+
+
+Opaque 3×3 RGBA sticker sheets have an explicit `normalize_background` import option (Web checkbox or CLI `--normalize-background`), default off. It removes only exact solid-color pixels connected to a uniform outer border before the unchanged transparent-gutter/all-nine-cell validation. Enclosed same-color details remain; gradients/nonuniform borders and ambiguous layouts are rejected. Same-color artwork touching the background can also be removed, so the UI explains the effect and complex backgrounds still require an already-transparent source. Normalization is local and introduces no model calls/dependencies. Source bytes remain unchanged; normalized pack IDs are distinct from ordinary imports.

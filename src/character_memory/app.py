@@ -43,6 +43,7 @@ class AppBundle:
     model: OpenAICompatibleModel
     clock: Clock
     init_timings: dict[str, float]
+    owns_store: bool = True
 
     def close(self) -> None:
         try:
@@ -53,7 +54,8 @@ class AppBundle:
                 if callable(close_embeddings):
                     close_embeddings()
             finally:
-                self.store.close()
+                if self.owns_store:
+                    self.store.close()
 
 
 def build_embedding(settings: Settings):
@@ -96,7 +98,7 @@ def _default_character_id(settings: Settings, profiles: list[dict[str, str]]) ->
     return profiles[0]["id"]
 
 
-def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -> AppBundle:
+def build_app_from_settings(settings: Settings, *, clock: Clock | None = None, store: SQLiteStore | None = None) -> AppBundle:
     if not settings.api_key:
         raise ValueError("Missing OPENCODE_GO_API_KEY or api_key in config.yaml")
 
@@ -106,7 +108,10 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
 
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     stage = time.perf_counter()
-    store = SQLiteStore(settings.db_path)
+    owns_store = store is None
+    if store is not None and Path(store.path).resolve() != Path(settings.db_path).resolve():
+        raise ValueError("injected store must match configured db_path")
+    store = store if store is not None else SQLiteStore(settings.db_path)
     timings["store_ms"] = _ms(stage)
     try:
         stage = time.perf_counter()
@@ -161,11 +166,12 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None) -
             len(profiles),
             " ".join(f"{key}={value:.1f}ms" for key, value in timings.items()),
         )
-        return AppBundle(settings, store, runtime, runtimes, profiles, chat, life, ticker, days, embeddings, model, app_clock, timings)
+        return AppBundle(settings, store, runtime, runtimes, profiles, chat, life, ticker, days, embeddings, model, app_clock, timings, owns_store)
     except Exception:
-        store.close()
+        if owns_store:
+            store.close()
         raise
 
 
-def build_app(config_path: str = "config.yaml", *, clock: Clock | None = None) -> AppBundle:
-    return build_app_from_settings(load_settings(config_path), clock=clock)
+def build_app(config_path: str = "config.yaml", *, clock: Clock | None = None, store: SQLiteStore | None = None) -> AppBundle:
+    return build_app_from_settings(load_settings(config_path), clock=clock, store=store)

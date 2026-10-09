@@ -432,15 +432,14 @@ class SQLiteStore:
             self._tx_depth += 1
             try:
                 yield
-            except Exception:
-                self._tx_depth -= 1
+                if outer:
+                    self.conn.commit()
+            except BaseException:
                 if outer:
                     self.conn.rollback()
                 raise
-            else:
+            finally:
                 self._tx_depth -= 1
-                if outer:
-                    self.conn.commit()
 
     @staticmethod
     def _pack(v):

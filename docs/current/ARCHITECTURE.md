@@ -265,6 +265,8 @@ Derived cognition  -> Memory / Mental State / Intent / Trace
 
 SQLite 是当前单机事实源。连接由进程内 `RLock` 保护，并通过 migration ledger 做幂等 schema 演进。
 
+Core Web 在 Runtime 懒初始化前后复用同一个 `SQLiteStore`：Web 装配拥有连接，后创建的 AppBundle 借用它。World 回执、观察和个人认知的本地事务不能通过另一连接更新自己持有写锁的数据库。独立 CLI AppBundle 仍拥有自己的 Store。事务主体或提交失败均回滚并恢复事务深度。
+
 当前不宣称支持多进程共享同一 ReactionScheduler / SSE hub 的生产级并发。若未来启用多个应用 worker，需要先引入 durable/shared job queue 与 cross-process event transport。
 
 ## 7. Memory

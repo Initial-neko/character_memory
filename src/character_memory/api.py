@@ -131,7 +131,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             logger.info("api.runtime init start config=%s", config_path)
             runtime_loading = True
             try:
-                app_bundle = build_app(config_path)
+                app_bundle = build_app(config_path, store=read_store)
                 runtime_error = None
                 logger.info(
                     "api.runtime init ready model=%s vision_model=%s characters=%d total_ms=%.1f",

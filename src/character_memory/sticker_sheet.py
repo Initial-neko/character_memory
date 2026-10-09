@@ -147,7 +147,32 @@ def _grid_lines(
     return lines
 
 
-def sticker_sheet_bundle(data: bytes, *, pack_name: str = '九宫表情') -> bytes:
+def _normalize_solid_background(width: int, height: int, rgba: bytearray) -> None:
+    """Explicit opt-in exact-color flood fill; never guess gradients or key all pixels."""
+    if any(alpha != 255 for alpha in rgba[3::4]):
+        return  # Already has alpha: retain the existing strict transparent path.
+    color = bytes(rgba[:3])
+    border = ([x for x in range(width)] + [(height-1)*width+x for x in range(width)]
+              + [y*width for y in range(height)] + [y*width+width-1 for y in range(height)])
+    if any(bytes(rgba[pos*4:pos*4+3]) != color for pos in border):
+        raise ValueError('background normalization requires a uniform solid-color outer border')
+    from array import array
+    pending = array('I', [0])
+    rgba[3] = 0
+    while pending:
+        pos = pending.pop()
+        x, y = pos % width, pos // width
+        for neighbor in ((pos-1 if x else -1), (pos+1 if x+1 < width else -1),
+                         (pos-width if y else -1), (pos+width if y+1 < height else -1)):
+            if neighbor < 0:
+                continue
+            offset = neighbor*4
+            if rgba[offset+3] == 255 and bytes(rgba[offset:offset+3]) == color:
+                rgba[offset+3] = 0
+                pending.append(neighbor)
+
+
+def sticker_sheet_bundle(data: bytes, *, pack_name: str = '九宫表情', normalize_background: bool = False) -> bytes:
     """Validate all nine cells before returning an importer-compatible ZIP.
 
     Each cell must have transparent separation along its border. This rejects
@@ -155,6 +180,8 @@ def sticker_sheet_bundle(data: bytes, *, pack_name: str = '九宫表情') -> byt
     are alpha-trimmed and receive two transparent pixels on every side.
     """
     width, height, rgba = _decode(data)
+    if normalize_background:
+        _normalize_solid_background(width, height, rgba)
     xs = _grid_lines(width, height, rgba, columns=True)
     # Rows are cut inside each column band: staggered columns keep one global
     # column layout, but their vertical gutters rarely line up across the sheet.
@@ -162,7 +189,7 @@ def sticker_sheet_bundle(data: bytes, *, pack_name: str = '九宫表情') -> byt
         _grid_lines(width, height, rgba, columns=False, span=(xs[col], xs[col + 1]))
         for col in range(3)
     ]
-    pack_id = 'sheet_' + hashlib.sha256(data).hexdigest()[:16]
+    pack_id = 'sheet_' + hashlib.sha256(data + (b'\0solid-background-v1' if normalize_background else b'')).hexdigest()[:16]
     pack_name = pack_name.strip()[:80] or '九宫表情'
     assets = []
     rows = []

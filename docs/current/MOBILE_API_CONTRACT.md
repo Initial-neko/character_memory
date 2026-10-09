@@ -262,3 +262,5 @@ Android consumes Core-owned RSS data and collection through the CORE origin. See
 - Deployment: [MOBILE_ACCESS.md](MOBILE_ACCESS.md), [ARCHITECTURE.md](ARCHITECTURE.md), [CONVERSATION_RUNTIME.md](CONVERSATION_RUNTIME.md), [VISUAL.md](VISUAL.md), [VOICE_AND_TTS.md](VOICE_AND_TTS.md).
 
 World local recovery: GET `/v1/world/activity/recovery` returns a bounded read-only eligibility report. POST `/v1/world/activity/recovery/{opportunity_id}` commits an existing complete APPRAISED receipt without provider calls; unknown opportunities return 404 and unsafe/incomplete receipts return 409. This is a local operator boundary, not an autonomous action granted to a character.
+
+Sticker PNG import accepts optional query `normalize_background=false`; enabling it explicitly applies exact solid-color border-connected background removal before strict 3×3 validation. It is independent of `auto_tag`, introduces no Vision call, and is ignored for ZIP imports. Complex/nonuniform backgrounds remain unsupported.

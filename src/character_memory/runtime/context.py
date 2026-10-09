@@ -49,12 +49,19 @@ def render_observed_experiences(events, budget: int = 4000) -> str:
         title_text = f" title={json.dumps(title[:180], ensure_ascii=False)}" if isinstance(title, str) and title else ""
         scope = reading.get("content_scope")
         scope_text = f" scope={json.dumps(scope[:24])}" if isinstance(scope, str) and scope else ""
+        if reading:
+            scope_text += " truncated=" + (str(reading['truncated']).lower() if type(reading.get('truncated')) is bool else "unknown")
+            for name in ('read_characters','available_characters'):
+                count = reading.get(name)
+                scope_text += f" {name}={count if type(count) is int and count >= 0 else 'unknown'}"
+            if scope == "RSS_FEED_TEXT":
+                scope_text += " linked_original_not_fetched=true"
         header = f"[event_id={item.id} observed_at={item.event_time.isoformat()} sources={source_text}{title_text}{scope_text}]\n"
         content = str(item.content or "")
         remaining = max(0, quota-len(header))
         summary = item.metadata.get("world_summary")
         if isinstance(summary, str) and summary.strip() and summary.strip() != content.strip():
-            summary_label = "\n来源内容摘要："
+            summary_label = "\n人物评估摘要（非原文）："
             note_limit = max(0, (remaining-len(summary_label)) // 2)
             content = content[:note_limit] + summary_label + summary[:max(0, remaining-note_limit-len(summary_label))]
         else:

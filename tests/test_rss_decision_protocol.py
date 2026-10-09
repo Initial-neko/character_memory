@@ -88,3 +88,22 @@ def test_actual_client_missing_choice_records_failure_not_no_action(tmp_path):
     finally:
         model.close()
         store.close()
+
+
+@pytest.mark.parametrize('decision,choice',[
+    ({'choice':'NO_ACTION','action':None},'NO_ACTION'),
+    ({'choice':None,'action':'READ_RSS','item_ids':[2]},'READ_RSS'),
+    ({'browse':True,'query':'public topic'},'WEB_SEARCH'),
+    ({'browse':False,'query':''},'NO_ACTION'),
+])
+def test_nullable_alias_and_legacy_boolean_are_locally_compatible(decision,choice):
+    assert PersonalWorldReadPlan.model_validate(decision).choice==choice
+
+
+@pytest.mark.parametrize('decision',[
+    {'browse':'true','query':'topic'}, {'browse':1,'query':'topic'},
+    {'browse':True,'query':''}, {'choice':'MESSAGE','browse':False},
+    {'choice':'NO_ACTION','action':'WEB_SEARCH','query':'topic'},
+])
+def test_compatibility_does_not_convert_invalid_or_conflicting_decisions(decision):
+    with pytest.raises(ValidationError):PersonalWorldReadPlan.model_validate(decision)

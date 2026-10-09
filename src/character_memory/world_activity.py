@@ -108,6 +108,12 @@ class PersonalWorldReadPlan(BaseModel):
             return value
         value = dict(value)
         for key in ("choice", "action"):
+            if value.get(key) is None:
+                value.pop(key, None)
+        if not any(key in value for key in ("choice", "action")) and type(value.get("browse")) is bool:
+            value["choice"] = "WEB_SEARCH" if value["browse"] else "NO_ACTION"
+            logger.info("world.read decision_compatibility=LEGACY_BROWSE")
+        for key in ("choice", "action"):
             if isinstance(value.get(key), str):
                 value[key] = value[key].strip().upper()
         if "choice" in value and "action" in value and value["choice"] != value["action"]:

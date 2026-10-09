@@ -739,7 +739,7 @@ def create_dev_app(
         hours: int = Query(default=24, ge=1, le=2160),
         limit: int = Query(default=80, ge=1, le=300),
     ):
-        store = LlmUsageStore(cfg.db_path)
+        store = LlmUsageStore(cfg.db_path, read_only=True)
         try:
             return store.usage(hours=hours, limit=limit)
         finally:

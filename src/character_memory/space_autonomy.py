@@ -627,6 +627,15 @@ Sources:
                     media_id=relations[0]["media_id"] if relations else None,
                     source_event_id=source_event.id,
                 )
+                if (content and world.get('source_event_id')
+                        and (world.get('appraisal') or {}).get('disposition') == 'MEMORY_AND_EXPRESS'):
+                    observation = self.repository.store.get_event(world['source_event_id'])
+                    if (observation is not None and observation.character_id == character_id
+                            and observation.metadata.get('channel') == 'WORLD'):
+                        self.repository.store.update_event_metadata(observation.id, {
+                            **observation.metadata,
+                            'public_projection': {'post_id': post.id, 'content': content},
+                        })
         except Exception:
             self.media_executor.discard(relations)
             raise

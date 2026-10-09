@@ -145,7 +145,8 @@ periodic_visual_observation_max_per_hour: 6
 # -----------------------------------------------------------------------------
 
 # Main SQLite database path for runtime state, memory, scheduling and usage.
-db_path: "data/character-memory.db"
+# Example/acceptance database is intentionally separate. Set config.yaml explicitly for the formal database.
+db_path: "data/character-memory.example.db"
 
 # Media asset directory. Empty = <db parent>/media.
 media_dir: ""

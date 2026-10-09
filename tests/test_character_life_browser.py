@@ -49,7 +49,7 @@ def test_filters_details_state_memory_actual_no_action(life_page):
     expect(p.locator('#details')).to_contain_text('讨论过冷暖配色')
     p.locator('[data-channel="WORLD"]').click()
     expect(p.locator('.event-card')).to_have_count(2)
-    p.get_by_role('heading',name='阅读了 配色笔记').locator('..').locator('..').click()
+    p.get_by_role('heading',name='阅读了 RSS Feed 文本：配色笔记').locator('..').locator('..').click()
     expect(p.locator('#details')).to_contain_text('RSS_FEED_TEXT')
     expect(p.get_by_role('link',name='查看原文')).to_have_attribute('href','https://example.com/article')
     p.locator('[data-channel="ALL"]').click()

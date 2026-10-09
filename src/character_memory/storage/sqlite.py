@@ -432,15 +432,14 @@ class SQLiteStore:
             self._tx_depth += 1
             try:
                 yield
-            except Exception:
-                self._tx_depth -= 1
+                if outer:
+                    self.conn.commit()
+            except BaseException:
                 if outer:
                     self.conn.rollback()
                 raise
-            else:
+            finally:
                 self._tx_depth -= 1
-                if outer:
-                    self.conn.commit()
 
     @staticmethod
     def _pack(v):
@@ -755,16 +754,37 @@ class SQLiteStore:
         text = f"lower(content || ' ' || coalesce(json_extract({metadata}, '$.world_summary'), '') || ' ' || coalesce(json_extract({metadata}, '$.query'), '') || ' ' || coalesce(json_extract({metadata}, '$.sources'), '') || ' ' || coalesce(json_extract({metadata}, '$.rss_reading.title'), ''))"
         score = ' + '.join('CASE WHEN instr(search_text, ?) > 0 THEN ? ELSE 0 END' for _ in terms)
         score_args = [value for term in terms for value in (term, len(term))]
-        public = f" AND json_extract({metadata}, '$.channel')='WORLD_PULSE'" if projection == "PUBLIC" else ""
-        sql = f"""WITH candidates AS (
-            SELECT *, {text} AS search_text FROM events
-            WHERE character_id=? AND event_type=? AND event_time_epoch<=?{public}
-        ), ranked AS (SELECT *, ({score}) AS relevance FROM candidates)
-        SELECT * FROM ranked WHERE relevance>0
-        ORDER BY relevance DESC,event_time_epoch DESC,id DESC LIMIT ?"""
         with self._lock:
+            public = ""
+            if projection == "PUBLIC":
+                pulse = f"json_extract({metadata}, '$.channel')='WORLD_PULSE'"
+                has_posts = self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='space_posts'").fetchone()
+                if has_posts:
+                    published = f"""json_extract({metadata}, '$.channel')='WORLD' AND EXISTS (
+                        SELECT 1 FROM space_posts p WHERE p.id=json_extract({metadata}, '$.public_projection.post_id')
+                        AND p.character_id=events.character_id AND p.created_at_epoch<={epoch_us(at)}
+                        AND p.created_at_epoch>=events.event_time_epoch
+                        AND p.content=json_extract({metadata}, '$.public_projection.content') AND length(trim(p.content))>0)"""
+                    public = f" AND ({pulse} OR ({published}))"
+                    # Public relevance and contents use only what was actually published.
+                    text = f"CASE WHEN {pulse} THEN {text} ELSE lower(json_extract({metadata}, '$.public_projection.content')) END"
+                else:
+                    public = f" AND ({pulse})"
+            sql = f"""WITH candidates AS (
+                SELECT *, {text} AS search_text FROM events
+                WHERE character_id=? AND event_type=? AND event_time_epoch<=?{public}
+            ), ranked AS (SELECT *, ({score}) AS relevance FROM candidates)
+            SELECT * FROM ranked WHERE relevance>0
+            ORDER BY relevance DESC,event_time_epoch DESC,id DESC LIMIT ?"""
             rows = self.conn.execute(sql, [character_id, EventType.WORLD_OBSERVATION.value, epoch_us(at), *score_args, min(4, int(limit))]).fetchall()
-            return [self._event_from_row(row) for row in rows]
+            events = [self._event_from_row(row) for row in rows]
+            if projection == "PUBLIC":
+                events = [event.model_copy(update={
+                    'content': event.metadata['public_projection']['content'],
+                    'metadata': {'channel': 'WORLD', 'public_post_id': event.metadata['public_projection']['post_id'],
+                                 'content_scope': 'PUBLISHED_SPACE_POST'}
+                }) if event.metadata.get('channel') == 'WORLD' else event for event in events]
+            return events
 
     def latest_event_id(
         self,

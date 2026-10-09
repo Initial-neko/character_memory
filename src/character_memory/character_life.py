@@ -60,6 +60,7 @@ class CharacterLifeReader:
                 sources.append(("intent_audit", "e.id", "CAST((julianday(e.decided_at)-2440587.5)*86400000000 AS INTEGER)", "e.decided_at", "i.content||e.decision", "i.character_id=?", [character_id], "SELECT e.*,i.content,i.character_id FROM intent_deferral_audit e JOIN intents i ON i.id=e.intent_id"))
             sources.append(("intent", "e.id", "e.created_at_epoch", "e.created_at", "e.content", "e.character_id=?", [character_id], "SELECT e.* FROM intents e"))
             records = []
+            undated_count = 0
             for kind, identity, stamp, time, content, condition, params, sql in sources:
                 if channel != 'ALL' and kind != 'events' and {'group':'GROUP','post':'SPACE','comment':'SPACE','world':'WORLD','intent':'INTENT','space_run':'SPACE','intent_audit':'INTENT'}[kind] != channel:
                     continue
@@ -73,12 +74,6 @@ class CharacterLifeReader:
                     elif channel == 'SPACE': condition += " AND e.event_type IN ('SPACE_POST_SEEN','SPACE_COMMENT_RECEIVED','SOCIAL_POST')"
                     elif channel == 'DIRECT': condition += " AND e.event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE','PROACTIVE_INTENT','VISUAL_OBSERVATION')"
                     else: continue
-                if start:
-                    condition += f" AND {stamp}>=? AND {stamp}<?"
-                    params += [epoch_us(start), epoch_us(end)]
-                if boundary:
-                    condition += f" AND ({stamp}<? OR ({stamp}=? AND ?||CAST({identity} AS TEXT)<?))"
-                    params += [boundary[0], boundary[0], kind+':', boundary[1]]
                 if query:
                     condition += f" AND instr(lower({content}),lower(?))>0"
                     params += [query]
@@ -99,7 +94,16 @@ class CharacterLifeReader:
                         condition += " AND EXISTS(SELECT 1 FROM conversation_runtime_traces t WHERE t.character_id=? AND t.source_conversation_event_id=e.id AND json_valid(t.trace_json) AND (json_extract(t.trace_json,'$.mental_state_before')<>json_extract(t.trace_json,'$.mental_state_after') OR json_array_length(json_extract(t.trace_json,'$.created_memory_ids'))>0))"
                         params += [character_id]
                     else: continue
-                condition += f" AND {stamp} IS NOT NULL"
+                invalid_time = f"({stamp} IS NULL OR julianday({time}) IS NULL)"
+                undated_count += self.store.conn.execute("SELECT COUNT(*) FROM (" + sql +
+                    f" WHERE {condition} AND {invalid_time})", params).fetchone()[0]
+                if start:
+                    condition += f" AND {stamp}>=? AND {stamp}<?"
+                    params += [epoch_us(start), epoch_us(end)]
+                if boundary:
+                    condition += f" AND ({stamp}<? OR ({stamp}=? AND ?||CAST({identity} AS TEXT)<?))"
+                    params += [boundary[0], boundary[0], kind+':', boundary[1]]
+                condition += f" AND {stamp} IS NOT NULL AND julianday({time}) IS NOT NULL"
                 rows = self.store.conn.execute(sql.replace("SELECT e.*", f"SELECT {stamp} AS _stamp,e.*") + f" WHERE {condition} ORDER BY {stamp} DESC,CAST({identity} AS TEXT) DESC LIMIT ?", params+[limit+1]).fetchall()
                 for row in rows:
                     item = self._project(kind, dict(row), character_id, tables)
@@ -109,7 +113,7 @@ class CharacterLifeReader:
             page=records[:limit]
             next_cursor = base64.urlsafe_b64encode(json.dumps([page[-1]['_stamp'],page[-1]['key']]).encode()).decode() if len(records)>limit and page else None
             for item in page: item.pop('_stamp')
-            return {'character_id':character_id,'items':page,'next_cursor':next_cursor,'read_only':True}
+            return {'character_id':character_id,'items':page,'next_cursor':next_cursor,'read_only':True,'undated_count':undated_count}
 
     def _project(self, kind, row, character, tables):
         metadata=obj(row.get('metadata_json'))
@@ -131,7 +135,7 @@ class CharacterLifeReader:
             if et=='WORLD_OBSERVATION':
                 title='保留了一次外界观察';channel='WORLD'
                 reading=obj(metadata.get('rss_reading'))
-                if text(reading.get('title')).strip(): title='阅读了 '+text(reading['title'],180)
+                if text(reading.get('title')).strip(): title=('阅读了 RSS Feed 文本：' if reading.get('content_scope')=='RSS_FEED_TEXT' else '阅读了 ')+text(reading['title'],180)
             elif et.startswith('SPACE_') or et=='SOCIAL_POST':
                 channel='SPACE';title='Space 互动经历'
                 if et=='SPACE_COMMENT_RECEIVED' and isinstance(metadata.get('commenter_id'),str):
@@ -188,16 +192,17 @@ class CharacterLifeReader:
         audit=[]
         due=False
         past_expiry=False
+        time_status="VALID"
         if kind=='intent':
             status=row['status'];content=text(row['content']);decision['basis']=text(row.get('reason')) or None
             now=datetime.now(timezone.utc)
             try:
-                earliest=parse_datetime(row['earliest_at']) if row.get('earliest_at') else None
-                expiry=parse_datetime(row['expires_at']) if row.get('expires_at') else None
+                earliest=parse_datetime(row['earliest_at'])
+                expiry=parse_datetime(row['expires_at']) if row.get('expires_at') is not None else None
                 due=status=='PENDING' and earliest is not None and earliest<=now and (expiry is None or expiry>now)
                 past_expiry=status=='PENDING' and expiry is not None and expiry<=now
             except (ValueError,TypeError):
-                pass
+                time_status="INVALID"
             if 'intent_deferral_audit' in tables:
                 audit=[dict(r) for r in self.store.conn.execute("SELECT decided_at,decision,old_earliest_at,new_earliest_at,source_event_id FROM intent_deferral_audit WHERE intent_id=? ORDER BY id LIMIT 50",[row['id']])]
-        return {'key':kind+':'+str(row.get('opportunity_id',row.get('id'))),'kind':kind,'time':row.get('event_time',row.get('created_at',row.get('started_at',row.get('decided_at')))),'title':title,'channel':channel,'status':status,'content':content,'source':{'kind':kind,'id':row.get('opportunity_id',row.get('id')),'event_id':event_id,'conversation_id':row.get('conversation_id'),'post_id':row.get('post_id') or metadata.get('post_id')},'decision':decision,'state_change':state,'memories':memories,'participants':participants,'reading':{'scope':text(reading.get('content_scope'),80),'url':text(reading.get('url'),1000),'summary':text(metadata.get('world_summary'))} if reading else None,'intent':{'earliest_at':row.get('earliest_at'),'expires_at':row.get('expires_at'),'audit':audit,'due':due,'past_expiry':past_expiry,'defer_count':row.get('deferral_count',0)} if kind=='intent' else None}
+        return {'key':kind+':'+str(row.get('opportunity_id',row.get('id'))),'kind':kind,'time':row.get('event_time',row.get('created_at',row.get('started_at',row.get('decided_at')))),'title':title,'channel':channel,'status':status,'content':content,'source':{'kind':kind,'id':row.get('opportunity_id',row.get('id')),'event_id':event_id,'conversation_id':row.get('conversation_id'),'post_id':row.get('post_id') or metadata.get('post_id')},'decision':decision,'state_change':state,'memories':memories,'participants':participants,'reading':{'scope':text(reading.get('content_scope'),80),'url':text(reading.get('url'),1000),'summary':text(metadata.get('world_summary')),'truncated':reading.get('truncated') if type(reading.get('truncated')) is bool else None,'read_characters':reading.get('read_characters') if type(reading.get('read_characters')) is int else None,'available_characters':reading.get('available_characters') if type(reading.get('available_characters')) is int else None} if reading else None,'intent':{'earliest_at':row.get('earliest_at'),'expires_at':row.get('expires_at'),'audit':audit,'due':due,'past_expiry':past_expiry,'defer_count':row.get('deferral_count',0),'time_status':time_status} if kind=='intent' else None}

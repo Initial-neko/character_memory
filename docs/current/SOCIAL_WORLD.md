@@ -723,9 +723,17 @@ Execution opportunity recovery and budget contracts remain a separate boundary.
 
 When `world_rss_reading_enabled` is enabled and eligible local candidates exist,
 Personal Browse uses `PersonalWorldReadPlan` for NO_ACTION / WEB_SEARCH / READ_RSS.
+Nullable `choice`/`action` aliases are ignored locally. A legacy boolean `browse` bridges to WEB_SEARCH/NO_ACTION only when no explicit selection remains. Contradictory valid selections and malformed values still fail validation; the adapter buys no additional call.
 The existing World opportunity, durable decision/appraisal phases and bounded
 CapabilityExecutor remain the owners. READ_RSS reads local Feed text only and
 uses one batch appraisal; actual source snapshots and per-person reading state
 are specified in RSS_SOURCES. Disabled or empty candidates use the original
 Web path. This adds no Direct/Group search or reading permission, automatic
 publication, long-term Memory admission or second character decision model.
+
+
+#### Local appraisal recovery
+
+`GET /v1/world/activity/recovery` inspects APPRAISED opportunities without a model, fetch, runtime initialization or schema write. `POST /v1/world/activity/recovery/{opportunity_id}` applies only a complete, identity-matched successful execution plus appraisal receipt. Recovery verifies a genuine reading decision, all snapshot request parameters/constraints and RSS selection/source generations. Invalid receipts expose only `INVALID_RECOVERY_RECEIPT`, never provider inputs. It uses the same local commit helpers as normal browsing. Missing/malformed receipts remain unresolved with an explicit reason; PLANNING and APPRAISING are not replayed. Original observation time and request identity remain, while lifecycle metadata records the later persistence time.
+
+The enabled World scheduler recovers at most two eligible appraisals per tick before new paid opportunities and independent of exhausted browse quotas. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.

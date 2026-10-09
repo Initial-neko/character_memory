@@ -108,6 +108,12 @@ class PersonalWorldReadPlan(BaseModel):
             return value
         value = dict(value)
         for key in ("choice", "action"):
+            if value.get(key) is None:
+                value.pop(key, None)
+        if not any(key in value for key in ("choice", "action")) and type(value.get("browse")) is bool:
+            value["choice"] = "WEB_SEARCH" if value["browse"] else "NO_ACTION"
+            logger.info("world.read decision_compatibility=LEGACY_BROWSE")
+        for key in ("choice", "action"):
             if isinstance(value.get(key), str):
                 value[key] = value[key].strip().upper()
         if "choice" in value and "action" in value and value["choice"] != value["action"]:
@@ -1096,6 +1102,12 @@ Summary: {topic["summary"]}
                 "appraisal_status": "NOT_COMPLETED", "errors": [{"stage": "recovery", "error": error}] if error else []}
 
     def _browse_character(self, character_id: str, *, now: datetime, opportunity_id: str) -> dict:
+        previous = self.repository.get_browse_decision(opportunity_id)
+        if previous and previous['character_id'] != character_id:
+            raise ValueError("browse opportunity belongs to another character")
+        if previous and previous['phase'] == 'APPRAISED':
+            from character_memory.world_recovery import WorldBrowseRecovery
+            return WorldBrowseRecovery(self.repository.store).apply(opportunity_id)
         bundle = self.access.require_bundle()
         runtime = bundle.runtimes.get(character_id)
         if runtime is None:
@@ -1266,6 +1278,10 @@ personal_note 写“这次浏览对我有什么意义”，不是复制新闻标
                 self.repository.update_browse_decision(opportunity_id, expected_phase="APPRAISING", phase="FAILED", result=result, error=str(error))
                 raise
             self.repository.update_browse_decision(opportunity_id, expected_phase="APPRAISING", phase="APPRAISED", appraisal=appraisal.model_dump(mode="json"))
+        return self._apply_web_receipt(character_id, opportunity_id, now=now, plan=plan,
+                                       request=request, observed=observed, observations=observations)
+
+    def _apply_web_receipt(self, character_id, opportunity_id, *, now, plan, request, observed, observations):
         # The paid appraisal receipt precedes this local-only transaction. A
         # restart can retry this commit without repeating decision/read/appraisal.
         with self.access.store().transaction(immediate=True):
@@ -1351,6 +1367,12 @@ personal_note 写“这次浏览对我有什么意义”，不是复制新闻标
                     self.repository.update_browse_decision(opportunity_id, expected_phase="APPRAISING", phase="FAILED", result=result, error=str(error))
                 raise
             self.repository.update_browse_decision(opportunity_id, expected_phase="APPRAISING", phase="APPRAISED", appraisal=appraisal.model_dump(mode="json"))
+        return self._apply_rss_receipt(character_id, opportunity_id, now=now,
+                                       request=request, items=items, result=result)
+
+    def _apply_rss_receipt(self, character_id, opportunity_id, *, now, request, items, result):
+        from character_memory.rss_world import RssPersonalReading
+        reading = RssPersonalReading(self.access.store())
         with self.access.store().transaction(immediate=True):
             row = self.repository.get_browse_decision(opportunity_id)
             if row["phase"] == "APPLIED":
@@ -1619,6 +1641,17 @@ class WorldActivityScheduler:
             return []
 
         outcomes = []
+        from character_memory.world_recovery import WorldBrowseRecovery
+        recovery = WorldBrowseRecovery(self.repository.store)
+        ready = [item for item in recovery.inspect(limit=200)['candidates'] if item['recoverable']][:2]
+        for item in ready:
+            try:
+                result = recovery.apply(item['opportunity_id'])
+                outcomes.append({'kind':'BROWSE_RECOVERY','subject_id':item['character_id'],
+                                 'status':'OK','details':result,'error':''})
+            except Exception as error:
+                outcomes.append({'kind':'BROWSE_RECOVERY','subject_id':item['character_id'],
+                                 'status':'FAILED','details':{},'error':str(error)[:800]})
         pulse_interval = self._interval("world_pulse_refresh_minutes", 60.0)
         discuss_interval = self._interval(
             "world_pulse_discussion_interval_minutes",
@@ -1759,6 +1792,7 @@ class WorldActivityScheduler:
         return outcomes
 
     def status(self) -> dict:
+        from character_memory.world_recovery import WorldBrowseRecovery
         now = datetime.now().astimezone()
         states = []
         for item in self.repository.states():
@@ -1772,6 +1806,7 @@ class WorldActivityScheduler:
             })
         return {
             "enabled": self.enabled(),
+            "recovery": WorldBrowseRecovery(self.repository.store).inspect(),
             "pulse_enabled": bool(
                 getattr(self.access.settings, "world_pulse_enabled", True)
             ),

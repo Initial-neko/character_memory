@@ -182,12 +182,21 @@ def provider_label(base_url: str) -> str:
 class LlmUsageStore:
     """Small append-only LLM meter stored beside Character Memory facts."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, read_only: bool = False):
         self.db_path = str(db_path)
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self.read_only = read_only
         self._lock = threading.RLock()
+        if read_only and Path(self.db_path).is_file():
+            self.conn = sqlite3.connect(Path(self.db_path).resolve().as_uri() + '?mode=ro',
+                                        check_same_thread=False, uri=True)
+            self.conn.row_factory = sqlite3.Row
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='llm_calls'").fetchone():
+                return
+            self.conn.close()
+        if not read_only:
+            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(
-            self.db_path,
+            ':memory:' if read_only else self.db_path,
             timeout=_TELEMETRY_BUSY_TIMEOUT_S,
             check_same_thread=False,
         )
@@ -242,6 +251,8 @@ class LlmUsageStore:
             self.conn.close()
 
     def add(self, item: dict[str, Any]) -> int:
+        if self.read_only:
+            raise PermissionError('usage inspection is read-only')
         now = datetime.now(timezone.utc)
         created_at = str(item.get("created_at") or now.isoformat())
         created_at_epoch = int(item.get("created_at_epoch") or time.time() * 1_000_000)

@@ -129,7 +129,7 @@ def test_production_eager_warmup_starts_runtime_without_waiting_for_first_chat(t
         def close(self):
             closed.append(True)
 
-    monkeypatch.setattr(api_module, "build_app", lambda _path: FakeBundle())
+    monkeypatch.setattr(api_module, "build_app", lambda _path, *, store: FakeBundle())
     app = api_module.create_api(str(config))
 
     with TestClient(app) as client:

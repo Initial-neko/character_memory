@@ -128,6 +128,21 @@ def attach_world_routes(app) -> None:
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    @app.get("/v1/world/activity/recovery")
+    def world_recovery_inspect():
+        from character_memory.world_recovery import WorldBrowseRecovery
+        return WorldBrowseRecovery(access.read_store).inspect()
+
+    @app.post("/v1/world/activity/recovery/{opportunity_id:path}")
+    def world_recovery_apply(opportunity_id: str):
+        from character_memory.world_recovery import WorldBrowseRecovery
+        try:
+            return WorldBrowseRecovery(access.read_store).apply(opportunity_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.post("/v1/world/dev/browse/{character_id}")
     def world_personal_browse(character_id: str):
         try:

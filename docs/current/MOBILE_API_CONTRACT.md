@@ -260,3 +260,5 @@ Android consumes Core-owned RSS data and collection through the CORE origin. See
 - Routing and schemas: `src/character_memory/api_contracts.py`, `core_character_web.py`, `async_web.py`, `group_web.py`, `ensemble_web.py`, `space_web.py`, `visual_capture_web.py`, `visual_web.py`, `core_resource_web.py`, `media_server.py`.
 - Web consumers: `web/app.js`, `web/groups.js`, `web/ensemble.js`, `web/space.js`, `web/voice.js`, `web/visual_capture.js`, `web/mobile_access.js`, `web/unread.js`.
 - Deployment: [MOBILE_ACCESS.md](MOBILE_ACCESS.md), [ARCHITECTURE.md](ARCHITECTURE.md), [CONVERSATION_RUNTIME.md](CONVERSATION_RUNTIME.md), [VISUAL.md](VISUAL.md), [VOICE_AND_TTS.md](VOICE_AND_TTS.md).
+
+World local recovery: GET `/v1/world/activity/recovery` returns a bounded read-only eligibility report. POST `/v1/world/activity/recovery/{opportunity_id}` commits an existing complete APPRAISED receipt without provider calls; unknown opportunities return 404 and unsafe/incomplete receipts return 409. This is a local operator boundary, not an autonomous action granted to a character.

@@ -729,3 +729,10 @@ uses one batch appraisal; actual source snapshots and per-person reading state
 are specified in RSS_SOURCES. Disabled or empty candidates use the original
 Web path. This adds no Direct/Group search or reading permission, automatic
 publication, long-term Memory admission or second character decision model.
+
+
+#### Local appraisal recovery
+
+`GET /v1/world/activity/recovery` inspects APPRAISED opportunities without a model, fetch, runtime initialization or schema write. `POST /v1/world/activity/recovery/{opportunity_id}` applies only a complete, identity-matched successful execution plus appraisal receipt. It uses the same local commit helpers as normal browsing. Missing/malformed receipts remain unresolved with an explicit reason; PLANNING and APPRAISING are not replayed. Original observation time and request identity remain, while lifecycle metadata records the later persistence time.
+
+The enabled World scheduler recovers at most two eligible appraisals per tick before new paid opportunities and independent of exhausted browse quotas. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.

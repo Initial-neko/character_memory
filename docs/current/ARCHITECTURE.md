@@ -561,3 +561,47 @@ owns character-local item claims/snapshots; RSS ingestion continues to own sourc
 and shared article data. The same durable execution allowance and result cache
 apply. Channel identity and item generations come from server context, not
 external text. This is not a general Tool registry or a second Character runtime.
+
+World WEB_SEARCH can opt into `world_browse_execution_backend: claude`; the
+default remains `direct`. RuntimeServices owns one bounded ClaudePrintRunner.
+Each task starts a fresh local `claude -p` process with no resume/continue/fork
+and no session persistence. The fixed execution contract and current public
+query are its only application input; Person context stays in the existing
+planning/appraisal calls. `--bare`, fresh working/configuration directories and
+an explicit MCP configuration prevent inheriting ordinary local customizations.
+The runner requires CLI 2.1.286 or newer and an explicit API key or bearer token.
+It reads only whitelisted authentication/routing/model fields from the existing
+user settings and environment; credentials stay in the subprocess environment.
+It does not load subscription OAuth files or the system keychain. The effective
+tool list must contain only `mcp__character_world__world_lookup`, with that server
+connected. Missing or unexpected tools fail readiness rather than changing mode.
+Managed policy requiring additional customization is not silently accepted.
+
+The single `world_lookup` stdio tool delegates through a short-lived authenticated
+loopback callback to the existing WorldObservationService. It has no database,
+shell, file, posting or Character-state access. Tool calls and page attempts are
+bounded across the whole task; callbacks revoke admission on cancellation, while
+already-running browser/DNS work retains the existing fetch lifecycle limitation.
+Only tool receipts supply readable observations; Claude prose is not proof of a
+visit. Failed or interrupted tasks do not enter appraisal.
+
+The additive `world/005-execution-metadata` migration extends the existing
+execution ledger, not a second execution system. It records backend, local-day
+quota reservation and CLI usage completeness. Unknown spend retains its
+reservation; failure consumes the attempt. The optional per-character estimated
+dollar budget is enforced only with cost saving enabled and an explicit per-run
+reservation. CLI estimates are not authoritative bills or subscription balance.
+Existing World planning, one successful-read appraisal and local recovery remain
+the cognition owners. Returning to direct stops new Claude dispatches without
+deleting execution history or restoring a database backup.
+
+Windows tasks start suspended and enter an owned kill-on-close Job Object before
+resuming; timeout/shutdown terminates descendants even if the parent has exited.
+Shutdown and launch admission share a lock. POSIX tasks use a process group.
+Per-task JSON details keep the public task, visible response, tool receipts and
+redacted diagnostics, never hidden reasoning. Details expire after 30 days and
+are cleaned on subsequent dispatch; the durable execution ledger remains.
+Bounded verified excerpts remain in the existing durable result cache, as for
+the direct backend, so interrupted World appraisal can recover without another
+external call. They are not duplicated in the transient detail file; the 30-day
+policy applies to assistant replies/diagnostics, not to durable reading facts.

@@ -74,10 +74,13 @@ class RuntimeServices:
     image_generation_providers: dict[str, ImageGenerationProvider]
     world_fetcher: HeadlessBrowserWebFetcher
     world_observer: WorldObservationService
+    claude_runner: Any | None = None
 
     def close(self) -> None:
         """Close resources once, after feature workers have stopped."""
 
+        if self.claude_runner is not None:
+            self.claude_runner.close()
         for provider in self.image_generation_providers.values():
             try:
                 provider.close()
@@ -193,6 +196,14 @@ def build_runtime_services(settings: Settings) -> RuntimeServices:
         channel=str(runtime_setting(settings, "web_browser_channel", "auto") or "auto"),
     )
     world_observer = WorldObservationService(web_search_provider, world_fetcher)
+    claude_runner = None
+    if getattr(settings, "world_browse_execution_backend", "direct") == "claude":
+        from pathlib import Path
+        from character_memory.runtime.claude_process import ClaudePrintRunner
+        claude_runner = ClaudePrintRunner(world_observer, Path(settings.db_path).resolve().parent / "claude-executions",
+            timeout_seconds=settings.claude_execution_timeout_seconds, max_turns=settings.claude_execution_max_turns,
+            max_tool_calls=settings.claude_execution_max_tool_calls, max_concurrency=settings.claude_execution_max_concurrency,
+            model=settings.claude_execution_model, max_budget_usd=settings.claude_execution_max_budget_usd)
     return RuntimeServices(
         search_provider=search_provider,
         web_search_provider=web_search_provider,
@@ -201,4 +212,5 @@ def build_runtime_services(settings: Settings) -> RuntimeServices:
         image_generation_providers=image_generation_providers,
         world_fetcher=world_fetcher,
         world_observer=world_observer,
+        claude_runner=claude_runner,
     )

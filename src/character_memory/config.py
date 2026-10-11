@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import os
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 import yaml
@@ -225,6 +226,15 @@ class Settings(BaseModel):
     world_pulse_max_topics: int = Field(default=8, ge=1, le=12)
     world_pulse_commenter_count: int = Field(default=4, ge=0, le=10)
     world_browse_enabled: bool = True
+    world_browse_execution_backend: Literal["direct", "claude"] = "direct"
+    claude_execution_model: str = Field(default="", max_length=120)
+    claude_execution_timeout_seconds: float = Field(default=120, ge=1, le=600)
+    claude_execution_max_turns: int = Field(default=6, ge=1, le=20)
+    claude_execution_max_tool_calls: int = Field(default=2, ge=1, le=4)
+    claude_execution_max_concurrency: int = Field(default=1, ge=1, le=4)
+    claude_execution_max_budget_usd: float | None = Field(default=None, gt=0, le=100)
+    claude_execution_daily_max: int = Field(default=3, ge=0, le=200)
+    claude_execution_daily_budget_usd: float | None = Field(default=None, gt=0, le=1000)
     # Optional background cadence reduction; permission and correctness do not depend on it.
     world_cost_saving_enabled: bool = False
     world_rss_reading_enabled: bool = False

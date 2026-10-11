@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import json
+import math
 
 from httpx import TimeoutException
 
@@ -55,11 +56,17 @@ class CapabilityExecutor:
     """
     MIGRATION = "world/004-capability-executions"
 
-    def __init__(self, store, web_observer, *, rss_reader=None):
+    def __init__(self, store, web_observer, *, rss_reader=None, claude_runner=None):
         self.store = store
         self.web_observer = web_observer
         self.rss_reader = rss_reader
+        self.claude_runner = claude_runner
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema, immediate=True)
+        self.store.apply_schema_migration("world/005-execution-metadata", self._add_metadata, immediate=True)
+
+    def _add_metadata(self):
+        if "execution_metadata_json" not in {row[1] for row in self.store.conn.execute("PRAGMA table_info(capability_executions)")}:
+            self.store.conn.execute("ALTER TABLE capability_executions ADD COLUMN execution_metadata_json TEXT NOT NULL DEFAULT '{}'")
 
     def _create_schema(self):
         self.store.conn.execute(
@@ -109,8 +116,29 @@ class CapabilityExecutor:
         bounds = request.constraints
         if not isinstance(bounds, dict):
             return "INVALID_CONSTRAINTS"
-        if (set(bounds) != {"max_pages", "max_chars_per_page", "max_calls"}
-                or any(type(value) is not int for value in bounds.values())
+        base = {"max_pages", "max_chars_per_page", "max_calls"}
+        policy = {"backend", "claude_daily_max", "claude_daily_budget_usd", "claude_max_budget_usd", "cost_saving"}
+        optional = {"claude_timeout_seconds", "claude_max_turns", "claude_max_tool_calls", "claude_model"}
+        if bounds.get("backend") == "claude":
+            if not base | policy <= set(bounds) or set(bounds) - base - policy - optional:
+                return "INVALID_CONSTRAINTS"
+            if type(bounds["claude_daily_max"]) is not int or not 0 <= bounds["claude_daily_max"] <= 200 or type(bounds["cost_saving"]) is not bool:
+                return "INVALID_CONSTRAINTS"
+            for key in ("claude_daily_budget_usd", "claude_max_budget_usd"):
+                value = bounds[key]
+                if value is not None and (type(value) not in {int, float} or not math.isfinite(value) or value <= 0):
+                    return "INVALID_CONSTRAINTS"
+            if bounds["cost_saving"] and bounds["claude_daily_budget_usd"] is not None and bounds["claude_max_budget_usd"] is None:
+                return "INVALID_CONSTRAINTS"
+            for key, low, high in (("claude_timeout_seconds", 1, 600), ("claude_max_turns", 1, 20), ("claude_max_tool_calls", 1, 4)):
+                types = {int, float} if key == "claude_timeout_seconds" else {int}
+                if key in bounds and (type(bounds[key]) not in types or not low <= bounds[key] <= high):
+                    return "INVALID_CONSTRAINTS"
+            if "claude_model" in bounds and (not isinstance(bounds["claude_model"], str) or len(bounds["claude_model"]) > 120):
+                return "INVALID_CONSTRAINTS"
+        elif set(bounds) != base:
+            return "INVALID_CONSTRAINTS"
+        if (any(type(bounds[key]) is not int for key in base)
                 or not 1 <= bounds["max_pages"] <= 4
                 or not 500 <= bounds["max_chars_per_page"] <= 16000
                 or not 0 <= bounds["max_calls"] <= 1):
@@ -125,6 +153,8 @@ class CapabilityExecutor:
             return CapabilityResult(request.request_id, "DENIED", reason=denial)
         now = now or datetime.now().astimezone()
         payload = asdict(request)
+        is_claude = request.capability == "WEB_SEARCH" and request.constraints.get("backend") == "claude"
+        metadata = {}
         # Reserve before any external call; failed/time-out attempts consume the
         # opportunity's finite allowance just like successful attempts.
         with self.store.transaction(immediate=True):
@@ -144,14 +174,39 @@ class CapabilityExecutor:
             ).fetchone()[0]
             if used >= request.constraints["max_calls"]:
                 return CapabilityResult(request.request_id, "DENIED", reason="BUDGET_EXHAUSTED")
+            if is_claude:
+                if self.claude_runner is None:
+                    return CapabilityResult(request.request_id, "DENIED", reason="CLAUDE_UNAVAILABLE")
+                day = now.astimezone().date().isoformat()
+                entries = self.store.conn.execute(
+                    "SELECT execution_metadata_json FROM capability_executions WHERE character_id=? "
+                    "AND json_extract(execution_metadata_json,'$.backend')='claude' "
+                    "AND json_extract(execution_metadata_json,'$.day')=?", (request.character_id, day)).fetchall()
+                if len(entries) >= request.constraints["claude_daily_max"]:
+                    return CapabilityResult(request.request_id, "DENIED", reason="CLAUDE_DAILY_LIMIT")
+                reserved = request.constraints["claude_max_budget_usd"]
+                budget = request.constraints["claude_daily_budget_usd"]
+                if request.constraints["cost_saving"] and budget is not None:
+                    spend = 0.0
+                    for entry in entries:
+                        previous = json.loads(entry[0])
+                        actual = previous.get("estimated_cost_usd")
+                        reservation = previous.get("reservation_usd") or 0.0
+                        spend += actual if previous.get("usage_state") == "COMPLETE" and actual is not None else max(actual or 0.0, reservation)
+                    if spend + reserved > budget:
+                        return CapabilityResult(request.request_id, "DENIED", reason="CLAUDE_DAILY_BUDGET")
+                metadata = {"backend": "claude", "day": day, "reservation_usd": reserved, "usage_state": "UNKNOWN"}
             self.store.conn.execute(
-                "INSERT INTO capability_executions(request_id,character_id,opportunity_id,request_json,status,started_at) "
-                "VALUES(?,?,?,?,?,?)",
+                "INSERT INTO capability_executions(request_id,character_id,opportunity_id,request_json,status,started_at,execution_metadata_json) "
+                "VALUES(?,?,?,?,?,?,?)",
                 (request.request_id, request.character_id, request.opportunity_id,
-                 json.dumps(payload, ensure_ascii=False, sort_keys=True), "STARTED", now.isoformat()),
+                 json.dumps(payload, ensure_ascii=False, sort_keys=True), "STARTED", now.isoformat(), json.dumps(metadata)),
             )
         try:
-            if request.capability == "READ_RSS":
+            if is_claude:
+                result = self.claude_runner.run(request)
+                metadata.update(result.data.get("execution") or {})
+            elif request.capability == "READ_RSS":
                 if self.rss_reader is None:
                     raise RuntimeError("RSS_READER_UNAVAILABLE")
                 data = self.rss_reader.read(
@@ -177,13 +232,13 @@ class CapabilityExecutor:
         except (TimeoutError, TimeoutException) as error:
             result = CapabilityResult(request.request_id, "TIMEOUT", reason=str(error)[:500])
         except Exception as error:
-            result = CapabilityResult(request.request_id, "FAILED", reason=str(error)[:500])
+            result = CapabilityResult(request.request_id, "FAILED", reason="CLAUDE_EXECUTION_FAILED" if is_claude else str(error)[:500])
         # If this local write fails, STARTED remains unknown. Do not rerun the
         # provider to make up for a missing local receipt.
         with self.store.transaction(immediate=True):
             self.store.conn.execute(
-                "UPDATE capability_executions SET status=?,completed_at=?,result_json=? WHERE request_id=? AND status='STARTED'",
+                "UPDATE capability_executions SET status=?,completed_at=?,result_json=?,execution_metadata_json=? WHERE request_id=? AND status='STARTED'",
                 (result.status, datetime.now().astimezone().isoformat(),
-                 json.dumps(asdict(result), ensure_ascii=False), request.request_id),
+                 json.dumps(asdict(result), ensure_ascii=False), json.dumps(metadata, ensure_ascii=False), request.request_id),
             )
         return result

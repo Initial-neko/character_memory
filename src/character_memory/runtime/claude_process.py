@@ -92,15 +92,15 @@ class ClaudePrintRunner:
         tree = getattr(process, "_owned_tree", None)
         if tree:
             tree.close()
+        if os.name != "nt":
+            import signal
+            try: os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError: pass
         if process.poll() is None:
             if os.name == "nt":
                 subprocess.run([str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/taskkill.exe"),
                                 "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, timeout=3, creationflags=subprocess.CREATE_NO_WINDOW)
-            else:
-                import signal
-                try: os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError: pass
             if process.poll() is None:
                 process.kill()
         process.wait(timeout=3)

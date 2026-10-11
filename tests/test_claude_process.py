@@ -71,11 +71,7 @@ def test_independent_runs_only_send_current_task_and_verified_sources(tmp_path):
 
 
 def test_exited_parent_cannot_leave_child_holding_pipes_past_timeout(tmp_path):
-    import os
     import time
-    import pytest
-    if os.name != "nt":
-        pytest.skip("Windows job object regression")
     from character_memory.runtime.claude_process import ClaudePrintRunner
     runner = ClaudePrintRunner(Observer(), tmp_path / "runs", command=fake_cli(tmp_path, "orphan"), timeout_seconds=.5)
     started = time.monotonic()

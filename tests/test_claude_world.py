@@ -74,6 +74,38 @@ def test_unknown_and_interrupted_reservations_survive_restart(tmp_path):
     store.close()
 
 
+def test_budget_reservation_blocks_competitor_and_resets_next_day(tmp_path):
+    import threading
+    from datetime import datetime,timedelta
+    entered,release=threading.Event(),threading.Event()
+    class Pending(Runner):
+        def run(self,req):
+            entered.set()
+            assert release.wait(3)
+            return super().run(req)
+    first_store=SQLiteStore(tmp_path/"shared.db")
+    second_store=SQLiteStore(tmp_path/"shared.db")
+    pending=Pending()
+    base=request()
+    req=replace(base,constraints={**base.constraints,**limits(cost_saving=True,claude_daily_budget_usd=.5,claude_max_budget_usd=.3)})
+    now=datetime.now().astimezone()
+    first=CapabilityExecutor(first_store,Observer(),claude_runner=pending)
+    second=CapabilityExecutor(second_store,Observer(),claude_runner=Runner())
+    thread=threading.Thread(target=lambda:first.execute(req,now=now))
+    thread.start()
+    try:
+        assert entered.wait(3)
+        other=replace(req,request_id="competitor",opportunity_id="competitor")
+        assert second.execute(other,now=now).reason=="CLAUDE_DAILY_BUDGET"
+        assert second.execute(other,now=now+timedelta(days=1)).status=="SUCCESS"
+    finally:
+        release.set()
+        thread.join(3)
+        assert not thread.is_alive()
+        first_store.close()
+        second_store.close()
+
+
 def test_claude_budget_cannot_be_enforced_without_per_run_reservation(tmp_path):
     store=SQLiteStore(tmp_path/"test.db")
     runner=Runner()

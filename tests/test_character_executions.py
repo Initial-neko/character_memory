@@ -28,6 +28,14 @@ def test_execution_projection_is_readonly_and_private(tmp_path):
     day=page["items"][0]["execution"]["day"]
     assert reader.list("alice",day=day)["summary"]["executions"]==1
     assert reader.list("alice",day="2000-01-01")["summary"]["executions"]==0
+    # Local quota day may differ from the timestamp's written UTC date.
+    metadata=page["items"][0]["execution"]
+    metadata["day"]="2000-01-01"
+    store.conn.execute("UPDATE capability_executions SET execution_metadata_json=?",[json.dumps(metadata)])
+    store.conn.commit()
+    assert len(reader.list("alice",day="2000-01-01")["items"])==1
+    assert reader.list("alice",day="2000-01-01")["summary"]["executions"]==1
+    before=store.conn.total_changes
     detail=reader.detail("alice",req.request_id)
     assert detail["task"]=="public photography" and detail["details_state"]=="NOT_RECORDED"
     assert reader.list("bob")["items"]==[]

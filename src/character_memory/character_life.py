@@ -65,7 +65,8 @@ class CharacterExecutionReader:
         where, values = "character_id=?", [character_id]
         columns = {row[1] for row in self.store.conn.execute("PRAGMA table_info(capability_executions)")}
         if day:
-            where += " AND substr(started_at,1,10)=?"
+            where += (" AND COALESCE(json_extract(execution_metadata_json,'$.day'),substr(started_at,1,10))=?"
+                      if "execution_metadata_json" in columns else " AND substr(started_at,1,10)=?")
             values.append(day)
         if position:
             where += " AND (started_at<? OR (started_at=? AND request_id<?))"
@@ -76,7 +77,7 @@ class CharacterExecutionReader:
         # SQL aggregates keep the projection bounded even with long-running histories.
         summary = empty["summary"]
         if "execution_metadata_json" in columns:
-            clause = " AND json_extract(execution_metadata_json,'$.day')=?" if day else ""
+            clause = " AND COALESCE(json_extract(execution_metadata_json,'$.day'),substr(started_at,1,10))=?" if day else ""
             aggregate = self.store.conn.execute("""SELECT COUNT(*) AS executions,
                 COALESCE(SUM(json_extract(execution_metadata_json,'$.estimated_cost_usd')),0) AS known_estimated_cost_usd,
                 COALESCE(SUM(CASE WHEN json_extract(execution_metadata_json,'$.usage_state')='COMPLETE' THEN 0 ELSE 1 END),0) AS unknown_usage_records,

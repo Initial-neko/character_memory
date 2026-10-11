@@ -605,3 +605,15 @@ Bounded verified excerpts remain in the existing durable result cache, as for
 the direct backend, so interrupted World appraisal can recover without another
 external call. They are not duplicated in the transient detail file; the 30-day
 policy applies to assistant replies/diagnostics, not to durable reading facts.
+
+The read-only `/v1/characters/{id}/executions` list and request detail route use
+the existing ledger, enforce character ownership and never initialize providers.
+Optional local `day` filtering supplies per-character daily usage summaries.
+Known subtotals are separate from totals: incomplete costs/token counts keep
+the total unknown rather than pretending missing records cost zero.
+The Life event detail links its existing capability request to task, response,
+actual source scope, connected tools and usage. A response is explicitly not
+webpage text or Character cognition. Missing details and incomplete usage remain
+distinguishable from a successful empty response or a zero bill. CLI costs are
+estimates, not account balance or remaining subscription quota. Inspecting a
+record never re-executes it or resumes a Claude session.

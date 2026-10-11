@@ -4,6 +4,8 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timedelta, timezone
 import json
+from pathlib import Path
+import re
 
 from character_memory.time_utils import epoch_us, parse_datetime
 
@@ -18,6 +20,105 @@ def obj(value):
 
 def text(value, maximum=2000):
     return value[:maximum] if isinstance(value, str) else ""
+
+
+class CharacterExecutionReader:
+    """Read existing execution receipts. Never initializes schemas or models."""
+    def __init__(self, store, detail_dir):
+        self.store = store
+        self.detail_dir = Path(detail_dir)
+
+    def _exists(self):
+        return bool(self.store.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='capability_executions'").fetchone())
+
+    @staticmethod
+    def _project(row):
+        row = dict(row)
+        request = obj(row.get("request_json"))
+        result = obj(row.get("result_json"))
+        execution = obj(row.get("execution_metadata_json")) or obj(obj(result.get("data")).get("execution"))
+        return {"request_id": row["request_id"], "opportunity_id": row["opportunity_id"],
+            "character_id": row["character_id"], "started_at": row["started_at"], "completed_at": row.get("completed_at"),
+            "status": row["status"], "capability": request.get("capability"), "backend": execution.get("backend", "direct"),
+            "execution": execution, "reason": result.get("reason", ""), "task": text(obj(request.get("arguments")).get("query"), 240)}
+
+    def list(self, character_id, *, cursor="", limit=30, day=None):
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("invalid limit")
+        if day:
+            datetime.strptime(day, "%Y-%m-%d")
+        position = None
+        if cursor:
+            try:
+                position = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+                if not isinstance(position, list) or len(position) != 2 or not all(isinstance(v, str) and len(v) <= 256 for v in position):
+                    raise ValueError()
+                if not position[1] or parse_datetime(position[0]) is None:
+                    raise ValueError()
+            except Exception as error:
+                raise ValueError("invalid cursor") from error
+        empty = {"read_only": True, "items": [], "next_cursor": None,
+                 "summary": {"scope": "all_recorded_claude_tasks", "executions": 0, "known_estimated_cost_usd": 0,
+                             "unknown_usage_records": 0, "input_tokens": 0, "output_tokens": 0}}
+        if not self._exists():
+            return empty
+        where, values = "character_id=?", [character_id]
+        columns = {row[1] for row in self.store.conn.execute("PRAGMA table_info(capability_executions)")}
+        if day:
+            where += " AND substr(started_at,1,10)=?"
+            values.append(day)
+        if position:
+            where += " AND (started_at<? OR (started_at=? AND request_id<?))"
+            values += [position[0], position[0], position[1]]
+        rows = self.store.conn.execute(f"SELECT * FROM capability_executions WHERE {where} ORDER BY started_at DESC,request_id DESC LIMIT ?", [*values, limit + 1]).fetchall()
+        items = [self._project(row) for row in rows[:limit]]
+        next_cursor = base64.urlsafe_b64encode(json.dumps([items[-1]["started_at"], items[-1]["request_id"]]).encode()).decode() if len(rows) > limit else None
+        # SQL aggregates keep the projection bounded even with long-running histories.
+        summary = empty["summary"]
+        if "execution_metadata_json" in columns:
+            clause = " AND json_extract(execution_metadata_json,'$.day')=?" if day else ""
+            aggregate = self.store.conn.execute("""SELECT COUNT(*) AS executions,
+                COALESCE(SUM(json_extract(execution_metadata_json,'$.estimated_cost_usd')),0) AS known_estimated_cost_usd,
+                COALESCE(SUM(CASE WHEN json_extract(execution_metadata_json,'$.usage_state')='COMPLETE' THEN 0 ELSE 1 END),0) AS unknown_usage_records,
+                SUM(json_extract(execution_metadata_json,'$.input_tokens')) AS input_tokens,
+                SUM(json_extract(execution_metadata_json,'$.output_tokens')) AS output_tokens,
+                COUNT(json_extract(execution_metadata_json,'$.input_tokens')) AS input_known_records,
+                COUNT(json_extract(execution_metadata_json,'$.output_tokens')) AS output_known_records
+                FROM capability_executions WHERE character_id=? AND json_extract(execution_metadata_json,'$.backend')='claude'""" + clause,
+                [character_id, day] if day else [character_id]).fetchone()
+            summary = {"scope": "recorded_claude_tasks_for_day" if day else "all_recorded_claude_tasks", "day": day, **dict(aggregate)}
+            summary["total_estimated_cost_usd"] = summary["known_estimated_cost_usd"] if not summary["unknown_usage_records"] else None
+            for field in ("input", "output"):
+                key=field+"_tokens"
+                summary["known_"+key]=summary[key]
+                if summary[field+"_known_records"] != summary["executions"]:
+                    summary[key]=None
+        return {"read_only": True, "items": items, "next_cursor": next_cursor, "summary": summary}
+
+    def detail(self, character_id, request_id):
+        if not self._exists():
+            return None
+        row = self.store.conn.execute("SELECT * FROM capability_executions WHERE character_id=? AND request_id=?", [character_id, request_id]).fetchone()
+        if row is None:
+            return None
+        item = self._project(row)
+        data = obj(obj(dict(row).get("result_json")).get("data"))
+        item.update(read_only=True, assistant_response=None, source_receipts=data.get("source_receipts") or [], details_state="NOT_RECORDED")
+        relative = item["execution"].get("detail_path")
+        if relative:
+            item["details_state"] = "UNAVAILABLE"
+            if isinstance(relative, str) and re.fullmatch(r"[0-9a-f-]{36}\.json", relative):
+                path = (self.detail_dir / relative).resolve()
+                if path.is_relative_to(self.detail_dir.resolve()):
+                    try:
+                        if path.stat().st_size <= 512000:
+                            detail = obj(path.read_text(encoding="utf-8"))
+                            item["assistant_response"] = text(detail.get("assistant_response"), 12000)
+                            item["source_receipts"] = detail.get("receipts") or []
+                            item["details_state"] = "AVAILABLE"
+                    except (OSError, ValueError):
+                        pass
+        return item
 
 
 class CharacterLifeReader:
@@ -172,6 +273,7 @@ class CharacterLifeReader:
                 decision['result']='、'.join(types) or '本次机会未对外表达'
                 if not types or all(t in ('NO_REPLY','NO_ACTION') for t in types): status='NO_ACTION'
         reading=obj(metadata.get('rss_reading'))
+        decision['execution_request_id']=metadata.get('capability_request_id')
         if kind=='world':
             plan=obj(row.get('plan_json')); result=obj(row.get('result_json'))
             choice=obj(plan.get('decision')).get('choice')
@@ -179,6 +281,7 @@ class CharacterLifeReader:
             title='本次 World 机会未行动' if choice=='NO_ACTION' else 'World 行动机会'
             content=text(result.get('query')) or (f'已记录选择：{choice}' if choice else '决策记录尚未完成')
             decision={'basis':None,'result':text(status,80),'error':text(row.get('error')) or None}
+            decision['execution_request_id']=result.get('capability_request_id')
             event_id=row.get('source_event_id')
         if kind=='space_run':
             status=row['status']

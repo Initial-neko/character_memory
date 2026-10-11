@@ -1189,6 +1189,16 @@ Summary: {topic["summary"]}
             snapshot = {"decision": plan.model_dump(mode="json"), "persona": context.persona,
                         "max_pages": max(1, min(4, int(getattr(self.access.settings, "world_browse_max_pages", 2)))),
                         "max_chars_per_page": max(500, min(16000, int(getattr(self.access.settings, "space_world_max_chars_per_page", 6000))))}
+            if getattr(self.access.settings, "world_browse_execution_backend", "direct") == "claude":
+                snapshot["execution_policy"] = {
+                    "backend": "claude", "claude_daily_max": self.access.settings.claude_execution_daily_max,
+                    "claude_daily_budget_usd": self.access.settings.claude_execution_daily_budget_usd,
+                    "claude_max_budget_usd": self.access.settings.claude_execution_max_budget_usd,
+                    "cost_saving": bool(getattr(self.access.settings, "world_cost_saving_enabled", False)),
+                    "claude_timeout_seconds": self.access.settings.claude_execution_timeout_seconds,
+                    "claude_max_turns": self.access.settings.claude_execution_max_turns,
+                    "claude_max_tool_calls": self.access.settings.claude_execution_max_tool_calls,
+                    "claude_model": self.access.settings.claude_execution_model}
             if isinstance(plan, PersonalWorldReadPlan):
                 snapshot["decision"]["browse"] = plan.browse
                 snapshot["rss_max_items"] = rss_limit
@@ -1209,7 +1219,12 @@ Summary: {topic["summary"]}
                       "execution_status": "SKIPPED", "opportunity_status": "APPLIED"}
             self.repository.update_browse_decision(opportunity_id, expected_phase="PLANNED", phase="APPLIED", result=result)
             return result
-        executed = CapabilityExecutor(self.access.store(), self.access.world_observer).execute(request, now=now)
+        if snapshot.get("execution_policy"):
+            from dataclasses import replace
+            request = replace(request, constraints={**request.constraints, **snapshot["execution_policy"]})
+        services = getattr(self.access, "services", None)
+        executed = CapabilityExecutor(self.access.store(), self.access.world_observer,
+                                      claude_runner=getattr(services, "claude_runner", None)).execute(request, now=now)
         if executed.status == "SKIPPED":
             return self._browse_unfinished(character_id, opportunity_id, error=executed.reason)
         observed = executed.data

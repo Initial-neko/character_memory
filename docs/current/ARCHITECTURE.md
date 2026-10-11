@@ -561,3 +561,30 @@ owns character-local item claims/snapshots; RSS ingestion continues to own sourc
 and shared article data. The same durable execution allowance and result cache
 apply. Channel identity and item generations come from server context, not
 external text. This is not a general Tool registry or a second Character runtime.
+
+World WEB_SEARCH can opt into `world_browse_execution_backend: claude`; the
+default remains `direct`. RuntimeServices owns one bounded ClaudePrintRunner.
+Each task starts a fresh local `claude -p` process with no resume/continue/fork
+and no session persistence. The fixed execution contract and current public
+query are its only application input; Person context stays in the existing
+planning/appraisal calls. Safe-mode, an isolated working directory and an
+explicit MCP configuration prevent inheriting ordinary local customizations.
+Managed policy requiring additional customization is not silently accepted.
+
+The single `world_lookup` stdio tool delegates through a short-lived authenticated
+loopback callback to the existing WorldObservationService. It has no database,
+shell, file, posting or Character-state access. Tool calls and page attempts are
+bounded across the whole task; callbacks revoke admission on cancellation, while
+already-running browser/DNS work retains the existing fetch lifecycle limitation.
+Only tool receipts supply readable observations; Claude prose is not proof of a
+visit. Failed or interrupted tasks do not enter appraisal.
+
+The additive `world/005-execution-metadata` migration extends the existing
+execution ledger, not a second execution system. It records backend, local-day
+quota reservation and CLI usage completeness. Unknown spend retains its
+reservation; failure consumes the attempt. The optional per-character estimated
+dollar budget is enforced only with cost saving enabled and an explicit per-run
+reservation. CLI estimates are not authoritative bills or subscription balance.
+Existing World planning, one successful-read appraisal and local recovery remain
+the cognition owners. Returning to direct stops new Claude dispatches without
+deleting execution history or restoring a database backup.

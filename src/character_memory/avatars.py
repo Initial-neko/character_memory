@@ -2,14 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import ipaddress
 import json
 import logging
 from pathlib import Path
-import socket
 import threading
 import time
-from urllib.parse import urlparse
 import uuid
 
 import httpx
@@ -78,40 +75,6 @@ class _SearchSession:
     query: str
     created_at: float
     candidates: dict[str, _CachedCandidate]
-
-
-def _safe_public_http_url(url: str) -> None:
-    parsed = urlparse(str(url or ""))
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("avatar URL must be an absolute http(s) URL")
-    hostname = parsed.hostname.strip().lower()
-    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
-        raise ValueError("avatar URL points to a local host")
-    try:
-        addresses = {
-            item[4][0]
-            for item in socket.getaddrinfo(
-                hostname,
-                parsed.port or (443 if parsed.scheme == "https" else 80),
-                type=socket.SOCK_STREAM,
-            )
-        }
-    except OSError as exc:
-        raise ValueError(f"avatar host could not be resolved: {hostname}") from exc
-    for raw in addresses:
-        try:
-            address = ipaddress.ip_address(raw)
-        except ValueError:
-            continue
-        if (
-            address.is_private
-            or address.is_loopback
-            or address.is_link_local
-            or address.is_multicast
-            or address.is_reserved
-            or address.is_unspecified
-        ):
-            raise ValueError("avatar URL resolved to a non-public address")
 
 
 class AvatarStore:

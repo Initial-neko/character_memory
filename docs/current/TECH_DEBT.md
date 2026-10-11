@@ -17,7 +17,7 @@ Existing groups can now receive restart-safe sparse opportunities without fabric
 
 ### Minimal Memory governance and shared Person context
 
-Character Runtime now exposes a small Memory Inspector over explicit APIs: pin/unpin, forget/restore and provenance-preserving correction via `superseded_by`. Pinned memories remain in the bounded recall candidate union.
+Character Runtime now exposes a small Memory Inspector over explicit APIs: pin/unpin, forget/restore and provenance-preserving correction via `superseded_by`. All eligible pinned memories remain in the recall candidate union, beyond the bound on unpinned candidates.
 
 Direct, Group and Space/World planning share `PersonContextBuilder` for Persona, Mental State, recalled Memory and recent events. World appraisal summaries remain working context; only an explicit first-person `personal_memory` can enter PersonRuntime admission.
 
@@ -62,7 +62,7 @@ The local sentence-transformers runtime is strict-offline and Web startup eagerl
 
 ### Long-memory unbounded Python scan
 
-Recall/admission now uses a bounded recent + high-importance vector candidate working set. Exact duplicate detection still queries all active Memory text through SQLite. This postpones the need for a vector database without making per-turn NumPy work grow without bound.
+Recall/admission now uses a bounded recent + high-importance vector candidate working set. Exact duplicate detection still queries all active Memory text through SQLite. This postpones the need for a vector database and bounds unpinned vector work; explicitly pinned memories can still increase per-turn work.
 
 ### Legacy trace compatibility full scan
 

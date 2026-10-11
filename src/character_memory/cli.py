@@ -73,8 +73,12 @@ def _reembed(config_path: str, character: str):
         embedding = build_embedding(settings)
         memories = store.list_memories(character, include_inactive=True)
         vectors = embedding.embed_many([m.content for m in memories])
-        for memory, vector in zip(memories, vectors):
-            store.update_memory_embedding(memory.id, vector)
+        if len(vectors) != len(memories):
+            raise ValueError("embedding batch size does not match memory count")
+        # Compute before acquiring the transaction; failed writes roll back all vectors.
+        with store.transaction():
+            for memory, vector in zip(memories, vectors):
+                store.update_memory_embedding(memory.id, vector)
         print(f"re-embedded {len(memories)} memories")
     finally:
         store.close()

@@ -63,9 +63,12 @@ def main():
             detail = json.loads((root / "claude-executions" / execution["detail_path"]).read_text(encoding="utf-8")) if execution.get("detail_path") else {}
             results.append({"status": result.status, "reason": result.reason, "execution": execution,
                 "sources": result.data.get("source_receipts", []), "sent_task": task,
-                "assistant_response": detail.get("assistant_response"), "second_input_excludes_marker": marker not in task if index == 1 else None})
+                "assistant_response": detail.get("assistant_response"),
+                "second_response_excludes_marker": marker not in (detail.get("assistant_response") or "") if index == 1 else None})
         report = {"scope": "real Claude CLI with controlled local World tool; not live Persona or public browser quality",
-                  "results": results, "passed": all(row["status"] == "SUCCESS" for row in results)}
+                  "results": results, "passed": all(row["status"] == "SUCCESS" for row in results)
+                    and results[1]["second_response_excludes_marker"]
+                    and results[0]["execution"].get("session_id") != results[1]["execution"].get("session_id")}
         (root / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps({"passed": report["passed"], "report": str(root / "report.json"),
                           "statuses": [row["status"] for row in results]}))

@@ -24,6 +24,7 @@ class LocalWorldToolBridge:
         self.max_chars = max_chars
         self.token = secrets.token_urlsafe(32)
         self.calls = 0
+        self.search_results = 0
         self.observations = []
         self.receipts = []
         self.errors = []
@@ -109,6 +110,9 @@ class LocalWorldToolBridge:
                 # Cancellation invalidates results arriving after the deadline.
                 if self.closed.is_set():
                     raise PermissionError("TOOL_CANCELLED")
+                hits = data.get("search_results")
+                if type(hits) is int and hits >= 0:
+                    self.search_results += hits
                 self.observations.extend(observations)
                 self.receipts.extend(receipts)
                 return {"observations": observations, "receipts": receipts}

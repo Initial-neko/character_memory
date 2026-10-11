@@ -350,7 +350,8 @@ claude_execution_daily_max: 3
 claude_execution_daily_budget_usd: null
 # 默认关闭：角色可在已有 World 浏览机会选读本地 RSS，最多一次批量评估；不访问原网页或自动发布。
 world_rss_reading_enabled: false
-# 默认关闭；后台 Browse 间隔加倍，RSS 候选 8→4、选择 2→1；评估质量和网页页数不变。
+# 默认关闭；后台 Browse 间隔加倍，RSS 候选 8→4、选择 2→1；同时执行已配置的 Claude 每日估算预算。
+# 评估质量和网页页数不变；单次 Claude 限制、每日次数不依赖此开关。
 world_cost_saving_enabled: false
 
 # Minutes between Personal Browse opportunities for each active character.

@@ -131,7 +131,8 @@ class CapabilityExecutor:
             if bounds["cost_saving"] and bounds["claude_daily_budget_usd"] is not None and bounds["claude_max_budget_usd"] is None:
                 return "INVALID_CONSTRAINTS"
             for key, low, high in (("claude_timeout_seconds", 1, 600), ("claude_max_turns", 1, 20), ("claude_max_tool_calls", 1, 4)):
-                if key in bounds and (type(bounds[key]) not in {int, float} or not low <= bounds[key] <= high):
+                types = {int, float} if key == "claude_timeout_seconds" else {int}
+                if key in bounds and (type(bounds[key]) not in types or not low <= bounds[key] <= high):
                     return "INVALID_CONSTRAINTS"
             if "claude_model" in bounds and (not isinstance(bounds["claude_model"], str) or len(bounds["claude_model"]) > 120):
                 return "INVALID_CONSTRAINTS"
@@ -231,7 +232,7 @@ class CapabilityExecutor:
         except (TimeoutError, TimeoutException) as error:
             result = CapabilityResult(request.request_id, "TIMEOUT", reason=str(error)[:500])
         except Exception as error:
-            result = CapabilityResult(request.request_id, "FAILED", reason=str(error)[:500])
+            result = CapabilityResult(request.request_id, "FAILED", reason="CLAUDE_EXECUTION_FAILED" if is_claude else str(error)[:500])
         # If this local write fails, STARTED remains unknown. Do not rerun the
         # provider to make up for a missing local receipt.
         with self.store.transaction(immediate=True):

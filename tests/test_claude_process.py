@@ -22,7 +22,13 @@ def fake_cli(tmp_path, mode="success"):
     script.write_text('''import json, os, sys, urllib.request, time
 args=sys.argv[1:]
 task=sys.stdin.read()
+with open(''' + repr(str(tmp_path / "received.jsonl")) + ''',"a",encoding="utf-8") as receipt:
+    receipt.write(json.dumps({"stdin":task,"argv":args,"config_dir":os.environ.get("CLAUDE_CONFIG_DIR"),"cwd":os.getcwd()})+"\\n")
 mode=''' + repr(mode) + '''
+if mode == "orphan":
+    import subprocess
+    subprocess.Popen([sys.executable,"-c","import time;time.sleep(15)"],stdout=sys.stdout,stderr=sys.stderr)
+    sys.exit(0)
 if mode == "hang": time.sleep(20)
 if mode == "flood":
     print("x"*70000, flush=True); time.sleep(20)
@@ -43,7 +49,7 @@ def test_independent_runs_only_send_current_task_and_verified_sources(tmp_path):
     from character_memory.runtime.claude_process import ClaudePrintRunner
     runner = ClaudePrintRunner(Observer(), tmp_path / "runs", command=fake_cli(tmp_path))
     first = runner.run(request())
-    second = runner.run(request("new task", "run:2"))
+    second = runner.run(replace(request("new task", "run:2"), character_id="bob"))
     assert first.status == second.status == "SUCCESS"
     assert first.data["execution"]["session_id"] != second.data["execution"]["session_id"]
     assert first.data["observations"][0]["content"] == "Verified public content"
@@ -56,7 +62,81 @@ def test_independent_runs_only_send_current_task_and_verified_sources(tmp_path):
     assert detail["assistant_response"] == "Visible answer"
     assert "--no-session-persistence" in detail["argv_flags"]
     assert not set(detail["argv_flags"]) & {"--resume", "--continue", "--fork-session"}
+    received = [json.loads(line) for line in (tmp_path / "received.jsonl").read_text().splitlines()]
+    assert [row["stdin"] for row in received] == ["public photography", "new task"]
+    assert received[0]["cwd"] != received[1]["cwd"]
+    assert received[0]["config_dir"] != received[1]["config_dir"]
+    assert all("--bare" in row["argv"] and "--safe-mode" not in row["argv"] for row in received)
     runner.close()
+
+
+def test_exited_parent_cannot_leave_child_holding_pipes_past_timeout(tmp_path):
+    import os
+    import time
+    import pytest
+    if os.name != "nt":
+        pytest.skip("Windows job object regression")
+    from character_memory.runtime.claude_process import ClaudePrintRunner
+    runner = ClaudePrintRunner(Observer(), tmp_path / "runs", command=fake_cli(tmp_path, "orphan"), timeout_seconds=.5)
+    started = time.monotonic()
+    result = runner.run(request())
+    assert time.monotonic() - started < 3
+    assert result.status == "TIMEOUT" and result.data["execution"]["process_stopped"]
+    runner.close()
+
+
+def test_user_auth_config_only_imports_routing_fields(tmp_path, monkeypatch):
+    from character_memory.runtime.claude_process import configured_auth_environment
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "settings.json").write_text(json.dumps({"env": {"ANTHROPIC_AUTH_TOKEN":"test-secret", "ANTHROPIC_MODEL":"test-model", "BASH_ENV":"unsafe"}, "hooks":{"x":"unsafe"}}))
+    assert configured_auth_environment() == {"ANTHROPIC_AUTH_TOKEN":"test-secret", "ANTHROPIC_MODEL":"test-model"}
+
+
+def test_close_before_resolution_finishes_never_launches_cli(tmp_path, monkeypatch):
+    import threading
+    import character_memory.runtime.claude_process as module
+    entered, release = threading.Event(), threading.Event()
+    command = fake_cli(tmp_path)
+    def resolve():
+        entered.set()
+        assert release.wait(3)
+        return command
+    monkeypatch.setattr(module, "resolve_claude", resolve)
+    monkeypatch.setattr(module, "configured_auth_environment", lambda: {"ANTHROPIC_AUTH_TOKEN":"test-only"})
+    runner = module.ClaudePrintRunner(Observer(), tmp_path / "runs")
+    results=[]
+    thread=threading.Thread(target=lambda: results.append(runner.run(request())))
+    thread.start()
+    assert entered.wait(3)
+    runner.close()
+    release.set()
+    thread.join(3)
+    assert not thread.is_alive()
+    assert results[0].reason == "EXECUTOR_CLOSED"
+    assert not (tmp_path / "received.jsonl").exists()
+
+
+def test_detail_retention_only_removes_expired_owned_files(tmp_path):
+    import os
+    import time
+    from character_memory.runtime.claude_process import ClaudePrintRunner
+    directory=tmp_path/"runs"
+    directory.mkdir()
+    old=directory/"11111111-1111-1111-1111-111111111111.json"
+    unrelated=directory/"settings.json"
+    for path in (old,unrelated):
+        path.write_text("{}")
+        os.utime(path,(time.time()-31*86400,)*2)
+    runner=ClaudePrintRunner(Observer(),directory,command=fake_cli(tmp_path))
+    assert runner.run(request()).status=="SUCCESS"
+    assert not old.exists() and unrelated.exists()
+    runner.close()
+
+
+def test_failed_cli_zero_placeholder_does_not_claim_known_free_usage():
+    from character_memory.runtime.claude_process import _usage
+    usage=_usage({"is_error":True,"subtype":"error_during_execution","total_cost_usd":0,"modelUsage":{}})
+    assert usage["usage_state"]=="UNKNOWN" and usage["estimated_cost_usd"] is None
 
 
 def test_success_without_tool_evidence_cannot_become_reading(tmp_path):

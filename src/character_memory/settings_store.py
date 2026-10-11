@@ -224,7 +224,7 @@ SETTING_HELP: dict[str, str] = {
     "claude_execution_daily_max": "每人物每个本地自然日最多预占 Claude 执行次数；0 禁用，失败也占用，重启不重置。需重启。",
     "claude_execution_daily_budget_usd": "可选每人物每日估算美元预算。节省开关开启且单次限额已设置时执行；未知用量保留预占额度。需重启。",
     "world_rss_reading_enabled": "默认关闭。允许角色在现有 World 浏览机会选择本地 RSS 内容；只读所选条目，最多一次批量评估，不抓取原网页、不自动发帖或写长期记忆。重启 Character Runtime 生效。",
-    "world_cost_saving_enabled": "默认关闭。开启后后台 Browse 间隔为基准的 2 倍；RSS 候选从 8 篇降为 4 篇、每次选择上限从 2 篇降为 1 篇。网页页数、评估质量、手动浏览频率、Pulse、Space 和聊天不变。重启 Character Runtime 后生效。",
+    "world_cost_saving_enabled": "默认关闭。开启后后台 Browse 间隔为基准的 2 倍；RSS 候选从 8 篇降为 4 篇、每次选择上限从 2 篇降为 1 篇；配置了 Claude 单次限额和每日预算时执行每日估算预算。网页页数、评估质量、手动浏览频率、Pulse、Space 和聊天不变。重启 Character Runtime 后生效。",
     "world_browse_interval_minutes": "同一角色两次 Personal Browse Opportunity 的间隔。",
     "world_browse_max_pages": "一次 Personal Browse 最多打开并读取的公网页面数。",
     "world_browse_daily_max": "每个角色每天最多执行多少次 Personal Browse；0 = 不限。",

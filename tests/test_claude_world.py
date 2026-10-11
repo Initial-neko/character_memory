@@ -36,15 +36,40 @@ def test_claude_backend_uses_existing_receipt_and_never_replays(tmp_path):
     store.close()
 
 
-def test_daily_cap_and_unknown_reservation_survive_restart(tmp_path):
+def test_daily_cap_survives_restart(tmp_path):
     store=SQLiteStore(tmp_path/"test.db")
     runner=Runner()
     base=request()
     req=replace(base,constraints={**base.constraints,**limits(claude_daily_max=1)})
     executor=CapabilityExecutor(store,Observer(),claude_runner=runner)
     assert executor.execute(req).status=="SUCCESS"
+    store.close()
+    store=SQLiteStore(tmp_path/"test.db")
+    executor=CapabilityExecutor(store,Observer(),claude_runner=runner)
     other=replace(req,request_id="other",opportunity_id="other")
     assert executor.execute(other).reason=="CLAUDE_DAILY_LIMIT"
+    assert len(runner.calls)==1
+    store.close()
+
+
+def test_unknown_and_interrupted_reservations_survive_restart(tmp_path):
+    class UnknownRunner(Runner):
+        def run(self, req):
+            self.calls.append(req)
+            return CapabilityResult(req.request_id,"TIMEOUT", {"execution":{"backend":"claude","usage_state":"UNKNOWN","estimated_cost_usd":None}})
+    store=SQLiteStore(tmp_path/"test.db")
+    runner=UnknownRunner()
+    base=request()
+    req=replace(base,constraints={**base.constraints,**limits(cost_saving=True,claude_daily_budget_usd=.5,claude_max_budget_usd=.3)})
+    assert CapabilityExecutor(store,Observer(),claude_runner=runner).execute(req).status=="TIMEOUT"
+    # Simulate a crash after reservation, before a final receipt.
+    store.conn.execute("UPDATE capability_executions SET status='STARTED',result_json=NULL")
+    store.conn.commit()
+    store.close()
+    store=SQLiteStore(tmp_path/"test.db")
+    executor=CapabilityExecutor(store,Observer(),claude_runner=runner)
+    assert executor.execute(req).reason=="IN_PROGRESS_OR_INTERRUPTED"
+    assert executor.execute(replace(req,request_id="later",opportunity_id="later")).reason=="CLAUDE_DAILY_BUDGET"
     assert len(runner.calls)==1
     store.close()
 
@@ -62,4 +87,46 @@ def test_claude_budget_cannot_be_enforced_without_per_run_reservation(tmp_path):
 def test_direct_backend_ignores_missing_claude_and_remains_compatible(tmp_path):
     store=SQLiteStore(tmp_path/"test.db")
     assert CapabilityExecutor(store,Observer()).execute(request()).status=="SUCCESS"
+    store.close()
+
+
+def test_world_chain_uses_one_planner_and_one_appraisal_without_private_cli_context(tmp_path):
+    from types import SimpleNamespace
+    from test_world_activity import make_access, NOW
+    from character_memory.world_activity import WorldActivityService, WorldPulseRepository
+    store,access,model=make_access(tmp_path,count=2)
+    access.settings=access.settings.model_copy(update={"world_browse_execution_backend":"claude"})
+    runner=Runner()
+    access.services=SimpleNamespace(claude_runner=runner)
+    service=WorldActivityService(access,WorldPulseRepository(store))
+    result=service.browse_character("c00",now=NOW)
+    assert result["kept"] and len(runner.calls)==1
+    assert [call[0] for call in model.calls]==["PersonalBrowsePlan","PersonalBrowseAppraisal"]
+    sent=runner.calls[0]
+    assert sent.character_id=="c00" and sent.arguments=={"query":"agent memory architecture"}
+    assert sent.constraints["claude_max_turns"]==access.settings.claude_execution_max_turns
+    assert store.conn.execute("SELECT COUNT(*) FROM events WHERE character_id='c00' AND event_type='WORLD_OBSERVATION'").fetchone()[0]==1
+    assert store.conn.execute("SELECT COUNT(*) FROM events WHERE character_id='c01' AND event_type='WORLD_OBSERVATION'").fetchone()[0]==0
+    model.browse=False
+    service.browse_character("c01",now=NOW)
+    assert len(runner.calls)==1 and len(model.calls)==3
+    store.close()
+
+
+def test_failed_claude_execution_skips_appraisal_and_observation(tmp_path):
+    from types import SimpleNamespace
+    from test_world_activity import make_access, NOW
+    from character_memory.world_activity import WorldActivityService, WorldPulseRepository
+    class Failure(Runner):
+        def run(self,req):
+            self.calls.append(req)
+            return CapabilityResult(req.request_id,"FAILED",reason="NO_VERIFIED_CONTENT")
+    store,access,model=make_access(tmp_path,count=1)
+    access.settings=access.settings.model_copy(update={"world_browse_execution_backend":"claude"})
+    access.services=SimpleNamespace(claude_runner=Failure())
+    import pytest
+    with pytest.raises(RuntimeError,match="NO_VERIFIED_CONTENT"):
+        WorldActivityService(access,WorldPulseRepository(store)).browse_character("c00",now=NOW)
+    assert [call[0] for call in model.calls]==["PersonalBrowsePlan"]
+    assert store.conn.execute("SELECT COUNT(*) FROM events WHERE event_type='WORLD_OBSERVATION'").fetchone()[0]==0
     store.close()

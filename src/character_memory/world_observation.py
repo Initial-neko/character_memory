@@ -138,7 +138,7 @@ class WorldObservationService:
             fetched, batch_errors = self._fetch(batch, max_chars=max_chars)
             pages.extend(fetched)
             errors.extend(batch_errors)
-        return pages, errors
+        return pages, errors, position
 
     def observe(
         self,
@@ -147,6 +147,7 @@ class WorldObservationService:
         max_pages: int = 2,
         max_chars_per_page: int = 6000,
         search_limit: int = 5,
+        max_fetch_attempts: int | None = None,
     ) -> dict:
         normalized = " ".join(str(query or "").split()).strip()
         if not normalized:
@@ -163,11 +164,13 @@ class WorldObservationService:
             if url and url not in by_url:
                 by_url[url] = item
         ordered = _ordered_candidates(candidates, limit=max_pages + EXTRA_FETCH_ATTEMPTS)
+        if max_fetch_attempts is not None:
+            ordered = ordered[:max(0, min(6, int(max_fetch_attempts)))]
 
         if not ordered:
-            return {"query": normalized, "observations": [], "errors": [], "search_results": len(candidates)}
+            return {"query": normalized, "observations": [], "errors": [], "search_results": len(candidates), "fetch_attempts": 0}
 
-        pages, errors = self._render(ordered, wanted=max_pages, max_chars=max_chars_per_page)
+        pages, errors, attempts = self._render(ordered, wanted=max_pages, max_chars=max_chars_per_page)
 
         observations: list[WorldObservation] = []
         for page in pages:
@@ -203,4 +206,5 @@ class WorldObservationService:
             "observations": observations,
             "errors": errors,
             "search_results": len(candidates),
+            "fetch_attempts": attempts,
         }

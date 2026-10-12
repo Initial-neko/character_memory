@@ -1,13 +1,32 @@
 from __future__ import annotations
 
+from pathlib import Path
 from fastapi import HTTPException, Query
 from fastapi.responses import FileResponse
 
-from character_memory.character_life import CharacterLifeReader
+from character_memory.character_life import CharacterLifeReader, CharacterExecutionReader
 
 
 def attach_character_life_routes(app, access):
     reader = CharacterLifeReader(access.read_store)
+    db_path = getattr(getattr(access, "settings", None), "db_path", ":memory:")
+    executions = CharacterExecutionReader(access.read_store, Path(db_path).resolve().parent / "claude-executions")
+
+    @app.get("/v1/characters/{character_id}/executions")
+    def execution_list(character_id: str, cursor: str = Query("", max_length=1000), limit: int = Query(30, ge=1, le=50), day: str | None = None):
+        access.ensure_character(character_id)
+        try:
+            return executions.list(character_id, cursor=cursor, limit=limit, day=day)
+        except ValueError as error:
+            raise HTTPException(422, detail=str(error)) from error
+
+    @app.get("/v1/characters/{character_id}/executions/{request_id:path}")
+    def execution_detail(character_id: str, request_id: str):
+        access.ensure_character(character_id)
+        item = executions.detail(character_id, request_id)
+        if item is None:
+            raise HTTPException(404, detail="execution not found")
+        return item
 
     @app.get("/life")
     def life_page():

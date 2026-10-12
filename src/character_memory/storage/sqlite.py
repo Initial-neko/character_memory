@@ -29,6 +29,12 @@ class SQLiteStore:
         self._tx_depth = 0
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # SQLite NOCASE only folds ASCII; admission uses Unicode strip/casefold.
+        self.conn.create_function(
+            "memory_text_key", 1,
+            lambda text: str(text or "").strip().casefold(),
+            deterministic=True,
+        )
         self._init_schema()
 
     def _ensure_migration_table_locked(self) -> None:
@@ -652,13 +658,13 @@ class SQLiteStore:
         return self.get_memory(memory_id), saved
 
     def find_active_memory_by_content(self, character_id: str, content: str, *, at: datetime | None = None) -> Memory | None:
-        normalized = str(content or "").strip()
+        normalized = str(content or "").strip().casefold()
         if not normalized:
             return None
         with self._lock:
             sql = (
                 "SELECT * FROM memories WHERE character_id=? AND active=1 "
-                "AND event_time_epoch IS NOT NULL AND trim(content)=? COLLATE NOCASE"
+                "AND event_time_epoch IS NOT NULL AND memory_text_key(content)=?"
             )
             args: list = [character_id, normalized]
             if at is not None:
@@ -681,9 +687,9 @@ class SQLiteStore:
         """Bound vector work without introducing a vector database.
 
         Candidate recall keeps the most recent active memories plus the
-        highest-importance memories (including old ones). The union caps Python
-        BLOB unpacking/cosine work while preserving a path for durable important
-        memories to remain recallable.
+        highest-importance memories (including old ones), plus all eligible
+        pinned memories. Unpinned candidates are bounded; explicit pins can
+        increase BLOB unpacking/cosine work beyond that bound.
         """
 
         recent_limit = max(1, int(recent_limit))

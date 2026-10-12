@@ -157,24 +157,26 @@ score = 0.70 * semantic
 
 - 只能 Recall `event_time <= now` 的 Memory，避免研究模式未来泄漏；
 - embedding 维度变化后，旧向量不混用；使用 re-embed 工具重建；
+- re-embed 先完成批量向量计算并校验数量，再在一个事务中写入；写入失败会回滚整批，不留下部分重建结果；
 - Recall 结果只是 Context，不等于人物必须在回复中提起它。
 
 ### Bounded candidate set
 
-长期运行不再在每一轮把该 Character 的全部 active Memory BLOB 解包并做 NumPy cosine。SQLite 先构造有上限的候选并集：
+长期运行不再在每一轮把该 Character 的全部 active Memory BLOB 解包并做 NumPy cosine。SQLite 构造近期、高重要性和显式固定记忆的候选并集：
 
 ```text
 recent active memories      <= 768
 highest-importance memories <= 256
+all eligible pinned memories (no count cap)
                      ↓ de-duplicate by id
-vector ranking working set  <= 1024
+vector ranking working set  <= 1024 + eligible pinned count
 ```
 
-“highest importance”分支保证很老但重要的 Memory 不会仅因时间久就从候选集消失。最终候选仍使用原来的 semantic + recency + importance 公式排序。
+“highest importance”分支保证很老但重要的 Memory 不会仅因时间久就从候选集消失。全部有效固定记忆都会参加排序，重复 ID 只保留一次；大量固定会增加计算开销，固定并不保证全部进入最终 Context（默认最多召回 8 条）。最终候选仍使用 semantic + recency + importance + pinned 公式排序。没有语义最低阈值，相似度为零的记忆仍可能因新近性或重要性入选。
 
-Admission 的 exact duplicate 另走 SQLite 全 active 精确文本查询，因此一条很老的完全相同 Memory 即使不在 vector shortlist 中，也不会重复写入。Semantic near-duplicate 检查只对 bounded candidate set 做 cosine。
+Admission 的 exact duplicate 另走 SQLite 全 active 精确文本查询，以与运行时一致的 Unicode `strip().casefold()` 规则比较，因此一条很老的完全相同 Memory 即使不在 vector shortlist 中，也不会重复写入。Semantic near-duplicate 检查只对 bounded candidate set 做 cosine。
 
-这不是 ANN，也不是最终长期记忆算法；它只是用低复杂度改动把常规每轮 Python/NumPy 工作量从随 N 无界增长收成固定上限。是否引入 sqlite-vec/FAISS/专用向量库仍由长期 benchmark 决定。
+这不是 ANN，也不是最终长期记忆算法；它只是用低复杂度改动限制非固定记忆的每轮 Python/NumPy 工作量；显式固定记忆数量仍会增加工作量。是否引入 sqlite-vec/FAISS/专用向量库仍由长期 benchmark 决定。
 
 长期可研究的信号包括 emotional salience、relationship relevance、associative activation 等，但当前不提前复杂化 ranking。
 

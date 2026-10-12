@@ -129,7 +129,9 @@ class AsrCaptureStore:
         """Newest first. Records whose audio is gone are skipped, not returned."""
         with self._lock:
             records = self._read_locked()
-        present = [item for item in records if (self.directory / f"{item['id']}.wav").is_file()]
+        # Stable sort keeps the newest append first when the clock repeats.
+        # Persisted index order also preserves the tie-breaker across restarts.
+        present = [item for item in reversed(records) if (self.directory / f"{item['id']}.wav").is_file()]
         present.sort(key=lambda item: item.get("at_epoch", 0.0), reverse=True)
         return present[: max(1, int(limit))]
 

@@ -443,6 +443,10 @@ export CHARACTER_MEDIA_ASR_CAPTURE_DIR="$PWD/data/asr-capture"
 
 设置该变量只改变存储位置；**是否录制由测试态开关决定，默认关闭**，关闭时不写入任何文件。详见 `DEV_CONSOLE.md` → ASR Capture Review。
 
+回看列表按真实采集时间倒序排列；时间戳相同的记录按持久化索引的
+写入顺序倒序显示，重启后仍一致。缺失音频的记录跳过，数量/容量
+上限继续优先保留较新的采集。排序不会修改录制时间或启动录音。
+
 ### 7. Windows native runtime safety
 
 Windows 上最重要的约束不是“ONNX 能 import 就行”，而是必须加载**当前 venv 与 sherpa wheel 匹配的 native runtime**。

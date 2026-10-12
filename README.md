@@ -20,6 +20,9 @@ README 只描述可运行入口和已经落地的主能力；尚未完成端到�
 
 - 多 Character Persona；`personas/*/persona.yaml` 是人物定义事实源。
 - SQLite Event Log、Memory、Mental State、Intent、Runtime Trace。
+- World Personal Browse 支持自主搜索或选读本地 RSS；只有实际选择、执行并保留的内容成为人物观察。观察不自动变成长期记忆或公开动态。
+- 可选本地 `claude -p` World 搜索后端：每次独立任务、不继承历史，工具受控；默认仍为 `direct`。通用问题委托与真实人物品质仍待验收，执行边界见 [Architecture](docs/current/ARCHITECTURE.md)。
+- 人物生活页 `/life`：只读查看真实活动、来源、状态变化、关联记忆和外部执行任务/回复/用量；它不是虚拟生活总结或完整工具对话录。
 - 本地 BGE Embedding + Vector Recall；同一进程内所有人物共享 Embedding / LLM Provider。
 - `PersonReaction.actions[0..3]`：`MESSAGE / EMOJI / STICKER / IMAGE`，以及内部工具意图 `GENERATE_IMAGE`。
 - `actions=[]` 是合法沉默；辅助 Memory/Intent 字段允许安全容错，主 outward action contract 仍严格。

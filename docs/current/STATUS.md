@@ -1,6 +1,6 @@
 # Current Status & Roadmap
 
-> Last audited against product `main`: 2026-10-05, `8f7dd9381267242e95a4b3c1c4c40b1ce7dc557d`.
+> Character / World implementation status reviewed: 2026-10-12. Media and real-device acceptance remain subject to their existing validation gates.
 >
 > This file owns **implementation status only**. Source/tests remain authoritative; the other topic documents define current behavior contracts.
 
@@ -21,13 +21,16 @@ An open PR never upgrades a capability to SHIPPED.
 
 | Area | State | Current contract |
 | --- | --- | --- |
-| Persistent Person Runtime | SHIPPED | Persona, durable facts, Memory, Mental State, Intent, Runtime Trace and shared Person context. |
+| Persistent Person Runtime | SHIPPED | Persona, durable facts, Memory, Mental State, finite Intent deferral, Runtime Trace and shared Person context with bounded historical observation recall. |
 | Direct chat | SHIPPED | Durable accept, async reaction scheduling, SSE reconciliation and multimodal expression. |
 | Group chat | SHIPPED | Shared facts, ordered reactions, mentions, archive/restore, member add/remove, turn-level rendering and bounded autonomous opportunities. User-turn speaker cap defaults to 5 (1–12 configurable); persisted Group Events remain action-granular. |
 | One-prompt Ensemble | SHIPPED | Prompt -> research -> candidates -> confirmation -> ordinary Characters + Group. |
 | Character onboarding | SHIPPED | Provenance, persisted Persona, guaranteed first avatar and best-effort voice selection. |
 | Character Space | SHIPPED | Feed, comments/replies, likes/views, up to 9 media, autonomous posting and bounded audience propagation. |
-| World Activity | SHIPPED | World Pulse plus independent per-character Personal Browse clocks; observation is not automatic publishing. |
+| World Activity | SHIPPED | World Pulse plus independent per-character Personal Browse clocks, bounded web/RSS choices and local recovery of complete saved appraisals. Observation is not automatic publishing or Memory admission. |
+| RSS collection / personal reading | SHIPPED opt-in | Shared source/feed inventory is separate from character-local selected Feed-text readings. Unread inventory is not personal experience. Settings defaults and scope belong to RSS_SOURCES and SOCIAL_WORLD. |
+| Stateless Claude World backend | SHIPPED opt-in foundation | Optional WEB_SEARCH backend uses fresh `claude -p` tasks and a single controlled World tool. Default remains direct. CLI/tool fixture validation passed; live Persona/public-source quality and deployment activation are separate. See ARCHITECTURE. |
+| Character life / execution inspection | SHIPPED | Read-only real event/state/Memory/Intent timeline and per-character external task/reply/source/tool/usage details. No model calls during inspection; complete intermediate tool transcripts are not implemented. |
 | Random Encounter | SHIPPED | Temporary WEB/GENERATED candidates, trial chat, accept/dismiss lifecycle and scheduler. |
 | Memory governance | SHIPPED | Inspect, pin/unpin, forget/restore and provenance-preserving correction. |
 | Voice Message | SHIPPED | Direct/Group durable voice-message lifecycle through formal TTS. |
@@ -79,6 +82,23 @@ LLM Usage Explorer is shipped and two mechanical-call reductions are already on 
 Status: **BACKLOG / RESEARCH**
 
 Still missing are long-horizon persona-decay and continuity suites, stronger cross-channel identity evaluation, and evidence that autonomous multi-character interaction produces durable relationships rather than random activity.
+
+Existing deterministic tests cover historical observations beyond the recent
+window, character/source isolation, future-time barriers, finite Intent deferral
+and bounded model-call paths. These do not prove seven-day relationship quality
+or natural Persona evolution. Human acceptance of unread-boundary/expression
+samples must not be generalized to post-reading quality or long-term continuity.
+
+### Explicit external-assistance decisions and richer execution records
+
+Status: **BACKLOG**
+
+Claude currently serves an existing World WEB_SEARCH choice; it is not a general
+question delegation entry and does not automatically receive Direct/Group chat.
+A future explicit assistance request should reuse Person decisions, permission
+checks, budgets and the existing receipt ledger. Step-by-step tool arguments and
+results, plus a dedicated Memory-page execution link, are still missing. No second
+intent-recognition model, Character state or unbounded AgentLoop is required.
 
 ### Social layer expansion
 

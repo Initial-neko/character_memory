@@ -240,7 +240,7 @@ Memory governance API 位于 `memory_web.py`。当前不做复杂的角色记忆
 
 > **看到网页 ≠ 长期记住网页。**
 
-World appraisal 的 `summary` 只服务本轮理解/表达，本身永远不是长期 Memory。只有 appraisal 明确产生非空 `personal_memory`，并且内容描述的是“这次观察对人物本人形成的持续兴趣、经历或反思”，才允许送入同一个 PersonRuntime Memory admission。
+World appraisal 的 `summary` 是本次观察的工作摘要，本身不是长期 Memory。Space World Explore 可以明确产生非空 `personal_memory`；只有描述人物自身持续兴趣、经历或反思的候选，才送入现有 PersonRuntime Memory admission。Personal Browse 与个人 RSS 阅读的保留结果直接形成有来源的 `WORLD_OBSERVATION`，不自动更新 Mental State、创建长期 Memory 或对外表达。观察记录本身仍是合法经历，后续可被检索。
 
 例如：
 
@@ -282,9 +282,14 @@ and source references. Full source metadata remains on the event; oversized
 source display values may be truncated. This is keyword recall, not a promise
 of arbitrary semantic paraphrase retrieval, and adds no LLM or embedding call.
 
-PERSONAL reads the character's own observations. PUBLIC currently includes only
-explicit World Pulse public observations; Personal Browse, personal RSS and
-unknown legacy sources are excluded from the new public observation field.
+PERSONAL reads the character's own observations. PUBLIC retains explicit World
+Pulse observations and the verified published projection of a Space World
+observation. Publication records the actual post ID/content atomically with the
+post. Recall checks owner, exact public content and publication time, searches
+only published text and removes private appraisal metadata. Personal Browse,
+personal RSS and legacy WORLD observations without a publication receipt remain
+excluded from the public observation field. This neither expands publication
+permissions nor publishes private observations automatically.
 This does not claim to implement comprehensive privacy classification of all
 legacy Memory. Existing Memory admission and its future-time barrier remain.
 Caller-provided recent shared facts retain their actor identities but are
@@ -326,4 +331,24 @@ The screenshot's event-to-chat participation affordance is visibly marked as a n
 
 Reading details distinguish the recorded Feed scope, read/available character counts and truncation from the model appraisal. `RSS_FEED_TEXT` titles explicitly name Feed text; linked original pages are not claimed as read. Missing scope counts remain unknown. A malformed Intent execution/expiry time reports `time_status=INVALID`, not a valid not-yet-due verdict. Timeline responses include `undated_count` for otherwise matching records whose source timestamp is missing/invalid; they cannot be assigned to the selected date and are not silently treated as a quiet day.
 
-PUBLIC historical observation recall retains World Pulse and can also retrieve the published projection of a Space World observation. Publication stores the actual Space post ID/content in the observation's existing metadata in the same transaction as the post. Recall verifies the existing post, owner, exact content and publication time, searches only published text and strips private appraisal metadata. Legacy WORLD events without a publication receipt and Personal Browse/RSS events remain personal. This neither changes publication permission nor publishes a private note automatically.
+### External execution details
+
+An existing World activity/observation can link its `capability_request_id` to
+the read-only execution list/detail APIs under
+`/v1/characters/{character_id}/executions`. The Life page's “查看外部执行” shows
+the public task, visible assistant reply, actual source receipts, connected
+tools and usage. It adds no simulated life event and does not resume or rerun
+the task. Records are scoped to the requested character; another character's
+request returns 404. Missing/expired detail files do not break the timeline.
+
+Execution pagination orders absolute execution start time at microsecond
+precision, with request ID as the stable tie-breaker; different timezone spellings
+do not change chronology. Original timestamps remain visible. Per-day usage uses
+the durable local quota day, and incomplete cost/token totals remain unknown.
+
+This is a task/response inspection view, not a complete intermediate tool-call
+transcript or a new Memory browser. Tool arguments and step-by-step tool replies
+are not currently displayed. Assistant prose is not original webpage text or
+proof that a character adopted it. Memory/state links refer only to persisted
+cognition effects. Executor configuration and retention ownership belong to
+[Architecture](ARCHITECTURE.md), not to Memory admission.

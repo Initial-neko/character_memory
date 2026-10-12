@@ -304,6 +304,9 @@ message_content.js      Direct/Group shared message body renderer
 | Camera/Screen Vision | `visual_capture_web.py` → `web/visual_capture.js` / `web/voice.js` |
 | ImageGen | `visual_generation.py` → `visual_runtime.py` → `visual_web.py` → `web/ai_images.js` |
 | Shared Search / World | `runtime_services.py` → `search.py` → `browser_web.py` / `world_observation.py` → `world_web.py` |
+| Personal Browse / RSS / local recovery | `world_activity.py` → `runtime/capability_execution.py` / `rss_world.py` → `world_recovery.py` → `world_web.py` |
+| Stateless Claude World execution | `runtime_services.py` → `runtime/claude_process.py` / `claude_tools.py` / `process_tree.py` → `runtime/capability_execution.py` |
+| Character life / execution inspection | `character_life.py` → `character_life_web.py` → `web/life.js` |
 | Avatar | `runtime_services.py` → `avatars.py` / `avatar_intent.py` → `avatar_web.py` → `web/avatars.js` |
 | Voice/ASR | `media_bootstrap.py` → `media_runtime.py` → `media_server.py` → `web/voice.js` |
 | Formal TTS | `config.py` → `media_server.py` → `tts_lab.py` → `web/voice.js` |
@@ -320,9 +323,9 @@ Live2D 通话展示：`live2d_web.py` 负责本地资源发现/安全路径与�
 
 ### Character life observation page
 
-- `character_life.py`: read-only durable event/state/Memory/Intent projection and pagination; no runtime execution.
-- `character_life_web.py`: Core-owned `/life` and per-character observation GET route.
+- `character_life.py`: read-only durable event/state/Memory/Intent and execution receipt projections, absolute-time pagination and per-character usage; no runtime execution.
+- `character_life_web.py`: Core-owned `/life`, per-character life and execution list/detail GET routes.
 - `web/life.html`, `life.js`, `life.css`: dedicated timeline, source/detail and state comparison UI.
-- `tests/test_character_life.py`, `test_character_life_browser.py`: provenance/isolation/paging contracts and explicit isolated browser checks.
+- `tests/test_character_life*.py`, `test_character_executions*.py`: provenance/isolation/paging contracts and explicit isolated browser checks.
 
 The owning durable observation contract is [MEMORY](MEMORY.md); `life/` continues to own the separate frozen simulator.

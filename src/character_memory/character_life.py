@@ -27,6 +27,16 @@ class CharacterExecutionReader:
     def __init__(self, store, detail_dir):
         self.store = store
         self.detail_dir = Path(detail_dir)
+        # Connection-local function only: inspection never migrates the database.
+        with store._lock:
+            store.conn.create_function('execution_epoch_us',1,self._timestamp,deterministic=True)
+
+    @staticmethod
+    def _timestamp(value):
+        try:
+            return epoch_us(parse_datetime(value))
+        except (ValueError,TypeError,OverflowError):
+            return None
 
     def _exists(self):
         return bool(self.store.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='capability_executions'").fetchone())
@@ -69,9 +79,10 @@ class CharacterExecutionReader:
                       if "execution_metadata_json" in columns else " AND substr(started_at,1,10)=?")
             values.append(day)
         if position:
-            where += " AND (started_at<? OR (started_at=? AND request_id<?))"
-            values += [position[0], position[0], position[1]]
-        rows = self.store.conn.execute(f"SELECT * FROM capability_executions WHERE {where} ORDER BY started_at DESC,request_id DESC LIMIT ?", [*values, limit + 1]).fetchall()
+            where += " AND (execution_epoch_us(started_at)<? OR (execution_epoch_us(started_at)=? AND request_id<?))"
+            stamp=epoch_us(parse_datetime(position[0]))
+            values += [stamp,stamp,position[1]]
+        rows = self.store.conn.execute(f"SELECT * FROM capability_executions WHERE {where} ORDER BY execution_epoch_us(started_at) DESC,request_id DESC LIMIT ?", [*values, limit + 1]).fetchall()
         items = [self._project(row) for row in rows[:limit]]
         next_cursor = base64.urlsafe_b64encode(json.dumps([items[-1]["started_at"], items[-1]["request_id"]]).encode()).decode() if len(rows) > limit else None
         # SQL aggregates keep the projection bounded even with long-running histories.

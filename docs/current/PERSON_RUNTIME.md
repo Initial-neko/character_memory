@@ -60,6 +60,18 @@ semantic verifier or a guarantee that all provider output is factual. Runtime
 permissions and durable execution receipts remain server-enforced; live review
 must separately check unsupported first-person statements and their sources.
 
+Read-only life and execution views expose the recorded opportunity, task, result,
+source and linked cognition effects; they do not infer hidden motives or treat an
+external assistant's reply as the Person's own observation. Personal Browse/RSS
+can retain a sourced observation without changing Mental State or admitting
+Memory. The owning observation/admission contract is [Memory](MEMORY.md).
+
+Character continuity acceptance must distinguish a direct source from a retold
+account, read from unread material and one person's private experience from
+another's. Retrieval tests and activity counts do not establish relationship
+quality. Long-horizon Persona and relationship evaluation remains separate from
+engineering gates and must allow silence, rejection and uncertainty.
+
 ## 2. PersonReaction contract
 
 当前主 contract：

@@ -105,3 +105,27 @@ def test_http_execution_details_are_scoped_and_readonly(tmp_path):
         assert client.get("/v1/characters/alice/executions",params={"cursor":invalid}).status_code==422
         assert client.post("/v1/characters/alice/executions/run:1").status_code==405
     store.close()
+
+
+def test_execution_paging_orders_absolute_time_and_exact_ties(tmp_path):
+    from character_memory.character_life import CharacterExecutionReader
+    store=SQLiteStore(tmp_path/'time.db')
+    CapabilityExecutor(store,Observer())
+    entries=[('earlier','2026-10-12T09:00:00+08:00'),('later','2026-10-12T08:30:00+00:00'),
+             ('tie-z','2026-10-12T16:30:00+08:00'),('micro-later','2026-10-12T08:30:00.000001+00:00')]
+    with store.transaction():
+        for identifier,stamp in entries:
+            store.conn.execute("INSERT INTO capability_executions(request_id,character_id,opportunity_id,request_json,status,started_at) VALUES(?,?,?,'{}','STARTED',?)",[identifier,'alice',identifier,stamp])
+    reader=CharacterExecutionReader(store,tmp_path/'details')
+    ids=[];cursor=''
+    for _ in entries:
+        page=reader.list('alice',limit=1,cursor=cursor)
+        ids.append(page['items'][0]['request_id']);cursor=page['next_cursor']
+    assert ids==['micro-later','tie-z','later','earlier']
+    assert cursor is None
+    # Previously issued opaque cursors used the same original timestamp/id pair.
+    import base64
+    legacy=base64.urlsafe_b64encode(json.dumps(['2026-10-12T16:30:00+08:00','tie-z']).encode()).decode()
+    assert [i['request_id'] for i in reader.list('alice',cursor=legacy)['items']]==['later','earlier']
+    assert reader.list('bob')['items']==[]
+    store.close()

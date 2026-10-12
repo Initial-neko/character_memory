@@ -381,7 +381,7 @@ Space Opportunity
 
 World Search、Browser Render、Memory、Public Expression 是四个不同边界。搜索到页面不等于相信、记住或公开表达；原始网页文本是 untrusted data，不直接写进 Memory 或最终发帖 prompt。
 
-**尚未定案的架构问题：** Space/World 的 planning/appraisal 目前仍有一部分在 `SpaceAutonomyService` 自己编译上下文并直接调用 model，而不是完全复用 PersonRuntime 的 Context/Recall pipeline。这个问题与“哪些 World 信息值得长期记忆、用户如何干预 Memory”绑在一起，当前只登记，不在本轮 composition-root 重构中擅自统一。
+Space/World planning 已通过 `PersonContextBuilder` 读取同一人物的身份、状态、记忆和经历。不同渠道仍保留专用 decision/appraisal Schema 与 Prompt；这是当前明确的边界，不是第二套人格状态。是否进一步收敛决策层，应由跨渠道、长期人物验收决定，不提前引入巨大统一 Schema。
 
 详见 [`SOCIAL_WORLD.md`](SOCIAL_WORLD.md) 与 [`MEMORY.md`](MEMORY.md)。
 
@@ -605,6 +605,9 @@ Bounded verified excerpts remain in the existing durable result cache, as for
 the direct backend, so interrupted World appraisal can recover without another
 external call. They are not duplicated in the transient detail file; the 30-day
 policy applies to assistant replies/diagnostics, not to durable reading facts.
+Recovery reconstructs the original request including its stored execution policy;
+current Settings do not rewrite that policy. Receipt integrity checks remain hard
+checks. The owning phase/recovery contract is [Social World](SOCIAL_WORLD.md).
 
 The read-only `/v1/characters/{id}/executions` list and request detail route use
 the existing ledger, enforce character ownership and never initialize providers.
@@ -617,3 +620,10 @@ webpage text or Character cognition. Missing details and incomplete usage remain
 distinguishable from a successful empty response or a zero bill. CLI costs are
 estimates, not account balance or remaining subscription quota. Inspecting a
 record never re-executes it or resumes a Claude session.
+
+V1 exposes this executor only through the existing World WEB_SEARCH choice.
+There is no general “ask Claude” decision, automatic Direct question delegation,
+native interactive window manager or complete intermediate tool transcript.
+The backend defaults to direct; code availability does not establish that a
+running deployment has restarted, enabled Claude or passed live Persona quality
+acceptance. Character life/source display semantics belong to [Memory](MEMORY.md).

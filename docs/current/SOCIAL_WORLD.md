@@ -736,4 +736,12 @@ publication, long-term Memory admission or second character decision model.
 
 `GET /v1/world/activity/recovery` inspects APPRAISED opportunities without a model, fetch, runtime initialization or schema write. `POST /v1/world/activity/recovery/{opportunity_id}` applies only a complete, identity-matched successful execution plus appraisal receipt. Recovery verifies a genuine reading decision, all snapshot request parameters/constraints and RSS selection/source generations. Invalid receipts expose only `INVALID_RECOVERY_RECEIPT`, never provider inputs. It uses the same local commit helpers as normal browsing. Missing/malformed receipts remain unresolved with an explicit reason; PLANNING and APPRAISING are not replayed. Original observation time and request identity remain, while lifecycle metadata records the later persistence time.
 
+For a Claude-backed WEB_SEARCH, expected constraints include the original
+`execution_policy` stored with the plan (backend, limits, model and reservations).
+Recovery compares that snapshot with the saved request rather than reading today's
+Settings. A changed request or policy is rejected. A valid saved success plus
+appraisal can be committed after a restart without initializing Claude, purchasing
+another appraisal or enlarging permissions. RSS recovery continues to use its
+existing item/generation contract even when the configured web backend is Claude.
+
 The enabled World scheduler recovers at most two eligible appraisals per tick before new paid opportunities and independent of exhausted browse quotas. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.

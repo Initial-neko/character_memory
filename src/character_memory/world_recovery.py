@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 from character_memory.domain.models import WorldObservation
@@ -54,6 +55,9 @@ class WorldBrowseRecovery:
                 plan, character_id=row['character_id'], opportunity_id=row['opportunity_id'],
                 source_event_id=row['source_event_id'], max_pages=snapshot['max_pages'],
                 max_chars_per_page=snapshot['max_chars_per_page'])
+            if snapshot.get('execution_policy'):
+                expected_request = replace(expected_request, constraints={
+                    **expected_request.constraints, **snapshot['execution_policy']})
         else:
             candidates = snapshot['rss_candidates']
             if len(plan.item_ids) != len(candidates) or set(plan.item_ids) != {item['item_id'] for item in candidates}:

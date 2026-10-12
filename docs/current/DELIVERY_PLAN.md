@@ -120,9 +120,21 @@ judgments, and dependent milestones cannot merge on an unaccepted predecessor.
 | M4 | RSS personal reading through existing World opportunity | Implemented in #257 | Accepted at 6abaded; merged #257; CI green | Live-provider / human quality pending |
 | M5 | Integrated compatibility, cost and opt-in rollout | Lifecycle gates implemented in #258; flags remain opt-in | Accepted at bb5a299: 215 regressions and 10 additional probes; CI green | Windows browser/short soak recorded; human accepted unread truthfulness and expression sample only; live post-reading quality, seven-day continuity and formal rollout pending |
 
-The optional World saving switch defaults off and changes only background browse
-cadence. Permission, idempotence and failure safety apply in both modes. Optional RSS
+The optional World saving switch defaults off. Its current effects include
+background cadence, bounded RSS selection and an explicitly configured Claude
+daily estimated budget (enabled only with cost saving and an explicit per-task
+reservation); the owning configuration/execution contract is
+[Architecture](ARCHITECTURE.md). Permission, idempotence and failure safety apply in both modes. Optional RSS
 personal reading defaults off; shared RSS collection is not personal experience.
 Acceptance must use its own configuration, database and process ownership;
 formal service startup and restoring an acceptance database over formal data
 are not part of automated milestone validation.
+
+The current delivery surface also includes the read-only character life and
+execution inspection pages and the opt-in stateless Claude World backend; see
+[Status](STATUS.md) for implementation status. Real CLI checks with controlled
+local sources establish tool connectivity, isolated sessions and usage recording,
+not real Persona decision/appraisal quality or public browser reliability.
+Before formal activation, validate a small character/source sample and verify
+post-reading continuity and local recovery. A source merge or local pull alone
+does not restart the runtime or enable its optional backend.

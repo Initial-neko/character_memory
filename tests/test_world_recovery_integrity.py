@@ -79,3 +79,55 @@ def test_web_recovery_rejects_plan_constraint_mismatch(tmp_path,monkeypatch):
         report=WorldBrowseRecovery(store).inspect()
         assert not report['candidates'][0]['recoverable'],report
     finally:store.close()
+
+
+def claude_interrupted(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from test_claude_world import Runner
+    store,access,model=make_access(tmp_path)
+    access.settings=access.settings.model_copy(update={'world_browse_execution_backend':'claude'})
+    runner=Runner()
+    access.services=SimpleNamespace(claude_runner=runner)
+    service=world.WorldActivityService(access,world.WorldPulseRepository(store))
+    with monkeypatch.context() as temporary:
+        temporary.setattr(world,'retain_world_observation',lambda *a,**kw:(_ for _ in ()).throw(RuntimeError('interrupted')))
+        with pytest.raises(RuntimeError,match='interrupted'):
+            service.browse_character('c00',now=NOW,opportunity_id='claude-recover')
+    return store,access,model,runner,service
+
+
+def test_claude_recovery_uses_saved_policy_and_no_live_runtime(tmp_path,monkeypatch):
+    store,access,model,runner,service=claude_interrupted(tmp_path,monkeypatch)
+    try:
+        recovery=WorldBrowseRecovery(store)
+        before=store.conn.total_changes
+        assert recovery.inspect()['candidates'][0]['recoverable']
+        assert store.conn.total_changes==before
+        access.settings.claude_execution_max_turns=1
+        access.require_bundle=lambda:pytest.fail('recovery cannot initialize any provider')
+        result=service.browse_character('c00',now=NOW,opportunity_id='claude-recover')
+        assert result['kept'] and result['source_event_id']
+        assert recovery.apply('claude-recover')==result
+        assert len(runner.calls)==1 and len(model.calls)==2
+        assert len(store.list_events('c00'))==1
+    finally:store.close()
+
+
+@pytest.mark.parametrize('target',['request','snapshot'])
+def test_claude_recovery_rejects_changed_policy(tmp_path,monkeypatch,target):
+    store,_,_,_,_=claude_interrupted(tmp_path,monkeypatch)
+    try:
+        if target=='request':
+            row=store.conn.execute('SELECT request_json FROM capability_executions').fetchone()
+            payload=json.loads(row[0]);payload['constraints']['claude_max_turns']=1
+            store.conn.execute('UPDATE capability_executions SET request_json=?',[json.dumps(payload)])
+        else:
+            row=store.conn.execute('SELECT plan_json FROM world_browse_decisions').fetchone()
+            payload=json.loads(row[0]);payload['execution_policy']['claude_model']='changed'
+            store.conn.execute('UPDATE world_browse_decisions SET plan_json=?',[json.dumps(payload)])
+        store.conn.commit()
+        recovery=WorldBrowseRecovery(store)
+        assert not recovery.inspect()['candidates'][0]['recoverable']
+        with pytest.raises(ValueError,match='INVALID_RECOVERY_RECEIPT'):recovery.apply('claude-recover')
+        assert not store.list_events('c00')
+    finally:store.close()

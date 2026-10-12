@@ -69,6 +69,24 @@ def test_nothing_is_written_until_a_test_run_turns_it_on(tmp_path):
     assert list((tmp_path / "captures").glob("*")) == []
 
 
+@pytest.mark.parametrize('max_items',[200,2])
+def test_same_timestamp_records_follow_append_order_after_reopen(tmp_path,monkeypatch,max_items):
+    from types import SimpleNamespace
+    import character_memory.asr_capture as capture
+    clock=capture.time
+    monkeypatch.setattr(capture,'time',SimpleNamespace(time=lambda:1234567890.25,
+        strftime=clock.strftime,localtime=clock.localtime))
+    folder=tmp_path/'same-time'
+    store=AsrCaptureStore(folder,max_items=max_items)
+    store.set_enabled(True)
+    records=[store.record(wav=make_wav(),result=_Result(str(i))) for i in range(3)]
+    expected=[r.id for r in reversed(records[-max_items:])]
+    assert [r['id'] for r in store.list()]==expected
+    assert [r['id'] for r in AsrCaptureStore(folder,max_items=max_items).list()]==expected
+    if max_items==2:
+        assert not (folder/f'{records[0].id}.wav').exists()
+
+
 def test_recording_keeps_the_raw_upload_next_to_its_transcript(tmp_path):
     store = AsrCaptureStore(tmp_path / "captures")
     store.set_enabled(True)

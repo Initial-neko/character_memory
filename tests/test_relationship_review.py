@@ -180,6 +180,13 @@ def test_real_group_turns_retain_peer_messages_actually_seen_by_follower(tmp_pat
     store.conn.execute("DELETE FROM conversation_runtime_traces WHERE turn_id<>?", [third["turn_id"]])
     recovered = CharacterRelationshipReader(store).review("a", "b", day=NOW.date().isoformat(), offset=0, now=NOW)
     assert [item["key"] for item in recovered["interactions"]] == [f"group:{peer_event.id}"]
+    app = FastAPI()
+    attach_character_life_routes(app, SimpleNamespace(read_store=store, ensure_character=lambda _: None,
+        web_dir=Path(__file__).parents[1] / "src/character_memory/web"))
+    source = TestClient(app).get(f"/v1/characters/a/life/conversation?key=group:{peer_event.id}")
+    assert source.status_code == 200, source.text
+    assert source.json()["conversation"] == {"type": "GROUP", "id": group.id}
+    assert "我刚修好了星灯。" in source.json()["quote"]
     store.close()
 
 

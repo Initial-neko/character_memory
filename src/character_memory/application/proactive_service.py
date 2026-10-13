@@ -79,6 +79,7 @@ class ProactiveService:
         """
         for character_id in character_ids:
             self.store.expire_intents(character_id, now)
+            self.store.suppress_non_direct_intents(character_id, now)
             if self._on_cooldown(character_id, now):
                 continue
             if self._awaiting_user_reply(character_id):

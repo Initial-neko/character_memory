@@ -299,6 +299,10 @@ otherwise -> write, with earliest_at >= server floor
 - `PROACTIVE_INTENT` 是自环的那条边：一轮“到期重判”如果又能留下新 Intent，而新 Intent 的 `earliest_at` 落在同一轮或下一轮，就形成永不停止的 LLM 循环。Memory / Mental State 仍照常接受，只切断 Intent 这一条回流边。
 - Space / World 被排除是另一回事：它们的 Intent 到期后会走成**私聊**主动消息（`dispatch_proactive_intent` 用该人物最近的会话 ID），也就是“在朋友圈看到评论”变成“私聊找用户说话”，属于跨渠道串味。这与 WORLD_OBSERVATION 只更新认知、不对外表达的既有边界一致。
 
+旧库的 PENDING Intent 在预检和原子领取时还会校验来源：Space、World、Social Post、上一轮 Proactive、瞬时视觉观察，以及明确标为 Group 的来源不能被派发成用户私聊。命中后标为 `SUPPRESSED`，通过现有 Intent audit 记录 `NON_DIRECT_SOURCE`；保留原事件/意图，不调用模型、不占用主动派发冷却。无来源 ID 的旧意图沿用兼容行为，不能仅按文本中的名字猜测接收人。
+
+Direct 用户消息、Wake 和 Proactive 入口明确标记 `channel=DIRECT`，Group reaction 标记 `channel=GROUP`。模型上下文保留近期事件的渠道、会话和可用的评论参与者信息，并声明当前私聊接收对象是用户；角色间交流是背景，不能原样续接为对用户的回复。该上下文约束需要真实模型验收，不等价于文本内容层面的硬保证。已经生成的历史消息保持原状。
+
 ### 原 Intent 的有限延期
 
 到期重判仍是原 PersonRuntime 的一次 reaction。可选 `intent_resolution`

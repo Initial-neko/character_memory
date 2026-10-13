@@ -353,6 +353,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 ),
                 metadata={
                     "conversation_id": group.id,
+                    "channel": "GROUP",
                     "group_turn_id": source_event.turn_id,
                     "source_conversation_event_id": source_event.id,
                     "mentions": list(mentioned_ids or []),

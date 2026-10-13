@@ -572,7 +572,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "title": "后台活跃时段",
         "description": "按 DeepSeek 官方北京时间计费时段参考调节 Space/World 自主机会，并非已证实的 OpenCode 价格折扣或硬性预算闸。保存后重启 Character Runtime 生效。",
         "fields": [
-            {"name": "activity_pacing_enabled", "label": "启用参考时段调频", "type": "checkbox", "level": "common"},
+            {"name": "activity_pacing_enabled", "label": "启用参考时段调频", "type": "checkbox", "level": "advanced"},
             {"name": "activity_peak_interval_multiplier", "label": "高峰间隔倍数", "type": "number", "step": 0.25, "level": "advanced"},
             {"name": "activity_offpeak_interval_multiplier", "label": "低谷间隔倍数", "type": "number", "step": 0.25, "level": "advanced"},
             {"name": "activity_reference_holidays", "label": "法定节假日（config.yaml）", "type": "textarea", "level": "diagnostic"},

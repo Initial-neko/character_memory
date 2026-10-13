@@ -1,13 +1,56 @@
 """Validate references to existing Life facts without invoking a runtime."""
+from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi import HTTPException
 from character_memory.character_life import obj, text
-from character_memory.time_utils import parse_datetime
+from character_memory.time_utils import epoch_us, parse_datetime
 
 class LifeReference(BaseModel):
     model_config = ConfigDict(extra='forbid')
     character_id: str = Field(min_length=1, max_length=100)
     key: str = Field(min_length=1, max_length=150)
+
+def _group_participated(store, row, character):
+    """Only owned output or actual bounded model-input receipts prove participation."""
+    now = epoch_us(datetime.now(timezone.utc))
+    member = store.conn.execute("SELECT joined_at,joined_at_epoch FROM conversation_members WHERE conversation_id=? AND actor_type='CHARACTER' AND actor_id=?", [row['conversation_id'], character]).fetchone()
+    if member is None or member['joined_at_epoch'] is None or row['event_time_epoch'] is None:
+        return False
+    try:
+        if parse_datetime(member['joined_at']) is None:
+            return False
+    except (ValueError, TypeError, OverflowError):
+        return False
+    if member['joined_at_epoch'] > row['event_time_epoch'] or row['event_time_epoch'] > now:
+        return False
+    if row['actor_type'] == 'CHARACTER' and row['actor_id'] == character:
+        return True
+    return bool(store.conn.execute("""
+        SELECT 1 FROM (
+            SELECT t.*, CASE WHEN json_valid(t.trace_json) THEN t.trace_json ELSE '{}' END AS proof
+            FROM conversation_runtime_traces t
+            WHERE t.character_id=? AND t.conversation_id=?
+              AND t.created_at_epoch>=? AND t.created_at_epoch<=?
+              AND julianday(t.created_at) IS NOT NULL
+        ) t
+        WHERE t.source_conversation_event_id=?
+           OR EXISTS (
+               SELECT 1 FROM json_each(CASE WHEN json_type(t.proof,'$.recent_group_event_ids')='array'
+                    THEN json_extract(t.proof,'$.recent_group_event_ids') ELSE '[]' END) r
+               WHERE r.type='integer' AND r.key>=0 AND r.key<14 AND r.value=?
+           )
+           OR EXISTS (
+               SELECT 1 FROM json_each(CASE WHEN json_type(t.proof,'$.shared_history_retrieval.events')='array'
+                    THEN json_extract(t.proof,'$.shared_history_retrieval.events') ELSE '[]' END) h
+               WHERE h.key>=0 AND h.key<4 AND h.type='object'
+                 AND json_extract(CASE WHEN h.type='object' THEN h.value ELSE '{}' END,'$.conversation_id')=?
+                 AND json_type(CASE WHEN h.type='object' THEN h.value ELSE '{}' END,'$.source_conversation_event_id')='integer'
+                 AND json_extract(CASE WHEN h.type='object' THEN h.value ELSE '{}' END,'$.source_conversation_event_id')=?
+           )
+        LIMIT 1
+    """, [character, row['conversation_id'], row['event_time_epoch'], now,
+            row['id'], row['id'], row['conversation_id'], row['id']]).fetchone())
+
 
 def resolve_life_reference(store, ref):
 
@@ -32,7 +75,7 @@ def resolve_life_reference(store, ref):
         if kind == 'group':
             if row['actor_type'] not in ('USER', 'CHARACTER') or row['event_type'] not in ('USER_MESSAGE', 'CHARACTER_MESSAGE'):
                 fail(422, '这类群聊机会不支持引用')
-            participated = row['actor_type'] == 'CHARACTER' and row['actor_id'] == ref.character_id or store.conn.execute('SELECT 1 FROM conversation_runtime_traces WHERE character_id=? AND source_conversation_event_id=?', [ref.character_id, row['id']]).fetchone()
+            participated = _group_participated(store, row, ref.character_id)
             if not participated:
                 fail(404, '来源不属于所选人物的可见经历')
             group = store.conn.execute('SELECT * FROM conversations WHERE id=?', [row['conversation_id']]).fetchone()

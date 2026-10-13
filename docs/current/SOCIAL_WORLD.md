@@ -542,6 +542,28 @@ When a character chooses to comment, the shared Pulse comment and that person's 
 
 #### Personal Browse
 
+##### Optional character vocation (research focus)
+
+A known character profile can include an optional `vocation.yaml` next to
+`persona.yaml`. This sidecar describes an operator-owned long-term specialty
+(`title`, `objective`, up to eight `topics`, and `enabled`). It is strictly
+validated, bounded to 8 KiB and read only from the existing persona directory;
+malformed sidecars are ignored with an operator warning. It is not a second
+Persona, an executable tool manifest or a new scheduler. Missing or
+`enabled: false` files preserve current World behavior.
+
+The existing per-character Personal Browse opportunity includes the vocation
+as a *preference hint* alongside Persona, Memory and real observations. The
+character may still choose silence/NO_ACTION. It can use only the pre-existing
+read-only `WEB_SEARCH` and optional `READ_RSS` capabilities. No access
+to local repository files, GitHub mutation or user secrets is granted by
+the sidecar, and a vocation does not imply that research has already happened.
+The normal durable Browse receipt, source provenance and World appraisal
+remain the source of truth. Example templates under `examples/vocations/`
+can be copied alongside a specific character's `persona.yaml` after review;
+none is installed or assigned automatically.
+
+
 Personal Browse has a separate per-character clock. It uses Persona, current Mental State and relevant Memory to decide whether the character naturally wants to look something up.
 
 If the character chooses to browse:

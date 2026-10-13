@@ -38,6 +38,10 @@ class CharacterRelationshipReader:
                 kind = "SPACE" if row["event_type"] == "SPACE_COMMENT_RECEIVED" else "DIRECT"
                 interactions.append(self._fact("events", row, kind, row["event_time"], row["event_time_epoch"]))
             if {"conversation_events", "conversation_runtime_traces", "conversation_members"} <= tables:
+                trace = "CASE WHEN json_valid(t.trace_json) THEN t.trace_json ELSE '{}' END"
+                recent_ids = f"CASE WHEN json_type({trace},'$.recent_group_event_ids')='array' THEN json_extract({trace},'$.recent_group_event_ids') ELSE '[]' END"
+                history = f"CASE WHEN json_type({trace},'$.shared_history_retrieval.events')='array' THEN json_extract({trace},'$.shared_history_retrieval.events') ELSE '[]' END"
+                history_item = "CASE WHEN h.type='object' THEN h.value ELSE '{}' END"
                 group = f"""SELECT e.* FROM conversation_events e
                     WHERE e.actor_id=? AND e.actor_type IN ('USER','CHARACTER') AND e.actor_id<>?
                     AND e.event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE')
@@ -46,7 +50,14 @@ class CharacterRelationshipReader:
                     AND EXISTS(SELECT 1 FROM conversation_members m WHERE m.conversation_id=e.conversation_id
                         AND m.actor_type='CHARACTER' AND m.actor_id=? AND m.joined_at_epoch<=e.event_time_epoch)
                     AND EXISTS(SELECT 1 FROM conversation_runtime_traces t WHERE t.conversation_id=e.conversation_id
-                        AND t.character_id=? AND t.source_conversation_event_id=e.id
+                        AND t.character_id=? AND (t.source_conversation_event_id=e.id
+                            OR EXISTS(SELECT 1 FROM json_each({recent_ids}) r
+                                WHERE r.key<14 AND r.type='integer' AND r.value=e.id)
+                            OR EXISTS(SELECT 1 FROM json_each({history}) h
+                                WHERE h.key<4 AND h.type='object'
+                                AND json_type({history_item},'$.source_conversation_event_id')='integer'
+                                AND json_extract({history_item},'$.source_conversation_event_id')=e.id
+                                AND json_extract({history_item},'$.conversation_id')=e.conversation_id))
                         AND julianday(t.created_at) IS NOT NULL
                         AND t.created_at_epoch>=e.event_time_epoch AND t.created_at_epoch<?)
                     ORDER BY e.event_time_epoch DESC,e.id DESC LIMIT 11"""

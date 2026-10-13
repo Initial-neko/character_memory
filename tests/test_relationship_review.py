@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+import json
+import pytest
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -120,4 +122,72 @@ def test_pending_plan_source_scope_limits_and_route_validation(tmp_path):
     assert client.get("/v1/characters/a/relationship-review?peer=a").status_code == 422
     assert client.get("/v1/characters/a/relationship-review?peer=user&day=bad").status_code == 422
     assert client.post("/v1/characters/a/relationship-review?peer=user").status_code == 405
+    store.close()
+
+
+def test_real_group_turns_retain_peer_messages_actually_seen_by_follower(tmp_path):
+    from character_memory.application.clock import FixedClock
+    from character_memory.application.group_conversation_service import GroupConversationService
+    from character_memory.character_relationships import CharacterRelationshipReader
+    from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
+    from character_memory.memory.embedding import DeterministicEmbedding
+    from test_p0_11_group_conversation import SequenceModel, runtime_for
+
+    store = SQLiteStore(tmp_path / "real-turns.db")
+    clock = FixedClock(NOW - timedelta(hours=2))
+    model = SequenceModel([
+        PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="我刚修好了星灯。")]),
+        PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="B，你修好的星灯真漂亮。")]),
+        PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="还想聊聊 B 刚修好的星灯。")]),
+        PersonReaction(actions=[]),
+    ])
+    embeddings = DeterministicEmbedding()
+    service = GroupConversationService(store, {
+        name: runtime_for(store, embeddings, model, name) for name in ("a", "b")
+    }, clock, profiles=[{"id": "a", "name": "A"}, {"id": "b", "name": "B"}])
+    group = service.create_group("real shared turns", ["b", "a"])
+    clock.set(NOW - timedelta(hours=1))
+    first = service.send(group.id, "说说星灯")
+    peer_event = next(event for event in service.repo.list_turn_events(group.id, first["turn_id"]) if event.actor_id == "b")
+    assert "B: 我刚修好了星灯。" in model.contexts[1]
+    clock.set(NOW - timedelta(minutes=30))
+    second = service.send(group.id, "再聊聊 B 的星灯")
+    assert second["speaker_order"] == ["a", "b"]
+    assert "B: 我刚修好了星灯。" in model.contexts[2]
+    # Real traces root at the User fact, not at B's reply.
+    traces = service.repo.list_turn_traces(group.id, first["turn_id"])
+    assert all(trace["source_conversation_event_id"] != peer_event.id for trace in traces)
+    review = CharacterRelationshipReader(store).review("a", "b", day="2026-10-14", offset=0, now=NOW)
+    if not any("recent_group_event_ids" in trace for trace in traces):
+        # This stack is based on #283; #282 supplies real input receipts.
+        assert review["interactions"] == []
+        store.close()
+        pytest.skip("full real Group provenance requires #282 + #283 + #286 integration")
+    assert [item["key"] for item in review["interactions"]] == [f"group:{peer_event.id}"]
+    store.close()
+
+
+def test_trace_input_evidence_types_group_scope_and_historical_provenance(tmp_path):
+    from character_memory.character_relationships import CharacterRelationshipReader
+    store = SQLiteStore(tmp_path / "trace-evidence.db")
+    repo = GroupRepository(store)
+    group = repo.create_group("shared", ["a", "b"], NOW - timedelta(days=1))
+    root = repo.append_event(GroupEvent(conversation_id=group.id, turn_id="one", actor_type="USER", actor_id="user", event_type="USER_MESSAGE", event_time=NOW - timedelta(hours=2), content="说说星灯"))
+    peer = repo.append_event(GroupEvent(conversation_id=group.id, turn_id="one", actor_type="CHARACTER", actor_id="b", event_type="CHARACTER_MESSAGE", event_time=root.event_time, content="星灯已经修好"))
+    reader = CharacterRelationshipReader(store)
+    def record(trace):
+        store.conn.execute("DELETE FROM conversation_runtime_traces")
+        repo.add_trace(group.id, "one", "a", root.id, NOW - timedelta(hours=1), trace)
+        return reader.review("a", "b", day="2026-10-14", offset=0, now=NOW)["interactions"]
+    assert record({"recent_group_event_ids": [peer.id]})[0]["key"] == f"group:{peer.id}"
+    assert record({"recent_group_event_ids": [str(peer.id), float(peer.id)]}) == []
+    assert record({"recent_group_event_ids": {"0": peer.id}}) == []
+    assert record({"recent_group_event_ids": [0] * 14 + [peer.id]}) == []
+    history = {"conversation_id": group.id, "source_conversation_event_id": peer.id}
+    assert record({"shared_history_retrieval": {"events": [history]}})[0]["key"] == f"group:{peer.id}"
+    assert record({"shared_history_retrieval": {"events": [{**history, "conversation_id": "other"}]}}) == []
+    assert record({"shared_history_retrieval": {"events": [str(peer.id), peer.id, "bad json"]}}) == []
+    record({})
+    store.conn.execute("UPDATE conversation_runtime_traces SET trace_json='malformed'")
+    assert reader.review("a", "b", day="2026-10-14", offset=0, now=NOW)["interactions"] == []
     store.close()

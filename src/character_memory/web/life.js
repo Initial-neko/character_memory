@@ -11,6 +11,11 @@
   const formatted = t => {if(!t)return "未设置";const d=new Date(t);return Number.isNaN(+d)?"时间未记录":d.toLocaleString("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});};
   const safeURL = value => {try {const u=new URL(value,location.origin);return ["http:","https:"].includes(u.protocol)?u.href:"";}catch{return "";}};
   async function get(url) {const r=await fetch(url);if(!r.ok){const data=await r.json().catch(()=>({}));throw new Error(data.detail||`请求失败 (${r.status})`);}return r.json();}
+  function renderRelationshipReview(data) {
+    const area=$("relationshipReview"), name=profiles.find(p=>p.id===data.peer)?.name||(data.peer==="user"?"用户":data.peer);
+    const character=$("character").value;
+    area.innerHTML=`<h2>与${esc(name)}的近期回顾</h2><p class="hint">${esc(formatted(data.window.start))} — ${esc(formatted(data.window.end))} · 所选日向前最多 7 天，与下方当天筛选分开。只读记录，不推断好感或共同活动完成。</p><h3>已记录的互动</h3>${data.interactions.map(i=>`<article class="memory-card"><small>${esc(formatted(i.time))} · ${esc(channels[i.channel])} · ${esc(sourceNames[i.source.kind])} #${esc(i.source.id)}</small><p>${esc(i.content)}</p><a href="/?${esc(new URLSearchParams({life_character:character,life_key:i.key}))}" title="复核已有来源并在原会话准备草稿；确认发送后才调用模型">查看来源并准备聊天 ↗</a></article>`).join("")||'<p class="hint">该范围内没有可确认的互动记录，关系情况未知；不代表没有交流或选择了沉默。</p>'}${data.interactions_has_more?'<p class="hint">仅显示最近 10 条；当天详情仍可在下方查看。</p>':""}<h3>尚待处理的主动表达意图</h3><p class="hint">当前状态，查询所有创建日期，最多 5 条；不受上方回顾日期或渠道/搜索筛选限制。意图不是承诺，也不是已发生经历；群聊文字邀请不自动解析成计划。</p>${data.pending_intents.map(i=>`<article class="memory-card"><span class="badge plan">尚未执行</span><p>${esc(i.content)}</p><small>意图 #${esc(i.source.id)} · ${i.source_known?`源事件 #${esc(i.source.event_id)}`:"旧意图来源未记录，接收对象沿用现有 User Direct 兼容行为"}<br>最早：${esc(formatted(i.earliest_at))} · 失效：${esc(formatted(i.expires_at))}</small></article>`).join("")||(data.peer==="user"?'<p class="hint">没有查到有效待处理的 User Direct 意图，不据此推断人物没有未来想法。</p>':'<p class="hint">当前只支持向用户的 Direct 主动意图，没有向该人物的可执行计划接口。</p>')}${data.pending_has_more?'<p class="hint">另有待处理意图；可在“未来意图”查看已有记录。</p>':""}`;
+  }
   function render() {
     const peer=$("peer").value, visible=peer?items.filter(i=>i.participants.some(p=>p.id===peer)):items;
     $("timeline").innerHTML=visible.map(i=>`<div class="timeline-row ${selected===i.key?"selected":""}"><time datetime="${esc(i.time)}">${esc(new Date(i.time).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"}))}</time><button type="button" class="event-card" data-key="${esc(i.key)}" aria-pressed="${selected===i.key}"><div class="card-head"><h2>${esc(i.title)}</h2><span class="badge ${["FAILED","DENIED","NO_ACTION","TIMEOUT"].includes(i.status)?"warn":i.kind==="intent"?"plan":""}">${esc(channels[i.channel]||i.channel)} · ${esc(i.intent?.time_status==="INVALID"?"时间无效，到期状态未知":i.intent?.past_expiry?"有效期已过，待处理":i.intent?.due?"已到期，待执行":statuses[i.status]||i.status)}</span></div><p>${esc(i.content)}</p>${i.reading?`<small>阅读范围：${esc(i.reading.scope||"未记录")} · ${i.state_change?"存在状态更新":"未关联状态更新"}</small>`:""}<div class="chips">${i.state_change?"<span>心理状态更新</span>":""}${i.memories.length?`<span>关联记忆 ${i.memories.length} 条</span>`:""}</div><small>来源：${esc(sourceNames[i.source.kind]||i.source.kind)} · ${esc(i.source.id)}</small></button></div>`).join("");
@@ -48,12 +53,19 @@
   async function load(more=false) {
     if(!$("character").value)return;
     const token=++request;
+    const reviewArea=$("relationshipReview");reviewArea.hidden=view!=="relationships";
+    reviewArea.textContent=view==="relationships"?($("peer").value?"正在读取所选对象的近期回顾…":"请选择互动对象，查看近期真实互动和待处理的主动意图。" ):"";
     if(!more){items=[];selected="";$("timeline").replaceChildren();$("details").innerHTML='<p class="empty-detail">正在读取所选人物的经历…</p>';}
     document.body.classList.add("loading");$("status").textContent="正在读取真实记录…";$("retry").hidden=true;
     const qs=new URLSearchParams({day:$("day").value,offset:String(-new Date($("day").value+"T12:00:00").getTimezoneOffset()),view,channel,query:$("search").value,peer:view==="relationships"?$("peer").value:""});
     if(more&&cursor)qs.set("cursor",cursor);
     try {const data=await get(`/v1/characters/${encodeURIComponent($("character").value)}/life?${qs}`);if(token!==request)return;items=more?[...items,...data.items]:data.items;cursor=data.next_cursor;undated=data.undated_count||0;selected=items[0]?.key||"";
       const previous=$("peer").value, peers=new Map([{id:"user",name:"用户"},...profiles.filter(p=>p.id!==$("character").value),...items.flatMap(i=>i.participants)].map(p=>[p.id,p]));$("peer").innerHTML='<option value="">全部对象</option>'+[...peers.values()].map(p=>`<option value="${esc(p.id)}">${esc(profiles.find(c=>c.id===p.id)?.name||p.name)}</option>`).join("");$("peer").value=peers.has(previous)?previous:"";render();
+      if(view==="relationships"&&$("peer").value){
+        const reviewQuery=new URLSearchParams({peer:$("peer").value,day:$("day").value,offset:qs.get("offset")});
+        try {const review=await get(`/v1/characters/${encodeURIComponent($("character").value)}/relationship-review?${reviewQuery}`);if(token!==request)return;renderRelationshipReview(review);}
+        catch(error){if(token===request){reviewArea.textContent="近期回顾加载失败，未展示旧人物或旧对象的数据；可点击重新加载。";$("retry").hidden=false;}}
+      }
     } catch(e) {if(token!==request)return;items=[];cursor=null;$("timeline").replaceChildren();$("details").innerHTML='<p class="hint">记录加载失败，未展示旧人物的数据。</p>';$("status").textContent=e.message;$("retry").hidden=false;$("more").hidden=true;}finally{if(token===request)document.body.classList.remove("loading");}
   }
   function identity() {const p=profiles.find(i=>i.id===$("character").value);$("heading").textContent=`人物生活 · ${p?.name||p?.id||""}`;$("avatar").textContent=(p?.name||"人").slice(0,1);if(p?.avatar_url&&safeURL(p.avatar_url)){const img=document.createElement("img");img.src=safeURL(p.avatar_url);img.alt="";img.onerror=()=>img.remove();$("avatar").append(img);}$("dateLabel").textContent=$("day").value;}

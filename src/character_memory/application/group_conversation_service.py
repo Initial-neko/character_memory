@@ -537,6 +537,11 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "mental_state_before": state_before,
                     "mental_state_after": state_after,
                     "recalled_memories": [memory.model_dump(mode="json", exclude={"embedding"}) for memory in memories],
+                    "recent_group_event_ids": [
+                        item.metadata["group_event_id"] for item in evaluation.recent[-14:]
+                        if type(item.metadata.get("group_event_id")) is int
+                        and item.metadata.get("conversation_id") == group.id
+                    ],
                     "shared_history_retrieval": shared_history_retrieval,
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,

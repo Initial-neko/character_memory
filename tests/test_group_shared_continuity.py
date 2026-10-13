@@ -39,7 +39,32 @@ def test_old_shared_fact_reaches_model_and_trace_after_restart(tmp_path):
         evidence = trace["shared_history_retrieval"]
         assert {item["source_conversation_event_id"] for item in evidence["events"]} == {old.id, invite.id}
         assert evidence["context_chars"] <= evidence["char_budget"]
+        assert len(trace["recent_group_event_ids"]) <= 14
     assert store.list_memories("rin") == []
+    store.close()
+
+
+def test_real_ordered_group_trace_records_input_ids_not_later_own_output(tmp_path):
+    from character_memory.domain.models import ActionDecision, ActionType
+    store = SQLiteStore(tmp_path / "seen-inputs.db")
+    at = datetime(2026, 10, 12, tzinfo=timezone.utc)
+    model = SequenceModel([
+        PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="我刚修好了星灯。")]),
+        PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="我看到了你修好的星灯。")]),
+    ])
+    embeddings = DeterministicEmbedding()
+    service = GroupConversationService(store, {
+        name: runtime_for(store, embeddings, model, name) for name in ("b", "a")
+    }, FixedClock(at), profiles=[{"id": "a", "name": "A"}, {"id": "b", "name": "B"}])
+    group = service.create_group("ordered", ["b", "a"])
+    result = service.send(group.id, "说说星灯")
+    events = service.repo.list_turn_events(group.id, result["turn_id"])
+    user, b, a = events
+    traces = {trace["character_id"]: trace for trace in service.repo.list_turn_traces(group.id, result["turn_id"])}
+    assert "B: 我刚修好了星灯。" in model.contexts[1]
+    assert traces["b"]["recent_group_event_ids"] == [user.id]
+    assert traces["a"]["recent_group_event_ids"] == [user.id, b.id]
+    assert a.id not in traces["a"]["recent_group_event_ids"]
     store.close()
 
 

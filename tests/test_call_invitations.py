@@ -124,3 +124,14 @@ def test_proactive_invitation_is_only_proposed_in_audit(tmp_path):
     assert '不代表已经通话' in projection['title']
     assert store.list_memories('a')==[]
     store.close()
+
+
+def test_default_off_runtime_does_not_initialize_invitation_storage(tmp_path):
+    store=SQLiteStore(tmp_path/'disabled.db');emb=DeterministicEmbedding();model=InviteModel()
+    before=store.list_schema_migrations()
+    runtime=PersonRuntime(store,VectorRecall(store,emb),emb,model,'人物')
+    assert store.list_schema_migrations()==before
+    runtime.handle(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=NOW,content='正常交流',metadata={'channel':'DIRECT','conversation_id':'direct'}))
+    assert 'calls/001-direct-invitations' not in store.list_schema_migrations()
+    assert runtime._call_invitations is None and len(model.contexts)==1
+    store.close()

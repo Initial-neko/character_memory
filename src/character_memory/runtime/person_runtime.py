@@ -107,7 +107,7 @@ class PersonRuntime:
         self.image_catalog = image_catalog
         self.intent_policy = intent_policy or IntentPolicy()
         self.call_policy = call_policy or CallInvitationPolicy()
-        self.call_invitations = CallInvitationRepository(store)
+        self._call_invitations = None
         self.sticker_retriever = StickerRetriever(embeddings)
         self.context_builder = PersonContextBuilder(store, recall, persona)
 
@@ -451,8 +451,18 @@ class PersonRuntime:
         normalized_action = kept[0] if kept else ActionDecision(type=ActionType.NO_REPLY)
         return reaction.model_copy(update={"actions": kept, "action": normalized_action}), dropped
 
+    @property
+    def call_invitations(self):
+        if self._call_invitations is None:
+            self._call_invitations = CallInvitationRepository(self.store)
+        return self._call_invitations
+
+    def _call_available(self, event):
+        # Default-off runtime paths retain the existing minimal Store contract.
+        return self.call_policy.enabled and self.call_invitations.can_offer(event, self.call_policy)
+
     def _sanitize_call_actions(self, event, reaction):
-        allowed = self.call_invitations.can_offer(event, self.call_policy)
+        allowed = self._call_available(event)
         kept, decisions = [], []
         for action in reaction.actions:
             if action.type != ActionType.CALL_INVITE:
@@ -511,7 +521,7 @@ class PersonRuntime:
             # that product boundary explicit here instead of advertising a wider
             # capability that a lower layer later removes.
             allow_generate_image=direct_visual_available() and event.event_type == EventType.USER_MESSAGE,
-            allow_call_invite=self.call_invitations.can_offer(event, self.call_policy),
+            allow_call_invite=self._call_available(event),
         )
         timings.update(evaluation.timings)
         memories = evaluation.memories

@@ -182,6 +182,14 @@ READY build 是可跨请求保留的 research 快照，不是提交时的角色�
 
 模型调用量级：`SOURCE` 模式一次群体 research + 最多每个新成员一次 `PersonaBuilder` 模型生成（可能附带结构化修复重试）；已有人物不再次生成，失败的单个角色采用本地确定性兜底。`ORIGINAL` 模式不触发 World Observer，但仍需一次群体生成和新人物深化。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
 
+### Curated original Ensemble template
+
+AI 建群入口提供「预览温暖异世界」，对应 `GET /v1/ensembles/templates` 的 `warm-isekai` 模板。`POST /v1/ensembles/templates/{template_id}/prepare` 将莉娅、芙露、赛琳、米娅四位原创成年人物的固定完整 Persona 和初始关系保存为普通 `READY` build；这一步不调用模型、搜索、头像或声音服务，也不创建人物、群聊或互动 Event。未知模板返回 404，不留下构建记录。重新打开入口仍使用现有 READY build 恢复流程。
+
+确认继续使用既有 `/{build_id}/confirm`、容量检查、回滚和幂等别名。模板草稿的 `reuse_existing=false` 持久化在既有 drafts JSON 中，在预览、重启恢复和确认时都不会按名字复用现有人物；因此容量计数把所选成员全部视为新建。创建来源仍是 `ENSEMBLE_BUILDER`，tags 标明 `原创情景` 和模板 ID，group_id 绑定真实群聊。固定模板不显示单人模型深化入口。创建后的头像/声音初始化与正常群聊反应沿用现有流程，不能把预览零调用理解为创建或聊天零调用。
+
+背景与关系继续通过 Initial Public Group Context 注入，明确不是已发生的聊天。确认不自动发开场或创建记忆。此版本是普通人物/群聊上的原创体验入口，尚无独立情景会话、故事时钟、跨渠道记忆隔离或专用暂停策略；应在独立测试环境验收，不能把专属人物 ID 当成完整情景隔离已经完成的证明。情景演化和跨天关系品质需要后续真实模型验收。
+
 ### Member failure isolation
 
 Group 当前页面收到的 group-level `reaction_error` 按群保留，不被后续 `idle` 或 history 对账重绘清掉；较新的 `queued` / `typing` 会清除旧提示，迟到的旧轮次错误不会覆盖新轮次。提示是页面内状态，刷新页面不会恢复，不改变 durable message/trace。

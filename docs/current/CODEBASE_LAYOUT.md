@@ -146,6 +146,7 @@ voices.py                   per-persona voice.yaml registry contract
 gsv_tts_runtime.py          isolated :9014 formal GSV sidecar adapter/runtime
 character_onboarding.py     shared first avatar / voice selection / creation provenance
 ensemble_builder.py         Ensemble build persistence, research and confirmation
+ensemble_templates.py       Curated original Persona/relationship drafts, no provider execution
 encounter.py / encounter_store.py temporary candidates, trial replies and scheduler
 background_services.py      lifecycle ownership for long-lived workers
 config.py                   Settings model + character discovery

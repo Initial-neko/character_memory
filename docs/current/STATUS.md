@@ -24,7 +24,7 @@ An open PR never upgrades a capability to SHIPPED.
 | Persistent Person Runtime | SHIPPED | Persona, durable facts, Memory, Mental State, finite Intent deferral, Runtime Trace and shared Person context with bounded historical observation recall. |
 | Direct chat | SHIPPED | Durable accept, async reaction scheduling, SSE reconciliation and multimodal expression. |
 | Group chat | SHIPPED | Shared facts, ordered reactions, mentions, archive/restore, member add/remove, turn-level rendering and bounded autonomous opportunities. User-turn speaker cap defaults to 5 (1–12 configurable); persisted Group Events remain action-granular. |
-| One-prompt Ensemble | SHIPPED | Prompt -> research -> candidates -> confirmation -> ordinary Characters + Group. |
+| One-prompt Ensemble | SHIPPED | Prompt -> research -> candidates -> confirmation -> ordinary Characters + Group. A curated warm-isekai template previews four fixed original drafts without model/search calls, then confirms into fresh Characters + Group; this is not a scoped scenario runtime. |
 | Character onboarding | SHIPPED | Provenance, persisted Persona, guaranteed first avatar and best-effort voice selection. |
 | Character Space | SHIPPED | Feed, comments/replies, likes/views, up to 9 media, autonomous posting and bounded audience propagation. |
 | World Activity | SHIPPED | World Pulse plus independent per-character Personal Browse clocks, bounded web/RSS choices and local recovery of complete saved appraisals. Observation is not automatic publishing or Memory admission. |

@@ -451,6 +451,12 @@ class ReactionScheduler:
             if self.voice_materializer is not None and response_event.metadata.get("action") == "VOICE_MESSAGE":
                 self.voice_materializer.materialize_direct(response_event, conversation_id=conversation_id)
             published.append(raw_event)
+        invitations=[]
+        with store._lock:
+            if not self._closed.is_set() and store.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='call_invitations'").fetchone():
+                invitations=store.conn.execute("SELECT id FROM call_invitations WHERE character_id=? AND conversation_id=? AND source_event_id=?",[character_id,conversation_id,source_event_id]).fetchall()
+        for invitation in invitations:
+            self.hub.publish(channel,"call_invitation",{"id":invitation['id']})
         return published
 
     def _finish_cycle(self, state: _PendingState, watermark: int) -> bool:

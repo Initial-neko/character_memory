@@ -414,6 +414,7 @@
       CM.updateHeader();
       CM.syncDirectEphemeralUi();
     });
+    source.addEventListener("call_invitation", () => CM.features.callInvitations?.refresh?.());
     source.addEventListener("character_event", event => {
       if (CM.isGroupConversation() || characterId !== CM.state.characterId) return;
       const message = CM.directEventToMessage(JSON.parse(event.data));

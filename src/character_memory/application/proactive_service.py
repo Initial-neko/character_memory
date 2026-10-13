@@ -129,7 +129,13 @@ class ProactiveService:
                     legacy = result.reaction.action.type if result.reaction.action is not None else ActionType.NO_ACTION
                     resolution = result.reaction.intent_resolution
                     resolution_reason = ""
-                    if action_types & EXPRESSIVE_ACTIONS or legacy in EXPRESSIVE_ACTIONS:
+                    invitation = None
+                    if ActionType.CALL_INVITE in action_types:
+                        invitation = self.store.conn.execute("SELECT id FROM call_invitations WHERE source_event_id=? AND character_id=?",[result.event.id,character_id]).fetchone()
+                    if invitation:
+                        status = "EXECUTED"
+                        resolution_reason = "CALL_INVITATION_PROPOSED"
+                    elif action_types & EXPRESSIVE_ACTIONS or legacy in EXPRESSIVE_ACTIONS:
                         status = "EXECUTED"
                         if resolution is not None and resolution.kind != IntentResolutionKind.EXECUTE:
                             resolution_reason = "EXPRESSION_CONFLICT"

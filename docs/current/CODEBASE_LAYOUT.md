@@ -267,6 +267,13 @@ message_content.js      Direct/Group shared message body renderer
 - Visual Capture frame bytes 只做本轮模型上下文，不变成普通图片附件。
 - 历史 `p0_*.css` 仍被正式页面加载，是待整理样式债务；V1 不重命名。
 
+## In-app call invitations
+
+- `call_invitations.py`: bounded durable Direct invitations, source permission/cooldown and acceptance/session lease transitions.
+- `call_invitation_web.py`: local list/accept/decline/cancel/lease APIs; no model or media invocation.
+- `web/call_invitations.js`: foreground invitation cards and explicit acceptance into the existing `voice.js` lifecycle.
+- `tests/test_call_invitations*.py`: Person/API state contracts and isolated Chromium microphone substitutes.
+
 ## Life / Inspector
 
 当前：

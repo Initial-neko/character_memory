@@ -1,4 +1,5 @@
 from __future__ import annotations
+from character_memory.call_invitations import CallInvitationPolicy
 
 from dataclasses import dataclass
 import logging
@@ -145,6 +146,7 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None, s
                 character_sticker_catalog(global_stickers, resolve_sticker_dir(settings), character_id),
                 image_by_id[character_id],
                 intent_policy=intent_policy,
+                call_policy=CallInvitationPolicy.from_settings(settings),
             )
             for character_id, persona in persona_by_id.items()
         }

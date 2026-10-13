@@ -1,4 +1,5 @@
 from __future__ import annotations
+from character_memory.call_invitations import CallInvitationPolicy
 
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -178,6 +179,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             stickers,
             images,
             intent_policy=IntentPolicy.from_settings(settings),
+            call_policy=CallInvitationPolicy.from_settings(settings),
         )
         current.runtimes[character_id] = runtime
         if isinstance(getattr(current.chat, "runtime", None), dict):

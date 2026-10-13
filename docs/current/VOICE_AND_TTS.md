@@ -11,6 +11,18 @@
 
 原先五份 TTS/Media 专题文档已合并到本文件。
 
+## 人物发起的应用内来电邀请
+
+`direct_call_invitations_enabled` 默认关闭；开启后，原有 Direct 的 USER_MESSAGE / TIME_TICK / PROACTIVE_INTENT 单次反应可以选择 `CALL_INVITE`，不增加意愿识别模型、不主动重拨，也没有真实电话线路。Group、Space、World 和 Visual 事件无此许可。服务端校验 Settings、实际 Core 来源、Direct channel、每人物最多一个 PENDING/ACCEPTED 以及邀请冷却；冷却复用 `proactive_min_dispatch_interval_minutes`，最小一分钟。`direct_call_invitation_ttl_seconds` 控制未接邀请有效期（默认120秒，30~600），两项新设置重启 Character Runtime 后生效。
+
+邀请以 `call_invitations` 独立持久事实保存来源 event ID、Direct 会话、邀请文案与公开简短 reason，不生成 CHARACTER_MESSAGE、不保存通话完成 Memory。状态为 PENDING / ACCEPTED / DECLINED / EXPIRED / CANCELLED。`ACCEPTED` 仅表示用户接受；`connected_at` 是浏览器报告麦克风已开启并通过服务端会话复验的时间，也不证明已经说话。真正的语音文字与回复仍由既有 ASR/聊天/TTS 生成自己的真实消息。
+
+前台通过 `GET /v1/call-invitations` 及现有 Direct SSE 的 `call_invitation` ID 通知重查权威状态；卡片可接受或拒绝。显示/重查不请求权限、不调用模型。用户接受后才切换到邀请的 Direct 会话并调用唯一 `voice.js` 生命周期；麦克风拒绝、Media 不可用或启动失败会取消邀请，不形成成功通话经历。没有背景来电通知或后台自动开麦。
+
+`POST /v1/call-invitations/{id}/accept` 用本页 client ID 原子领取邀请；重复请求不再次开麦，另一页面不能领取已接受邀请。`decline` 保存拒绝；`cancel` 保存取消/挂断；`lease` 要求服务端发放的 session token，列表不返回 token。已接受会话有90秒固定租期，前台活动通话每30秒续租。页面重启不自动恢复麦克风；失联过租转 CANCELLED，过期/旧 token/晚到权限不能重新接通。晚到麦克风资源通过已有 Voice ticket 清理并再次核验服务端租期。挂断、切换人物或离开页面尝试取消；网络失败时靠租期收束。许可关闭或人物归档/删除也取消未结束邀请。
+
+来电状态请求从本地数据库获得；截止状态可在查询时推进 EXPIRED/CANCELLED，不依赖模型、进程内定时器或重新发送。仅接受邀请后才触发媒体运行环境能力。临时库与真实 Chromium 的 API/麦克风替身验证确定性路径；真实麦克风、ASR/TTS效果、背景通知和模型主动邀请质量需独立人工验收。
+
 ## Optional Live2D presentation in Browser Call
 
 Live2D is a presentation of the **existing** Person/voice call, not a second Voice Agent or an ASR/TTS provider. This first slice adds a Live2D toggle to the browser call and retains the current static avatar, capture, playback, camera, screen sharing and dock as fallbacks. It does **not** perform PSD rigging or TTS lip-sync yet.

@@ -119,6 +119,8 @@ class Settings(BaseModel):
     # P0.17 direct-character wake. This is intentionally process-local scheduling:
     # every eligible character gets a TIME_TICK opportunity roughly once per hour.
     # It is not a durable background-job system and does not wake group chats.
+    direct_call_invitations_enabled: bool = Field(default=False, description="允许人物在原有 Direct 反应中提出应用内来电邀请；接受前不开麦，重启生效。")
+    direct_call_invitation_ttl_seconds: int = Field(default=120, ge=30, le=600, description="未接受来电邀请的有效秒数；不延长通话租期，重启生效。")
     proactive_wake_enabled: bool = True
     proactive_wake_minutes: float = Field(default=60.0, ge=1.0, le=1440.0)
 

@@ -47,6 +47,7 @@ def evaluate_reaction(
     session_id: str | None = None,
     image_data_urls: list[str] | None = None,
     allow_generate_image: bool = False,
+    allow_call_invite: bool = False,
 ) -> ReactionEvaluation:
     """Run the shared Recall -> Context -> Model -> resource-sanitize pipeline."""
 
@@ -93,6 +94,7 @@ def evaluate_reaction(
         sticker_catalog=prompt_stickers,
         image_catalog=runtime.image_catalog,
         allow_generate_image=allow_generate_image,
+        allow_call_invite=allow_call_invite,
         observed_events=person_context.observed_events,
     )
     if context_suffix:

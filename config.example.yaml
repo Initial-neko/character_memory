@@ -174,6 +174,11 @@ recall_limit: 8
 # -----------------------------------------------------------------------------
 
 # Master switch for periodic character wake opportunities.
+# 人物应用内来电许可，默认关闭；只复用原有 Direct 反应，不增加意愿模型调用。接受前不开麦，重启生效。
+direct_call_invitations_enabled: false
+# 未接受邀请的有效秒数（30~600）；过期不重拨，重启生效。
+direct_call_invitation_ttl_seconds: 120
+# 是否给予人物周期性 Wake 机会；人物仍可沉默。
 proactive_wake_enabled: true
 
 # Minutes between normal wake opportunities for one character.

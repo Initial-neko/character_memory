@@ -582,10 +582,10 @@ class EnsembleBuilderService:
         )
         return self.payload(saved)
 
-    def prepare_scene(self, scene: EnsembleSceneDraft | dict, *, now: datetime | None = None) -> dict[str, Any]:
+    def start_scene(self, scene: EnsembleSceneDraft | dict, *, now: datetime | None = None) -> dict[str, Any]:
         draft = EnsembleSceneDraft.model_validate(scene)
         prompt = json.dumps(draft.model_dump(), ensure_ascii=False)
-        return self.prepare(prompt, mode="SCENE", now=now)
+        return self.start(prompt, mode="SCENE", now=now)
 
     def prepare(self, prompt: str, *, mode: str = "SOURCE", now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now().astimezone()

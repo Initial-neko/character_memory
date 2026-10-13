@@ -33,7 +33,8 @@ def test_scene_prepare_persists_fresh_characters_and_input_on_restart(tmp_path):
     access, store, observer, profiles, created = _access(tmp_path)
     _original_model(access)
     service = EnsembleBuilderService(access, EnsembleRepository(store))
-    build = service.prepare_scene(SCENE)
+    build = service.start_scene(SCENE)
+    build = service.research(build["group_id"])
     assert build["mode"] == "SCENE"
     assert build["scene"] == SCENE
     assert all(item["existing_character_id"] is None for item in build["drafts"])
@@ -105,7 +106,8 @@ def test_scene_confirmation_leaves_existing_same_name_persona_untouched(tmp_path
     access.create_character_from_draft = creator.create_from_draft
     access.rollback_created_character = creator.rollback_created
     service = EnsembleBuilderService(access, EnsembleRepository(store))
-    build = service.prepare_scene(SCENE)
+    build = service.start_scene(SCENE)
+    build = service.research(build["group_id"])
     active = service.confirm(build["group_id"], [0, 1, 2])
     assert existing.read_text(encoding="utf-8") == original
     assert "kurisu" not in active["group"]["member_ids"]

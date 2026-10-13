@@ -68,7 +68,7 @@ def attach_ensemble_routes(app):
 
     @app.post("/v1/ensembles/scenes/prepare")
     def prepare_scene(req: EnsembleSceneDraft):
-        build = service.start(req.model_dump_json(), mode="SCENE")
+        build = service.start_scene(req)
         try:
             return {"build": service.research(build["group_id"])}
         except Exception:

@@ -505,12 +505,15 @@ class SQLiteStore:
         )
 
     def append_event(self, event: Event) -> Event:
-        with self._lock:
+        # A failed implicit sqlite3 write (including SQLITE_BUSY) can leave an
+        # open deferred transaction on the connection. Use our transaction owner
+        # so failed autonomous World/Space event writes always roll back, while
+        # callers already inside a larger transaction retain their atomic scope.
+        with self.transaction():
             cur = self.conn.execute(
                 "INSERT INTO events(character_id,event_type,event_time,event_time_epoch,content,metadata_json) VALUES(?,?,?,?,?,?)",
                 (event.character_id, event.event_type.value, event.event_time.isoformat(), epoch_us(event.event_time), event.content, json.dumps(event.metadata, ensure_ascii=False)),
             )
-            self._maybe_commit()
             return event.model_copy(update={"id": cur.lastrowid})
 
     def append_observation_once(self, event: Event) -> tuple[Event, bool]:

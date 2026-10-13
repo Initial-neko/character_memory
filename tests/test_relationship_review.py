@@ -133,6 +133,7 @@ def test_real_group_turns_retain_peer_messages_actually_seen_by_follower(tmp_pat
     from character_memory.memory.embedding import DeterministicEmbedding
     from test_p0_11_group_conversation import SequenceModel, runtime_for
 
+    NOW = datetime.now(timezone.utc)
     store = SQLiteStore(tmp_path / "real-turns.db")
     clock = FixedClock(NOW - timedelta(hours=2))
     model = SequenceModel([
@@ -157,13 +158,28 @@ def test_real_group_turns_retain_peer_messages_actually_seen_by_follower(tmp_pat
     # Real traces root at the User fact, not at B's reply.
     traces = service.repo.list_turn_traces(group.id, first["turn_id"])
     assert all(trace["source_conversation_event_id"] != peer_event.id for trace in traces)
-    review = CharacterRelationshipReader(store).review("a", "b", day="2026-10-14", offset=0, now=NOW)
+    review = CharacterRelationshipReader(store).review("a", "b", day=NOW.date().isoformat(), offset=0, now=NOW)
     if not any("recent_group_event_ids" in trace for trace in traces):
         # This stack is based on #283; #282 supplies real input receipts.
         assert review["interactions"] == []
         store.close()
         pytest.skip("full real Group provenance requires #282 + #283 + #286 integration")
     assert [item["key"] for item in review["interactions"]] == [f"group:{peer_event.id}"]
+    for index in range(20):
+        service.persist_user_event(group.id, f"无关闲聊 {index}", at=NOW - timedelta(minutes=29 - index))
+    model.reactions.extend([PersonReaction(actions=[]), PersonReaction(actions=[])])
+    clock.set(NOW - timedelta(minutes=5))
+    third = service.send(group.id, "还记得 B 的星灯吗？")
+    assert third["speaker_order"] == ["b", "a"]
+    assert "B: 我刚修好了星灯。" in model.contexts[-1]
+    third_trace = next(trace for trace in service.repo.list_turn_traces(group.id, third["turn_id"]) if trace["character_id"] == "a")
+    assert peer_event.id not in third_trace["recent_group_event_ids"]
+    assert peer_event.id in {item["source_conversation_event_id"] for item in third_trace["shared_history_retrieval"]["events"]}
+    # Remove the earlier input receipts to prove the later actual historical
+    # projection alone can establish that this peer message was supplied.
+    store.conn.execute("DELETE FROM conversation_runtime_traces WHERE turn_id<>?", [third["turn_id"]])
+    recovered = CharacterRelationshipReader(store).review("a", "b", day=NOW.date().isoformat(), offset=0, now=NOW)
+    assert [item["key"] for item in recovered["interactions"]] == [f"group:{peer_event.id}"]
     store.close()
 
 

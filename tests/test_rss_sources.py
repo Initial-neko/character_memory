@@ -29,6 +29,34 @@ RSS_SAMPLE = """<?xml version="1.0"?>
 </rss>
 """
 
+
+def test_repository_reinitialization_keeps_active_keyword_query(tmp_path):
+    store = SQLiteStore(tmp_path / "registration.db")
+    try:
+        RssRepository(store)
+        cursor = store.conn.execute(
+            "SELECT rss_keyword_match('AI', 'AI') AS matched "
+            "UNION ALL SELECT rss_keyword_match('AI', 'AI')"
+        )
+        try:
+            RssRepository(store)
+            assert [row['matched'] for row in cursor.fetchall()] == [1, 1]
+        finally:
+            cursor.close()
+    finally:
+        store.close()
+
+
+def test_repository_registers_keyword_function_on_each_connection(tmp_path):
+    path = tmp_path / "connections.db"
+    for _ in range(2):
+        store = SQLiteStore(path)
+        try:
+            RssRepository(store)
+            assert store.conn.execute("SELECT rss_keyword_match('AI', 'AI')").fetchone()[0] == 1
+        finally:
+            store.close()
+
 ATOM_SAMPLE = """<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <title>Example Atom</title>

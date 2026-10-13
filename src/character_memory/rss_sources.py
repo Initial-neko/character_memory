@@ -226,7 +226,12 @@ class RssRepository:
         self.store = store
         # Category filtering has to happen in SQL to keep paging correct, and
         # the boundary rule below is not expressible in plain SQLite.
-        self.store.conn.create_function("rss_keyword_match", 2, keyword_matches, deterministic=True)
+        # SQLite cannot replace a function while a statement using it is active.
+        # Repositories share one store; register once under its connection lock.
+        with self.store._lock:
+            if not getattr(self.store, "_rss_keyword_match_registered", False):
+                self.store.conn.create_function("rss_keyword_match", 2, keyword_matches, deterministic=True)
+                self.store._rss_keyword_match_registered = True
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema)
         self.store.apply_schema_migration("rss/002-rich-content", self._add_rich_content)
         self.store.apply_schema_migration("rss/003-subscription-lifecycle", self._add_subscription_lifecycle)

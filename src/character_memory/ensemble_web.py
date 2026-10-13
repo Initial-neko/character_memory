@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from character_memory.ensemble_builder import EnsembleBuilderService, EnsembleRepository
+from character_memory.ensemble_builder import EnsembleBuilderService, EnsembleRepository, EnsembleSceneDraft
 from character_memory.ensemble_templates import ensemble_template_catalog
 
 
@@ -65,6 +65,14 @@ def attach_ensemble_routes(app):
             if failed is None:
                 raise HTTPException(status_code=502, detail="资料整理暂时失败，请稍后重试")
             return {"build": service.payload(failed)}
+
+    @app.post("/v1/ensembles/scenes/prepare")
+    def prepare_scene(req: EnsembleSceneDraft):
+        build = service.start(req.model_dump_json(), mode="SCENE")
+        try:
+            return {"build": service.research(build["group_id"])}
+        except Exception:
+            return {"build": service.payload(repository.get(build["group_id"]))}
 
     @app.get("/v1/ensembles/templates")
     def list_ensemble_templates():

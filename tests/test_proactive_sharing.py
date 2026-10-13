@@ -68,7 +68,7 @@ def test_sharing_context_is_bounded_and_excludes_unsourced_private_and_future_fa
         store.close()
 
 @pytest.mark.parametrize('entry', ['wake', 'intent'])
-def test_proactive_sharing_reuses_existing_image_delivery_and_source_receipt(tmp_path, entry):
+def test_proactive_sharing_reuses_existing_image_delivery_and_source_receipt(tmp_path, entry, monkeypatch):
     from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
     from character_memory.images import CharacterImage, ImageCatalog
     from character_memory.llm.client import ModelCallResult, ModelCallTrace
@@ -81,6 +81,22 @@ def test_proactive_sharing_reuses_existing_image_delivery_and_source_receipt(tmp
                 ActionDecision(type=ActionType.IMAGE, image_id='old_photo'),
                 ActionDecision(type=ActionType.GENERATE_IMAGE, image_purpose='SCENE', visual_intent='new image'),
             ]), trace=ModelCallTrace(attempt=1, model='local'))
+
+    # Full-suite application fixtures may leave a configured visual service.
+    # Exercise the actual non-user execution guard with an available provider,
+    # rather than relying on resource sanitization when no provider is present.
+    import character_memory.visual_runtime as visual
+    from test_p0_19_direct_visual_runtime import _runtime
+    service, _, provider, _, _, visual_store = _runtime(tmp_path)
+    workers = []
+    original_submit = service.submit
+    def submit(*args, **kwargs):
+        worker = original_submit(*args, **kwargs)
+        if worker is not None:
+            workers.append(worker)
+        return worker
+    monkeypatch.setattr(service, 'submit', submit)
+    monkeypatch.setattr(visual, '_service', service)
 
     (tmp_path / 'photo.png').write_bytes(b'local asset')
     images = ImageCatalog(tmp_path, [CharacterImage(id='old_photo', file='photo.png', label='已有照片')], source='character')
@@ -95,9 +111,16 @@ def test_proactive_sharing_reuses_existing_image_delivery_and_source_receipt(tmp
         assert [item.metadata['action'] for item in messages] == ['MESSAGE', 'IMAGE']
         assert all(item.metadata['source_event_id'] == result.event.id for item in messages)
         assert messages[1].metadata['image_id'] == 'old_photo'
-        assert all(action.type != ActionType.GENERATE_IMAGE for action in result.reaction.actions)
+        for worker in workers:
+            worker.join(timeout=3)
+            assert not worker.is_alive()
+        assert provider.requests == []
+        assert len(store.list_chat_events('a')) == 2
         assert len(model.calls) == 1
     finally:
+        for worker in workers:
+            worker.join(timeout=3)
+        visual_store.close()
         store.close()
 
 

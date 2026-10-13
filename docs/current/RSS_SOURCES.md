@@ -45,6 +45,11 @@ Seeding is opt-in because it writes into whatever database is already there, and
 
 `RssScheduler` is process-local and polls for sources whose own fetch interval has expired. Fetching starts after the first poll instead of blocking application startup. Manual refresh remains immediate.
 
+The RSS keyword SQL function is registered once per SQLiteStore connection under
+the store lock. Recreating a repository for a World RSS signal reuses that function
+without replacing it while another query is active; a new connection registers it
+independently.
+
 User-supplied URLs pass the same public-http target guard used by existing remote media paths. Redirect destinations are checked again.
 
 Feeds containing DOCTYPE/ENTITY declarations are rejected before XML parsing, and article/origin URLs are normalized to credential-free HTTP(S). During shutdown, in-flight fetching may finish its network read, but it cannot write to the closed SQLite store. The HTTP client is closed when the last active fetch returns.

@@ -582,6 +582,22 @@ loopback callback to the existing WorldObservationService. It has no database,
 shell, file, posting or Character-state access. Tool calls and page attempts are
 bounded across the whole task; callbacks revoke admission on cancellation, while
 already-running browser/DNS work retains the existing fetch lifecycle limitation.
+The real `world_lookup` callback records bounded tool steps in the existing detail
+file and capability result receipt: owning capability request ID, a local `step_id`
+(not a Claude JSON-RPC ID), tool name, validated query, UTC start/completion,
+elapsed milliseconds, status and source-backed result excerpts. At most
+`min(5, max_tool_calls + 1)` callbacks are recorded; additional callbacks set an
+explicit truncation flag. Invalid payloads omit their inputs; failures contain
+fixed error codes rather than raw exceptions. A result excerpt is at most 1200
+characters, with available length and excerpt-truncation recorded separately;
+titles and step source URLs are capped at 180/500 characters with explicit
+truncation flags (the UI does not open truncated URLs).
+This does not certify that the original webpage was fully read. No callback
+means an empty recorded list, not tool success. Timeout snapshots may retain
+`RUNNING` with no completion/result; inspection shows that outcome as unknown.
+Existing credential redaction is applied before persisting steps. Commands,
+environment values and hidden model thinking are not added to step records.
+
 Only tool receipts supply readable observations; Claude prose is not proof of a
 visit. Failed or interrupted tasks do not enter appraisal.
 

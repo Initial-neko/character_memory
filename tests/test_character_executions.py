@@ -129,3 +129,31 @@ def test_execution_paging_orders_absolute_time_and_exact_ties(tmp_path):
     assert [i['request_id'] for i in reader.list('alice',cursor=legacy)['items']]==['later','earlier']
     assert reader.list('bob')['items']==[]
     store.close()
+
+
+def test_tool_steps_survive_missing_detail_file_without_reexecution(tmp_path):
+    from character_memory.character_life import CharacterExecutionReader
+    from character_memory.runtime.claude_process import ClaudePrintRunner
+    from test_claude_process import fake_cli
+    store=SQLiteStore(tmp_path/'local.db')
+    try:
+        directory=tmp_path/'runs'
+        runner=ClaudePrintRunner(Observer(),directory,command=fake_cli(tmp_path))
+        req=replace(request(),constraints={**request().constraints,**limits()})
+        executor=CapabilityExecutor(store,Observer(),claude_runner=runner)
+        result=executor.execute(req)
+        path=directory/result.data['execution']['detail_path']
+        path.unlink()
+        before=store.conn.total_changes
+        reader=CharacterExecutionReader(store,directory)
+        detail=reader.detail('alice',req.request_id)
+        assert detail['details_state']=='UNAVAILABLE'
+        assert detail['tool_steps_state']=='RECORDED'
+        assert detail['tool_steps']==result.data['tool_steps']
+        assert detail['tool_steps'][0]['status']=='SUCCESS'
+        assert reader.detail('bob',req.request_id) is None
+        assert executor.execute(req)==result
+        assert store.conn.total_changes==before
+        runner.close()
+    finally:
+        store.close()

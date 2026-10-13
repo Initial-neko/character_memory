@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
+from character_memory.activity_schedule import paced_interval_minutes, reference_billing_window
 from character_memory.world_observation import observation_lifecycle, retain_world_observation
 from character_memory.runtime.context import render_observed_experiences
 from character_memory.runtime.capability_execution import CapabilityExecutor, CapabilityRequest, adapt_browse_decision
@@ -1456,10 +1457,20 @@ class WorldActivityScheduler:
             and getattr(self.access.settings, "world_activity_enabled", True)
         )
 
-    def _interval(self, field: str, default: float) -> float:
+    def _interval(self, field: str, default: float, now: datetime | None = None) -> float:
         base = max(10.0, min(10080.0, float(getattr(self.access.settings, field, default))))
         if field == "world_browse_interval_minutes" and bool(getattr(self.access.settings, "world_cost_saving_enabled", False)):
-            return base * 2.0
+            base *= 2.0
+        # Only paid World cognition opportunities are paced. RSS ingestion and
+        # other deterministic infrastructure retain their independent clocks.
+        if field in {
+            "world_browse_interval_minutes",
+            "world_pulse_refresh_minutes",
+            "world_pulse_discussion_interval_minutes",
+        }:
+            return paced_interval_minutes(
+                self.access.settings, base, now=now or datetime.now().astimezone()
+            )
         return base
 
     def browse_daily_max(self) -> int:
@@ -1667,12 +1678,13 @@ class WorldActivityScheduler:
             except Exception as error:
                 outcomes.append({'kind':'BROWSE_RECOVERY','subject_id':item['character_id'],
                                  'status':'FAILED','details':{},'error':str(error)[:800]})
-        pulse_interval = self._interval("world_pulse_refresh_minutes", 60.0)
+        pulse_interval = self._interval("world_pulse_refresh_minutes", 60.0, now)
         discuss_interval = self._interval(
             "world_pulse_discussion_interval_minutes",
             360.0,
+            now,
         )
-        browse_interval = self._interval("world_browse_interval_minutes", 30.0)
+        browse_interval = self._interval("world_browse_interval_minutes", 30.0, now)
 
         if bool(getattr(self.access.settings, "world_pulse_enabled", True)):
             self.repository.ensure_state(
@@ -1829,6 +1841,12 @@ class WorldActivityScheduler:
                 getattr(self.access.settings, "world_browse_enabled", True)
             ),
             "cost_saving_enabled": bool(getattr(self.access.settings, "world_cost_saving_enabled", False)),
+            "reference_billing_window": reference_billing_window(
+                now, getattr(self.access.settings, "activity_reference_holidays", ())
+            ),
+            "activity_pacing_enabled": bool(
+                getattr(self.access.settings, "activity_pacing_enabled", False)
+            ),
             "rss_reading_enabled": bool(getattr(self.access.settings, "world_rss_reading_enabled", False)),
             "pulse_refresh_minutes": self._interval(
                 "world_pulse_refresh_minutes",

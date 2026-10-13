@@ -262,6 +262,28 @@ An Opportunity is only a chance to decide whether to publish. It is never a post
 
 The scheduler persists `space_opportunity_state` and `space_opportunity_runs`, so a long-running test can be inspected the next day and service restarts do not reset the schedule.
 
+### Optional reference billing-window pacing
+
+`activity_pacing_enabled` defaults to false. When enabled, Space opportunities
+and the three World activity opportunity clocks use the current **Asia/Shanghai**
+reference DeepSeek billing window: Monday-Friday 09:00-12:00 and 14:00-18:00
+(except configured statutory holidays) are `PEAK`; all other periods are
+`OFF_PEAK`. Boundaries are half-open and do not depend on the host OS timezone.
+`activity_reference_holidays` is an operator-maintained ISO date list; there is
+no hidden holiday fetch. An absent holiday is classified as weekday peak,
+which is conservative for potential off-peak savings.
+
+The chosen reference-window multiplier adjusts the **base interval at the
+time the scheduler assesses/claims opportunities**. It does not alter historical
+runs or preempt a previously persisted `next_opportunity_at`; a due opportunity
+does not guarantee publication or interaction. The same principle applies to
+`world_activity_state`, with World browse jitter retained. Persisted settings
+require a Character Runtime restart. Direct chat, user-triggered actions, group
+chat, RSS polling, provider prices, global token budgets, and invoice billing
+are NOT modified by this feature. OpenCode gateway pass-through of a DeepSeek
+off-peak discount has **not** been established; this feature must not be
+described as a proven 50% cost saving.
+
 `space_opportunity_runs.details_json` records the World Observation outcome, the derived `plan` payload (has_text + media intents) and the media/audience errors. It also keeps `model_calls`: the raw structured output of each autonomous call (`world_explore`, `world_appraisal`, `space_plan`) with the model name, the attempt number, and the output rejected by schema validation. Raw output is truncated at 2000 characters per call and flagged when it was cut. `repaired: true` on a record means the first output failed validation and the generic repair prompt produced the kept one — the path where an invalid media intent comes back as an empty list instead of surfacing an error.
 
 The ledger is read at two sizes. `GET /v1/space/dev/status` reports `recent_runs` as a verdict per call (`attempt`, `chars`, plus `repaired` / `truncated` / `failed` only when true) so polling the status never carries raw model text, and `recent_run_details: "summary"` says so. `GET /v1/space/dev/opportunity/run/{run_id}` returns one run in full, raw output included; Dev Console's **决策账本** Run ID control reads that endpoint.

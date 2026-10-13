@@ -6,6 +6,32 @@ import json
 from character_memory.domain.models import EventType
 
 
+def _event_channel(event) -> str:
+    metadata = event.metadata
+    if event.event_type in {EventType.SPACE_POST_SEEN, EventType.SPACE_COMMENT_RECEIVED, EventType.SOCIAL_POST}:
+        return "SPACE"
+    if event.event_type == EventType.WORLD_OBSERVATION:
+        return "WORLD"
+    if metadata.get("source_conversation_event_id") is not None or metadata.get("group_event_id") is not None:
+        return "GROUP"
+    channel = str(metadata.get("channel") or "").upper()
+    if channel:
+        return channel
+    if event.event_type in {EventType.USER_MESSAGE, EventType.CHARACTER_MESSAGE, EventType.PROACTIVE_INTENT, EventType.TIME_TICK}:
+        return "DIRECT"
+    return "PERSONAL"
+
+
+def _recent_event_text(event) -> str:
+    # Preserve social provenance when the same Person later wakes in Direct.
+    # These are structured source facts, never inferred from message wording.
+    scope = {"channel": _event_channel(event)}
+    for key in ("conversation_id", "commenter_id", "post_id", "comment_id", "group_event_id"):
+        if key in event.metadata:
+            scope[key] = event.metadata[key]
+    return f"- {event.event_time.isoformat()} {event.event_type.value} {json.dumps(scope, ensure_ascii=False)}: {event.content}"
+
+
 def _relationship_time_text(event, last_chat_event) -> str:
     if last_chat_event is None:
         return "- 这是目前可见历史中的第一次聊天。"
@@ -87,7 +113,7 @@ def compile_context(
     relationship_text = "\n".join(f"- [{m.memory_type}] {m.content}" for m in relationship) or "- 无"
     recalled = "\n".join(f"- [{m.memory_type}] {m.content}" for m in other) or "- 无"
     recent = (
-        "\n".join(f"- {e.event_time.isoformat()} {e.event_type.value}: {e.content}" for e in (recent_events or []))
+        "\n".join(_recent_event_text(e) for e in (recent_events or []))
         or "- 无"
     )
     observed = render_observed_experiences(observed_events)
@@ -192,6 +218,16 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
         intent_contract = "本轮 intent_candidates=[]；公开互动不创建未来私聊意图。"
 
     relationship_time = _relationship_time_text(event, last_chat_event)
+    channel = _event_channel(event)
+    delivery_contract = f"当前表达渠道：{channel}。"
+    if channel == "DIRECT":
+        delivery_contract += (
+            "当前接收对象是与你私聊的用户，不是 Recent Events 中出现的其他角色。"
+            "Space 评论、群聊发言和其他角色的经历只是背景，不能当作用户刚刚对你说的话，"
+            "不能把对另一个角色的回复、称呼或约定发给用户。想继续角色间交流时，本轮保持沉默；"
+            "可以自愿向用户分享相关经历，但必须重新面向用户表达并保留实际参与者归属。"
+            "本轮新建的未来 intent_candidates 也只能是面向该用户的私聊意图。"
+        )
     return f"""# Identity / Persona
 {persona}
 
@@ -222,6 +258,9 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 # Current Event
 时间：{event.event_time.isoformat()}
 {event.event_type.value}: {event.content}
+
+# Delivery Context
+{delivery_contract}
 
 # Behavioral Contract
 你是一个持续存在的人物，不是客服。用户发来消息不代表你必须回复；真实的人会回复、追问、只发一个表情，也会在对话自然结束、需要空间、没有想说的话或不想回应时保持沉默。

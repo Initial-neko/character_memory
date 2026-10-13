@@ -978,11 +978,49 @@ class SQLiteStore:
         )
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_intent_deferral_audit ON intent_deferral_audit(intent_id,id)")
 
+    def suppress_non_direct_intents(self, character_id: str, now: datetime) -> None:
+        """Quarantine old social intents before they can enter Direct dispatch.
+
+        Admission guards do not repair already-persisted PENDING rows. Keep the
+        source fact and intent, recording the rejection in the existing audit.
+        Source-less legacy intents retain their existing compatibility behavior.
+        """
+        blocked_types = (
+            EventType.SPACE_POST_SEEN.value, EventType.SPACE_COMMENT_RECEIVED.value,
+            EventType.WORLD_OBSERVATION.value, EventType.SOCIAL_POST.value,
+            EventType.PROACTIVE_INTENT.value, EventType.VISUAL_OBSERVATION.value,
+        )
+        placeholders = ",".join("?" for _ in blocked_types)
+        metadata = "CASE WHEN json_valid(e.metadata_json) THEN e.metadata_json ELSE '{}' END"
+        with self.transaction(immediate=True):
+            cursor = self.conn.execute(
+                f"""UPDATE intents SET status='SUPPRESSED'
+                WHERE character_id=? AND status='PENDING' AND EXISTS (
+                    SELECT 1 FROM events e WHERE e.id=intents.source_event_id AND (
+                        e.character_id<>intents.character_id OR e.event_type IN ({placeholders})
+                        OR upper(coalesce(json_extract({metadata}, '$.channel'), '')) IN ('GROUP','SPACE')
+                        OR json_extract({metadata}, '$.source_conversation_event_id') IS NOT NULL
+                        OR json_extract({metadata}, '$.group_event_id') IS NOT NULL
+                    )
+                ) RETURNING id,source_event_id""",
+                (character_id, *blocked_types),
+            )
+            rows = cursor.fetchall()
+            cursor.close()
+            for row in rows:
+                self.conn.execute(
+                    "INSERT INTO intent_deferral_audit(intent_id,decided_at,decision,source_event_id) VALUES(?,?,?,?)",
+                    (row['id'], now.isoformat(), 'NON_DIRECT_SOURCE', row['source_event_id']),
+                )
+
     def claim_due_intent(self, character_id: str, now: datetime, *, next_allowed_at: datetime,
                          interval_minutes: float) -> dict | None:
         """Claim and consume cooldown in one transaction before any provider call."""
         stamp = epoch_us(now)
         with self.transaction():
+            # Re-check under the same writer transaction as the claim: callers
+            # need not have run has_due, and another connection may have written.
+            self.suppress_non_direct_intents(character_id, now)
             cursor = self.conn.execute(
                 "UPDATE intents SET status='PROCESSING' WHERE id=("
                 "SELECT id FROM intents WHERE character_id=? AND status='PENDING' "

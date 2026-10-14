@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -283,6 +284,13 @@ class GroupRepository:
             raise KeyError("group not found")
         stamp = epoch_us(now)
         with self.store.transaction():
+            retained = {
+                row["actor_id"]: (row["joined_at"], row["joined_at_epoch"])
+                for row in self.store.conn.execute(
+                    "SELECT actor_id,joined_at,joined_at_epoch FROM conversation_members "
+                    "WHERE conversation_id=? AND actor_type='CHARACTER'", (conversation_id,),
+                ).fetchall()
+            }
             self.store.conn.execute(
                 "DELETE FROM conversation_members WHERE conversation_id=? AND actor_type='CHARACTER'",
                 (conversation_id,),
@@ -290,7 +298,7 @@ class GroupRepository:
             for position, character_id in enumerate(cleaned, start=1):
                 self.store.conn.execute(
                     "INSERT INTO conversation_members(conversation_id,actor_type,actor_id,position,joined_at,joined_at_epoch) VALUES(?,?,?,?,?,?)",
-                    (conversation_id, "CHARACTER", character_id, position, now.isoformat(), stamp),
+                    (conversation_id, "CHARACTER", character_id, position, *retained.get(character_id, (now.isoformat(), stamp))),
                 )
             self.store.conn.execute(
                 "UPDATE conversations SET updated_at=?,updated_at_epoch=? WHERE id=? AND type='GROUP'",
@@ -488,14 +496,63 @@ class GroupRepository:
             self.store._maybe_commit()
             return cur.rowcount > 0
 
-    def list_events(self, conversation_id: str, limit: int = 160) -> list[GroupEvent]:
+    def list_events(self, conversation_id: str, limit: int = 160, *, source_event: GroupEvent | None = None, character_id: str | None = None) -> list[GroupEvent]:
         limit = max(1, min(int(limit), 500))
         with self.store._lock:
+            boundary = ""
+            args: list = [conversation_id]
+            if source_event is not None:
+                boundary += " AND event_time_epoch<=? AND (id<=? OR (turn_id=? AND actor_type='CHARACTER'))"
+                args.extend([epoch_us(source_event.event_time), source_event.id, source_event.turn_id])
+            if character_id is not None:
+                boundary += " AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id=conversation_events.conversation_id AND m.actor_type='CHARACTER' AND m.actor_id=? AND m.joined_at_epoch<=conversation_events.event_time_epoch)"
+                args.append(character_id)
             rows = self.store.conn.execute(
-                "SELECT * FROM conversation_events WHERE conversation_id=? AND event_time_epoch IS NOT NULL ORDER BY event_time_epoch DESC,id DESC LIMIT ?",
-                (conversation_id, limit),
+                f"SELECT * FROM conversation_events WHERE conversation_id=? AND event_time_epoch IS NOT NULL{boundary} ORDER BY event_time_epoch DESC,id DESC LIMIT ?",
+                [*args, limit],
             ).fetchall()
         return [self._event_from_row(row) for row in reversed(rows)]
+
+    def recall_shared_events(self, conversation_id: str, character_id: str, query: str, *, at: datetime, max_id: int, exclude_ids: list[int] | None = None, limit: int = 4) -> list[GroupEvent]:
+        """Bounded lexical projection of durable shared facts, with no model call.
+
+        As with observed-event recall, match in SQL before limiting results so
+        unrelated recent chat cannot push a relevant old fact out of recall.
+        Chinese bigrams also match subjects inside ordinary unsegmented questions.
+        """
+        normalized = str(query or "").lower()[:512]
+        for phrase in ("你还记得", "还记得", "记得", "昨天", "上次", "最近", "什么", "有没有", "一起", "我们", "你们"):
+            normalized = normalized.replace(phrase, " ")
+        stopwords = {"what", "when", "where", "which", "about", "have", "did", "you", "the", "and", "remember"}
+        terms = []
+        for token in re.findall(r"[a-z0-9][a-z0-9_-]{1,63}|[\u4e00-\u9fff]{2,32}", normalized):
+            if token in stopwords:
+                continue
+            terms.append(token)
+            if re.fullmatch(r"[\u4e00-\u9fff]+", token):
+                terms.extend(token[index:index + 2] for index in range(len(token) - 1))
+        terms = list(dict.fromkeys(terms))[:24]
+        if not terms or limit <= 0:
+            return []
+        metadata = "CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END"
+        text = f"lower(coalesce(json_extract({metadata}, '$.display_text'),content))"
+        score = " + ".join("CASE WHEN instr(search_text,?)>0 THEN ? ELSE 0 END" for _ in terms)
+        exclusions = list(dict.fromkeys(exclude_ids or []))[:500]
+        excluded = f" AND id NOT IN ({','.join('?' for _ in exclusions)})" if exclusions else ""
+        with self.store._lock:
+            rows = self.store.conn.execute(f"""WITH candidates AS (
+                SELECT *, {text} AS search_text FROM conversation_events
+                WHERE conversation_id=? AND event_time_epoch<=? AND id<=?
+                AND actor_type IN ('USER','CHARACTER') AND event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE')
+                AND coalesce(json_extract({metadata}, '$.hidden'),0)=0{excluded}
+                AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id=conversation_events.conversation_id
+                    AND m.actor_type='CHARACTER' AND m.actor_id=? AND m.joined_at_epoch<=conversation_events.event_time_epoch)
+            ), ranked AS (SELECT *, ({score}) AS relevance FROM candidates)
+            SELECT * FROM ranked WHERE relevance>0 ORDER BY relevance DESC,event_time_epoch DESC,id DESC LIMIT ?""",
+                [conversation_id, epoch_us(at), int(max_id), *exclusions, character_id,
+                 *[value for term in terms for value in (term, len(term))], min(4, int(limit))],
+            ).fetchall()
+        return [self._event_from_row(row) for row in rows]
 
     def list_event_page(self, conversation_id: str, *, limit: int = 50, before_id: int | None = None) -> GroupHistoryPage:
         page_size = max(1, min(int(limit), 100))

@@ -8,6 +8,7 @@ import os
 import logging
 import time
 
+from character_memory.life_conversation import prepare_life_message
 from character_memory.api import ChatRequest
 from character_memory.application.async_conversation import (
     ConversationEventHub,
@@ -204,6 +205,14 @@ def attach_async_routes(app):
         ensure_character(req.character_id)
         selected_sticker = sticker_for(req.sticker_id)
         store = active_store()
+        reference = None
+        message = req.message
+        if req.life_reference:
+            ensure_character(req.life_reference.character_id)
+            profile = profiles_by_id()[req.life_reference.character_id]
+            if profile and profile.get("archived_at"):
+                raise HTTPException(409, "人物已归档，请先恢复")
+            message, reference = prepare_life_message(store, req.life_reference, message, character_id=req.character_id, conversation_id=req.conversation_id)
         selected_image = None
         image_data_url = None
         now = req.at or datetime.now().astimezone()
@@ -221,7 +230,7 @@ def attach_async_routes(app):
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         event = build_user_event(
-            req.message,
+            message,
             character_id=req.character_id,
             conversation_id=req.conversation_id,
             at=now,
@@ -233,7 +242,11 @@ def attach_async_routes(app):
         presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, [req.character_id])
         if presentation:
             event.metadata["live2d"] = presentation
-        event = store.append_event(event)
+        with store._lock:
+            if reference:
+                event.content, reference = prepare_life_message(store, req.life_reference, req.message, character_id=req.character_id, conversation_id=req.conversation_id)
+                event.metadata["life_reference"] = reference
+            event = store.append_event(event)
         scheduler.enqueue_direct(
             req.character_id,
             req.conversation_id,
@@ -261,6 +274,14 @@ def attach_async_routes(app):
             raise HTTPException(status_code=404, detail="group not found")
         if len(group.member_ids) < 2:
             raise HTTPException(status_code=409, detail="群聊还在构建中，请先完成成员确认。")
+        reference = None
+        message = req.message
+        if req.life_reference:
+            ensure_character(req.life_reference.character_id)
+            profile = profiles_by_id()[req.life_reference.character_id]
+            if profile and profile.get("archived_at"):
+                raise HTTPException(409, "人物已归档，请先恢复")
+            message, reference = prepare_life_message(store, req.life_reference, message, conversation_id=conversation_id)
         try:
             mentions = resolve_group_mentions(group.member_ids, req.message, profiles_by_id(), req.mentions)
         except ValueError as exc:
@@ -284,7 +305,7 @@ def attach_async_routes(app):
 
         event = build_group_user_event(
             conversation_id,
-            req.message,
+            message,
             at=now,
             image=selected_image,
             sticker=selected_sticker,
@@ -294,7 +315,11 @@ def attach_async_routes(app):
             presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, group.member_ids)
             if presentation:
                 event.metadata["live2d"] = presentation
-            event = repository.append_user_event(event)
+            with store._lock:
+                if reference:
+                    event.content, reference = prepare_life_message(store, req.life_reference, req.message, conversation_id=conversation_id)
+                    event.metadata["life_reference"] = reference
+                event = repository.append_user_event(event)
         except KeyError as exc:
             if selected_image is not None:
                 store.delete_media_asset(asset.id)

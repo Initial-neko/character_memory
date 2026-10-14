@@ -356,7 +356,11 @@ resolution 也进入 Runtime Trace。旧行和原时间保留，旧查询继续�
 
 TIME_TICK Wake 与到期 PROACTIVE_INTENT 都允许人物在自然需要时选择 `VOICE_MESSAGE`；这不是强制语音。语音 action 仍先落成 durable pending message，再复用 Direct 的 VoiceMessageMaterializer 生成音频并更新同一 Event。
 
-Wake/Intent 当前不自动获得自主 ImageGen 权限。自主生成图像只发生在用户消息 reaction 中，避免后台无配额地消耗图片 Provider。
+Wake/Intent 复用既有文字、语音和 `IMAGE` 表达；图片只能引用当前 Available Images 的合法既有资源，不证明人物刚拍过照片或图中事件已发生。当前不自动获得自主 ImageGen 权限。自主生成图像只发生在用户消息 reaction 中，避免后台无配额地消耗图片 Provider。
+
+Direct Wake/Intent 在原有一次 reaction 中附带有限个人分享观察：从同一人物、机会时间之前的最近 32 条 Event 中，选择最多 4 条有来源的 `WORLD_OBSERVATION`，仅接受 `PERSONAL_BROWSE` / `WORLD_PULSE`。不扫描未读 RSS inventory，不从未保留的 appraisal、失败执行、屏幕记录、Space 私密讨论或其他人物私聊制造经历。每条快照保存源 Event ID、观察时间、来源及原 RSS 阅读范围；正文最多 600 字、来源最多两项各 240 字，Prompt 独立预算 3200 字，并与 Observed Experiences 的检索结果按 ID 去重。候选快照随本次机会 Event 留存，完整原观察仍可按 ID 查验；窗口之外的观察继续使用既有按主题检索，不承诺穷尽历史。
+
+这些材料是人物自身观察的上下文节选，不代表用户在场、已读或已经收到分享。Feed 节选、截断、阅读字数和未抓取原文的说明保持原义。人物可以基于真实共同经历或观察自愿表达，也可以仅因想联系用户说一句或保持沉默；不得臆测用户当前心情、空闲或需要安慰。以上自然表达要求属于原反应调用的模型契约，不是额外语义评估或真实模型质量保证。原 Wake 节奏、Intent 冷却/配额/来源准入继续生效，不增加设置、通知或执行权限。
 
 ## 11. Multimodal input is still one Person
 

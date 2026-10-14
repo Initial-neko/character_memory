@@ -600,17 +600,21 @@ class SpaceRepository:
                     request_id,
                 ),
             )
+            # User notifications represent human-directed replies, not ambient
+            # Character-to-Character Space conversation. A model may emit
+            # mentions_user while replying to another character or commenting
+            # on an autonomous post; keep that shared comment as written but
+            # do not route it into the human unread inbox.
             reasons: list[str] = []
-            if normalized_actor_type == "CHARACTER":
-                if reply_to_comment_id is not None:
-                    parent_row = self.store.conn.execute(
-                        "SELECT actor_type FROM space_comments WHERE id=? AND post_id=?",
-                        (int(reply_to_comment_id), int(post_id)),
-                    ).fetchone()
-                    if parent_row is not None and str(parent_row["actor_type"] or "CHARACTER") == "USER":
-                        reasons.append("REPLY")
-                if mentions_user:
-                    reasons.append("MENTION")
+            if normalized_actor_type == "CHARACTER" and reply_to_comment_id is not None:
+                parent_row = self.store.conn.execute(
+                    "SELECT actor_type FROM space_comments WHERE id=? AND post_id=?",
+                    (int(reply_to_comment_id), int(post_id)),
+                ).fetchone()
+                if parent_row is not None and parent_row["actor_type"] == "USER":
+                    reasons.append("REPLY")
+                    if mentions_user:
+                        reasons.append("MENTION")
             if reasons:
                 self.store.conn.execute(
                     "INSERT OR IGNORE INTO space_notifications("

@@ -25,6 +25,19 @@ real system environment > adjacent project .env > legacy config.yaml secret
 
 `character-stack` does **not** promote the whole project `.env` into every child process. Doing so would make persisted values look like immutable system overrides and would hide later Settings edits. Only the GSV sidecar receives its persisted `GSV_TTS_*` values as process environment because the upstream runtime consumes that contract.
 
+## Schema-driven category navigation
+
+The Settings Center includes a **sticky category navigation** beside its
+configuration cards on desktop and a horizontally scrollable category strip
+on narrower viewports. Links are derived from the existing `GET /v1/settings`
+section order, not a duplicated client-side registry; a new supported section
+automatically gets a native keyboard-accessible anchor. The same navigation
+always exposes Secrets and the configuration lifecycle contract. Native
+anchors preserve URL fragments, keyboard navigation, and reload behavior.
+The visual change does not promote diagnostic fields or expand any closed
+advanced controls. On mobile the strip scrolls inside its own region rather
+than widening the whole page.
+
 ## 2. Configuration levels
 
 Every schema field and every secret carries a **level** and non-empty **help text**, served in `GET /v1/settings`. Settings renders the help directly beneath editable fields and exposes it as the input tooltip/accessibility description; Secret rows likewise explain what the key unlocks. CI rejects schema fields or Secrets without help text.

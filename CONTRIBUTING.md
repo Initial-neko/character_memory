@@ -49,6 +49,49 @@ uv run pytest -q
 
 If your change affects browser behavior, also run the relevant browser smoke checks. If it affects a real local model or CUDA sidecar, document the live validation separately from CI.
 
+## Visual acceptance: Issue-owned evidence (mandatory for UI changes)
+
+A passing unit/Playwright/browser smoke test only establishes its asserted behavior.
+It **does not** establish that the final UI is readable, attractive, aligned or usable.
+Any PR that changes visible Web/Android UI must have a **separate visual acceptance
+result** before final sign-off. Backend-only PRs explicitly say `VISUAL N/A` and why.
+
+Record the evidence **in the originating GitHub Issue** and link the relevant
+entry in [#121: real Chromium frontend acceptance](https://github.com/Initial-neko/character_memory/issues/121)
+for integrated frontend review. Attach *actual image files* as Issue images or
+evidence-linked Issue comments: local-only filenames, transient Agent artifacts,
+code-source assertions and prose PASS summaries are not sufficient.
+
+For each affected user-visible surface:
+
+1. **Reference/expectation** — attach the previously agreed mock/design image
+   if one exists, label it as *design reference* or *previous accepted product
+   screenshot*, and identify the desired state; do not invent a reference
+   when none was agreed.
+2. **Rendered evidence** — capture the actual served app in a real Chromium
+   browser and include at least the applicable desktop and narrow/mobile
+   viewports. Record branch, exact commit SHA, page/state, viewport/device,
+   browser, and timestamp. Android native UX additionally requires emulator
+   screenshots and final physical-device acceptance, not Web mobile screenshots.
+3. **Visual comparison** — explicitly check layout, hierarchy, fonts, color
+   and contrast, avatar/media aspect ratios, interactive controls, scrolling,
+   overlays, responsive clipping and representative empty/loading/error states.
+   State notable differences, including those that passed functionality tests.
+4. **Verdict** — mark `VISUAL PASS`, `VISUAL FAIL`, or `VISUAL BLOCKED`;
+   link reproduction steps, Issue screenshots and any corrective PR for FAIL.
+   A missing actual screenshot or unavailable real runtime is **BLOCKED**,
+   never automatically PASS. Scrub secrets and private personal data.
+5. **Integration/human gate** — repeat affected visual checks against the
+   exact final integrated `main` commit after merges. Agent/browser
+   acceptance is preliminary; only the project owner's explicit visual
+   review completes the human acceptance gate. A subsequent UI change
+   invalidates the affected earlier screen evidence until rechecked.
+
+Do not commit generated screenshot albums, arbitrary image mockups or acceptance
+logs merely to satisfy this rule; GitHub Issues/PRs own task evidence. Include
+the originating Issue and its visual verdict/evidence links in UI PR descriptions.
+A non-visual code review must never mark an unverified UI as visually accepted.
+
 ## Documentation checks before submission
 
 Run `python scripts/check_docs.py` before each commit. It checks local link targets in maintained documents and requires every `docs/current/*.md` to be indexed in `docs/README.md`. It does not fetch external links or validate Markdown heading anchors.

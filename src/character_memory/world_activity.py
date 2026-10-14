@@ -8,9 +8,11 @@ import threading
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+import yaml
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from character_memory.activity_schedule import paced_interval_minutes, reference_billing_window
+from character_memory.vocation import read_vocation, render_vocation
 from character_memory.world_observation import observation_lifecycle, retain_world_observation
 from character_memory.runtime.context import render_observed_experiences
 from character_memory.runtime.capability_execution import CapabilityExecutor, CapabilityRequest, adapt_browse_decision
@@ -1145,6 +1147,24 @@ Summary: {topic["summary"]}
 如果 browse=true，query 必须是简短公开搜索词，绝不能包含用户隐私、私聊原句、住址、账号、联系方式或秘密。
 选择人物自己会感兴趣的内容，不要为了系统有数据而硬搜。
 """
+                # Optional per-person vocation adds a persistent research focus
+                # to the existing Personal Browse opportunity. It does not
+                # create a second scheduler, force a search, or grant any tool.
+                profile = next(
+                    (item for item in self._active_profiles() if item["id"] == character_id),
+                    None,
+                )
+                if profile is not None and profile.get("persona_path"):
+                    try:
+                        vocation = read_vocation(profile["persona_path"])
+                    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+                        logger.warning(
+                            "world.vocation ignored_invalid character=%s error=%s",
+                            character_id, exc,
+                        )
+                        vocation = None
+                    if vocation is not None:
+                        plan_prompt += render_vocation(vocation)
                 candidates = []
                 plan_schema = PersonalBrowsePlan
                 rss_limit = 1 if getattr(self.access.settings, "world_cost_saving_enabled", False) else 2

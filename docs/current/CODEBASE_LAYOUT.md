@@ -148,6 +148,7 @@ voices.py                   per-persona voice.yaml registry contract
 gsv_tts_runtime.py          isolated :9014 formal GSV sidecar adapter/runtime
 character_onboarding.py     shared first avatar / voice selection / creation provenance
 ensemble_builder.py         Ensemble build persistence, research and confirmation
+ensemble_templates.py       Curated original Persona/relationship drafts, no provider execution
 encounter.py / encounter_store.py temporary candidates, trial replies and scheduler
 background_services.py      lifecycle ownership for long-lived workers
 config.py                   Settings model + character discovery
@@ -315,7 +316,7 @@ message_content.js      Direct/Group shared message body renderer
 | Shared Search / World | `runtime_services.py` → `search.py` → `browser_web.py` / `world_observation.py` → `world_web.py` |
 | Personal Browse / RSS / local recovery | `world_activity.py` → `runtime/capability_execution.py` / `rss_world.py` → `world_recovery.py` → `world_web.py` |
 | Stateless Claude World execution | `runtime_services.py` → `runtime/claude_process.py` / `claude_tools.py` / `process_tree.py` → `runtime/capability_execution.py` |
-| Character life / execution inspection | `character_life.py` → `character_life_web.py` → `web/life.js` |
+| Character life / execution inspection | `character_life.py` / `life_conversation.py` → `character_life_web.py` → `web/life.js` / `web/app.js` |
 | Avatar | `runtime_services.py` → `avatars.py` / `avatar_intent.py` → `avatar_web.py` → `web/avatars.js` |
 | Voice/ASR | `media_bootstrap.py` → `media_runtime.py` → `media_server.py` → `web/voice.js` |
 | Formal TTS | `config.py` → `media_server.py` → `tts_lab.py` → `web/voice.js` |
@@ -333,8 +334,10 @@ Live2D 通话展示：`live2d_web.py` 负责本地资源发现/安全路径与�
 ### Character life observation page
 
 - `character_life.py`: read-only durable event/state/Memory/Intent and execution receipt projections, absolute-time pagination and per-character usage; no runtime execution.
-- `character_life_web.py`: Core-owned `/life`, per-character life and execution list/detail GET routes.
+- `character_relationships.py`: bounded read-only recent counterpart interactions and current User Direct pending-Intent review; no relationship scoring or runtime execution.
+- `character_life_web.py`: Core-owned `/life`, per-character life/execution GET routes and read-only reference resolution.
+- `life_conversation.py`: validates existing source ownership, participation, visibility and destination; normal async sending revalidates and persists provenance with the user fact.
 - `web/life.html`, `life.js`, `life.css`: dedicated timeline, source/detail and state comparison UI.
-- `tests/test_character_life*.py`, `test_character_executions*.py`: provenance/isolation/paging contracts and explicit isolated browser checks.
+- `tests/test_character_life*.py`, `test_character_executions*.py`, `test_life_conversation*.py`: provenance/isolation/paging contracts and explicit isolated browser checks.
 
 The owning durable observation contract is [MEMORY](MEMORY.md); `life/` continues to own the separate frozen simulator.

@@ -52,6 +52,8 @@ def attach_core_direct_routes(app, access: CoreApiRouteAccess):
 
     @app.post("/v1/chat")
     def chat(req: ChatRequest):
+        if req.life_reference:
+            raise HTTPException(422, "生活引用仅支持现有异步消息入口")
         access.ensure_character(req.character_id)
         selected_sticker = None
         if req.sticker_id:

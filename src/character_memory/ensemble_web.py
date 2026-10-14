@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from character_memory.ensemble_builder import EnsembleBuilderService, EnsembleRepository
+from character_memory.ensemble_builder import EnsembleBuilderService, EnsembleRepository, EnsembleSceneDraft
+from character_memory.ensemble_templates import ensemble_template_catalog
 
 
 class EnsembleStartRequest(BaseModel):
@@ -64,6 +65,25 @@ def attach_ensemble_routes(app):
             if failed is None:
                 raise HTTPException(status_code=502, detail="资料整理暂时失败，请稍后重试")
             return {"build": service.payload(failed)}
+
+    @app.post("/v1/ensembles/scenes/prepare")
+    def prepare_scene(req: EnsembleSceneDraft):
+        build = service.start_scene(req)
+        try:
+            return {"build": service.research(build["group_id"])}
+        except Exception:
+            return {"build": service.payload(repository.get(build["group_id"]))}
+
+    @app.get("/v1/ensembles/templates")
+    def list_ensemble_templates():
+        return {"templates": ensemble_template_catalog()}
+
+    @app.post("/v1/ensembles/templates/{template_id}/prepare")
+    def prepare_ensemble_template(template_id: str):
+        try:
+            return {"build": service.prepare_template(template_id)}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/v1/ensembles/{group_id}")
     def get_ensemble(group_id: str):

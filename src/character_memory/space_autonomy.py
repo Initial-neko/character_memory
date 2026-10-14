@@ -20,6 +20,7 @@ from character_memory.domain.models import (
     WorldObservationAppraisal,
     WorldObservationDisposition,
 )
+from character_memory.activity_schedule import paced_interval_minutes, reference_billing_window
 from character_memory.space_media import SpacePostMediaRepository
 from character_memory.space_media_executor import SpaceMediaExecutor
 from character_memory.space_store import SpaceRepository
@@ -1126,13 +1127,16 @@ class SpaceAutonomyScheduler:
         self._pending_lock = threading.Lock()
         self._pending_threads: deque[tuple[int, int, datetime]] = deque()
 
-    def interval_minutes(self) -> float:
-        return max(
+    def interval_minutes(self, now: datetime | None = None) -> float:
+        base = max(
             10.0,
             min(
                 10080.0,
                 float(getattr(self.access.settings, "space_opportunity_interval_minutes", 1440.0)),
             ),
+        )
+        return paced_interval_minutes(
+            self.access.settings, base, now=now or datetime.now().astimezone()
         )
 
     def max_posts_per_day(self) -> int:
@@ -1153,7 +1157,7 @@ class SpaceAutonomyScheduler:
         return self.repository.ensure_opportunity_state(
             character_id,
             now,
-            self.interval_minutes(),
+            self.interval_minutes(now),
         )
 
     def memory_metrics(self, now: datetime | None = None) -> dict:
@@ -1179,7 +1183,7 @@ class SpaceAutonomyScheduler:
                     "last_post_id": state.get("last_post_id"),
                     "posts_today": self._posts_today(character_id, now),
                     "configured_interval_minutes": float(
-                        state.get("configured_interval_minutes") or self.interval_minutes()
+                        state.get("configured_interval_minutes") or self.interval_minutes(now)
                     ),
                     "minutes_until_next": round(
                         max(0, int(state["next_opportunity_at_epoch"]) - epoch_us(now)) / 60_000_000,
@@ -1231,7 +1235,13 @@ class SpaceAutonomyScheduler:
 
         return {
             "enabled": autonomy_enabled(self.access),
-            "interval_minutes": self.interval_minutes(),
+            "interval_minutes": self.interval_minutes(now),
+            "reference_billing_window": reference_billing_window(
+                now, getattr(self.access.settings, "activity_reference_holidays", ())
+            ),
+            "activity_pacing_enabled": bool(
+                getattr(self.access.settings, "activity_pacing_enabled", False)
+            ),
             "max_posts_per_day": self.max_posts_per_day(),
             "media_enabled": bool(getattr(self.access.settings, "space_media_enabled", True)),
             "media_max_items": max(0, min(9, int(getattr(self.access.settings, "space_media_max_items", 3)))),
@@ -1317,7 +1327,7 @@ class SpaceAutonomyScheduler:
             self.access.settings.space_scheduler_poll_seconds = self.poll_seconds
 
         if rearm:
-            interval = self.interval_minutes()
+            interval = self.interval_minutes(now)
             next_at = now + timedelta(minutes=interval)
             for profile in self.service._active_profiles():
                 self.repository.set_next_opportunity(
@@ -1392,7 +1402,7 @@ class SpaceAutonomyScheduler:
         if not autonomy_enabled(self.access):
             return []
         outcomes = []
-        interval = self.interval_minutes()
+        interval = self.interval_minutes(now)
         for profile in self.service._active_profiles():
             character_id = profile["id"]
             state = self._state_for(character_id, now)

@@ -263,7 +263,7 @@ Derived cognition  -> Memory / Mental State / Intent / Trace
 - `conversation_events`
 - `conversation_runtime_traces`
 
-SQLite 是当前单机事实源。连接由进程内 `RLock` 保护，并通过 migration ledger 做幂等 schema 演进。
+SQLite 是当前单机事实源。连接由进程内 `RLock` 保护，并通过 migration ledger 做幂等 schema 演进。持久化数据库连接在 schema 初始化前启用 SQLite **WAL** 模式，允许不同连接的读快照与写提交并行；跨连接写者仍然串行，普通核心连接最多等待 15 秒取得 SQLite 锁。只读/调用统计连接继续使用其自身独立的短等待策略，不能通过提高业务写等待把遥测写入变成聊天延迟。此策略缓解正常读写竞争，不承诺外部进程持有长期写事务时不会超时；也不意味着能够启动多个相互独立的 Character Runtime workers。
 
 Core Web 在 Runtime 懒初始化前后复用同一个 `SQLiteStore`：Web 装配拥有连接，后创建的 AppBundle 借用它。World 回执、观察和个人认知的本地事务不能通过另一连接更新自己持有写锁的数据库。独立 CLI AppBundle 仍拥有自己的 Store。事务主体或提交失败均回滚并恢复事务深度。
 
@@ -562,8 +562,40 @@ and shared article data. The same durable execution allowance and result cache
 apply. Channel identity and item generations come from server context, not
 external text. This is not a general Tool registry or a second Character runtime.
 
-World WEB_SEARCH can opt into `world_browse_execution_backend: claude`; the
-default remains `direct`. RuntimeServices owns one bounded ClaudePrintRunner.
+World WEB_SEARCH can opt into `world_browse_execution_backend: claude`, but
+this **global preference is never a character permission**. A character must
+also have an operator-maintained `capabilities.yaml` beside its `persona.yaml`:
+```yaml
+capabilities: [claude_research]
+skills: [shared/seasonal-research]  # optional; omit for a plain research task
+```
+No sidecar or malformed/unknown capability means **no Claude dispatch**:
+the original direct World browser remains available and the normal Person
+planning prompt gets no Claude/Skill section. `skills` may be absent or contain
+at most four explicit `shared/<slug>` or `personal/<slug>` entries. Shared
+Skills live under `skills/shared/<slug>/SKILL.md` at the persona repository
+root; personal Skills under `personas/<role>/skills/<slug>/SKILL.md`.
+Only bounded, reviewed plain `SKILL.md` files with exact `name` and
+`description` frontmatter are eligible. Other resources, scripts, symbolic
+links, tool-grant fields and undeclared Skills are rejected.
+
+Skill frontmatter accepts UTF-8 LF and CRLF line endings; parsing normalizes a
+copy only. The snapshot, SHA-256 and temporary mount preserve the exact original
+UTF-8 bytes on Windows as well as Linux.
+
+Authorized Skills are read and hashed at World planning time into the durable
+execution policy, then only selected SKILL.md texts are projected into the
+temporary `.claude/skills/` directory and loaded via `--add-dir`.
+When none are selected, the old `--bare --tools ""` profile is unchanged.
+When explicitly selected, only the `Skill` builtin joins `world_lookup`;
+other builtin tools, repository files, and other characters' Skills remain
+unmounted. A Skill is reusable methodology, not proof of having run research
+or permission to edit source. No Skill writing, generation or promotion is
+automatically granted. The CLI must still pass its effective-tool readiness
+check on a real installation; mocked tests are not a substitute for a live
+provider or isolation validation.
+
+The default remains `direct`. RuntimeServices owns one bounded ClaudePrintRunner.
 Each task starts a fresh local `claude -p` process with no resume/continue/fork
 and no session persistence. The fixed execution contract and current public
 query are its only application input; Person context stays in the existing
@@ -582,6 +614,22 @@ loopback callback to the existing WorldObservationService. It has no database,
 shell, file, posting or Character-state access. Tool calls and page attempts are
 bounded across the whole task; callbacks revoke admission on cancellation, while
 already-running browser/DNS work retains the existing fetch lifecycle limitation.
+The real `world_lookup` callback records bounded tool steps in the existing detail
+file and capability result receipt: owning capability request ID, a local `step_id`
+(not a Claude JSON-RPC ID), tool name, validated query, UTC start/completion,
+elapsed milliseconds, status and source-backed result excerpts. At most
+`min(5, max_tool_calls + 1)` callbacks are recorded; additional callbacks set an
+explicit truncation flag. Invalid payloads omit their inputs; failures contain
+fixed error codes rather than raw exceptions. A result excerpt is at most 1200
+characters, with available length and excerpt-truncation recorded separately;
+titles and step source URLs are capped at 180/500 characters with explicit
+truncation flags (the UI does not open truncated URLs).
+This does not certify that the original webpage was fully read. No callback
+means an empty recorded list, not tool success. Timeout snapshots may retain
+`RUNNING` with no completion/result; inspection shows that outcome as unknown.
+Existing credential redaction is applied before persisting steps. Commands,
+environment values and hidden model thinking are not added to step records.
+
 Only tool receipts supply readable observations; Claude prose is not proof of a
 visit. Failed or interrupted tasks do not enter appraisal.
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from character_memory.life_conversation import LifeReference
 
 from datetime import datetime
 
@@ -18,6 +19,7 @@ class ChatImageRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    life_reference: LifeReference | None = None
     live2d: Live2DPresentationRequest | None = None
     message: str = Field(default="", max_length=12000)
     sticker_id: str | None = Field(default=None, max_length=64)
@@ -28,6 +30,8 @@ class ChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_content(self):
+        if self.life_reference and (self.image is not None or self.sticker_id):
+            raise ValueError("生活引用首版仅支持文字消息")
         if not self.message.strip() and not (self.sticker_id or "").strip() and self.image is None:
             raise ValueError("message, sticker_id or image is required")
         if self.sticker_id and self.image is not None:

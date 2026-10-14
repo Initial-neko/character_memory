@@ -1172,8 +1172,8 @@ def test_only_the_common_level_reaches_the_first_screen(tmp_path: Path, monkeypa
     # web_search_provider is `advanced` for the same reason: it decides whether
     # public-web discovery spends an API quota, which an operator reaches for
     # when the quota runs out -- not something to read before first use.
-    # Three finite-deferral and three optional autonomous-image guards are advanced; common remains unchanged.
-    assert levels == {"common": 9, "advanced": 54, "diagnostic": 36}
+    # Finite deferral, pacing, Group saving, invitations and image limits remain advanced.
+    assert levels == {"common": 9, "advanced": 59, "diagnostic": 37}
     field_levels = {field["name"]: field["level"] for section in schema for field in section["fields"]}
     assert all(field_levels[name] == "advanced" for name in (
         "proactive_intent_defer_min_minutes", "proactive_intent_defer_max_hours", "proactive_intent_max_deferrals"))

@@ -197,6 +197,10 @@ SETTING_HELP: dict[str, str] = {
     "proactive_intent_duplicate_similarity": "Intent 去重的余弦相似度阈值；越高越严格要求接近才判重复。",
     "proactive_intent_dedup_window_hours": "Intent 去重向前检查的时间窗口小时数。",
     "proactive_poll_seconds": "Intent 调度器检查是否到期的轮询延迟；不会改变 Intent 的真实间隔。",
+    "activity_pacing_enabled": "可选的后台机会错峰开关；仅影响 Space 和 World 的自主机会，不改变私聊、群聊和 RSS 抓取。需要重启 Character Runtime。OpenCode 网关未确认透传 DeepSeek 折扣。",
+    "activity_peak_interval_multiplier": "北京时间工作日 09:00-12:00、14:00-18:00 的 Space/World 机会间隔倍数；越大越少触发。需要重启。",
+    "activity_offpeak_interval_multiplier": "非高峰时段的 Space/World 机会间隔倍数；越小越频繁。需要重启。",
+    "activity_reference_holidays": "中国法定节假日 YYYY-MM-DD 列表；手动维护，未列出的工作日会保守地视为高峰。仅在 config.yaml 中编辑，需重启。",
     "space_autonomy_enabled": "是否允许角色获得自主 Space 发帖机会；Opportunity 不等于强制发布。",
     "space_opportunity_interval_minutes": "同一角色两次 Space Opportunity 的间隔；控制判断频率，不是发帖频率。",
     "space_max_posts_per_day": "每个角色每天允许发布的 Space 动态上限；0 = 不额外限制。",
@@ -240,6 +244,8 @@ SETTING_HELP: dict[str, str] = {
     "group_autonomy_user_quiet_minutes": "用户刚发言后多少分钟内跳过正式自主群聊；0 = 关闭该保护。",
     "group_autonomy_poll_seconds": "自主群聊 Scheduler 的轮询延迟；不会改变 Opportunity 间隔。",
     "group_max_speakers_per_turn": "用户发一条群消息时最多让多少不同角色参与本轮回复。",
+    "cost_saving_enabled": "默认关闭。开启后仅降低未点名群成员的反应上限；显式 @ 与单聊不受影响。关闭恢复原群聊配置；不改变媒体、World 或其独立节省模式，不承诺账单节省。重启 Character Runtime 后生效。",
+    "cost_saving_group_max_speakers_per_turn": "节省模式开启时，与用户普通群聊上限取较小值；默认3、范围1–12。点名成员仍全部参与，其他成员沿原轮换顺序参与；不开启则不生效，也不覆盖普通上限。需重启。",
     "encounter_enabled": "是否允许 Random Encounter Scheduler 产生新的候选相遇。",
     "encounter_interval_minutes": "两次 Random Encounter Opportunity 的间隔。",
     "encounter_web_probability": "AUTO 邂逅选择公网资料来源的概率；其余概率走系统生成。",
@@ -574,6 +580,17 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "activity-pacing",
+        "title": "后台活跃时段",
+        "description": "按 DeepSeek 官方北京时间计费时段参考调节 Space/World 自主机会，并非已证实的 OpenCode 价格折扣或硬性预算闸。保存后重启 Character Runtime 生效。",
+        "fields": [
+            {"name": "activity_pacing_enabled", "label": "启用参考时段调频", "type": "checkbox", "level": "advanced"},
+            {"name": "activity_peak_interval_multiplier", "label": "高峰间隔倍数", "type": "number", "step": 0.25, "level": "advanced"},
+            {"name": "activity_offpeak_interval_multiplier", "label": "低谷间隔倍数", "type": "number", "step": 0.25, "level": "advanced"},
+            {"name": "activity_reference_holidays", "label": "法定节假日（config.yaml）", "type": "textarea", "level": "diagnostic"},
+        ],
+    },
+    {
         "id": "space-autonomy",
         "title": "Character Space",
         "description": "角色自主动态调度。默认每 24 小时一次 Opportunity；测试阶段可改成 1 小时或更短，一个角色一天因此可以发多条动态。到点只是让角色判断一次，仍然可以选择不发。",
@@ -833,6 +850,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "title": "Group Conversation",
         "description": "用户消息触发的一轮群聊最多让多少位成员接话。被 @ 的成员始终参与；未点名的成员从滚动顺序尾部截断，因此每轮听到的人仍然轮换。",
         "fields": [
+            {"name": "cost_saving_enabled", "label": "Optional Group Cost Saving", "type": "checkbox", "level": "advanced"},
+            {"name": "cost_saving_group_max_speakers_per_turn", "label": "Saving Max Speakers / Turn", "type": "number", "step": 1, "level": "advanced"},
             {
                 "name": "group_max_speakers_per_turn",
                 "label": "Max Speakers / Turn",

@@ -5,11 +5,16 @@ import hashlib
 import json
 import logging
 import threading
+import yaml
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+import yaml
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
+from character_memory.activity_schedule import paced_interval_minutes, reference_billing_window
+from character_memory.vocation import read_vocation, render_vocation
+from character_memory.character_capabilities import select_role_research
 from character_memory.world_observation import observation_lifecycle, retain_world_observation
 from character_memory.runtime.context import render_observed_experiences
 from character_memory.runtime.capability_execution import CapabilityExecutor, CapabilityRequest, adapt_browse_decision
@@ -1126,6 +1131,18 @@ Summary: {topic["summary"]}
                     at=now,
                     recent_limit=12,
                 )
+                # Capability resolution precedes prompting and any Claude task.
+                # A missing/malformed sidecar never exposes Skill descriptions.
+                selected_skills = None
+                if getattr(self.access.settings, "world_browse_execution_backend", "direct") == "claude":
+                    profile = next(
+                        (item for item in self._active_profiles() if item.get("id") == character_id),
+                        None,
+                    )
+                    try:
+                        selected_skills = select_role_research(profile)
+                    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+                        logger.warning("world.role_capabilities denied character=%s error=%s", character_id, exc)
                 plan_prompt = f"""# Persona
 {context.persona}
 
@@ -1144,6 +1161,24 @@ Summary: {topic["summary"]}
 如果 browse=true，query 必须是简短公开搜索词，绝不能包含用户隐私、私聊原句、住址、账号、联系方式或秘密。
 选择人物自己会感兴趣的内容，不要为了系统有数据而硬搜。
 """
+                # Optional per-person vocation adds a persistent research focus
+                # to the existing Personal Browse opportunity. It does not
+                # create a second scheduler, force a search, or grant any tool.
+                profile = next(
+                    (item for item in self._active_profiles() if item["id"] == character_id),
+                    None,
+                )
+                if profile is not None and profile.get("persona_path"):
+                    try:
+                        vocation = read_vocation(profile["persona_path"])
+                    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+                        logger.warning(
+                            "world.vocation ignored_invalid character=%s error=%s",
+                            character_id, exc,
+                        )
+                        vocation = None
+                    if vocation is not None:
+                        plan_prompt += render_vocation(vocation)
                 candidates = []
                 plan_schema = PersonalBrowsePlan
                 rss_limit = 1 if getattr(self.access.settings, "world_cost_saving_enabled", False) else 2
@@ -1189,8 +1224,9 @@ Summary: {topic["summary"]}
             snapshot = {"decision": plan.model_dump(mode="json"), "persona": context.persona,
                         "max_pages": max(1, min(4, int(getattr(self.access.settings, "world_browse_max_pages", 2)))),
                         "max_chars_per_page": max(500, min(16000, int(getattr(self.access.settings, "space_world_max_chars_per_page", 6000))))}
-            if getattr(self.access.settings, "world_browse_execution_backend", "direct") == "claude":
+            if selected_skills is not None:
                 snapshot["execution_policy"] = {
+                    "role_grant": "claude_research", "claude_skills": selected_skills,
                     "backend": "claude", "claude_daily_max": self.access.settings.claude_execution_daily_max,
                     "claude_daily_budget_usd": self.access.settings.claude_execution_daily_budget_usd,
                     "claude_max_budget_usd": self.access.settings.claude_execution_max_budget_usd,
@@ -1207,6 +1243,31 @@ Summary: {topic["summary"]}
             self.repository.update_browse_decision(opportunity_id, expected_phase="PLANNING", phase="PLANNED", plan=snapshot, source_event_id=source_event_id)
             row = self.repository.get_browse_decision(opportunity_id)
         snapshot = row["plan"]
+        if snapshot.get("execution_policy"):
+            # Revoking the capability or editing an approved Skill between
+            # the durable plan and dispatch must block a new Claude process.
+            policy = snapshot["execution_policy"]
+            profile = next(
+                (item for item in self._active_profiles() if item.get("id") == character_id),
+                None,
+            )
+            try:
+                approved = select_role_research(profile)
+            except (OSError, UnicodeError, ValueError, yaml.YAMLError):
+                approved = None
+            expected = [(item["name"], item["sha256"]) for item in policy.get("claude_skills", [])]
+            actual = [(item["name"], item["sha256"]) for item in (approved or [])]
+            if policy.get("role_grant") != "claude_research" or approved is None or expected != actual:
+                denied = self._browse_unfinished(
+                    character_id, opportunity_id, execution_status="DENIED",
+                    error="ROLE_CAPABILITY_REVOKED",
+                )
+                denied["opportunity_status"] = "FAILED"
+                self.repository.update_browse_decision(
+                    opportunity_id, expected_phase="PLANNED", phase="FAILED",
+                    result=denied, error="ROLE_CAPABILITY_REVOKED",
+                )
+                return denied
         if snapshot["decision"].get("choice") == "READ_RSS":
             return self._browse_rss(character_id, opportunity_id, now=now, row=row, bundle=bundle)
         plan = PersonalBrowsePlan.model_validate(snapshot["decision"])
@@ -1456,10 +1517,20 @@ class WorldActivityScheduler:
             and getattr(self.access.settings, "world_activity_enabled", True)
         )
 
-    def _interval(self, field: str, default: float) -> float:
+    def _interval(self, field: str, default: float, now: datetime | None = None) -> float:
         base = max(10.0, min(10080.0, float(getattr(self.access.settings, field, default))))
         if field == "world_browse_interval_minutes" and bool(getattr(self.access.settings, "world_cost_saving_enabled", False)):
-            return base * 2.0
+            base *= 2.0
+        # Only paid World cognition opportunities are paced. RSS ingestion and
+        # other deterministic infrastructure retain their independent clocks.
+        if field in {
+            "world_browse_interval_minutes",
+            "world_pulse_refresh_minutes",
+            "world_pulse_discussion_interval_minutes",
+        }:
+            return paced_interval_minutes(
+                self.access.settings, base, now=now or datetime.now().astimezone()
+            )
         return base
 
     def browse_daily_max(self) -> int:
@@ -1667,12 +1738,13 @@ class WorldActivityScheduler:
             except Exception as error:
                 outcomes.append({'kind':'BROWSE_RECOVERY','subject_id':item['character_id'],
                                  'status':'FAILED','details':{},'error':str(error)[:800]})
-        pulse_interval = self._interval("world_pulse_refresh_minutes", 60.0)
+        pulse_interval = self._interval("world_pulse_refresh_minutes", 60.0, now)
         discuss_interval = self._interval(
             "world_pulse_discussion_interval_minutes",
             360.0,
+            now,
         )
-        browse_interval = self._interval("world_browse_interval_minutes", 30.0)
+        browse_interval = self._interval("world_browse_interval_minutes", 30.0, now)
 
         if bool(getattr(self.access.settings, "world_pulse_enabled", True)):
             self.repository.ensure_state(
@@ -1829,6 +1901,12 @@ class WorldActivityScheduler:
                 getattr(self.access.settings, "world_browse_enabled", True)
             ),
             "cost_saving_enabled": bool(getattr(self.access.settings, "world_cost_saving_enabled", False)),
+            "reference_billing_window": reference_billing_window(
+                now, getattr(self.access.settings, "activity_reference_holidays", ())
+            ),
+            "activity_pacing_enabled": bool(
+                getattr(self.access.settings, "activity_pacing_enabled", False)
+            ),
             "rss_reading_enabled": bool(getattr(self.access.settings, "world_rss_reading_enabled", False)),
             "pulse_refresh_minutes": self._interval(
                 "world_pulse_refresh_minutes",

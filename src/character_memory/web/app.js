@@ -512,6 +512,24 @@
   CM.submitCurrentText = async () => {
     const message = CM.dom.input.value.trim();
     if (!message) return;
+    if (CM.state.lifeSending) return;
+    if (CM.state.lifeReference) {
+      CM.state.lifeSending=true;
+      const ref=CM.state.lifeReference, target=CM.state.lifeTarget;
+      if ((target.type==="GROUP" && (!CM.isGroupConversation() || CM.state.conversation.groupId!==target.id)) ||
+          (target.type==="DIRECT" && (CM.isGroupConversation() || CM.state.characterId!==ref.character_id))) {
+        CM.state.lifeSending=false;CM.clearLifeReference();
+        throw new Error("会话已变化，请从生活记录重新打开引用");
+      }
+      CM.dom.sendButton.disabled=true;
+      try {
+        if(target.type==="DIRECT") await CM.sendDirectPayload({message,life_reference:ref});
+        else await CM.api(`/v1/groups/${encodeURIComponent(target.id)}/messages`, {method:"POST",body:JSON.stringify({message,life_reference:ref})});
+        if(CM.state.lifeReference===ref){CM.dom.input.value="";CM.clearLifeReference();await CM.loadHistory();}
+      } catch(error){if(CM.state.lifeReference===ref)CM.state.lifeNotice.textContent=`发送失败：${error.message}；草稿已保留。`;}
+      finally {CM.state.lifeSending=false;CM.updateComposerState();}
+      return;
+    }
     if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message);
     return CM.sendDirectText(message);
   };
@@ -806,12 +824,44 @@
       await CM.loadHistory();
       if (!CM.isGroupConversation()) CM.connectDirectStream();
       CM.updateComposerState();
+      await CM.openLifeReference();
     } catch (error) {
       d.chat.innerHTML = `<div class="error">页面初始化失败：${CM.escapeHtml(error.message)}</div>`;
       console.error(error);
     }
   };
 
+  CM.clearLifeReference = () => {
+    CM.state.lifeReference=null;CM.state.lifeTarget=null;
+    CM.state.lifeNotice?.remove();CM.state.lifeNotice=null;
+  };
+  CM.on("conversationChanged", () => {
+    if(CM.state.lifeReference){CM.clearLifeReference();CM.dom.input.value="";}
+  });
+  CM.openLifeReference = async () => {
+    const qs=new URLSearchParams(location.search), character=qs.get("life_character"), key=qs.get("life_key");
+    if(!character || !key)return;
+    history.replaceState(null,"",location.pathname);
+    const notice=document.createElement("p");notice.setAttribute("aria-live","polite");
+    CM.dom.composer.before(notice);
+    try {
+      const data=await CM.api(`/v1/characters/${encodeURIComponent(character)}/life/conversation?${new URLSearchParams({key})}`);
+      if(data.conversation.type==="GROUP"){
+        await CM.features.groups.loadGroups();await CM.features.groups.enter(data.conversation.id);
+        if(!CM.isGroupConversation() || CM.state.conversation.groupId!==data.conversation.id)throw new Error("来源群聊不可用");
+      }else{
+        localStorage.setItem(`character-memory:conversation:${character}`,data.conversation.id);
+        CM.closeDirectStream();await CM.switchCharacter(character);CM.connectDirectStream();
+      }
+      CM.state.lifeReference=data.reference;CM.state.lifeTarget=data.conversation;CM.state.lifeNotice=notice;
+      notice.textContent=`来源：${character} / ${key}。只准备草稿；确认发送后调用模型。引用不表示你亲历。`;
+      const source=document.createElement("details"), summary=document.createElement("summary"), body=document.createElement("pre");
+      summary.textContent="查看引用原始记录";body.textContent=data.quote;body.style.whiteSpace="pre-wrap";source.append(summary,body);notice.append(source);
+      const cancel=document.createElement("button");cancel.type="button";cancel.textContent="取消引用";cancel.title="移除引用及草稿，不发送消息";
+      cancel.onclick=()=>{CM.clearLifeReference();CM.dom.input.value="";};notice.append(cancel);
+      CM.dom.input.value=data.draft;CM.dom.input.focus();
+    } catch(error){notice.textContent=`无法引用：${error.message}`;}
+  };
   window.addEventListener("beforeunload", () => CM.closeDirectStream());
   window.addEventListener("DOMContentLoaded", () => CM.bootstrap(), {once:true});
 })();

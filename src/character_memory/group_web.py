@@ -1,4 +1,5 @@
 from __future__ import annotations
+from character_memory.life_conversation import LifeReference
 
 from datetime import datetime
 import logging
@@ -7,7 +8,7 @@ import threading
 from pydantic import BaseModel, Field, model_validator
 from character_memory.live2d_behavior import Live2DPresentationRequest
 
-from character_memory.application.group_conversation_service import GroupConversationService
+from character_memory.application.group_conversation_service import GroupConversationService, effective_group_speaker_limit
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.images import load_image_catalog
 from character_memory.message_projection import project_group_message, upload_caption
@@ -46,6 +47,7 @@ class GroupImageRequest(BaseModel):
 
 
 class GroupChatRequest(BaseModel):
+    life_reference: LifeReference | None = None
     live2d: Live2DPresentationRequest | None = None
     message: str = Field(default="", max_length=12000)
     sticker_id: str | None = Field(default=None, max_length=64)
@@ -55,6 +57,8 @@ class GroupChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_content(self):
+        if self.life_reference and (self.image is not None or self.sticker_id):
+            raise ValueError("生活引用首版仅支持文字消息")
         if not self.message.strip() and not (self.sticker_id or "").strip() and self.image is None:
             raise ValueError("message, sticker_id or image is required")
         if self.sticker_id and self.image is not None:
@@ -339,6 +343,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
 
     @app.post("/v1/groups/{conversation_id}/chat")
     def group_chat(conversation_id: str, req: GroupChatRequest):
+        if req.life_reference:
+            raise HTTPException(422, "生活引用仅支持现有异步消息入口")
         preliminary = repo().get_group(conversation_id)
         if preliminary is None:
             raise HTTPException(status_code=404, detail="group not found")
@@ -385,6 +391,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 image_data_url=image_data_url,
                 sticker=selected_sticker,
                 mentions=req.mentions,
+                max_speakers=effective_group_speaker_limit(bundle.settings),
             )
             group = service.repo.get_group(conversation_id)
             turn_summary = service.repo.turn_summaries(conversation_id, [result["turn_id"]]).get(result["turn_id"])
@@ -394,6 +401,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 "conversation_id": conversation_id,
                 "turn_id": result["turn_id"],
                 "speaker_order": result["speaker_order"],
+                "max_speakers": result.get("max_speakers"),
+                "deferred_speaker_ids": result.get("deferred_speaker_ids", []),
                 "mentions": result.get("mentions", []),
                 "decisions": result["decisions"],
                 "group": group_payload(group, profiles=resources["profiles"]),

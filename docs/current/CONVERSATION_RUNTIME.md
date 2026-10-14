@@ -144,6 +144,10 @@ conversation_runtime_traces
 
 同一条房间消息只存一次。每个成员读取同一事实，但可以形成不同 Memory 和 Reaction。
 
+人物每轮读取最近 14 条群上下文，并按当前询问从同群 `conversation_events` 额外检索最多 4 条相关历史发言。检索采用本地词项匹配（中文包含二字片段），SQL 先匹配再限制返回量，因此旧事实不会因为最近有大量无关闲聊而从候选中消失；这不是语义改写检索，也不新增模型或 embedding 调用。额外上下文最多 2400 字符，每条原文最多 500 字符，携带 group id、event id、发言人和时间；当前 Recent Events 已有的事件不重复注入。
+
+检索只投影实际持久化的可见 User / Character 群消息，不读取私人 Event、其它群、hidden Opportunity 或初始设定。读取人物必须仍是本群成员，事实时间不得早于其当前成员加入时间；替换成员名单保留仍在群中的人物原加入时间，退出再加入则从新加入时间开始。上下文同时受本轮源事件时间和插入 id 水位约束，排除未来时间及水位后迟到的回填；最近窗口允许同一 turn 已提交的人物回复，让后续成员仍能回应。来源发言只是历史原文，不是完成状态：邀请不等于已接受或已完成，不替 User 推进剧情或决定感受，不自动生成 Memory。`conversation_runtime_traces.shared_history_retrieval` 保存询问、边界、预算、实际字符数和采用的来源片段；`recent_group_event_ids` 保存本次实际 Recent Events 输入的最多 14 个同群事件 ID，记录发生于回复写入之前，不把该人物稍后生成的回复当成已读输入。Trace 的主 source ID 仍指向 User 根事件/Opportunity；旧 Trace 没有输入 ID 时，不凭同 turn 推断已看到另一人物消息。重启后可重复检查这些凭据。真实模型能否自然、准确地延续经历仍需人工验收。
+
 ### Member ordering
 
 Group member 当前按顺序反应：
@@ -157,6 +161,13 @@ member C -> ...
 这保留角色之间的公开因果关系，因此不直接并行所有成员。
 
 **成本形状**：一条 user message 最多让 `group_max_speakers_per_turn`（默认 5，范围 1..12）位成员各产生一次模型调用；被 @ 的成员一定进入本轮，未点名成员从滚动顺序尾部截断（`deferred_speaker_ids`），因此每轮听到的人仍然轮换。设为 12 即恢复到"每个成员都被问到"的旧行为（对应旧的 12 次模型调用上限）。自主机会另有独立硬上限（`cap = 1..4`）。群成员上限是 `MAX_GROUP_CHARACTERS = 12`，所以满员群里一句用户消息默认最多 5 次模型调用、把 `group_max_speakers_per_turn` 调到 12 时最坏 12 次；这不是 bug，但改动上限或给群加人时要按这个数量级算成本。该项是后端形状旋钮，不在 `HOT_APPLY_FIELDS` 内，因此保存后按 `restart_required` 处理。
+
+`cost_saving_enabled` 默认关闭。开启后每轮使用 `min(group_max_speakers_per_turn, cost_saving_group_max_speakers_per_turn)`；节省上限默认 3、范围 1..12，可在 Settings 调整。两个上限分别保存，关闭直接恢复用户普通上限，不覆盖为默认值。同步 `/v1/groups/{id}/chat` 和异步 scheduler 现在都消费这个正式上限；同步入口此前没有消费 `group_max_speakers_per_turn`，此次补齐，因此关闭模式时也遵守用户已配置的普通上限。内部直接调用 `service.send()` 没有显式 cap 时仍保持原全员判断兼容行为。
+
+节省仅减少未点名成员的本轮反应调用，继续使用既有轮换与 @ 豁免：所有点名成员始终获得反应机会，`@所有人` 可超过有效上限；机会不强制发言。同步结果与异步 `reaction_complete` 都暴露有效 `max_speakers`、实际 `speaker_order` 和 `deferred_speaker_ids`，跳过者不伪装成已判断沉默，不产生模型调用或 Trace。上限在处理本轮时读取既有 bundle Settings 快照；字段均需重启 Character Runtime 才应用持久修改。
+
+本开关不降低单聊质量，不改变手动媒体、既有媒体权限或 World 专用节省/后台节奏，不新增判断人物意愿的模型、预算引擎或供应商账单承诺。当前作用范围只包含用户消息触发的群聊；自主 Group Opportunity 仍使用自己的硬上限。
+
 
 **展示粒度**：群聊以 **Turn** 为单位渲染，而不是以持久化 Event 为单位。一个 `PersonReaction` 可以携带多个 action，`_react_member` 按 action 逐条持久化 Group Event（这是有意的，保留），但前端 `web/groups.js` 的 `foldMessages()` 会把 `(turn_id, actor_id)` 相同的连续角色事件折回一个 `ChatTurn`：文本行合并进同一个气泡，表情/图片/语音成为该气泡内部的内容，说话人名字每个 turn 只出现一次。不同角色**永不合并**；同一角色不同 turn 也各自成块，否则会篡改真实的发言顺序。单聊不受此影响，仍然允许更细粒度的连续消息。
 
@@ -181,6 +192,22 @@ READY build 是可跨请求保留的 research 快照，不是提交时的角色�
 可选 `use_voice_design=true` 只在用户显式勾选后生效。它要求用户已经手动启动 Qwen3 VoiceDesign sidecar；群聊和 Character 核心 commit 完成后，后台才按角色 identity/personality/speech style 逐个尝试 VoiceDesign + freeze。VoiceDesign 未启动、不可用或单个角色生成失败都只记日志并保留现有默认/回退 voice，绝不回滚 Character 或 Group。
 
 模型调用量级：`SOURCE` 模式一次群体 research + 最多每个新成员一次 `PersonaBuilder` 模型生成（可能附带结构化修复重试）；已有人物不再次生成，失败的单个角色采用本地确定性兜底。`ORIGINAL` 模式不触发 World Observer，但仍需一次群体生成和新人物深化。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
+
+### Curated original Ensemble template
+
+AI 建群入口提供「预览温暖异世界」，对应 `GET /v1/ensembles/templates` 的 `warm-isekai` 模板。`POST /v1/ensembles/templates/{template_id}/prepare` 将莉娅、芙露、赛琳、米娅四位原创成年人物的固定完整 Persona 和初始关系保存为普通 `READY` build；这一步不调用模型、搜索、头像或声音服务，也不创建人物、群聊或互动 Event。未知模板返回 404，不留下构建记录。重新打开入口仍使用现有 READY build 恢复流程。
+
+确认继续使用既有 `/{build_id}/confirm`、容量检查、回滚和幂等别名。模板草稿的 `reuse_existing=false` 持久化在既有 drafts JSON 中，在预览、重启恢复和确认时都不会按名字复用现有人物；因此容量计数把所选成员全部视为新建。创建来源仍是 `ENSEMBLE_BUILDER`，tags 标明 `原创情景` 和模板 ID，group_id 绑定真实群聊。固定模板不显示单人模型深化入口。创建后的头像/声音初始化与正常群聊反应沿用现有流程，不能把预览零调用理解为创建或聊天零调用。
+
+背景与关系继续通过 Initial Public Group Context 注入，明确不是已发生的聊天。确认不自动发开场或创建记忆。此版本是普通人物/群聊上的原创体验入口，尚无独立情景会话、故事时钟、跨渠道记忆隔离或专用暂停策略；应在独立测试环境验收，不能把专属人物 ID 当成完整情景隔离已经完成的证明。情景演化和跨天关系品质需要后续真实模型验收。
+
+### User-authored scene draft
+
+AI 建群的「自定义情景」填写背景、人物要求、可选关系期待与开场。`POST /v1/ensembles/scenes/prepare` 验证这四项后将原稿保存到既有 build prompt（JSON）及 `mode=SCENE`，复用 ORIGINAL 的人物/关系生成链，不联网，不增加情景解析模型。READY / FAILED 恢复响应中的 `scene` 保留原稿，模型失败后可重试或修改；创建仍需用户确认。背景/开场是设定，不自动生成互动事实或记忆。SOURCE / ORIGINAL 的旧请求合同保持不变。
+
+SCENE 的成员始终新建：研究、单人成员重试、恢复和确认均保留 `reuse_existing=false`；确认提供新 ID，拉丁姓名也不会碰撞同名现有人物文件。创建标记 `原创情景`。数据库仍使用原有 TEXT/JSON 字段，无 schema 迁移。模型调用仍是已有原创群体生成和必要人物深化（可能含修复重试），不是固定模板预览的零调用路径。
+
+此入口仍落在普通 Group/Person 上，不是完整场景运行时；它不提供自动故事时钟、私人知情分区或跨场景记忆隔离。首版在独立环境使用专属人物，由用户明确推进故事时间。相关产品体验由真实模型人工验收，自动测试只证明输入、恢复、专属 ID 和创建流程。
 
 ### Member failure isolation
 

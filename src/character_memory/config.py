@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 import os
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from character_memory.envfile import effective_env_value
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_PATTERN
@@ -146,6 +146,31 @@ class Settings(BaseModel):
     proactive_intent_dedup_enabled: bool = True
     proactive_intent_duplicate_similarity: float = Field(default=0.90, ge=0.5, le=1.0)
     proactive_intent_dedup_window_hours: float = Field(default=72.0, ge=1.0, le=720.0)
+
+    # Optional opportunity pacing by the DeepSeek public reference billing window.
+    # This is scheduling policy, NOT a provider price/discount or a hard token cap.
+    # In particular, the OpenCode gateway may not pass DeepSeek discounts through.
+    activity_pacing_enabled: bool = False
+    activity_peak_interval_multiplier: float = Field(default=2.0, ge=0.25, le=8.0)
+    activity_offpeak_interval_multiplier: float = Field(default=0.5, ge=0.25, le=8.0)
+    # CN statutory holidays are supplied explicitly; no unverified web calendar
+    # is fetched at startup. Omitted holidays are treated as peak on weekdays
+    # (conservative when estimating a possible discount).
+    activity_reference_holidays: list[str] = Field(default_factory=list, max_length=80)
+
+    @field_validator("activity_reference_holidays")
+    @classmethod
+    def _validate_activity_holidays(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if len(value) != 10 or value[4:5] != "-" or value[7:8] != "-":
+                raise ValueError("holiday dates must use YYYY-MM-DD")
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError as exc:
+                raise ValueError("invalid billing holiday date") from exc
+            if parsed.isoformat() != value:
+                raise ValueError("holiday dates must use YYYY-MM-DD")
+        return sorted(set(values))
 
     # Character Space autonomous social life. These are deliberately ordinary
     # persisted settings so the test-stage behavior can be tuned from Settings

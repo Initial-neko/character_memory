@@ -23,6 +23,110 @@ from character_memory.group_store import GroupRepository
 from character_memory.storage.sqlite import SQLiteStore
 
 
+def _no_template_model():
+    raise AssertionError("curated template preparation must not load or call a model")
+
+
+def test_warm_template_prepares_distinct_drafts_without_creating_people(tmp_path):
+    access, store, observer, _, created = _access(tmp_path)
+    access.require_bundle = _no_template_model
+    service = EnsembleBuilderService(access, EnsembleRepository(store))
+
+    build = service.prepare_template("warm-isekai")
+
+    assert build["status"] == "READY"
+    assert build["mode"] == "ORIGINAL"
+    assert [item["draft"]["name"] for item in build["drafts"]] == ["莉娅", "芙露", "赛琳", "米娅"]
+    assert len({item["draft"]["care"] for item in build["drafts"]}) == 4
+    assert all(item["draft"]["age"] >= 18 for item in build["drafts"])
+    assert created == []
+    assert service.groups.list_groups() == []
+    assert observer.calls == []
+
+
+def test_template_confirm_creates_fresh_people_instead_of_reusing_names(tmp_path):
+    access, store, _, profiles, created = _access(tmp_path)
+    profiles.append({"id": "existing-lia", "name": "莉娅", "identity": "existing person"})
+    access.require_bundle = _no_template_model
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    build = service.prepare_template("warm-isekai")
+
+    # Reopen SQLite as on restart. The registry still contains the same-name
+    # person, but the durable request for fresh characters must survive.
+    store.close()
+    store = SQLiteStore(str(tmp_path / "ensemble.db"))
+    access.read_store = store
+    access.store = lambda: store
+    repository = EnsembleRepository(store)
+    service = EnsembleBuilderService(access, repository)
+    restored = service.payload(repository.get(build["group_id"]))
+    assert restored["drafts"][0]["existing_character_id"] is None
+    activated = service.confirm(build["group_id"], [0, 1, 2, 3])
+    group = service.groups.get_group(activated["group_id"])
+    assert "existing-lia" not in group.member_ids
+    assert len(created) == 4
+    assert len(group.member_ids) == 4
+    assert service.groups.list_events(group.id) == []
+    context = repository.active_context(group.id)
+    assert "灯溪镇" in context["overview"]
+    assert len(context["participants"]) == 4
+    assert all("原创情景" in item["tags"] for item in access.creation_records)
+    repeated = service.confirm(build["group_id"], [0, 1, 2, 3])
+    assert repeated["group_id"] == group.id
+    assert len(created) == 4
+
+
+def test_unknown_template_does_not_leave_a_build_record(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    service = EnsembleBuilderService(access, EnsembleRepository(store))
+    with pytest.raises(KeyError):
+        service.prepare_template("does-not-exist")
+    assert store.conn.execute("SELECT count(*) FROM ensemble_builds").fetchone()[0] == 0
+
+
+def test_research_retry_preserves_curated_template_without_paid_rebuild(tmp_path):
+    access, store, _, _, _ = _access(tmp_path)
+    access.require_bundle = _no_template_model
+    service = EnsembleBuilderService(access, EnsembleRepository(store))
+    build = service.prepare_template("warm-isekai")
+    retried = service.research(build["group_id"])
+    assert retried["drafts"] == build["drafts"]
+    assert retried["overview"] == build["overview"]
+
+
+def test_template_capacity_counts_same_name_people_as_new(tmp_path):
+    access, store, _, profiles, created = _access(tmp_path)
+    profiles.extend({"id": f"existing-{i}", "name": name} for i, name in enumerate(["莉娅", "芙露", "赛琳", "米娅"]))
+    profiles.extend({"id": f"other-{i}", "name": f"Other {i}"} for i in range(12))
+    service = EnsembleBuilderService(access, EnsembleRepository(store))
+    build = service.prepare_template("warm-isekai")
+    assert build["capacity"]["add_count"] == 4
+    with pytest.raises(ValueError, match="hard limit"):
+        service.confirm(build["group_id"], [0, 1, 2, 3])
+    assert created == []
+    assert service.groups.list_groups() == []
+
+
+def test_template_routes_preview_without_model_or_character_writes(tmp_path):
+    access, store, _, _, created = _access(tmp_path)
+    access.require_bundle = _no_template_model
+    app = FastAPI()
+    app.state.character_memory = access
+    attach_ensemble_routes(app)
+    with TestClient(app) as client:
+        listing = client.get("/v1/ensembles/templates")
+        assert listing.status_code == 200
+        assert listing.json()["templates"][0]["id"] == "warm-isekai"
+        result = client.post("/v1/ensembles/templates/warm-isekai/prepare")
+        assert result.status_code == 200
+        assert len(result.json()["build"]["drafts"]) == 4
+        unknown = client.post("/v1/ensembles/templates/missing/prepare")
+        assert unknown.status_code == 404
+    assert created == []
+    assert store.conn.execute("SELECT count(*) FROM ensemble_builds").fetchone()[0] == 1
+
+
 class FakeWorldObserver:
     def __init__(self):
         self.calls = []

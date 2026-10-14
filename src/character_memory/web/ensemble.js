@@ -17,10 +17,18 @@
   let useVoiceDesignRequested = false;
   let lastPrompt = "";
   let lastMode = "SOURCE";
+  let preparingTemplate = false;
 
   function introHtml() {
     return `
       <div class="ensemble-builder">
+        <div class="ensemble-intro">
+          <strong>先体验一个温暖异世界</strong>
+          <p>灯溪镇的旅店主人、炼金学徒、巡林人和乐师，各有自己的关注与关心方式。先看四人的原创设定，确认后创建专属人物和群聊。</p>
+          <div class="ensemble-actions">
+            <button type="button" data-ensemble-template="warm-isekai" title="预览固定原创设定；确认后新建人物，不复用同名角色">预览温暖异世界</button>
+          </div>
+        </div>
         <div class="ensemble-intro">
           <strong>一句话创建一整组人物</strong>
           <p>例如：“复刻命运石之门的 LAB MEM，并形成群聊”。系统先读取公开资料并准备成员草稿；只有你确认后，才真正创建角色和群聊。</p>
@@ -105,6 +113,7 @@
   function memberHtml(item) {
     const draft = item.draft || {};
     const existing = Boolean(item.existing_character_id);
+    const template = item.generation_method === "TEMPLATE";
     const failed = item.status === "FAILED" || !item.draft;
     if (failed) {
       return `
@@ -136,7 +145,7 @@
         <span class="ensemble-member-copy">
           <span class="ensemble-member-name">
             <strong>${CM.escapeHtml(draft.name || item.canonical_name || "角色")}</strong>
-            ${existing ? '<em>已存在 · 保留当前设定</em>' : item.generation_method === "FALLBACK" ? '<em>基础草稿 · 深化失败可重试</em>' : '<em>已深化 · 将创建</em>'}
+            ${existing ? '<em>已存在 · 保留当前设定</em>' : template ? '<em>原创设定 · 新建专属人物</em>' : item.generation_method === "FALLBACK" ? '<em>基础草稿 · 深化失败可重试</em>' : '<em>已深化 · 将创建</em>'}
           </span>
           <span>${CM.escapeHtml(draft.identity || item.identity || draft.tagline || "")}</span>
           <small>${CM.escapeHtml((item.relationship_notes || []).slice(0, 2).join("；"))}</small>
@@ -144,7 +153,7 @@
             <summary>${existing ? "查看研究草稿（实际复用现有人物设定）" : "查看完整人物草稿"}</summary>
             ${previewFields.map(([title, value]) => `<p><strong>${title}：</strong>${CM.escapeHtml(value || "未提供")}</p>`).join("")}
           </details>
-          ${existing ? "" : `<button type="button" data-ensemble-regenerate="${Number(item.index)}">重新深化此人物</button>`}
+          ${existing || template ? "" : `<button type="button" data-ensemble-regenerate="${Number(item.index)}">重新深化此人物</button>`}
         </span>
       </div>
     `;
@@ -233,6 +242,25 @@
       });
     }
     updateCapacity(build);
+  }
+
+  async function prepareTemplate(templateId) {
+    if (preparingTemplate) return;
+    preparingTemplate = true;
+    currentBuild = null;
+    useVoiceDesignRequested = Boolean(CM.dom.drawerBody.querySelector("[data-ensemble-voice-design]")?.checked);
+    CM.openDrawer("温暖异世界", "正在准备四位人物的原创设定，确认后再创建");
+    CM.dom.drawerBody.innerHTML = '<div class="ensemble-loading"><strong>正在打开人物设定…</strong></div>';
+    try {
+      const response = await CM.api(`/v1/ensembles/templates/${encodeURIComponent(templateId)}/prepare`, {method:"POST"});
+      renderConfirmation(response.build);
+    } catch (error) {
+      CM.openDrawer("AI 建群", "暂时无法打开情景设定，请稍后重试");
+      CM.dom.drawerBody.innerHTML = introHtml();
+      showError("情景设定暂时无法打开，尚未创建人物或群聊。");
+    } finally {
+      preparingTemplate = false;
+    }
   }
 
   async function startBuild() {
@@ -397,6 +425,8 @@
   });
 
   CM.dom.drawerBody.addEventListener("click", event => {
+    const templateButton = event.target.closest("[data-ensemble-template]");
+    if (templateButton) { prepareTemplate(templateButton.dataset.ensembleTemplate).catch(console.error); return; }
     if (event.target.closest("[data-ensemble-cancel]")) { CM.closeDrawer(); return; }
     if (event.target.closest("[data-ensemble-start]")) { startBuild().catch(console.error); return; }
     if (event.target.closest("[data-ensemble-retry-build]")) { retryBuild().catch(console.error); return; }

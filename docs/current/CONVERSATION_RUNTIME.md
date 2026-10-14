@@ -144,6 +144,10 @@ conversation_runtime_traces
 
 同一条房间消息只存一次。每个成员读取同一事实，但可以形成不同 Memory 和 Reaction。
 
+人物每轮读取最近 14 条群上下文，并按当前询问从同群 `conversation_events` 额外检索最多 4 条相关历史发言。检索采用本地词项匹配（中文包含二字片段），SQL 先匹配再限制返回量，因此旧事实不会因为最近有大量无关闲聊而从候选中消失；这不是语义改写检索，也不新增模型或 embedding 调用。额外上下文最多 2400 字符，每条原文最多 500 字符，携带 group id、event id、发言人和时间；当前 Recent Events 已有的事件不重复注入。
+
+检索只投影实际持久化的可见 User / Character 群消息，不读取私人 Event、其它群、hidden Opportunity 或初始设定。读取人物必须仍是本群成员，事实时间不得早于其当前成员加入时间；替换成员名单保留仍在群中的人物原加入时间，退出再加入则从新加入时间开始。上下文同时受本轮源事件时间和插入 id 水位约束，排除未来时间及水位后迟到的回填；最近窗口允许同一 turn 已提交的人物回复，让后续成员仍能回应。来源发言只是历史原文，不是完成状态：邀请不等于已接受或已完成，不替 User 推进剧情或决定感受，不自动生成 Memory。`conversation_runtime_traces.shared_history_retrieval` 保存询问、边界、预算、实际字符数和采用的来源片段；`recent_group_event_ids` 保存本次实际 Recent Events 输入的最多 14 个同群事件 ID，记录发生于回复写入之前，不把该人物稍后生成的回复当成已读输入。Trace 的主 source ID 仍指向 User 根事件/Opportunity；旧 Trace 没有输入 ID 时，不凭同 turn 推断已看到另一人物消息。重启后可重复检查这些凭据。真实模型能否自然、准确地延续经历仍需人工验收。
+
 ### Member ordering
 
 Group member 当前按顺序反应：
@@ -188,6 +192,14 @@ READY build 是可跨请求保留的 research 快照，不是提交时的角色�
 可选 `use_voice_design=true` 只在用户显式勾选后生效。它要求用户已经手动启动 Qwen3 VoiceDesign sidecar；群聊和 Character 核心 commit 完成后，后台才按角色 identity/personality/speech style 逐个尝试 VoiceDesign + freeze。VoiceDesign 未启动、不可用或单个角色生成失败都只记日志并保留现有默认/回退 voice，绝不回滚 Character 或 Group。
 
 模型调用量级：`SOURCE` 模式一次群体 research + 最多每个新成员一次 `PersonaBuilder` 模型生成（可能附带结构化修复重试）；已有人物不再次生成，失败的单个角色采用本地确定性兜底。`ORIGINAL` 模式不触发 World Observer，但仍需一次群体生成和新人物深化。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
+
+### Curated original Ensemble template
+
+AI 建群入口提供「预览温暖异世界」，对应 `GET /v1/ensembles/templates` 的 `warm-isekai` 模板。`POST /v1/ensembles/templates/{template_id}/prepare` 将莉娅、芙露、赛琳、米娅四位原创成年人物的固定完整 Persona 和初始关系保存为普通 `READY` build；这一步不调用模型、搜索、头像或声音服务，也不创建人物、群聊或互动 Event。未知模板返回 404，不留下构建记录。重新打开入口仍使用现有 READY build 恢复流程。
+
+确认继续使用既有 `/{build_id}/confirm`、容量检查、回滚和幂等别名。模板草稿的 `reuse_existing=false` 持久化在既有 drafts JSON 中，在预览、重启恢复和确认时都不会按名字复用现有人物；因此容量计数把所选成员全部视为新建。创建来源仍是 `ENSEMBLE_BUILDER`，tags 标明 `原创情景` 和模板 ID，group_id 绑定真实群聊。固定模板不显示单人模型深化入口。创建后的头像/声音初始化与正常群聊反应沿用现有流程，不能把预览零调用理解为创建或聊天零调用。
+
+背景与关系继续通过 Initial Public Group Context 注入，明确不是已发生的聊天。确认不自动发开场或创建记忆。此版本是普通人物/群聊上的原创体验入口，尚无独立情景会话、故事时钟、跨渠道记忆隔离或专用暂停策略；应在独立测试环境验收，不能把专属人物 ID 当成完整情景隔离已经完成的证明。情景演化和跨天关系品质需要后续真实模型验收。
 
 ### Member failure isolation
 

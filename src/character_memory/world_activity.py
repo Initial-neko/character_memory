@@ -1222,6 +1222,31 @@ Summary: {topic["summary"]}
             self.repository.update_browse_decision(opportunity_id, expected_phase="PLANNING", phase="PLANNED", plan=snapshot, source_event_id=source_event_id)
             row = self.repository.get_browse_decision(opportunity_id)
         snapshot = row["plan"]
+        if snapshot.get("execution_policy"):
+            # Revoking the capability or editing an approved Skill between
+            # the durable plan and dispatch must block a new Claude process.
+            policy = snapshot["execution_policy"]
+            profile = next(
+                (item for item in self._active_profiles() if item.get("id") == character_id),
+                None,
+            )
+            try:
+                approved = select_role_research(profile)
+            except (OSError, UnicodeError, ValueError, yaml.YAMLError):
+                approved = None
+            expected = [(item["name"], item["sha256"]) for item in policy.get("claude_skills", [])]
+            actual = [(item["name"], item["sha256"]) for item in (approved or [])]
+            if policy.get("role_grant") != "claude_research" or approved is None or expected != actual:
+                denied = self._browse_unfinished(
+                    character_id, opportunity_id, execution_status="DENIED",
+                    error="ROLE_CAPABILITY_REVOKED",
+                )
+                denied["opportunity_status"] = "FAILED"
+                self.repository.update_browse_decision(
+                    opportunity_id, expected_phase="PLANNED", phase="FAILED",
+                    result=denied, error="ROLE_CAPABILITY_REVOKED",
+                )
+                return denied
         if snapshot["decision"].get("choice") == "READ_RSS":
             return self._browse_rss(character_id, opportunity_id, now=now, row=row, bundle=bundle)
         plan = PersonalBrowsePlan.model_validate(snapshot["decision"])

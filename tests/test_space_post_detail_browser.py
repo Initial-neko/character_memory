@@ -57,17 +57,21 @@ def space_server_with_image(tmp_path_factory, monkeypatch):
         store = SQLiteStore(child_env["CHARACTER_MEMORY_E2E_DB"])
         try:
             image_path = Path(__file__).resolve().parents[1] / "src" / "character_memory" / "web" / "call-room.png"
-            asset = MediaStorage(child_env["CHARACTER_MEMORY_E2E_MEDIA"]).save_bytes(
-                character_id="rin",
-                original_name="space-browser-test.png",
-                payload=image_path.read_bytes(),
-                created_at=datetime(2026, 10, 14, tzinfo=timezone.utc),
-                source="GENERATED_TEST",
-            )
-            store.add_media_asset(asset)
+            storage = MediaStorage(child_env["CHARACTER_MEMORY_E2E_MEDIA"])
+            assets = []
+            for name in ("space-browser-test-a.png", "space-browser-test-b.png"):
+                asset = storage.save_bytes(
+                    character_id="rin",
+                    original_name=name,
+                    payload=image_path.read_bytes(),
+                    created_at=datetime(2026, 10, 14, tzinfo=timezone.utc),
+                    source="GENERATED_TEST",
+                )
+                store.add_media_asset(asset)
+                assets.append(asset)
         finally:
             store.close()
-        yield base, asset.id
+        yield base, assets[0].id, assets[1].id
     finally:
         fixture.close()
 
@@ -152,7 +156,7 @@ def test_space_card_detail_returns_to_same_feed_position(page, space_server):
 
 
 def test_space_lightbox_traps_focus_and_restores_image_trigger(page, space_server_with_image):
-    base, media_id = space_server_with_image
+    base, media_id, _second_media_id = space_server_with_image
     created = page.request.post(
         f"{base}/v1/space/posts",
         data={"character_id": "rin", "content": "灯箱真实图片焦点测试", "media_ids": [media_id]},
@@ -183,6 +187,43 @@ def test_space_lightbox_traps_focus_and_restores_image_trigger(page, space_serve
     expect(dialog).to_be_hidden()
     assert page.locator(".chat-shell").evaluate("element => element.inert") is False
     expect(image_trigger).to_be_focused()
+
+
+def test_space_lightbox_moves_between_real_post_images(page, space_server_with_image):
+    base, first_media_id, second_media_id = space_server_with_image
+    created = page.request.post(
+        f"{base}/v1/space/posts",
+        data={
+            "character_id": "rin",
+            "content": "两张测试图片的灯箱导航",
+            "media_ids": [first_media_id, second_media_id],
+        },
+    )
+    assert created.ok
+    post_id = str(created.json()["post"]["id"])
+    page.goto(f"{base}/?space_post={post_id}", wait_until="domcontentloaded")
+
+    detail = page.locator(".space-detail-view")
+    expect(detail).to_be_visible()
+    triggers = detail.locator(f'[data-space-post="{post_id}"] [data-space-image-open]')
+    expect(triggers).to_have_count(2)
+    triggers.nth(0).click()
+    dialog = page.get_by_role("dialog", name="动态图片预览")
+    expect(dialog.locator("[data-space-lightbox-count]")).to_have_text("1 / 2")
+    first_url = triggers.nth(0).get_attribute("data-image-url")
+    second_url = triggers.nth(1).get_attribute("data-image-url")
+    expect(dialog.locator(".space-lightbox-image")).to_have_attribute("src", first_url)
+
+    dialog.get_by_role("button", name="下一张").click()
+    expect(dialog.locator("[data-space-lightbox-count]")).to_have_text("2 / 2")
+    expect(dialog.locator(".space-lightbox-image")).to_have_attribute("src", second_url)
+    dialog.get_by_role("button", name="上一张").click()
+    expect(dialog.locator("[data-space-lightbox-count]")).to_have_text("1 / 2")
+    expect(dialog.locator(".space-lightbox-image")).to_have_attribute("src", first_url)
+
+    dialog.get_by_role("button", name="关闭", exact=True).click()
+    expect(dialog).to_be_hidden()
+    expect(triggers.nth(0)).to_be_focused()
 
 
 def test_space_detail_deep_link_survives_reload_and_posts_comment(page, space_server):
@@ -240,3 +281,71 @@ def test_space_comment_enter_waits_for_ime_composition(page, space_server):
     expect(detail.get_by_text(draft, exact=True)).to_be_visible()
     stored = page.request.get(f"{space_server}/v1/space/posts/{post_id}").json()["post"]
     assert any(item["content"] == draft for item in stored["comments"])
+
+
+def test_space_comment_reply_and_thread_controls_work_in_browser(page, space_server):
+    created = page.request.post(
+        f"{space_server}/v1/space/posts",
+        data={"character_id": "rin", "content": "评论线程按钮真实行为测试"},
+    )
+    assert created.ok
+    post_id = str(created.json()["post"]["id"])
+    roots = []
+    for index in range(4):
+        response = page.request.post(
+            f"{space_server}/v1/space/posts/{post_id}/comments",
+            data={"content": f"测试主评论 {index + 1}"},
+        )
+        assert response.ok
+        roots.append(response.json()["comment"])
+    replies = []
+    for index in range(4):
+        response = page.request.post(
+            f"{space_server}/v1/space/posts/{post_id}/comments",
+            data={"content": f"根评论的回复 {index + 1}", "reply_to_comment_id": roots[0]["id"]},
+        )
+        assert response.ok
+        replies.append(response.json()["comment"])
+
+    page.goto(space_server, wait_until="domcontentloaded")
+    page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
+    post = page.locator(f'.space-feed [data-space-post="{post_id}"]')
+    post.locator("[data-space-comments-panel-toggle]").click()
+
+    # The collapsed panel opens, and root/thread disclosure controls change the
+    # rendered comments rather than only changing their labels.
+    root_toggle = post.get_by_role("button", name="查看全部 4 条主评论")
+    expect(root_toggle).to_be_visible()
+    assert post.locator(".space-comment-thread").count() == 3
+    root_toggle.click()
+    assert post.locator(".space-comment-thread").count() == 4
+    post.locator("[data-space-comments-toggle]").click()
+    assert post.locator(".space-comment-thread").count() == 3
+
+    target_thread = post.locator(f'[data-space-thread-root="{roots[0]["id"]}"]')
+    expect(target_thread.get_by_text("展开 2 条回复", exact=True)).to_be_visible()
+    assert target_thread.locator(".space-comment-reply").count() == 2
+    target_thread.get_by_role("button", name="展开 2 条回复").click()
+    assert target_thread.locator(".space-comment-reply").count() == 4
+    target_thread.get_by_role("button", name="收起回复").click()
+    assert target_thread.locator(".space-comment-reply").count() == 2
+
+    target_thread.locator(f'[data-space-reply-comment="{roots[0]["id"]}"]').click()
+    form = post.locator(f'[data-space-comment-form="{post_id}"]')
+    expect(form.locator("[data-space-reply-cancel]")).to_be_visible()
+    expect(form.locator(".space-comment-input")).to_have_attribute("placeholder", "回复 我…")
+    form.get_by_role("button", name="取消", exact=True).click()
+    expect(form.locator("[data-space-reply-cancel]")).to_have_count(0)
+    expect(form.locator(".space-comment-input")).to_have_attribute("placeholder", "评论这条动态…")
+
+    # Reply submission preserves the selected parent ID in the durable record.
+    target_thread.locator(f'[data-space-reply-comment="{roots[0]["id"]}"]').click()
+    form.locator(".space-comment-input").fill("浏览器发出的真实楼中楼回复")
+    form.locator(".space-comment-submit").click()
+    expect(post.get_by_text("浏览器发出的真实楼中楼回复", exact=True)).to_be_visible()
+    stored = page.request.get(f"{space_server}/v1/space/posts/{post_id}").json()["post"]
+    reply = next(item for item in stored["comments"] if item["content"] == "浏览器发出的真实楼中楼回复")
+    assert str(reply["reply_to_comment_id"]) == str(roots[0]["id"])
+    assert {str(item["id"]) for item in replies}.issubset(
+        {str(item["id"]) for item in stored["comments"]}
+    )

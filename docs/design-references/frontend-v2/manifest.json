@@ -1,0 +1,41 @@
+{
+  "status": "APPROVED_DESIGN_REFERENCE",
+  "implementation_status": "NOT_IMPLEMENTED",
+  "references": [
+    {
+      "id": "space-home",
+      "label": "Space 瀑布流首页",
+      "path": "docs/design-references/frontend-v2/space-home.png",
+      "sha256": "641b5212473465578f414df161fcab4c5978bb768886bb13e02f355ab6246003",
+      "width": 1586,
+      "height": 992,
+      "approval": "User-approved design reference, 2026-10-14",
+      "scope": "Desktop visual target; sample content and metrics are illustrative",
+      "generator": "GPT-IMAGE"
+    },
+    {
+      "id": "post-detail",
+      "label": "帖子详情与评论",
+      "path": "docs/design-references/frontend-v2/post-detail.png",
+      "sha256": "0e63108ab89b727982062ab10f5038d31361cd35201a5af35eab5f772df242fe",
+      "width": 1586,
+      "height": 992,
+      "approval": "User-approved design reference, 2026-10-14",
+      "scope": "Desktop visual target; sample content and metrics are illustrative",
+      "generator": "GPT-IMAGE"
+    },
+    {
+      "id": "world-visitors",
+      "label": "世界来客发现页",
+      "path": "docs/design-references/frontend-v2/world-visitors.png",
+      "sha256": "24ee24d2977fad8fe215be0957b228a4a289e8f8bbac2bacc7d9fca08f36c8ac",
+      "width": 1586,
+      "height": 992,
+      "approval": "User-approved design reference, 2026-10-14",
+      "scope": "Desktop visual target; sample content and metrics are illustrative",
+      "generator": "GPT-IMAGE"
+    }
+  ],
+  "mobile_status": "Awaiting a separate approved design",
+  "rules": "Preserve shared design language. Reference images do not prove implementation, real activity or human runtime acceptance."
+}

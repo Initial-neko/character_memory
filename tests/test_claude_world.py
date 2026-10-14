@@ -199,7 +199,10 @@ def test_role_without_claude_grant_never_dispatches_or_mentions_skills(tmp_path)
             "SELECT plan_json FROM world_browse_decisions WHERE opportunity_id='unprivileged-role'"
         ).fetchone()
         assert "execution_policy" not in json.loads(saved[0])
-        assert store.conn.execute("SELECT execution_metadata_json FROM capability_executions").fetchone()[0] is None
+        assert store.conn.execute(
+            "SELECT COUNT(*) FROM capability_executions WHERE "
+            "json_extract(execution_metadata_json,'$.backend')='claude'"
+        ).fetchone()[0] == 0
     finally:
         store.close()
 

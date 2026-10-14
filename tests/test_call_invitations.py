@@ -103,6 +103,45 @@ def test_http_permission_and_session_token(tmp_path):
     store.close()
 
 
+@pytest.mark.parametrize("archived_at", [None, "", "2026-10-14T00:00:00+00:00"])
+@pytest.mark.parametrize("operation", ["list", "accept", "lease"])
+def test_archive_marker_blocks_invitation_even_without_timestamp(tmp_path, archived_at, operation):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from character_memory.call_invitation_web import attach_call_invitation_routes
+    store = SQLiteStore(tmp_path / "archived.db")
+    repo = CallInvitationRepository(store)
+    now = datetime.now(timezone.utc)
+    event = store.append_event(Event(character_id="a", event_type=EventType.USER_MESSAGE,
+        event_time=now, content="机会", metadata={"channel": "DIRECT", "conversation_id": "direct"}))
+    invite = repo.offer(event, "邀请", "公开依据", CallInvitationPolicy(enabled=True))
+    profile = {"id": "a"}
+    app = FastAPI()
+    app.state.character_memory = SimpleNamespace(read_store=store,
+        settings=SimpleNamespace(direct_call_invitations_enabled=True),
+        character_profiles=lambda: [profile])
+    attach_call_invitation_routes(app)
+    try:
+        with TestClient(app) as client:
+            token = None
+            if operation == "lease":
+                token = client.post(f"/v1/call-invitations/{invite['id']}/accept",
+                    json={"client_id": "tab"}).json()["session_token"]
+            profile["archived_at"] = archived_at
+            if operation == "list":
+                assert client.get("/v1/call-invitations").json()["items"] == []
+            else:
+                payload = {"client_id": "tab"} if operation == "accept" else {"session_token": token, "connected": True}
+                assert client.post(f"/v1/call-invitations/{invite['id']}/{operation}", json=payload).status_code == 409
+            state = repo.get(invite["id"])
+            assert state["status"] == "CANCELLED"
+            assert state["end_reason"] == "CHARACTER_UNAVAILABLE"
+            assert state["connected_at"] is None
+    finally:
+        store.close()
+
+
 def test_proactive_invitation_is_only_proposed_in_audit(tmp_path):
     from character_memory.application.chat_service import ChatService
     from character_memory.application.clock import FixedClock

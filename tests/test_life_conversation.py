@@ -92,13 +92,16 @@ def test_http_reference_validates_before_writes_and_model(isolated_app):
         assert s.conn.total_changes==before
 
 
-def test_group_http_confirmed_reference_and_archived_character(isolated_app):
+@pytest.mark.parametrize('archived_at',[None,'','2026-10-14'])
+def test_group_http_confirmed_reference_and_archived_character(isolated_app, archived_at):
     from fastapi.testclient import TestClient
     from character_memory.group_store import GroupRepository, GroupEvent
     app=isolated_app;access=app.state.character_memory;s=access.store();profiles=access.character_profiles();a,b=[p['id'] for p in profiles[:2]]
     repo=GroupRepository(s);now=datetime.now(timezone.utc);group=repo.create_group('共同经历',[a,b],now)
     source=repo.append_event(GroupEvent(conversation_id=group.id,turn_id='source',actor_type='CHARACTER',actor_id=a,event_type='CHARACTER_MESSAGE',event_time=now,content='人物确实说过'))
     ref={'character_id':a,'key':f'group:{source.id}'}
+    direct=s.append_event(Event(character_id=a,event_type=EventType.USER_MESSAGE,event_time=now,
+        content='真实私聊',metadata={'channel':'DIRECT','conversation_id':'archive-direct'}))
     with TestClient(app) as c:
         payload={'message':'继续聊聊','life_reference':ref}
         response=c.post(f'/v1/groups/{group.id}/messages',json=payload)
@@ -109,9 +112,11 @@ def test_group_http_confirmed_reference_and_archived_character(isolated_app):
         assert c.post('/v1/chat/messages',json={'character_id':a,'conversation_id':group.id,**payload}).status_code==409
         assert c.post(f'/v1/groups/{group.id}/chat',json=payload).status_code==422
         original=access.character_profiles
-        access.character_profiles=lambda:[{**p,'archived_at':'2026-10-14'} if p['id']==a else p for p in profiles]
+        access.character_profiles=lambda:[{**p,'archived_at':archived_at} if p['id']==a else p for p in profiles]
         try:
             assert c.post(f'/v1/groups/{group.id}/messages',json=payload).status_code==409
+            assert c.post('/v1/chat/messages',json={'character_id':a,'conversation_id':'archive-direct',
+                'message':'继续真实私聊','life_reference':{'character_id':a,'key':f'event:{direct.id}'}}).status_code==409
         finally: access.character_profiles=original
         assert s.conn.total_changes==before
         assert c.get('/health').json()['runtime_loaded'] is False

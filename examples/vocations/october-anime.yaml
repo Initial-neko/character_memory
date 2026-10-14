@@ -1,0 +1,9 @@
+# Copy to personas/<existing-character>/vocation.yaml after review.
+# This is an interest/objective hint, not a scheduled paid agent or tool grant.
+enabled: true
+title: "十月新番观察员"
+objective: "跟进2026年10月公开播出的新番，基于真实来源与用户反馈研究适合推荐的作品"
+topics:
+  - "2026年10月新番上映与播出信息"
+  - "作品题材、制作团队与角色吸引力"
+  - "用户已经表达过的动画偏好"

@@ -263,7 +263,7 @@ Derived cognition  -> Memory / Mental State / Intent / Trace
 - `conversation_events`
 - `conversation_runtime_traces`
 
-SQLite 是当前单机事实源。连接由进程内 `RLock` 保护，并通过 migration ledger 做幂等 schema 演进。
+SQLite 是当前单机事实源。连接由进程内 `RLock` 保护，并通过 migration ledger 做幂等 schema 演进。持久化数据库连接在 schema 初始化前启用 SQLite **WAL** 模式，允许不同连接的读快照与写提交并行；跨连接写者仍然串行，普通核心连接最多等待 15 秒取得 SQLite 锁。只读/调用统计连接继续使用其自身独立的短等待策略，不能通过提高业务写等待把遥测写入变成聊天延迟。此策略缓解正常读写竞争，不承诺外部进程持有长期写事务时不会超时；也不意味着能够启动多个相互独立的 Character Runtime workers。
 
 Core Web 在 Runtime 懒初始化前后复用同一个 `SQLiteStore`：Web 装配拥有连接，后创建的 AppBundle 借用它。World 回执、观察和个人认知的本地事务不能通过另一连接更新自己持有写锁的数据库。独立 CLI AppBundle 仍拥有自己的 Store。事务主体或提交失败均回滚并恢复事务深度。
 
@@ -582,6 +582,22 @@ loopback callback to the existing WorldObservationService. It has no database,
 shell, file, posting or Character-state access. Tool calls and page attempts are
 bounded across the whole task; callbacks revoke admission on cancellation, while
 already-running browser/DNS work retains the existing fetch lifecycle limitation.
+The real `world_lookup` callback records bounded tool steps in the existing detail
+file and capability result receipt: owning capability request ID, a local `step_id`
+(not a Claude JSON-RPC ID), tool name, validated query, UTC start/completion,
+elapsed milliseconds, status and source-backed result excerpts. At most
+`min(5, max_tool_calls + 1)` callbacks are recorded; additional callbacks set an
+explicit truncation flag. Invalid payloads omit their inputs; failures contain
+fixed error codes rather than raw exceptions. A result excerpt is at most 1200
+characters, with available length and excerpt-truncation recorded separately;
+titles and step source URLs are capped at 180/500 characters with explicit
+truncation flags (the UI does not open truncated URLs).
+This does not certify that the original webpage was fully read. No callback
+means an empty recorded list, not tool success. Timeout snapshots may retain
+`RUNNING` with no completion/result; inspection shows that outcome as unknown.
+Existing credential redaction is applied before persisting steps. Commands,
+environment values and hidden model thinking are not added to step records.
+
 Only tool receipts supply readable observations; Claude prose is not proof of a
 visit. Failed or interrupted tasks do not enter appraisal.
 

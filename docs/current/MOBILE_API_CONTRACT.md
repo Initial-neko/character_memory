@@ -55,6 +55,8 @@ All paths below are relative to the noted base. JSON request/response is default
 | Manage membership | `POST /v1/groups/{id}/members`; `DELETE /v1/groups/{id}/members/{character_id}` | existing membership API |
 | Group archive | `POST /v1/groups/{id}/archive`; `POST /v1/groups/{id}/restore` | response `{group}` |
 | AI ensemble prepare | `POST /v1/ensembles/prepare` | `{prompt: string(3..2000)}` → `{build}` |
+| Original ensemble templates | `GET /v1/ensembles/templates` | `{templates:[{id,name,description,member_names}]}`; current template `warm-isekai` |
+| Original template preview | `POST /v1/ensembles/templates/{template_id}/prepare` | No body → `{build}` READY; fixed drafts, no model/search/onboarding call; 404 for unknown ID. Confirm/cancel use ordinary ensemble APIs. |
 | AI ensemble resume | `GET /v1/ensembles`; `GET /v1/ensembles/{group_id}` | in-progress / resumable build |
 | AI ensemble retry | `POST /v1/ensembles/{group_id}/research`; `POST /v1/ensembles/{group_id}/members/{index}/retry` | resumable build on transient failure |
 | AI ensemble confirm | `POST /v1/ensembles/{group_id}/confirm` | `{selected_indices:[2..12],confirm_over_soft_limit?:false,use_voice_design?:false}` → `{build}` |

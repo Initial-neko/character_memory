@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from character_memory.life_conversation import LifeReference, resolve_life_reference
 from fastapi import HTTPException, Query
 from fastapi.responses import FileResponse
 
@@ -27,6 +28,13 @@ def attach_character_life_routes(app, access):
         if item is None:
             raise HTTPException(404, detail="execution not found")
         return item
+
+    @app.get("/v1/characters/{character_id}/life/conversation")
+    def life_conversation(character_id: str, key: str = Query(..., min_length=1, max_length=150)):
+        profile = access.ensure_character(character_id)
+        if profile and profile.get("archived_at"):
+            raise HTTPException(409, "人物已归档，请先恢复")
+        return resolve_life_reference(access.read_store, LifeReference(character_id=character_id, key=key))
 
     @app.get("/life")
     def life_page():

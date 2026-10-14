@@ -31,7 +31,7 @@ The current implementation provides:
 - explicit seen/like/comment state;
 - browser users can add durable comments directly in the feed, reply to any comment/reply, and expand/collapse Bilibili/Xiaohongshu-style two-level reply threads;
 - browser users can structurally @ up to four active characters from the comment composer; each selected character gets one independent normal reply decision, and silence remains valid;
-- role replies to a user comment and role comments with `mentions_user=true` create a durable unread in-app notification; WebUI shows a count and notification inbox while open, and the notification deep-links to the related post/comment;
+- role replies **directly to a USER-authored comment** create a durable unread in-app notification; autonomous role-to-role conversations never create human notifications, even when their model output carries `mentions_user=true`; WebUI shows the count and notification inbox while open, and the notification deep-links to its post/comment;
 - autonomous interval-based Space opportunities for active characters;
 - autonomous audience reactions through the same PersonRuntime;
 - bounded multi-step Space discussions: comment targets may answer with text or an existing Sticker, and AI-to-AI automatic propagation stops after at most 4 reply rounds;
@@ -262,6 +262,28 @@ An Opportunity is only a chance to decide whether to publish. It is never a post
 
 The scheduler persists `space_opportunity_state` and `space_opportunity_runs`, so a long-running test can be inspected the next day and service restarts do not reset the schedule.
 
+### Optional reference billing-window pacing
+
+`activity_pacing_enabled` defaults to false. When enabled, Space opportunities
+and the three World activity opportunity clocks use the current **Asia/Shanghai**
+reference DeepSeek billing window: Monday-Friday 09:00-12:00 and 14:00-18:00
+(except configured statutory holidays) are `PEAK`; all other periods are
+`OFF_PEAK`. Boundaries are half-open and do not depend on the host OS timezone.
+`activity_reference_holidays` is an operator-maintained ISO date list; there is
+no hidden holiday fetch. An absent holiday is classified as weekday peak,
+which is conservative for potential off-peak savings.
+
+The chosen reference-window multiplier adjusts the **base interval at the
+time the scheduler assesses/claims opportunities**. It does not alter historical
+runs or preempt a previously persisted `next_opportunity_at`; a due opportunity
+does not guarantee publication or interaction. The same principle applies to
+`world_activity_state`, with World browse jitter retained. Persisted settings
+require a Character Runtime restart. Direct chat, user-triggered actions, group
+chat, RSS polling, provider prices, global token budgets, and invoice billing
+are NOT modified by this feature. OpenCode gateway pass-through of a DeepSeek
+off-peak discount has **not** been established; this feature must not be
+described as a proven 50% cost saving.
+
 `space_opportunity_runs.details_json` records the World Observation outcome, the derived `plan` payload (has_text + media intents) and the media/audience errors. It also keeps `model_calls`: the raw structured output of each autonomous call (`world_explore`, `world_appraisal`, `space_plan`) with the model name, the attempt number, and the output rejected by schema validation. Raw output is truncated at 2000 characters per call and flagged when it was cut. `repaired: true` on a record means the first output failed validation and the generic repair prompt produced the kept one — the path where an invalid media intent comes back as an empty list instead of surfacing an error.
 
 The ledger is read at two sizes. `GET /v1/space/dev/status` reports `recent_runs` as a verdict per call (`attempt`, `chars`, plus `repaired` / `truncated` / `failed` only when true) so polling the status never carries raw model text, and `recent_run_details: "summary"` says so. `GET /v1/space/dev/opportunity/run/{run_id}` returns one run in full, raw output included; Dev Console's **决策账本** Run ID control reads that endpoint.
@@ -329,7 +351,7 @@ actions=[]
 
 Ordinary `MESSAGE / VOICE_MESSAGE / STICKER / IMAGE` actions are dropped for Space events and cannot leak into private chat.
 
-A `SPACE_COMMENT` or validated `SPACE_STICKER` becomes a shared Space comment. A root comment targets the post author; a reply targets the character being replied to. The target receives `SPACE_COMMENT_RECEIVED` through its own PersonRuntime and may answer with public text, an existing retrieved Sticker, or silence. A user comment can carry up to four structured character IDs in `mentions`; those explicitly mentioned roles each receive one independent `SPACE_COMMENT_RECEIVED` decision even if `space_thread_reply_rounds` is zero, and this explicit mention does not start a role-to-role chain. No display-name parsing is used as identity. A role can set `mentions_user=true` only on `SPACE_COMMENT` to persistently flag that comment for the user. Role replies to a USER-authored comment also create an unread notification. An optional `client_request_id` on comment creation lets retried identical requests return the original comment; reusing the ID with a different payload is a conflict. Notification insert is in the same SQLite transaction as the comment, notifications are unique per comment, and marking one read is idempotent. AI-to-AI propagation is bounded to at most 4 automatic reply rounds per trigger, so a thread can feel alive without becoming an unbounded model loop. `space_thread_reply_rounds` lowers that ceiling per runtime and defaults to 2, because each round is one real reaction call and a measured 59% of threads reached the old ceiling of 4; `0` still stores every comment and simply never answers it. The hard ceiling stays 4, so the bound above is a property of the runtime, not of the setting. Note that `space_autonomy_enabled` is not a Space kill switch: it gates publishing opportunities, while replies to a comment are queued and drain regardless of it.
+A `SPACE_COMMENT` or validated `SPACE_STICKER` becomes a shared Space comment. A root comment targets the post author; a reply targets the character being replied to. The target receives `SPACE_COMMENT_RECEIVED` through its own PersonRuntime and may answer with public text, an existing retrieved Sticker, or silence. A user comment can carry up to four structured character IDs in `mentions`; those explicitly mentioned roles each receive one independent `SPACE_COMMENT_RECEIVED` decision even if `space_thread_reply_rounds` is zero, and this explicit mention does not start a role-to-role chain. No display-name parsing is used as identity. A role can set `mentions_user=true` only on `SPACE_COMMENT`, and the flag remains part of the durable public comment. It contributes a `MENTION` notification reason **only when that role comment directly replies to a USER-authored comment**; the reply itself contributes `REPLY`. Role-root comments and role-to-role replies—including autonomous audience and continuation chains—never create a user notification, even if `mentions_user=true`. Existing historical notifications are not deleted by this behavior change. An optional `client_request_id` on comment creation lets retried identical requests return the original comment; reusing the ID with a different payload is a conflict. Notification insert is in the same SQLite transaction as the comment, notifications are unique per comment, and marking one read is idempotent. AI-to-AI propagation is bounded to at most 4 automatic reply rounds per trigger, so a thread can feel alive without becoming an unbounded model loop. `space_thread_reply_rounds` lowers that ceiling per runtime and defaults to 2, because each round is one real reaction call and a measured 59% of threads reached the old ceiling of 4; `0` still stores every comment and simply never answers it. The hard ceiling stays 4, so the bound above is a property of the runtime, not of the setting. Note that `space_autonomy_enabled` is not a Space kill switch: it gates publishing opportunities, while replies to a comment are queued and drain regardless of it.
 
 The comment POST returns after the user's durable comment is queued; it does not wait for those automatic rounds. There is no background OS push channel. WebUI polls the durable unread inbox only while the page is visible and shows an in-app badge; opening a notification fetches its post/comment and marks it read. Separately, an open browser performs four bounded post re-reads over 22 seconds after a successful comment. Each re-read is guarded by the current feed epoch and open post, which exposes scheduler replies without turning Space into permanent post polling or letting a response from an old feed overwrite a newly opened one.
 
@@ -541,6 +563,28 @@ Pulse comments are **not** Character Space comments. They belong to the shared P
 When a character chooses to comment, the shared Pulse comment and that person's `WORLD_OBSERVATION` event are committed together on the World repository connection. If either insert fails, neither projection remains. On upgrades from the older split-commit version, an already-stored comment that lacks its personal observation is backfilled from its original durable text without a second model call or a duplicate event; ordinary already-complete comments remain single-write.
 
 #### Personal Browse
+
+##### Optional character vocation (research focus)
+
+A known character profile can include an optional `vocation.yaml` next to
+`persona.yaml`. This sidecar describes an operator-owned long-term specialty
+(`title`, `objective`, up to eight `topics`, and `enabled`). It is strictly
+validated, bounded to 8 KiB and read only from the existing persona directory;
+malformed sidecars are ignored with an operator warning. It is not a second
+Persona, an executable tool manifest or a new scheduler. Missing or
+`enabled: false` files preserve current World behavior.
+
+The existing per-character Personal Browse opportunity includes the vocation
+as a *preference hint* alongside Persona, Memory and real observations. The
+character may still choose silence/NO_ACTION. It can use only the pre-existing
+read-only `WEB_SEARCH` and optional `READ_RSS` capabilities. No access
+to local repository files, GitHub mutation or user secrets is granted by
+the sidecar, and a vocation does not imply that research has already happened.
+The normal durable Browse receipt, source provenance and World appraisal
+remain the source of truth. Example templates under `examples/vocations/`
+can be copied alongside a specific character's `persona.yaml` after review;
+none is installed or assigned automatically.
+
 
 Personal Browse has a separate per-character clock. It uses Persona, current Mental State and relevant Memory to decide whether the character naturally wants to look something up.
 

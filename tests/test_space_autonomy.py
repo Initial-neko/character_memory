@@ -540,7 +540,7 @@ def test_space_comment_can_structurally_mention_the_user_but_chat_message_cannot
     store.close()
 
 
-def test_role_space_post_can_create_a_durable_user_mention_notification(tmp_path):
+def test_autonomous_role_comment_may_mention_user_without_notifying_private_inbox(tmp_path):
     access, store, _ = _access(
         tmp_path,
         ids=("c00", "c01", "c02"),
@@ -553,11 +553,14 @@ def test_role_space_post_can_create_a_durable_user_mention_notification(tmp_path
 
     SpaceAutonomyService(access, repository).process_audience(post.id, now=now)
 
-    notification = repository.list_notifications(unread_only=True)[0]
-    comment = repository.get_comment(notification.comment_id)
-    assert comment is not None and comment.character_id == "c01"
-    assert comment.mentions_user is True
-    assert notification.reasons == ["MENTION"]
+    comments = repository.list_comments(post.id)
+    assert len(comments) == 1
+    assert comments[0].character_id == "c01"
+    assert comments[0].mentions_user is True
+    # A free-running role-to-role reaction is a Space fact, not a direct
+    # message to the user, even if the model sets the mention flag.
+    assert repository.list_notifications(unread_only=False) == []
+    assert repository.unread_notification_count() == 0
     store.close()
 
 

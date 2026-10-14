@@ -9,6 +9,7 @@ import os
 import secrets
 import sys
 import threading
+import time
 import urllib.request
 import uuid
 
@@ -16,7 +17,11 @@ from character_memory.domain.models import WorldObservation
 
 
 class LocalWorldToolBridge:
-    def __init__(self, observer, *, max_calls=2, max_pages=2, max_chars=6000):
+    def __init__(self, observer, *, max_calls=2, max_pages=2, max_chars=6000, request_id=""):
+        self.request_id = request_id
+        self.steps = []
+        self.steps_dropped = 0
+        self.redact = lambda value: value
         self.observer = observer
         self.max_calls = max_calls
         self.pages_left = max_pages
@@ -77,12 +82,32 @@ class LocalWorldToolBridge:
         return self
 
     def execute(self, payload):
-        if (not isinstance(payload, dict) or set(payload) != {"query"}
-                or not isinstance(payload["query"], str) or not payload["query"].strip()
-                or len(payload["query"]) > 240):
-            raise ValueError("INVALID_ARGUMENTS")
+        valid = (isinstance(payload, dict) and set(payload) == {"query"}
+                 and isinstance(payload["query"], str) and payload["query"].strip()
+                 and len(payload["query"]) <= 240)
         with self.lock:
+            started = time.monotonic()
+            step = {"request_id": self.request_id, "step_id": uuid.uuid4().hex,
+                    "tool": "world_lookup", "arguments": {"query": self.redact(payload["query"])} if valid else {},
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "completed_at": None, "elapsed_ms": None, "status": "RUNNING", "result": None, "reason": ""}
+            index = len(self.steps)
+            if index < min(5, self.max_calls + 1):
+                self.steps.append(step)
+            else:
+                self.steps_dropped += 1
+            def finish(status, reason="", result=None):
+                # Replace the snapshot atomically; a timeout may read RUNNING
+                # without waiting for the observer's network call to finish.
+                if index < len(self.steps):
+                    self.steps[index] = {**step, "status": status, "reason": reason, "result": result,
+                                         "completed_at": datetime.now(timezone.utc).isoformat(),
+                                         "elapsed_ms": round((time.monotonic()-started)*1000)}
+            if not valid:
+                finish("DENIED", "INVALID_ARGUMENTS")
+                raise ValueError("INVALID_ARGUMENTS")
             if self.closed.is_set() or self.calls >= self.max_calls or self.pages_left <= 0 or self.attempts_left <= 0:
+                finish("DENIED", "TOOL_BUDGET_EXHAUSTED")
                 raise PermissionError("TOOL_BUDGET_EXHAUSTED")
             self.calls += 1
             # Reserve attempts before network work; an exception never refunds.
@@ -115,8 +140,15 @@ class LocalWorldToolBridge:
                     self.search_results += hits
                 self.observations.extend(observations)
                 self.receipts.extend(receipts)
+                excerpts = [{"title": self.redact(page["title"])[:180], "url": self.redact(page["url"])[:500],
+                             "title_truncated": len(page["title"]) > 180, "url_truncated": len(page["url"]) > 500,
+                             "content": self.redact(page["content"])[:1200], "available_characters": len(page["content"]),
+                             "excerpt_truncated": len(page["content"]) > 1200} for page in observations]
+                finish("SUCCESS" if observations else "FAILED", "" if observations else "NO_VERIFIED_CONTENT",
+                       {"observations": excerpts, "receipts": [{**receipt, "url": self.redact(receipt["url"])[:500]} for receipt in receipts]})
                 return {"observations": observations, "receipts": receipts}
             except Exception:
+                finish("FAILED", "TOOL_CANCELLED" if self.closed.is_set() else "TOOL_EXECUTION_FAILED")
                 self.errors.append({"stage": "world_lookup", "error": "TOOL_EXECUTION_FAILED"})
                 raise
 

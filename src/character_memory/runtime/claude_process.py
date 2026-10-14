@@ -159,7 +159,7 @@ class ClaudePrintRunner:
             flags.extend(["--model", selected_model])
         if budget is not None:
             flags.extend(["--max-budget-usd", str(budget)])
-        with LocalWorldToolBridge(self.observer, max_calls=tool_calls,
+        with LocalWorldToolBridge(self.observer, request_id=request.request_id, max_calls=tool_calls,
                                  max_pages=request.constraints["max_pages"],
                                  max_chars=request.constraints["max_chars_per_page"]) as bridge:
             with tempfile.TemporaryDirectory(prefix="task-", dir=self.output_dir) as cwd:
@@ -185,6 +185,8 @@ class ClaudePrintRunner:
                     for secret in secrets_to_remove:
                         if secret: text = text.replace(secret, "[REDACTED]")
                     return text
+
+                bridge.redact = clean
 
                 def read(stream, kind):
                     try:
@@ -317,7 +319,14 @@ class ClaudePrintRunner:
                     "detail_path": detail_path, "limits": {"timeout_seconds": timeout, "max_turns": turns,
                     "max_tool_calls": tool_calls, "max_budget_usd": budget}, "effective_tools": init_tools,
                     "mcp_servers": mcp_servers, **_usage(final)}
-                detail = {"task": request.arguments["query"], "session_id": session,
+                def clean_data(value):
+                    if isinstance(value, dict):
+                        return {key: clean_data(item) for key, item in value.items()}
+                    if isinstance(value, list):
+                        return [clean_data(item) for item in value]
+                    return clean(value) if isinstance(value, str) else value
+                tool_steps = clean_data(list(bridge.steps))
+                detail = {"tool_steps": tool_steps, "tool_steps_truncated": bridge.steps_dropped > 0, "task": clean(request.arguments["query"]), "session_id": session,
                     "argv_flags": [flag for flag in flags if flag.startswith("--") or flag == "-p"],
                     "assistant_response": clean(final.get("result") or "\n".join(visible))[:12000],
                     "diagnostics": "\n".join(diagnostics)[-2000:],
@@ -326,5 +335,6 @@ class ClaudePrintRunner:
                 temporary.write_text(json.dumps(detail, ensure_ascii=False), encoding="utf-8")
                 temporary.replace(self.output_dir / detail_path)
                 data = {"observations": bridge.observations if success else [], "search_results": bridge.search_results,
-                        "errors": bridge.errors, "source_receipts": bridge.receipts, "execution": execution}
+                        "errors": bridge.errors, "tool_steps": tool_steps, "tool_steps_truncated": bridge.steps_dropped > 0,
+                        "source_receipts": bridge.receipts, "execution": execution}
                 return CapabilityResult(request.request_id, "SUCCESS" if success else "TIMEOUT" if reason == "TIMEOUT" else "FAILED", data, reason)

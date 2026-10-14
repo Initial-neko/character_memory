@@ -24,8 +24,9 @@ def _grant_role(tmp_path, access, character_id, *, skills=()):
     folder.mkdir(parents=True,exist_ok=True)
     (folder/"persona.yaml").write_text("id: "+character_id+"\n",encoding="utf-8")
     (folder/"capabilities.yaml").write_text(
-        "capabilities:\n  - claude_research\nskills:\n"+
-        "".join("  - "+item+"\n" for item in skills),encoding="utf-8")
+        "capabilities:\n  - claude_research\n" +
+        ("skills:\n" + "".join("  - " + item + "\n" for item in skills) if skills else "skills: []\n"),
+        encoding="utf-8")
     profiles=access.character_profiles()
     for profile in profiles:
         if profile["id"]==character_id:

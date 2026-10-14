@@ -1,7 +1,7 @@
 (() => {
   const state = {view:"feed", period:"today", q:"", category:"", sourceId:"", sources:[], cancelledSources:[], cancelCandidate:null, items:[],
     next:null, feedDate:null, feedRequest:0, sourceRequest:0, modalVersion:0, articleRequest:0,
-    loading:false, retryAppend:false, articleOrigin:null};
+    loading:false, retryAppend:false, articleOrigin:null, articleId:"", articleOpen:false, initialReaderReady:false, readerMobile:null};
   const $ = selector => document.querySelector(selector);
   const escapeHtml = value => String(value ?? "").replaceAll("&","&amp;")
     .replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
@@ -136,7 +136,7 @@
   };
   const renderCards = items => items.map(item => {
     const image = item.image_url && safeUrl(item.image_url) ? item.image_url : "";
-    return `<article class="feed-card" tabindex="0" role="button" aria-label="阅读 ${escapeHtml(item.title)}" data-item-id="${item.id}">
+    return `<article class="feed-card${image?" has-image":""}${String(item.id) === state.articleId ? " selected" : ""}" tabindex="0" role="button" aria-pressed="${String(item.id) === state.articleId}" aria-controls="articlePanel" aria-label="阅读 ${escapeHtml(item.title)}" data-item-id="${item.id}">
       ${image ? `<img src="${escapeHtml(imageSrc(item.id, image))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
       <div class="feed-card-copy"><h2>${escapeHtml(item.title)}</h2>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}
         <div class="feed-meta"><span class="feed-source">${escapeHtml(item.source_name)}</span><span>${escapeHtml(item.published_at ? fmtTime(item.published_at) : "发布时间未知")}</span></div>
@@ -171,6 +171,18 @@
       $("#feedEmpty").classList.toggle("hidden", state.items.length > 0);
       $("#feedHint").textContent = `${data.query?.date ? `${data.query.date} · ` : ""}北京时间 · 类型按标题关键词筛选`;
       feedback("feed", `已显示 ${state.items.length} 篇${data.has_more ? "" : " · 已全部加载"}`);
+      if (state.articleOpen && state.articleId && !state.items.some(item=>String(item.id)===state.articleId)) {
+        const first=state.items[0];
+        if (first && !isMobileReader()) openArticle(first.id, document.querySelector(`[data-item-id="${first.id}"]`));
+        else closeArticle();
+      }
+      if (!state.initialReaderReady) {
+        state.initialReaderReady = true;
+        if (state.items.length && !isMobileReader()) {
+          const first = state.items[0];
+          openArticle(first.id, document.querySelector(`[data-item-id="${first.id}"]`));
+        }
+      }
     } catch (error) { if (request === state.feedRequest) feedback("feed", `加载失败：${error.message}`, true); }
     finally { if (request === state.feedRequest) { state.loading = false; $("#loadMoreButton").disabled = false; } }
   };
@@ -181,14 +193,55 @@
     try { const data = await api("/v1/rss/categories"); render(data.categories || []); }
     catch { $("#feedCategories").insertAdjacentHTML("beforeend", '<button type="button" id="retryCategoriesButton">类型加载失败，重试</button>'); }
   };
+  const isMobileReader = () => window.matchMedia("(max-width: 760px)").matches;
+  const readerPlaceholder = text => {
+    $("#articleExternalLink").classList.add("hidden");
+    $("#articleBody").replaceChildren(Object.assign(document.createElement("p"), {className:"reader-empty", textContent:text}));
+  };
+  const setReaderBackgroundInert = inert => {
+    $(".rss-sidebar").inert=inert; $(".rss-main").inert=inert;
+    const header=$(".cm-global-header"); if(header) header.inert=inert;
+  };
+  const syncReaderMode = () => {
+    const panel=$("#articlePanel"), mobile=isMobileReader(), changed=state.readerMobile!==null&&state.readerMobile!==mobile;
+    state.readerMobile=mobile;
+    panel.classList.remove("hidden");
+    panel.removeAttribute("aria-hidden");
+    panel.setAttribute("role", mobile?"dialog":"region");
+    if (mobile) {
+      if (state.articleOpen) {
+        panel.setAttribute("aria-modal","true");
+        setReaderBackgroundInert(true);
+      } else {
+        panel.removeAttribute("aria-modal"); panel.classList.add("hidden");
+        setReaderBackgroundInert(false);
+      }
+    } else {
+      panel.removeAttribute("aria-modal");
+      setReaderBackgroundInert(false);
+      if (!state.articleOpen) { panel.classList.remove("hidden"); readerPlaceholder("选择一篇文章，查看 Feed 中实际提供的内容。"); }
+    }
+    $("#closeArticleButton").hidden=!state.articleOpen;
+    if (changed && mobile && state.articleOpen) $("#closeArticleButton").focus({preventScroll:true});
+    if (changed && !mobile && state.articleOpen && state.articleOrigin?.isConnected) state.articleOrigin.focus({preventScroll:true});
+  };
   const closeArticle = () => {
-    ++state.articleRequest; $("#articlePanel").classList.add("hidden"); $("#articlePanel").setAttribute("aria-hidden", "true");
-    $(".rss-shell").inert = false; state.articleOrigin?.focus({preventScroll:true});
+    ++state.articleRequest; state.articleOpen=false; state.articleId="";
+    document.querySelectorAll("[data-item-id]").forEach(card=>{card.setAttribute("aria-pressed","false");card.classList.remove("selected");});
+    if (!isMobileReader()) readerPlaceholder("选择一篇文章，查看 Feed 中实际提供的内容。");
+    syncReaderMode();
+    const origin=state.articleOrigin; state.articleOrigin=null;
+    if (origin?.isConnected) origin.focus({preventScroll:true});
+    else if (!isMobileReader()) $("#feedSearch").focus({preventScroll:true});
   };
   const openArticle = async (itemId, origin) => {
-    const request = ++state.articleRequest; state.articleOrigin = origin;
-    $("#articlePanel").classList.remove("hidden"); $("#articlePanel").setAttribute("aria-hidden", "false"); $(".rss-shell").inert = true;
-    $("#articleBody").textContent = "加载文章中…"; $("#articleExternalLink").classList.add("hidden"); $("#closeArticleButton").focus(); $("#articlePanel").scrollTop = 0;
+    const request = ++state.articleRequest; state.articleOrigin = origin; state.articleId=String(itemId); state.articleOpen=true;
+    document.querySelectorAll("[data-item-id]").forEach(card=>{const selected=card.dataset.itemId===state.articleId;card.setAttribute("aria-pressed",String(selected));card.classList.toggle("selected",selected);});
+    syncReaderMode();
+    if (isMobileReader()) $("#closeArticleButton").focus({preventScroll:true});
+    else origin?.focus({preventScroll:true});
+    $("#closeArticleButton").hidden=false;
+    $("#articleBody").textContent = "加载文章中…"; $("#articleExternalLink").classList.add("hidden"); $("#articlePanel").scrollTop = 0;
     try {
       const {item} = await api(`/v1/rss/items/${itemId}`);
       if (request !== state.articleRequest) return;
@@ -292,12 +345,13 @@
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") {
       if (!$("#sourceModal").classList.contains("hidden")) hideModal();
-      else if (!$("#articlePanel").classList.contains("hidden")) closeArticle();
+      else if (state.articleOpen) closeArticle();
     }
     const card = event.target.closest("[data-item-id]");
     if (card && ["Enter", " "].includes(event.key)) { event.preventDefault(); openArticle(card.dataset.itemId, card); }
     if (event.key === "Tab") {
-      const dialog = [$("#sourceModal"), $("#articlePanel")].find(node => !node.classList.contains("hidden"));
+      const dialog = !$("#sourceModal").classList.contains("hidden") ? $("#sourceModal") :
+        (state.articleOpen && isMobileReader() ? $("#articlePanel") : null);
       if (!dialog) return;
       const focusable = [...dialog.querySelectorAll("button:not(:disabled), input:not(:disabled), a[href]")].filter(node => node.getClientRects().length);
       const first = focusable[0], last = focusable.at(-1);
@@ -354,5 +408,7 @@
       if (version === state.modalVersion) { submit.disabled = false; submit.textContent = "添加订阅"; }
     }
   });
+  window.matchMedia("(max-width: 760px)").addEventListener("change", syncReaderMode);
+  syncReaderMode();
   renderSourceNavigation(); loadSources(); loadCategories(); loadFeed();
 })();

@@ -6,8 +6,10 @@
   <title>外部信息 · Character Memory</title>
   <link rel="stylesheet" href="/static/ui.css">
   <link rel="stylesheet" href="/static/rss.css">
+  <link rel="stylesheet" href="/static/reading_v2.css">
+  <link rel="stylesheet" href="/static/frontend_v2.css">
 </head>
-<body>
+<body class="reading-page">
   <div class="rss-shell">
     <aside class="rss-sidebar">
       <a class="rss-brand" href="/"><span class="rss-brand-mark">CM</span><span>Character Memory</span></a>
@@ -59,6 +61,11 @@
         </section>
       </section>
     </main>
+
+    <aside id="articlePanel" class="article-panel" role="region" aria-label="文章阅读" aria-live="polite">
+      <header><button id="closeArticleButton" class="icon-button" type="button" aria-label="返回文章列表" hidden>←</button><a id="articleExternalLink" class="hidden" target="_blank" rel="noopener noreferrer">原文 ↗</a></header>
+      <div id="articleBody" class="article-body"><p class="reader-empty">选择一篇文章，查看 Feed 中实际提供的内容。</p></div>
+    </aside>
   </div>
 
   <div id="sourceModal" class="rss-modal hidden" role="dialog" aria-modal="true" aria-labelledby="sourceModalTitle">
@@ -74,11 +81,7 @@
     </form>
   </div>
 
-  <aside id="articlePanel" class="article-panel hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-label="文章详情">
-    <header><button id="closeArticleButton" class="icon-button" type="button" aria-label="返回信息流">←</button><a id="articleExternalLink" target="_blank" rel="noopener noreferrer">原文 ↗</a></header>
-    <div id="articleBody" class="article-body"></div>
-  </aside>
-
   <script src="/static/rss.js" defer></script>
+  <script src="/static/frontend_v2.js" defer></script>
 </body>
 </html>

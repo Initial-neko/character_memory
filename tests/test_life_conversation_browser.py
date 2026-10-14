@@ -65,7 +65,7 @@ def test_real_chromium_deleted_source_keeps_draft(page,live_life):
     expect(page.get_by_role('button',name='取消引用')).to_be_visible()
     store.conn.execute('DELETE FROM events WHERE id=?',[event.id]);store.conn.commit()
     page.locator('#sendButton').click()
-    expect(page.locator('p[aria-live="polite"]')).to_contain_text('草稿已保留')
+    expect(page.locator('p[aria-live="polite"]:visible')).to_contain_text('草稿已保留')
     expect(page.locator('#messageInput')).to_have_value('想和你聊聊这条记录。')
     assert store.conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]==0
     assert page.request.get(base+'/health').json()['runtime_loaded'] is False

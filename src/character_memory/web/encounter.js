@@ -100,7 +100,7 @@
     capacity.textContent = `正式角色 ${Math.min(total, limit)}/${limit}`;
     list.innerHTML = state.encounters.length
       ? state.encounters.map(cardHtml).join("")
-      : '<div class="encounter-empty"><strong>今天还没有遇见谁</strong><span>系统会按自己的节奏产生下一次邂逅。</span></div>';
+      : '<div class="encounter-empty"><strong>暂时没有可展示的新朋友</strong><span>已有邂逅候选出现后，会在这里显示。</span></div>';
   }
 
   async function refresh() {

@@ -163,6 +163,10 @@ refreshes do not wake the model. Gate inspection itself makes no model or networ
 calls, and it never bypasses the existing due clock/daily ceiling. Read/ignored
 items are not a recurring wake source.
 
+### Reader presentation
+
+The desktop `/sources` page uses subscription navigation, an article list and a non-modal reading region. Source/filter changes synchronize the selected article. The reader preserves the Feed excerpt boundary and the original link below the body; it does not infer original-page readership. Narrow screens retain a modal article reader with background isolation, Escape/back close and return focus. The shared user-page styling does not change fetching, subscription identities or stored content.
+
 ### Personal reading decision protocol
 
 An enabled RSS opportunity requires an explicit `choice`: `NO_ACTION`,

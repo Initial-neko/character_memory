@@ -41,6 +41,10 @@ The current implementation provides:
 
 All active (not archived) characters are conceptually eligible to see new Space posts. Eligibility is not the same as actually seeing a post; `space_views` records the latter.
 
+The user-facing Space feed uses a responsive masonry layout for existing image and text posts. Opening a post moves its existing node into the detail view, preserving one comment form and the existing media/reply handlers. `?view=space&space_post=<id>` identifies a post detail for direct entry and refresh. Returning restores the feed position/focus; browser back and Escape also close the detail.
+
+World discovery displays the existing Encounter candidates in a separate user page, with an explicit RSS reading entry. Its greeting/admission actions still use the original Encounter contracts: a candidate is not evidence of a public visit, and this visual change does not add a visitor lifecycle or generate a Space introduction. It does not invent visitor portraits, reactions or public-visit status when the current records provide none.
+
 #### World memory boundary
 
 World Observation 的网页 `summary` 默认只属于当前机会的 Working Context，不自动进入长期 Memory。Appraisal 只有在明确给出第一人称 `personal_memory`（人物持续兴趣/经历/反思）时，才会创建 WORLD_OBSERVATION Event 并进入现有 PersonRuntime admission；价格、新闻标题、参数等动态世界事实默认以后重新查询。

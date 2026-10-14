@@ -237,6 +237,11 @@ src/character_memory/web/
 
 ```text
 app.js                  conversation/composer core
+frontend_v2.js/css      shared user-page navigation, chat visual shell and click-only experience entry
+profile_v2.js/css       read-only character profile, sourced daily posts and user interactions
+world_v2.js/css         World discovery presentation over the existing Encounter feature
+reading_v2.css          life timeline and desktop/non-modal RSS reader presentation
+social_rail_v2.js/css    Space context links and click-only sourced experience rail
 groups.js               group UX
 realtime_reconcile.js   realtime reconciliation
 persona.js              character UI
@@ -249,7 +254,7 @@ images.js               normal image draft/send
 ai_images.js            generated image source
 avatars.js              avatar management
 search.js               message search
-space.js                Character Space feed + per-character Space entry
+space.js                Character Space masonry feed, deep-linked post detail + per-character Space entry
 space.css               Character Space layout
 intent.js               intent UX
 wake.js                 wake

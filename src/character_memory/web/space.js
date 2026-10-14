@@ -27,7 +27,7 @@
   topbarActions?.appendChild(characterEntry);
 
   const shell = document.createElement("section");
-  shell.className = "space-shell hidden";
+  shell.className = "space-shell space-layout-v2 hidden";
   shell.innerHTML = `
     <header class="space-header">
       <div class="space-heading">
@@ -39,6 +39,7 @@
     <div class="space-feed-wrap">
       <div class="space-feed-meta"></div>
       <section class="space-notification-inbox hidden" aria-live="polite" aria-label="未读空间提醒"></section>
+      <section class="space-detail-view hidden" aria-label="动态详情"><div class="space-detail-toolbar"><button class="space-detail-back" type="button" data-space-detail-back>← 返回 Space</button><span>动态详情</span></div><div class="space-detail-content"></div></section>
       <div class="space-feed" aria-live="polite"></div>
       <button class="space-feed-more hidden" type="button" aria-live="polite">继续向下滚动加载更多</button>
     </div>
@@ -63,24 +64,49 @@
   document.body.appendChild(lightbox);
 
   const feed = shell.querySelector(".space-feed");
+  const feedWrap = shell.querySelector(".space-feed-wrap");
   const meta = shell.querySelector(".space-feed-meta");
   const notificationInbox = shell.querySelector(".space-notification-inbox");
+  const detailView = shell.querySelector(".space-detail-view");
+  const detailContent = shell.querySelector(".space-detail-content");
   const more = shell.querySelector(".space-feed-more");
-  const title = shell.querySelector(".space-title");
-  const subtitle = shell.querySelector(".space-subtitle");
-  const closeButton = shell.querySelector(".space-close-button");
+  const pageHeading = document.createElement("header");
+  pageHeading.className = "space-page-heading";
+  const pageHeadingCopy = document.createElement("div");
+  pageHeadingCopy.className = "space-page-heading-copy";
+  const title = document.createElement("h1");
+  title.className = "space-title";
+  title.textContent = "Space";
+  const subtitle = document.createElement("p");
+  subtitle.className = "space-subtitle";
+  subtitle.textContent = "角色们公开留下的近况";
+  pageHeadingCopy.append(title, subtitle);
+  const pageNav = document.createElement("nav");
+  pageNav.className = "space-page-nav";
+  pageNav.setAttribute("aria-label", "Space 页面导航");
+  pageNav.innerHTML = '<button type="button" data-space-page-action="all" aria-current="page">全部动态</button><button type="button" data-space-page-action="current">当前人物</button><button type="button" data-space-page-action="world">世界来客</button>';
+  const currentPageButton = pageNav.querySelector('[data-space-page-action="current"]');
+  pageHeading.append(pageHeadingCopy, pageNav);
+  shell.prepend(pageHeading);
+  shell.querySelector(".space-header")?.remove();
 
   let opened = false;
   let filterCharacterId = null;
+  let detailPostId = null;
+  let detailReturn = null;
+  let detailRequestEpoch = 0;
   let voicePlayer = {audio:null, button:null};
   let lightboxItems = [];
   let lightboxIndex = 0;
+  let lightboxReturnFocus = null;
+  const lightboxBackgroundInert = new Map();
   let postsById = new Map();
   let feedHasMore = false;
   let feedNextBeforeId = null;
   let feedTotal = 0;
   let feedActiveCharacterCount = 0;
   let feedLoading = false;
+  let feedLoaded = false;
   let feedEpoch = 0;
   let autoPrefetchPages = 0;
   let autoPrefetchTimer = null;
@@ -324,17 +350,32 @@
     lightboxItems = buttons.map(node => ({url:String(node.dataset.imageUrl || ""),label:String(node.dataset.imageLabel || "动态图片")})).filter(item => item.url);
     lightboxIndex = Math.max(0, buttons.indexOf(button));
     if (!lightboxItems.length) return;
+    lightboxReturnFocus = button;
+    lightboxBackgroundInert.clear();
+    for (const element of [...document.body.children]) {
+      if (element === lightbox) continue;
+      lightboxBackgroundInert.set(element, Boolean(element.inert));
+      element.inert = true;
+    }
     renderLightbox();
     lightbox.classList.remove("hidden");
     document.body.classList.add("space-lightbox-open");
+    lightbox.querySelector("[data-space-lightbox-close]:not(.space-lightbox-backdrop)")?.focus({preventScroll:true});
   }
 
-  function closeLightbox() {
+  function closeLightbox({restoreFocus = true} = {}) {
     lightbox.classList.add("hidden");
     document.body.classList.remove("space-lightbox-open");
+    for (const [element, wasInert] of lightboxBackgroundInert) {
+      if (element.isConnected) element.inert = wasInert;
+    }
+    lightboxBackgroundInert.clear();
     lightboxItems = [];
     lightboxIndex = 0;
     lightbox.querySelector(".space-lightbox-image").removeAttribute("src");
+    const returnFocus = lightboxReturnFocus;
+    lightboxReturnFocus = null;
+    if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({preventScroll:true});
   }
 
   function moveLightbox(delta) {
@@ -501,19 +542,21 @@
     </div>`;
   }
 
-  function postHtml(post) {
+  function postHtml(post, {detail = false} = {}) {
     const author = post.author || profileFor(post.character_id);
     const archived = author.archived ? '<span class="space-archived-badge">已归档</span>' : "";
+    const media = mediaHtml(post);
+    const detailClass = detail ? " space-post-detail" : "";
+    const textOnlyClass = detail && !media ? " space-post-detail-text-only" : "";
     return `
-      <article class="space-post" data-space-post="${CM.escapeHtml(post.id)}">
-        <div class="space-post-avatar">${avatarHtml(author, "space-avatar")}</div>
+      <article class="space-post${detailClass}${textOnlyClass}" data-space-post="${CM.escapeHtml(post.id)}">
         <div class="space-post-body">
           <div class="space-post-head">
-            <div><strong class="space-author">${CM.escapeHtml(author.name || author.id)}</strong>${archived}</div>
-            <time class="space-time">${CM.escapeHtml(CM.fmtTime(post.created_at))}</time>
+            <div class="space-post-author">${avatarHtml(author, "space-avatar")}<span class="space-post-author-copy"><strong class="space-author">${CM.escapeHtml(author.name || author.id)}</strong>${archived}<time class="space-time">${CM.escapeHtml(CM.fmtTime(post.created_at))}</time></span></div>
+            ${detail ? "" : `<button class="space-post-detail-trigger" type="button" data-space-post-open="${CM.escapeHtml(post.id)}" aria-label="打开 ${CM.escapeHtml(author.name || author.id)} 的动态详情">详情 ›</button>`}
           </div>
+          ${media ? `<div class="space-post-media">${media}</div>` : ""}
           ${post.content ? `<div class="space-content">${CM.escapeHtml(post.content)}</div>` : ""}
-          ${mediaHtml(post)}
           ${likesHtml(post)}
           ${commentsHtml(post)}
         </div>
@@ -521,20 +564,171 @@
     `;
   }
 
+  function findPostElement(postId) {
+    const key = String(postId);
+    const selector = `[data-space-post="${CSS.escape(key)}"]`;
+    return detailContent.querySelector(selector) || feed.querySelector(selector);
+  }
+
+  function commentStateFor(postId) {
+    const prefix = `${postId}:`;
+    return {
+      panel:expandedCommentPanels.has(postId),
+      expanded:expandedComments.has(postId),
+      threads:[...expandedThreads].filter(key => key.startsWith(prefix)),
+    };
+  }
+
+  function expandPostComments(postId, post) {
+    expandedCommentPanels.add(postId);
+    expandedComments.add(postId);
+    for (const comment of post?.comments || []) {
+      const rootId = threadRootId(post, comment.id);
+      expandedThreads.add(`${postId}:${rootId}`);
+    }
+  }
+
+  function restoreCommentState(postId, state) {
+    if (!state) return;
+    if (state.panel) expandedCommentPanels.add(postId);
+    else expandedCommentPanels.delete(postId);
+    if (state.expanded) expandedComments.add(postId);
+    else expandedComments.delete(postId);
+    for (const key of [...expandedThreads]) {
+      if (key.startsWith(`${postId}:`)) expandedThreads.delete(key);
+    }
+    state.threads.forEach(key => expandedThreads.add(key));
+  }
+
+  function setSpacePostUrl(postId, {push = false} = {}) {
+    const url = new URL(window.location.href);
+    const state = {...(window.history.state || {})};
+    if (postId) {
+      url.searchParams.set("space_post", String(postId));
+      if (push) state.cmSpacePostId = String(postId);
+    } else {
+      url.searchParams.delete("space_post");
+      delete state.cmSpacePostId;
+    }
+    const target = `${url.pathname}${url.search}${url.hash}`;
+    if (push) window.history.pushState(state, "", target);
+    else window.history.replaceState(state, "", target);
+  }
+
+  async function openPostDetail(postId, {pushHistory = false, historyEntry = false} = {}) {
+    const key = String(postId || "");
+    if (!key || detailPostId === key) return;
+    if (detailPostId) await restorePostDetail({clearUrl:false, restoreFocus:false, loadFeedAfter:false});
+    if (!opened) setOpen(true);
+    const previousFilterCharacterId = filterCharacterId;
+    filterCharacterId = null;
+    nav.classList.add("active");
+    title.textContent = "Space";
+    subtitle.textContent = "角色们公开留下的近况";
+    updatePageNav();
+    const current = findPostElement(key);
+    const placeholder = current?.parentElement === feed ? document.createComment(`space-post:${key}`) : null;
+    if (placeholder) current.before(placeholder);
+    detailPostId = key;
+    detailReturn = {
+      scrollY:window.scrollY,
+      placeholder,
+      focusTarget:current?.querySelector("[data-space-post-open]") || null,
+      commentState:commentStateFor(key),
+      filterCharacterId:previousFilterCharacterId,
+      historyEntry:Boolean(historyEntry || pushHistory),
+    };
+    const requestEpoch = ++detailRequestEpoch;
+    if (current) {
+      current.classList.add("space-post-detail");
+      detailContent.append(current);
+      const post = postsById.get(key);
+      if (post) {
+        expandPostComments(key, post);
+        current.outerHTML = postHtml(post, {detail:true});
+      }
+    } else {
+      detailContent.innerHTML = '<div class="space-loading">正在读取这条动态…</div>';
+    }
+    detailView.classList.remove("hidden");
+    feedWrap.classList.add("is-detail");
+    more.classList.add("hidden");
+    clearAutoPrefetch();
+    if (pushHistory) setSpacePostUrl(key, {push:true});
+    window.scrollTo({top:0, behavior:"auto"});
+    detailView.querySelector("[data-space-detail-back]")?.focus({preventScroll:true});
+
+    if (current) return;
+    try {
+      const data = await CM.api(`/v1/space/posts/${encodeURIComponent(key)}`);
+      if (detailPostId !== key || detailRequestEpoch !== requestEpoch) return;
+      postsById.set(key, data.post);
+      expandPostComments(key, data.post);
+      detailContent.innerHTML = postHtml(data.post, {detail:true});
+    } catch (error) {
+      if (detailPostId !== key || detailRequestEpoch !== requestEpoch) return;
+      detailContent.innerHTML = `<div class="error" role="alert">动态读取失败：${CM.escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  async function restorePostDetail({clearUrl = true, restoreFocus = true, loadFeedAfter = true} = {}) {
+    if (!detailPostId) return;
+    const key = detailPostId;
+    const previous = detailReturn;
+    const current = detailContent.querySelector("[data-space-post]");
+    ++detailRequestEpoch;
+    detailPostId = null;
+    detailReturn = null;
+    filterCharacterId = previous?.filterCharacterId || null;
+    title.textContent = filterCharacterId
+      ? `${profileFor(filterCharacterId).name || filterCharacterId} 的空间`
+      : "Space";
+    subtitle.textContent = filterCharacterId ? "这个角色公开留下的动态" : "角色们公开留下的近况";
+    nav.classList.toggle("active", opened && !filterCharacterId);
+    updatePageNav();
+    detailView.classList.add("hidden");
+    feedWrap.classList.remove("is-detail");
+    if (current && previous?.placeholder?.parentNode) {
+      current.classList.remove("space-post-detail", "space-post-detail-text-only");
+      previous.placeholder.replaceWith(current);
+    }
+    restoreCommentState(key, previous?.commentState);
+    if (previous?.placeholder) replacePost(postsById.get(key));
+    detailContent.innerHTML = "";
+    if (clearUrl) setSpacePostUrl(null);
+    if (!feedLoaded && loadFeedAfter) await loadFeed();
+    updateFeedMore();
+    requestAnimationFrame(() => {
+      window.scrollTo({top:Number(previous?.scrollY || 0), behavior:"auto"});
+      const focusTarget = previous?.focusTarget?.isConnected
+        ? previous.focusTarget
+        : findPostElement(key)?.querySelector("[data-space-post-open]");
+      if (restoreFocus) focusTarget?.focus?.({preventScroll:true});
+    });
+  }
+
+  function backFromPostDetail() {
+    if (!detailPostId) return;
+    if (detailReturn?.historyEntry && new URLSearchParams(location.search).has("space_post")) {
+      window.history.back();
+      return;
+    }
+    restorePostDetail({clearUrl:true}).catch(console.warn);
+  }
   function replacePost(post) {
     if (!post) return;
     postsById.set(String(post.id), post);
-    const target = Array.from(feed.querySelectorAll("[data-space-post]"))
-      .find(node => node.dataset.spacePost === String(post.id));
-    if (target) target.outerHTML = postHtml(post);
+    const target = findPostElement(post.id);
+    const detail = Boolean(target?.classList.contains("space-post-detail"));
+    if (detail && String(post.id) === detailPostId) expandPostComments(String(post.id), post);
+    if (target) target.outerHTML = postHtml(post, {detail});
   }
 
   async function refreshPost(postId, epoch) {
     if (!opened || feedEpoch !== epoch || !postsById.has(postId)) return;
     const data = await CM.api(`/v1/space/posts/${encodeURIComponent(postId)}`);
     if (!opened || feedEpoch !== epoch || !postsById.has(postId)) return;
-    const current = Array.from(feed.querySelectorAll("[data-space-post]"))
-      .find(node => node.dataset.spacePost === String(postId));
+    const current = findPostElement(postId);
     const draft = current?.querySelector(".space-comment-input");
     // Never replace a card containing unsent text. The submit handler will
     // reconcile the card after the next comment. An empty, focused composer is
@@ -543,8 +737,7 @@
     const restoreFocus = draft && document.activeElement === draft;
     replacePost(data.post);
     if (restoreFocus) {
-      const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
-        .find(node => node.dataset.spacePost === String(postId));
+      const updated = findPostElement(postId);
       updated?.querySelector(".space-comment-input")?.focus();
     }
   }
@@ -571,6 +764,16 @@
     shell.classList.toggle("hidden", !value);
     nav.classList.toggle("active", value && !filterCharacterId);
     if (!value) filterCharacterId = null;
+    updatePageNav();
+  }
+
+  function updatePageNav() {
+    const selected = filterCharacterId ? "current" : "all";
+    for (const button of pageNav.querySelectorAll("[data-space-page-action]")) {
+      if (button.dataset.spacePageAction === selected) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
+    currentPageButton.hidden = CM.isGroupConversation() || !CM.state.characterId;
   }
 
   function updateFeedMeta() {
@@ -582,7 +785,7 @@
 
   function updateFeedMore() {
     if (!more) return;
-    if (!opened || !postsById.size) {
+    if (!opened || detailPostId || !postsById.size) {
       more.classList.add("hidden");
       return;
     }
@@ -603,7 +806,7 @@
   }
 
   function shouldAutoPrefetch() {
-    if (!opened || feedLoading || !feedHasMore || !feedNextBeforeId) return false;
+    if (!opened || detailPostId || feedLoading || !feedHasMore || !feedNextBeforeId) return false;
     if (autoPrefetchPages < AUTO_PREFETCH_PAGES) return true;
     if (!more) return false;
     return more.getBoundingClientRect().top <= window.innerHeight + AUTO_PREFETCH_AHEAD_PX;
@@ -627,6 +830,7 @@
       clearAutoPrefetch();
       autoPrefetchPages = 0;
       postsById = new Map();
+      feedLoaded = false;
       feedHasMore = false;
       feedNextBeforeId = null;
       feedTotal = 0;
@@ -649,6 +853,7 @@
       if (epoch !== feedEpoch) return;
 
       const posts = Array.isArray(data.posts) ? data.posts : [];
+      feedLoaded = true;
       const freshPosts = posts.filter(post => !postsById.has(String(post.id)));
       posts.forEach(post => postsById.set(String(post.id), post));
       feedHasMore = Boolean(data.has_more);
@@ -661,9 +866,10 @@
         title.textContent = `${profile.name || profile.id} 的空间`;
         subtitle.textContent = "这个角色公开留下的动态";
       } else {
-        title.textContent = "空间";
+        title.textContent = "Space";
         subtitle.textContent = "角色们公开留下的近况";
       }
+      updatePageNav();
 
       if (append) {
         if (freshPosts.length) feed.insertAdjacentHTML("beforeend", freshPosts.map(postHtml).join(""));
@@ -697,8 +903,10 @@
   }
 
   async function open(characterId = null) {
+    if (detailPostId) await restorePostDetail({clearUrl:true, restoreFocus:false, loadFeedAfter:false});
     filterCharacterId = characterId || null;
     setOpen(true);
+    updatePageNav();
     window.scrollTo({top:0, behavior:"auto"});
     await loadMentionProfiles();
     await loadFeed();
@@ -714,12 +922,29 @@
   function close() {
     clearAutoPrefetch();
     stopVoice();
-    closeLightbox();
+    closeLightbox({restoreFocus:false});
+    if (detailPostId) restorePostDetail({clearUrl:true, restoreFocus:false, loadFeedAfter:false}).catch(console.warn);
     setOpen(false);
     window.scrollTo({top:0, behavior:"auto"});
   }
 
-  feed.addEventListener("click", event => {
+  shell.addEventListener("click", event => {
+    const detailBack = event.target.closest("[data-space-detail-back]");
+    if (detailBack) { backFromPostDetail(); return; }
+
+    const postOpen = event.target.closest("[data-space-post-open]");
+    if (postOpen) {
+      event.preventDefault();
+      openPostDetail(postOpen.dataset.spacePostOpen, {pushHistory:true}).catch(console.warn);
+      return;
+    }
+
+    const postCard = event.target.closest("[data-space-post]:not(.space-post-detail)");
+    const interactive = event.target.closest("button, a, input, textarea, select, video, audio, [contenteditable=\"true\"]");
+    if (postCard && !interactive) {
+      openPostDetail(postCard.dataset.spacePost, {pushHistory:true}).catch(console.warn);
+      return;
+    }
     const mentionToggle = event.target.closest("[data-space-mention-toggle]");
     if (mentionToggle) {
       const form = mentionToggle.closest("[data-space-comment-form]");
@@ -771,8 +996,7 @@
       }
       replacePost(postsById.get(postId));
       if (expandedCommentPanels.has(postId)) {
-        const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
-          .find(node => node.dataset.spacePost === postId);
+        const updated = findPostElement(postId);
         updated?.querySelector(".space-comment-input")?.focus();
       }
       return;
@@ -810,8 +1034,7 @@
         expandedThreads.add(`${postId}:${rootId}`);
       }
       replacePost(post);
-      const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
-        .find(node => node.dataset.spacePost === postId);
+      const updated = findPostElement(postId);
       updated?.querySelector(".space-comment-input")?.focus();
       return;
     }
@@ -854,7 +1077,7 @@
     }
   });
 
-  feed.addEventListener("keydown", event => {
+  shell.addEventListener("keydown", event => {
     const input = event.target?.closest?.(".space-comment-input");
     if (!input) return;
     // Enter sends and Shift+Enter keeps the newline. A composing IME reports the
@@ -868,7 +1091,7 @@
     else form.dispatchEvent(new Event("submit", {cancelable:true, bubbles:true}));
   });
 
-  feed.addEventListener("submit", async event => {
+  shell.addEventListener("submit", async event => {
     const form = event.target.closest("[data-space-comment-form]");
     if (!form) return;
     event.preventDefault();
@@ -906,8 +1129,7 @@
       commentRequestIds.delete(postId);
       replacePost(data.post);
       scheduleCommentReconciliation(postId);
-      const updated = Array.from(feed.querySelectorAll("[data-space-post]"))
-        .find(node => node.dataset.spacePost === postId);
+      const updated = findPostElement(postId);
       updated?.querySelector(".space-comment-input")?.focus();
     } catch (error) {
       if (submit) submit.disabled = false;
@@ -924,10 +1146,33 @@
     if (event.target.closest("[data-space-lightbox-next]")) moveLightbox(1);
   });
   document.addEventListener("keydown", event => {
-    if (lightbox.classList.contains("hidden")) return;
-    if (event.key === "Escape") closeLightbox();
-    else if (event.key === "ArrowLeft") moveLightbox(-1);
-    else if (event.key === "ArrowRight") moveLightbox(1);
+    if (!lightbox.classList.contains("hidden")) {
+      if (event.key === "Tab") {
+        const focusable = [...lightbox.querySelectorAll("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")]
+          .filter(element => element.tabIndex >= 0 && !element.closest(".hidden") && element.getClientRects().length > 0);
+        if (!focusable.length) {
+          event.preventDefault();
+          lightbox.querySelector("[data-space-lightbox-close]:not(.space-lightbox-backdrop)")?.focus({preventScroll:true});
+          return;
+        }
+        const activeIndex = focusable.indexOf(document.activeElement);
+        const atBoundary = event.shiftKey ? activeIndex <= 0 : activeIndex === -1 || activeIndex === focusable.length - 1;
+        if (atBoundary) {
+          event.preventDefault();
+          const next = event.shiftKey ? focusable[focusable.length - 1] : focusable[0];
+          next?.focus({preventScroll:true});
+        }
+        return;
+      }
+      if (event.key === "Escape") { event.preventDefault(); closeLightbox(); }
+      else if (event.key === "ArrowLeft") moveLightbox(-1);
+      else if (event.key === "ArrowRight") moveLightbox(1);
+      return;
+    }
+    if (event.key === "Escape" && detailPostId) {
+      event.preventDefault();
+      backFromPostDetail();
+    }
   });
 
   more?.addEventListener("click", () => {
@@ -945,6 +1190,17 @@
   }
 
   nav.addEventListener("click", () => open(null).catch(console.error));
+  pageNav.addEventListener("click", event => {
+    const button = event.target.closest("[data-space-page-action]");
+    if (!button) return;
+    if (button.dataset.spacePageAction === "all") open(null).catch(console.error);
+    else if (button.dataset.spacePageAction === "current") {
+      if (!CM.isGroupConversation() && CM.state.characterId) open(CM.state.characterId).catch(console.error);
+    } else if (button.dataset.spacePageAction === "world") {
+      if (CM.features.world?.open) CM.features.world.open();
+      else window.location.assign("/?view=world");
+    }
+  });
   notificationsButton.addEventListener("click", () => openNotifications().catch(console.error));
   notificationInbox.addEventListener("click", event => {
     const button = event.target.closest("[data-space-notification]");
@@ -955,15 +1211,15 @@
   characterEntry.addEventListener("click", () => {
     if (!CM.isGroupConversation()) open(CM.state.characterId).catch(console.error);
   });
-  closeButton.addEventListener("click", close);
   CM.dom.characterList?.addEventListener("click", event => {
     if (opened && event.target.closest("[data-character]")) close();
   });
   CM.on("conversationChanged", () => {
     if (opened) close();
     updateCharacterEntry();
+    updatePageNav();
   });
-  CM.on("charactersLoaded", updateCharacterEntry);
+  CM.on("charactersLoaded", () => { updateCharacterEntry(); updatePageNav(); });
   updateCharacterEntry();
   refreshNotifications();
   window.setInterval(refreshNotifications, 30000);
@@ -972,7 +1228,21 @@
   });
 
   CM.registerFeature("space", {open, close, reload:loadFeed});
+  window.addEventListener("popstate", () => {
+    const postId = new URLSearchParams(location.search).get("space_post");
+    if (postId) {
+      if (postId !== detailPostId) openPostDetail(postId, {historyEntry:false}).catch(console.warn);
+    } else if (detailPostId) {
+      restorePostDetail({clearUrl:false}).catch(console.warn);
+    }
+  });
   CM.on("ready", () => {
-    if (new URLSearchParams(location.search).get("view") === "space") return open(null);
+    const params = new URLSearchParams(location.search);
+    const postId = params.get("space_post");
+    if (postId) {
+      open(null).then(() => openPostDetail(postId, {historyEntry:false})).catch(console.warn);
+      return;
+    }
+    if (params.get("view") === "space") return open(null);
   });
 })();

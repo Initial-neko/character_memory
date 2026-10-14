@@ -1153,7 +1153,7 @@ def test_space_comment_box_sends_on_enter_but_keeps_shift_enter():
     root = Path(__file__).resolve().parents[1]
     script = (root / "src" / "character_memory" / "web" / "space.js").read_text(encoding="utf-8")
 
-    assert 'feed.addEventListener("keydown"' in script
+    assert 'shell.addEventListener("keydown"' in script
     assert '".space-comment-input"' in script
     assert 'event.key !== "Enter"' in script
     assert "event.shiftKey" in script

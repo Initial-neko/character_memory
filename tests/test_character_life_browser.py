@@ -93,3 +93,68 @@ def test_visual_and_failure_retry(life_page):
     p.unroute('**/v1/characters/a/life?**')
     p.locator('#retry').click()
     expect(p.locator('.event-card')).to_have_count(1)
+
+
+def test_shared_shell_profile_rail_and_mobile_layout(life_page):
+    from playwright.sync_api import expect
+    p=life_page
+    expect(p.locator(".cm-global-header")).to_be_visible()
+    expect(p.locator("#lifeCharacters")).to_contain_text("林绘")
+    expect(p.locator("#lifeCharacters")).to_contain_text("另一位角色")
+    rail=p.locator(".life-nav").bounding_box()
+    assert rail["y"] >= 60
+    p.locator("[data-life-character='b']").click()
+    expect(p.locator("#character")).to_have_value("b")
+    expect(p.locator("#timeline")).to_contain_text("另一个人物独立经历")
+    p.set_viewport_size({"width":390,"height":844})
+    assert p.evaluate("document.documentElement.scrollWidth<=innerWidth")
+    mobile=p.evaluate("""() => ({
+      globalBottom: document.querySelector('.cm-global-header').getBoundingClientRect().bottom,
+      lifeNavigationTop: document.querySelector('.life-page-nav').getBoundingClientRect().top
+    })""")
+    assert mobile["lifeNavigationTop"] >= mobile["globalBottom"]
+
+
+def test_desktop_identity_and_timeline_fit_their_layout(life_page):
+    p=life_page
+    layout=p.evaluate("""() => {
+      const rect = selector => document.querySelector(selector).getBoundingClientRect();
+      const globalHeader = rect('.cm-global-header');
+      const identity = rect('.life-header');
+      const records = rect('.records');
+      const details = rect('.details');
+      const active = document.querySelector('.life-page-nav [aria-current="page"]');
+      const activeColor = getComputedStyle(active).color;
+      const accentProbe = document.createElement('span');
+      accentProbe.style.color = getComputedStyle(document.body).getPropertyValue('--ui-accent').trim();
+      document.body.append(accentProbe);
+      const accentColor = getComputedStyle(accentProbe).color;
+      accentProbe.remove();
+
+      const card = document.querySelector('#timeline .event-card');
+      const paragraph = card.querySelector('p');
+      paragraph.textContent = 'LongRecordWithoutSpaces'.repeat(80);
+      const cardRect = card.getBoundingClientRect();
+      const paragraphRect = paragraph.getBoundingClientRect();
+      return {
+        identityTop: identity.top,
+        globalHeaderBottom: globalHeader.bottom,
+        activeColor,
+        accentColor,
+        recordsRight: records.right,
+        detailsLeft: details.left,
+        paragraphClientWidth: paragraph.clientWidth,
+        paragraphScrollWidth: paragraph.scrollWidth,
+        paragraphRight: paragraphRect.right,
+        cardRight: cardRect.right,
+        documentScrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: innerWidth
+      };
+    }""")
+    assert layout["identityTop"] >= layout["globalHeaderBottom"] + 8
+    assert layout["activeColor"] == layout["accentColor"]
+    assert layout["detailsLeft"] >= layout["recordsRight"]
+    assert layout["paragraphClientWidth"] > 0
+    assert layout["paragraphScrollWidth"] <= layout["paragraphClientWidth"]
+    assert layout["paragraphRight"] <= layout["cardRight"]
+    assert layout["documentScrollWidth"] <= layout["viewportWidth"]

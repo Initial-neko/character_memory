@@ -116,6 +116,10 @@ class CharacterExecutionReader:
         item = self._project(row)
         data = obj(obj(dict(row).get("result_json")).get("data"))
         item.update(read_only=True, assistant_response=None, source_receipts=data.get("source_receipts") or [], details_state="NOT_RECORDED")
+        steps = data.get("tool_steps")
+        item.update(tool_steps=[step for step in steps[:5] if isinstance(step, dict)] if isinstance(steps, list) else [],
+                    tool_steps_state="RECORDED" if isinstance(steps, list) else "NOT_RECORDED",
+                    tool_steps_truncated=data.get("tool_steps_truncated") is True)
         relative = item["execution"].get("detail_path")
         if relative:
             item["details_state"] = "UNAVAILABLE"
@@ -127,6 +131,10 @@ class CharacterExecutionReader:
                             detail = obj(path.read_text(encoding="utf-8"))
                             item["assistant_response"] = text(detail.get("assistant_response"), 12000)
                             item["source_receipts"] = detail.get("receipts") or []
+                            if isinstance(detail.get("tool_steps"), list):
+                                item["tool_steps"] = [step for step in detail["tool_steps"][:5] if isinstance(step, dict)]
+                                item["tool_steps_state"] = "RECORDED"
+                                item["tool_steps_truncated"] = detail.get("tool_steps_truncated") is True
                             item["details_state"] = "AVAILABLE"
                     except (OSError, ValueError):
                         pass

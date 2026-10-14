@@ -30,6 +30,11 @@ def test_execution_details_escape_text_and_never_write(page, tmp_path):
     identifier=str(uuid.uuid4())+".json"
     folder=tmp_path/"claude-executions";folder.mkdir()
     (folder/identifier).write_text(json.dumps({"assistant_response":"<script>window.EXECUTED=true</script>",
+        "tool_steps":[{"request_id":"run:1","step_id":"local-one","tool":"world_lookup","status":"SUCCESS",
+                       "started_at":"2026-10-14T00:00:00+00:00","completed_at":"2026-10-14T00:00:01+00:00",
+                       "elapsed_ms":1000,"arguments":{"query":"<img src=x onerror=window.EXECUTED=true>"},
+                       "result":{"observations":[{"title":"source","url":"javascript:alert(1)","content":"<script>unsafe</script>",
+                                                  "excerpt_truncated":True,"available_characters":3000}]}}],
         "receipts":[{"url":"https://example.org/source","content_scope":"WEB_EXCERPT","read_characters":32}]}))
     row=store.conn.execute("SELECT execution_metadata_json FROM capability_executions").fetchone()
     meta=json.loads(row[0]);meta.update(detail_path=identifier,tool_calls=1,
@@ -65,6 +70,12 @@ def test_execution_details_escape_text_and_never_write(page, tmp_path):
         expect(page.locator("#details")).to_contain_text("mcp__character_world__world_lookup")
         expect(page.locator("#details")).to_contain_text("character_world: connected")
         expect(page.locator("#details")).to_contain_text("工具调用 1 次")
+        page.get_by_text("受控工具步骤（1 条）").click()
+        expect(page.locator("#details")).to_contain_text("本地步骤：local-one")
+        expect(page.locator("#details")).to_contain_text("详情节选已截断")
+        expect(page.locator("#details")).to_contain_text("<script>unsafe</script>")
+        assert page.locator('a[href^="javascript:"]').count()==0
+        assert page.evaluate("window.EXECUTED") is None
         assert store.conn.total_changes==before
     finally:
         server.should_exit=True

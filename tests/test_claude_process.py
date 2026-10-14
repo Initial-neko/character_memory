@@ -60,6 +60,9 @@ def test_independent_runs_only_send_current_task_and_verified_sources(tmp_path):
     assert detail["task"] == "new task"
     assert "public photography" not in json.dumps(detail)
     assert detail["assistant_response"] == "Visible answer"
+    assert detail["tool_steps"] == second.data["tool_steps"]
+    assert detail["tool_steps"][0]["request_id"] == "run:2"
+    assert detail["tool_steps"][0]["status"] == "SUCCESS"
     assert "--no-session-persistence" in detail["argv_flags"]
     assert not set(detail["argv_flags"]) & {"--resume", "--continue", "--fork-session"}
     received = [json.loads(line) for line in (tmp_path / "received.jsonl").read_text().splitlines()]
@@ -141,6 +144,7 @@ def test_success_without_tool_evidence_cannot_become_reading(tmp_path):
     result = runner.run(request())
     assert result.status == "FAILED" and result.reason == "NO_VERIFIED_CONTENT"
     assert result.data["observations"] == []
+    assert result.data["tool_steps"] == []
     runner.close()
 
 
@@ -169,4 +173,16 @@ def test_non_world_or_unknown_capability_never_starts(tmp_path):
     runner = ClaudePrintRunner(Observer(), tmp_path / "runs", command=["does-not-exist"])
     assert runner.run(replace(request(), channel="DIRECT")).status == "DENIED"
     assert runner.run(replace(request(), capability="READ_RSS")).status == "DENIED"
+    runner.close()
+
+
+def test_step_queries_and_results_use_existing_credential_redaction(tmp_path, monkeypatch):
+    from character_memory.runtime.claude_process import ClaudePrintRunner
+    monkeypatch.setenv("ANTHROPIC_API_KEY", 'unit-test"secret')
+    runner = ClaudePrintRunner(Observer(), tmp_path / "runs", command=fake_cli(tmp_path))
+    result = runner.run(request('public unit-test"secret topic'))
+    assert 'unit-test"secret' not in str(result.data["tool_steps"])
+    detail = json.loads((tmp_path / "runs" / result.data["execution"]["detail_path"]).read_text())
+    assert 'unit-test"secret' not in detail["task"]
+    assert "[REDACTED]" in json.dumps(result.data["tool_steps"])
     runner.close()

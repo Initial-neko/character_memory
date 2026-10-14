@@ -50,8 +50,8 @@ before switching to the provider that needs it.
 
 ```text
 common      9 fields + the two keys a user must supply   -> first screen
-advanced   37 fields                                     -> closed groups by section
-diagnostic 36 fields                                     -> API schema + config.example.yaml
+advanced   52 fields                                     -> closed groups by section
+diagnostic 37 fields                                     -> API schema + config.example.yaml
 ```
 
 Where a field goes:

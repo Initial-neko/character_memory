@@ -210,6 +210,25 @@ proactive_intent_duplicate_similarity: 0.90
 proactive_intent_dedup_window_hours: 72
 
 # -----------------------------------------------------------------------------
+# Optional DeepSeek reference-window opportunity pacing (not a money budget)
+# -----------------------------------------------------------------------------
+
+# Off by default to preserve existing Space/World scheduler behavior.
+activity_pacing_enabled: false
+
+# Base opportunity interval multiplier during Beijing weekday 09:00-12:00
+# and 14:00-18:00, excluding explicitly configured CN public holidays.
+activity_peak_interval_multiplier: 2.0
+
+# Multiplier outside peak periods, including weekday lunch and weekends.
+activity_offpeak_interval_multiplier: 0.5
+
+# China statutory holidays in YYYY-MM-DD; maintain manually for the applicable
+# year. Empty list conservatively treats weekday holidays as peak.
+# Makeup weekends stay off-peak under the official weekday-based definition.
+activity_reference_holidays: []
+
+# -----------------------------------------------------------------------------
 # Character Space autonomy
 # -----------------------------------------------------------------------------
 

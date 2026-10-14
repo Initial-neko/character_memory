@@ -188,8 +188,7 @@ def test_only_selected_skills_mount_into_temporary_claude_directory(tmp_path):
     argv = received["argv"]
     assert argv[argv.index("--tools") + 1] == "Skill"
     assert "--add-dir" in argv
-    assert argv[argv.index("--allowedTools") + 1] == "mcp__character_world__world_lookup"
-    assert any(argv[i:i+2] == ["--allowedTools", "Skill"] for i in range(len(argv)-1))
+    assert argv[argv.index("--allowedTools") + 1] == "mcp__character_world__world_lookup Skill"
     assert result.data["execution"]["selected_skills"] == [{"name":"anime-research","sha256":item["sha256"]}]
     assert not (tmp_path / "runs" / "task-").exists()
     runner.close()

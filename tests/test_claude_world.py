@@ -216,3 +216,32 @@ def test_claude_executor_rejects_missing_role_grant_before_start(tmp_path):
     assert executor.execute(req).reason == "ROLE_CAPABILITY_DENIED"
     assert runner.calls == []
     store.close()
+
+
+def test_revoking_role_between_planning_and_execution_prevents_cli(tmp_path):
+    from types import SimpleNamespace
+    from test_world_activity import make_access, NOW
+    from character_memory.world_activity import WorldActivityService, WorldPulseRepository
+    store, access, model = make_access(tmp_path, count=1)
+    _grant_role(tmp_path, access, "c00")
+    access.settings = access.settings.model_copy(update={"world_browse_execution_backend": "claude"})
+    runner = Runner()
+    access.services = SimpleNamespace(claude_runner=runner)
+    repo = WorldPulseRepository(store)
+    service = WorldActivityService(access, repo)
+    original = repo.update_browse_decision
+
+    def revoke_after_plan(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if kwargs.get("phase") == "PLANNED":
+            (tmp_path / "personas" / "c00" / "capabilities.yaml").unlink()
+        return result
+
+    repo.update_browse_decision = revoke_after_plan
+    try:
+        result = service.browse_character("c00", now=NOW, opportunity_id="revoked-before-dispatch")
+        assert result["execution_status"] == "DENIED"
+        assert result["opportunity_status"] == "FAILED"
+        assert runner.calls == []
+    finally:
+        store.close()

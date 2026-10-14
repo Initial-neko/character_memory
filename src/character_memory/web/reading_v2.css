@@ -9,6 +9,7 @@ body.reading-page {
 }
 
 /* Life timeline */
+.identity-copy { min-width:0; }
 .life-nav {
   position: fixed;
   inset: 72px auto 0 0;

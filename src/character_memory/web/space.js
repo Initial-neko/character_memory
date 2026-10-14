@@ -914,6 +914,7 @@
   }
 
   async function openNotifications() {
+    if (detailPostId) await restorePostDetail({clearUrl:true, restoreFocus:false, loadFeedAfter:false});
     if (!opened) await open(null);
     else await refreshNotifications();
     notificationInbox.scrollIntoView({behavior:"smooth", block:"start"});

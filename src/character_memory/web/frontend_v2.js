@@ -14,6 +14,22 @@
   header.className = 'cm-global-header';
   header.innerHTML = `<a class="cm-global-brand" href="/" aria-label="Character Memory 首页"><img src="/static/stickers/default/round_cat_happy.svg" alt=""><span><strong>Character Memory</strong><small>让人物拥有自己的生活</small></span></a><nav class="cm-global-nav" aria-label="页面导航"><button type="button" data-cm-nav="space">${spaceIcon}Space</button><button type="button" data-cm-nav="chat">${chatIcon}聊天</button><a href="/?view=world" data-cm-nav="world">${worldIcon}World</a><a href="/?view=profile" data-cm-nav="people">${personIcon}人物</a></nav>${CM ? '<button class="cm-global-search" type="button" title="打开现有聊天搜索">搜索人物与聊天内容</button>' : ''}`;
   document.body.prepend(header);
+  const notifications = document.querySelector('.space-notification-button');
+  if (notifications) {
+    notifications.classList.add('cm-global-notification');
+    notifications.title = '查看空间提醒';
+    notifications.setAttribute('aria-label', '空间提醒');
+    notifications.querySelector('span').innerHTML = icon('<path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5Z"/><path d="M10 20h4"/>');
+    header.append(notifications);
+    notifications.addEventListener('click', event => {
+      if (!ready || conversationKey() !== handledConversation) {
+        event.stopImmediatePropagation(); event.preventDefault(); pendingNavigation='notifications'; return;
+      }
+      CM.features.world?.close(); CM.features.profile?.close();
+      const next=routeUrl('space');
+      if (next.href!==location.href) history.pushState(null,'',next);
+    }, {capture:true});
+  }
   function active() {
     const selected = location.pathname === '/sources' || document.body.classList.contains('world-mode') ? 'world' : location.pathname === '/life' || document.body.classList.contains('profile-mode') ? 'people' : document.body.classList.contains('space-mode') ? 'space' : 'chat';
     header.querySelectorAll('[data-cm-nav]').forEach(node => {
@@ -25,7 +41,7 @@
     const url = new URL(original);
     url.searchParams.delete('space_post');
     if (mode === 'chat') url.searchParams.delete('view');
-    else url.searchParams.set('view', mode === 'people' ? 'profile' : mode);
+    else url.searchParams.set('view', mode === 'people' ? 'profile' : mode === 'notifications' ? 'space' : mode);
     return url;
   }
   function navigate(mode, {writeHistory = true} = {}) {
@@ -42,6 +58,7 @@
     if (mode === 'space') CM.features.space?.open(null).catch(console.error);
     else if (mode === 'world') CM.features.world?.open();
     else if (mode === 'people') CM.features.profile?.open(CM.state.characterId).catch(console.error);
+    else if (mode === 'notifications') notifications?.click();
     active();
   }
   header.querySelectorAll('[data-cm-nav]').forEach(node => node.addEventListener('click', event => {

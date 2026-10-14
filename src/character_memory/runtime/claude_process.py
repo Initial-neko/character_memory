@@ -174,7 +174,7 @@ class ClaudePrintRunner:
                         (dest / "SKILL.md").write_text(skill["text"], encoding="utf-8")
                     flags.extend(["--add-dir", str(root)])
                     flags[flags.index("--tools") + 1] = "Skill"
-                    flags.extend(["--allowedTools", "Skill"])
+                    flags[flags.index("--allowedTools") + 1] = "mcp__character_world__world_lookup Skill"
                 config = {"mcpServers": {"character_world": {"command": sys.executable,
                     "args": ["-m", "character_memory.runtime.claude_tools"]}}}
                 flags.extend(["--mcp-config", json.dumps(config)])

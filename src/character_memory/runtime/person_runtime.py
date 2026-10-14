@@ -15,7 +15,7 @@ from character_memory.runtime.person_context import PersonContextBuilder
 from character_memory.runtime.reaction_engine import evaluate_reaction
 from character_memory.live2d_behavior import behavior_metadata
 from character_memory.runtime.sticker_retrieval import StickerRetriever
-from character_memory.visual_runtime import direct_visual_available, generate_direct_visual_action
+from character_memory.visual_runtime import direct_visual_permission, generate_direct_visual_action
 
 
 logger = logging.getLogger("character_memory.runtime")
@@ -336,7 +336,7 @@ class PersonRuntime:
 
         return accepted, decisions
 
-    def _sanitize_resource_actions(self, reaction, *, allowed_sticker_ids: set[str] | None = None):
+    def _sanitize_resource_actions(self, reaction, *, allowed_sticker_ids: set[str] | None = None, event=None):
         sticker_decisions = []
         image_decisions = []
         sanitized = []
@@ -367,8 +367,9 @@ class PersonRuntime:
                 continue
 
             if action.type == ActionType.GENERATE_IMAGE:
-                if not direct_visual_available():
-                    image_decisions.append({"decision": "DROP_GENERATION_UNAVAILABLE", "purpose": action.image_purpose})
+                denial = direct_visual_permission(event, store=self.store)
+                if denial:
+                    image_decisions.append({"decision": "DROP_GENERATION_UNAVAILABLE" if denial == "UNAVAILABLE" else "DROP_GENERATION_DENIED", "reason": denial, "purpose": action.image_purpose})
                     continue
                 if generated_seen:
                     image_decisions.append({"decision": "DROP_EXTRA_GENERATION", "purpose": action.image_purpose})
@@ -517,10 +518,7 @@ class PersonRuntime:
             last_chat_event=last_chat_event,
             session_id=conversation_id,
             image_data_urls=image_data_urls,
-            # compile_context only exposes the tool on USER_MESSAGE turns; make
-            # that product boundary explicit here instead of advertising a wider
-            # capability that a lower layer later removes.
-            allow_generate_image=direct_visual_available() and event.event_type == EventType.USER_MESSAGE,
+            allow_generate_image=not direct_visual_permission(event, store=self.store),
             allow_call_invite=self._call_available(event),
         )
         timings.update(evaluation.timings)
@@ -547,7 +545,7 @@ class PersonRuntime:
             len(recent),
             len(allowed_sticker_ids),
             bool(state_before),
-            direct_visual_available() and event.event_type == EventType.USER_MESSAGE,
+            not direct_visual_permission(event, store=self.store),
             timings["context_ms"],
         )
 
@@ -752,6 +750,7 @@ class PersonRuntime:
                     event,
                     generation_action,
                     still_current=commit_guard,
+                    action_index=reaction.actions.index(generation_action),
                 )
             except Exception as exc:
                 # Text/state actions have already committed. A provider outage must

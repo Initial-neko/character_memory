@@ -78,6 +78,9 @@ class Settings(BaseModel):
     # P0.19 direct-character visual capability. Both providers share one
     # provider-neutral request/result contract. Agnes supports reference images;
     # msimg 0.0.4 is currently text-to-image only in this integration.
+    direct_autonomous_image_generation_enabled: bool = False
+    direct_autonomous_image_daily_max_generations: int = Field(default=3, ge=0, le=100)
+    direct_autonomous_image_cooldown_hours: float = Field(default=8.0, ge=0.0, le=168.0)
     image_generation_provider: str = "agnes"
     image_generation_timeout_seconds: float = Field(default=180.0, ge=10.0, le=600.0)
     agnes_api_key: str = ""

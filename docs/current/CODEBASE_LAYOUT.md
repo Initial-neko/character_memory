@@ -125,6 +125,8 @@ sticker_import_cli.py       global sticker import CLI + deprecated --character c
 search.py                   shared image/web search provider contracts
 visual_generation.py        ImageGen providers + prompt compiler
 visual_runtime.py           direct autonomous generated-image execution
+visual_policy.py            shared image-generation event eligibility
+image_generation_store.py   lazy durable autonomous image reservations
 group_autonomous_visual.py  group autonomous ImageGen glue/adapter
 runtime_services.py          Search/Avatar/ImageGen/World composition root
 browser_web.py               public headless Chromium renderer

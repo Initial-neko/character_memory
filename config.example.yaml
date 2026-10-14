@@ -98,6 +98,13 @@ web_browser_timeout_seconds: 20
 web_browser_render_wait_ms: 700
 
 # Provider used by guided/autonomous image generation: agnes | msimg.
+# Optional synthetic Direct images on explicit TIME_TICK / PROACTIVE_INTENT; off by default.
+direct_autonomous_image_generation_enabled: false
+# Application-wide autonomous reservations per UTC day; failures consume quota; 0 disables.
+direct_autonomous_image_daily_max_generations: 3
+# Minimum real-time hours between autonomous reservations for one character.
+direct_autonomous_image_cooldown_hours: 8.0
+# Provider for explicit tools and character synthetic image expression.
 image_generation_provider: "agnes"
 
 # Maximum seconds allowed for one ImageGen provider request.

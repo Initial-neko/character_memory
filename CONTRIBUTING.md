@@ -67,7 +67,10 @@ For each affected user-visible surface:
 1. **Reference/expectation** — attach the previously agreed mock/design image
    if one exists, label it as *design reference* or *previous accepted product
    screenshot*, and identify the desired state; do not invent a reference
-   when none was agreed.
+   when none was agreed. **Reference provenance is mandatory:** link
+   the originating conversation/Issue and explicit user approval for that
+   exact image. AI-generated drafts, unrelated image-search previews or
+   plausible filenames are not accepted design baselines by default.
 2. **Rendered evidence** — capture the actual served app in a real Chromium
    browser and include at least the applicable desktop and narrow/mobile
    viewports. Record branch, exact commit SHA, page/state, viewport/device,

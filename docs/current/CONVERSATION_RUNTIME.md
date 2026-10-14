@@ -194,6 +194,14 @@ AI 建群入口提供「预览温暖异世界」，对应 `GET /v1/ensembles/tem
 
 背景与关系继续通过 Initial Public Group Context 注入，明确不是已发生的聊天。确认不自动发开场或创建记忆。此版本是普通人物/群聊上的原创体验入口，尚无独立情景会话、故事时钟、跨渠道记忆隔离或专用暂停策略；应在独立测试环境验收，不能把专属人物 ID 当成完整情景隔离已经完成的证明。情景演化和跨天关系品质需要后续真实模型验收。
 
+### User-authored scene draft
+
+AI 建群的「自定义情景」填写背景、人物要求、可选关系期待与开场。`POST /v1/ensembles/scenes/prepare` 验证这四项后将原稿保存到既有 build prompt（JSON）及 `mode=SCENE`，复用 ORIGINAL 的人物/关系生成链，不联网，不增加情景解析模型。READY / FAILED 恢复响应中的 `scene` 保留原稿，模型失败后可重试或修改；创建仍需用户确认。背景/开场是设定，不自动生成互动事实或记忆。SOURCE / ORIGINAL 的旧请求合同保持不变。
+
+SCENE 的成员始终新建：研究、单人成员重试、恢复和确认均保留 `reuse_existing=false`；确认提供新 ID，拉丁姓名也不会碰撞同名现有人物文件。创建标记 `原创情景`。数据库仍使用原有 TEXT/JSON 字段，无 schema 迁移。模型调用仍是已有原创群体生成和必要人物深化（可能含修复重试），不是固定模板预览的零调用路径。
+
+此入口仍落在普通 Group/Person 上，不是完整场景运行时；它不提供自动故事时钟、私人知情分区或跨场景记忆隔离。首版在独立环境使用专属人物，由用户明确推进故事时间。相关产品体验由真实模型人工验收，自动测试只证明输入、恢复、专属 ID 和创建流程。
+
 ### Member failure isolation
 
 Group 当前页面收到的 group-level `reaction_error` 按群保留，不被后续 `idle` 或 history 对账重绘清掉；较新的 `queued` / `typing` 会清除旧提示，迟到的旧轮次错误不会覆盖新轮次。提示是页面内状态，刷新页面不会恢复，不改变 durable message/trace。

@@ -18,6 +18,7 @@
   let lastPrompt = "";
   let lastMode = "SOURCE";
   let preparingTemplate = false;
+  let lastScene = {background:"", characters:"", relationships:"", opening:""};
 
   function introHtml() {
     return `
@@ -39,8 +40,14 @@
         </label>
         <label class="ensemble-voice-option">
           <span>创建类型</span>
-          <select data-ensemble-mode><option value="SOURCE">作品 / 公开资料复刻</option><option value="ORIGINAL">原创世界与人物（不联网检索）</option></select>
+          <select data-ensemble-mode><option value="SOURCE">作品 / 公开资料复刻</option><option value="ORIGINAL">原创世界与人物（不联网检索）</option><option value="SCENE">自定义情景（新建专属人物）</option></select>
         </label>
+        <div data-ensemble-scene-fields hidden>
+          <label class="ensemble-prompt-field"><span>背景与氛围</span><textarea data-ensemble-scene-background rows="3" maxlength="500" placeholder="例如：雨后的小镇旅店，温暖、轻松"></textarea></label>
+          <label class="ensemble-prompt-field"><span>希望有哪些人物</span><textarea data-ensemble-scene-characters rows="3" maxlength="600" placeholder="至少两位，写身份、关注或表达特点，也可以请系统创作"></textarea></label>
+          <label class="ensemble-prompt-field"><span>关系期待（可选）</span><textarea data-ensemble-scene-relationships rows="2" maxlength="300" placeholder="例如：大家熟悉，欢迎远来的我，各有不同的好感表达"></textarea></label>
+          <label class="ensemble-prompt-field"><span>开场</span><textarea data-ensemble-scene-opening rows="2" maxlength="400" placeholder="例如：我走进旅店，可以帮忙、聊天或安静休息"></textarea></label>
+        </div>
         <label class="ensemble-voice-option">
           <input type="checkbox" data-ensemble-voice-design>
           <span>
@@ -55,6 +62,18 @@
         <div class="ensemble-error hidden" data-ensemble-error></div>
       </div>
     `;
+  }
+
+  function restoreSceneFields() {
+    const isScene = CM.dom.drawerBody.querySelector("[data-ensemble-mode]")?.value === "SCENE";
+    const fields = CM.dom.drawerBody.querySelector("[data-ensemble-scene-fields]");
+    const freePrompt = CM.dom.drawerBody.querySelector("[data-ensemble-prompt]")?.closest("label");
+    if (fields) fields.hidden = !isScene;
+    if (freePrompt) { freePrompt.hidden = isScene; freePrompt.classList.toggle("hidden", isScene); }
+    for (const [key, value] of Object.entries(lastScene)) {
+      const field = CM.dom.drawerBody.querySelector(`[data-ensemble-scene-${key}]`);
+      if (field) field.value = value;
+    }
   }
 
   async function openBuilder() {
@@ -192,6 +211,7 @@
 
   function renderBuildFailure(build) {
     currentBuild = build;
+    if (build.mode === "SCENE" && build.scene) lastScene = {...lastScene, ...build.scene};
     CM.openDrawer("AI 建群", "本次进度已保留，可以直接重试，不会创建空群");
     CM.dom.drawerBody.innerHTML = `
       <div class="ensemble-builder">
@@ -210,6 +230,7 @@
 
   function renderConfirmation(build, selectedIndices = null) {
     currentBuild = build;
+    if (build.mode === "SCENE" && build.scene) lastScene = {...lastScene, ...build.scene};
     const drafts = Array.isArray(build.drafts) ? build.drafts : [];
     CM.openDrawer(build.group_name || build.group?.name || "确认群成员", "勾选要加入的角色，然后一次确认创建");
     CM.dom.drawerBody.innerHTML = `
@@ -264,14 +285,22 @@
   }
 
   async function startBuild() {
+    lastMode = CM.dom.drawerBody.querySelector("[data-ensemble-mode]")?.value || "SOURCE";
+    const isScene = lastMode === "SCENE";
+    if (isScene) {
+      lastScene = Object.fromEntries(Object.keys(lastScene).map(key => [key, CM.dom.drawerBody.querySelector(`[data-ensemble-scene-${key}]`)?.value.trim() || ""]));
+      if (["background", "characters", "opening"].some(key => lastScene[key].length < 3)) {
+        showError("请填写背景、人物和开场，每项至少三个字。");
+        return;
+      }
+    }
     const prompt = CM.dom.drawerBody.querySelector("[data-ensemble-prompt]")?.value.trim() || "";
-    if (!prompt) {
+    if (!prompt && !isScene) {
       showError("先写一句你想创建的群聊。");
       return;
     }
     currentBuild = null;
     lastPrompt = prompt;
-    lastMode = CM.dom.drawerBody.querySelector("[data-ensemble-mode]")?.value || "SOURCE";
     useVoiceDesignRequested = Boolean(
       CM.dom.drawerBody.querySelector("[data-ensemble-voice-design]")?.checked
     );
@@ -280,14 +309,14 @@
       <div class="ensemble-loading">
         <span class="ensemble-loading-mark">◎</span>
         <strong>正在整理群成员…</strong>
-        <p>正在搜索公开资料、浏览页面并准备每位成员的 Persona 草稿。完成后只需要确认一次。</p>
+        <p>${lastMode === "SOURCE" ? "正在搜索公开资料、浏览页面并准备人物草稿。" : "正在根据你的描述创作人物与初始关系，不联网检索。"}完成后确认一次再创建。</p>
         <div class="ensemble-error hidden" data-ensemble-error></div>
       </div>
     `;
     try {
-      const prepared = await CM.api("/v1/ensembles/prepare", {
+      const prepared = await CM.api(isScene ? "/v1/ensembles/scenes/prepare" : "/v1/ensembles/prepare", {
         method:"POST",
-        body:JSON.stringify({prompt, mode:lastMode}),
+        body:JSON.stringify(isScene ? lastScene : {prompt, mode:lastMode}),
       });
       if (prepared.build?.status === "FAILED") {
         renderBuildFailure(prepared.build);
@@ -300,6 +329,9 @@
       CM.dom.drawerBody.innerHTML = introHtml();
       const textarea = CM.dom.drawerBody.querySelector("[data-ensemble-prompt]");
       if (textarea) textarea.value = prompt;
+      const mode = CM.dom.drawerBody.querySelector("[data-ensemble-mode]");
+      if (mode) mode.value = lastMode;
+      restoreSceneFields();
       showError("资料整理暂时失败。请稍后重试；如果持续失败，再查看 Dev Console / 服务端日志。");
     }
   }
@@ -363,6 +395,7 @@
     if (textarea) textarea.value = prompt;
     const mode = CM.dom.drawerBody.querySelector("[data-ensemble-mode]");
     if (mode) mode.value = currentBuild?.mode || lastMode;
+    restoreSceneFields();
     if (voice) voice.checked = useVoiceDesignRequested;
   }
 
@@ -421,6 +454,14 @@
   button.addEventListener("click", () => { openBuilder().catch(console.error); });
 
   CM.dom.drawerBody.addEventListener("change", event => {
+    if (event.target.closest("[data-ensemble-mode]")) {
+      // Preserve fields when moving between the ordinary and scenario forms.
+      for (const key of Object.keys(lastScene)) {
+        const field = CM.dom.drawerBody.querySelector(`[data-ensemble-scene-${key}]`);
+        if (field) lastScene[key] = field.value;
+      }
+      restoreSceneFields();
+    }
     if (event.target.closest("[data-ensemble-member]") && currentBuild) updateCapacity(currentBuild);
   });
 

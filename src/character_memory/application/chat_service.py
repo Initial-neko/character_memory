@@ -76,6 +76,43 @@ class ChatService:
                 return value
         return f"{character_id}:proactive"
 
+    def _sharing_observations(self, character_id: str, at: datetime) -> list[dict]:
+        """Small read-only window of sourced observations, not unread inventory.
+
+        Keep original reading scope/counts: a feed excerpt is never upgraded to
+        a fetched original. The snapshot belongs to this opportunity's trace.
+        """
+        recent = self.store.list_events(character_id, limit=32, before=at)
+        candidates = []
+        for item in reversed(recent):
+            channel = item.metadata.get("channel")
+            sources = item.metadata.get("sources")
+            if (item.event_type != EventType.WORLD_OBSERVATION
+                    or channel not in {"PERSONAL_BROWSE", "WORLD_PULSE"}
+                    or not isinstance(sources, list)):
+                continue
+            sources = [value[:240] for value in sources if isinstance(value, str) and value.strip()][:2]
+            if not sources:
+                continue
+            reading = item.metadata.get("rss_reading")
+            reading = reading if isinstance(reading, dict) else {}
+            reading = {key: value for key, value in reading.items()
+                       if key in {"title", "content_scope", "truncated", "read_characters", "available_characters"}
+                       and isinstance(value, (str, int, bool))}
+            reading = {key: value[:180] if isinstance(value, str) else value for key, value in reading.items()}
+            candidates.append({
+                "event_id": item.id,
+                "observed_at": item.event_time.isoformat(),
+                "channel": channel,
+                "content": item.content[:600],
+                "context_excerpt": len(item.content) > 600,
+                "sources": sources,
+                "rss_reading": reading,
+            })
+            if len(candidates) == 4:
+                break
+        return candidates
+
     def persist_user_message(
         self,
         message: str,
@@ -174,6 +211,7 @@ class ChatService:
                     content=f"之前留下的意图：{content}。现在重新判断是否自然执行、保持沉默或放弃。",
                     metadata={
                         "intent_id": intent_id,
+                        "sharing_observations": self._sharing_observations(character_id, at),
                         "channel": "DIRECT",
                         "intent_deferral_policy": intent_deferral_policy,
                         "conversation_id": conversation_id,
@@ -226,6 +264,7 @@ class ChatService:
                     content=content,
                     metadata={
                         "wake_reason": normalized_reason,
+                        "sharing_observations": self._sharing_observations(character_id, at),
                         "channel": "DIRECT",
                         "conversation_id": resolved_conversation,
                     },

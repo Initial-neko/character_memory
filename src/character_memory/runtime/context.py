@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timezone
 import json
 
-from character_memory.domain.models import EventType
+from character_memory.domain.models import Event, EventType
 
 
 def _event_channel(event) -> str:
@@ -117,7 +117,19 @@ def compile_context(
         "\n".join(_recent_event_text(e) for e in (recent_events or []))
         or "- 无"
     )
-    observed = render_observed_experiences(observed_events)
+    sharing_events = []
+    sharing = ""
+    if event.event_type in {EventType.TIME_TICK, EventType.PROACTIVE_INTENT} and _event_channel(event) == "DIRECT":
+        for item in event.metadata.get("sharing_observations", [])[:4]:
+            sharing_events.append(Event(
+                id=item["event_id"], character_id=event.character_id,
+                event_type=EventType.WORLD_OBSERVATION, event_time=item["observed_at"],
+                content=item["content"], metadata={"sources": item["sources"], "rss_reading": item["rss_reading"]},
+            ))
+        sharing = "\n# Personal Sharing Observations\n" + render_observed_experiences(sharing_events, budget=3200)
+        sharing += "\n这是本人真实观察的有限上下文节选，不是已发送内容，不代表用户在场或已读；来源和阅读范围保留原义。"
+    sharing_ids = {item.id for item in sharing_events}
+    observed = render_observed_experiences([item for item in (observed_events or []) if item.id not in sharing_ids])
     has_stickers = bool(sticker_catalog and sticker_catalog.stickers)
     stickers = sticker_catalog.prompt_text() if sticker_catalog is not None else "- 无合适候选"
     has_images = bool(image_catalog and image_catalog.images)
@@ -216,6 +228,14 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 - 不适合继续做时可以放弃；不要为了保留意图强行表达或无限延期。
 """
 
+    if event.event_type in {EventType.TIME_TICK, EventType.PROACTIVE_INTENT} and _event_channel(event) == "DIRECT":
+        proactive_contract += """
+- 可以因为只想联系用户而自然说一句，不必先编出发现或任务；也可以保持 actions=[]。
+- 想分享时，结合真实共同经历、个人观察和 Available Images；用户的经历仍归用户，未发生的活动不说成已完成。
+- 不得推测用户此刻的心情、空闲或需要安慰；没有事实依据时保留不确定，不借口用户状态催促回应。
+- 已有图片只是可用资源，不证明你刚拍过或图中事件已经发生；IMAGE 只能选 Available Images，不能自主 GENERATE_IMAGE。
+"""
+
     action_contract = f"""actions 是本轮真正对外发生的动作，最多 3 个；通常用 MESSAGE，单独的 emoji/颜文字可以用 EMOJI。VOICE_MESSAGE 是你真的开口说给对方听，文字只是这条语音的转写——语气、停顿、笑意本身就是内容的一部分，那是打字给不了的。想用就用：不需要等对方先发语音，也不需要等到什么特别的时候。懒得打字、手上正忙、想让对方听见你是什么语气，或者一段话连着说比拆成好几条文字更顺，这时候语音就是最自然的表达。一个 VOICE_MESSAGE 的 message 必须是一段完整连续表达，即使包含多句话也保持为一个 action，不要为了语音拆句，也不要为了展示功能而发语音。Available Stickers 是系统从完整全局表情库中按当前语境召回的本轮候选，不代表完整资源库：列表非空时这些候选就是你可以自然使用的表达资源，不需要等用户先发表情包；聊天事件里可以单独使用 STICKER，也可以 MESSAGE + STICKER。当前事件如需表情应使用 {sticker_action_name}，sticker_id 只能从当前列表选择。列表为空表示当前没有足够相关的候选，不要凭记忆编造或强行使用表情。Available Images 非空时才可使用 IMAGE，并且 image_id 必须从上面的列表中选择。自然需要连续两三条时可以拆开，但不要机械拆句、刷屏或为了显得可爱而强行发送媒体。"""
     intent_contract = f"""只有确实存在未来行动意图时才填写 intent_candidates，否则保持空数组。每一项的形状是 {{"content": "...", "preferred_action": "PROACTIVE_MESSAGE", "earliest_hours": 8, "expires_hours": 48}}：content 是你以后想做的事；earliest_hours 表示“从现在起至少多少小时后才适合做这件事”，0 表示不必等；expires_hours 表示过了多久这条意图就作废。想做“明早再问”这类有时机的表达时，earliest_hours 要填真实间隔（明早约 8-14），不要一边写“明早”一边把最早时间填成 0。服务端会保证一个最小等待，填 0 不会被立即执行。同一件事不要重复留下多条意图。"""
     if event.event_type == EventType.WORLD_OBSERVATION:
@@ -256,6 +276,7 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 
 # Observed Experiences
 {observed}
+{sharing}
 
 # Available Stickers
 {stickers}

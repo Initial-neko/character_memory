@@ -1,6 +1,7 @@
 (() => {
   const state = { snapshot: null };
   const sections = document.getElementById("settingsSections");
+  const categoryNav = document.getElementById("settingsNav");
   const secretList = document.getElementById("secretList");
   const notice = document.getElementById("notice");
   const configPath = document.getElementById("configPath");
@@ -104,11 +105,42 @@
     return input;
   }
 
+  // Use the canonical backend schema order: there is no parallel frontend
+  // taxonomy that can silently lose fields when a new Settings section lands.
+  // Links are native anchors so keyboard access, browser history and reloads
+  // work without a separate router or click dispatcher.
+  function renderCategoryNav(snapshot) {
+    if (!categoryNav) return;
+    const fragment = document.createDocumentFragment();
+    const heading = document.createElement("strong");
+    heading.className = "settings-category-title";
+    heading.textContent = "配置分类";
+    fragment.appendChild(heading);
+
+    const entries = (snapshot.schema || []).map((section, index) => ({
+      label: section.title || section.id,
+      anchor: `settings-category-${index}`,
+    }));
+    entries.push(
+      {label: "Secrets 与密钥", anchor: "settings-secrets"},
+      {label: "配置生效规则", anchor: "settings-lifecycle"},
+    );
+    for (const entry of entries) {
+      const link = document.createElement("a");
+      link.className = "settings-category-link";
+      link.href = `#${entry.anchor}`;
+      link.textContent = entry.label;
+      fragment.appendChild(link);
+    }
+    categoryNav.replaceChildren(fragment);
+  }
+
   function renderSections(snapshot) {
     sections.innerHTML = "";
-    for (const section of snapshot.schema || []) {
+    for (const [index, section] of (snapshot.schema || []).entries()) {
       const card = document.createElement("article");
       card.className = "card settings-section";
+      card.id = `settings-category-${index}`;
 
       const heading = document.createElement("div");
       heading.className = "section-heading";
@@ -136,6 +168,7 @@
       }
       sections.appendChild(card);
     }
+    renderCategoryNav(snapshot);
     wireTtsControls(snapshot);
   }
 

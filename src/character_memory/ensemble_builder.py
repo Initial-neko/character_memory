@@ -14,6 +14,7 @@ import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from character_memory.character_onboarding import save_creation_metadata
+from character_memory.ensemble_templates import get_ensemble_template
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft, coerce_age_hint
 from character_memory.time_utils import epoch_us
@@ -472,7 +473,10 @@ class EnsembleBuilderService:
             current = dict(item)
             draft = current.get("draft") if isinstance(current.get("draft"), dict) else {}
             name = str(current.get("canonical_name") or draft.get("name") or "").strip()
-            current["existing_character_id"] = active_by_name.get(name.casefold())
+            current["existing_character_id"] = (
+                active_by_name.get(name.casefold())
+                if current.get("reuse_existing") is not False else None
+            )
             refreshed.append(current)
         return refreshed
 
@@ -539,6 +543,31 @@ class EnsembleBuilderService:
         build = self.repository.create(build_id, clean, hint, now, mode=mode)
         logger.info("ensemble.start build=%s prompt_chars=%d", build_id, len(clean))
         return self.payload(build)
+
+    def prepare_template(self, template_id: str, *, now: datetime | None = None) -> dict[str, Any]:
+        """Preview curated personas without research, model calls or onboarding."""
+        template = get_ensemble_template(template_id)
+        now = now or datetime.now().astimezone()
+        drafts = [
+            {
+                "index": index,
+                "canonical_name": member["draft"]["name"],
+                "status": "READY",
+                "draft": PersonaDraft.model_validate(member["draft"]).model_dump(mode="json"),
+                "generation_method": "TEMPLATE",
+                "relationship_notes": list(member["relationship_notes"]),
+                "existing_character_id": None,
+                "reuse_existing": False,
+                "template_id": template_id,
+            }
+            for index, member in enumerate(template["members"])
+        ]
+        build = self.start(template["description"], mode="ORIGINAL", now=now)
+        saved = self.repository.save_research(
+            build["group_id"], group_name=template["name"], overview=template["overview"],
+            source_query="", sources=[], drafts=drafts, now=now,
+        )
+        return self.payload(saved)
 
     def prepare(self, prompt: str, *, mode: str = "SOURCE", now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now().astimezone()
@@ -1016,7 +1045,8 @@ Content:
                         "prompt": str(build.get("prompt") or ""),
                         "name_hint": str(item.get("canonical_name") or draft.name),
                         "age_hint": draft.age,
-                        "tags": ["群像复刻"],
+                        "tags": (["原创情景", str(item["template_id"])] if item.get("template_id")
+                                 else ["群像复刻"]),
                         "group_id": group_id,
                     },
                 )

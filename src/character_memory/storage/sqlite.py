@@ -20,6 +20,12 @@ from character_memory.time_utils import epoch_us, epoch_us_from_iso, parse_datet
 
 logger = logging.getLogger("character_memory.storage")
 
+# A separate telemetry/CLI/inspection connection can contend with the main
+# World/Space writer. Let ordinary short writes wait for the other writer rather
+# than failing at the sqlite3 default (5 seconds). Read-only telemetry still has
+# its own intentionally short 100ms best-effort budget.
+STORE_BUSY_TIMEOUT_SECONDS = 15.0
+
 
 class SQLiteStore:
     def __init__(self, path: str | Path):
@@ -27,8 +33,18 @@ class SQLiteStore:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._tx_depth = 0
-        self.conn = sqlite3.connect(self.path, check_same_thread=False)
+        self.conn = sqlite3.connect(
+            self.path,
+            timeout=STORE_BUSY_TIMEOUT_SECONDS,
+            check_same_thread=False,
+        )
         self.conn.row_factory = sqlite3.Row
+        # WAL lets an independent World/Space/CLI writer commit while a separate
+        # reader holds a snapshot. The per-store RLock still owns in-process
+        # ordering, and SQLite remains a single-writer database. This PRAGMA
+        # runs before schema setup, outside any transaction. On :memory: SQLite
+        # retains its native journal mode.
+        self.conn.execute("PRAGMA journal_mode=WAL")
         # SQLite NOCASE only folds ASCII; admission uses Unicode strip/casefold.
         self.conn.create_function(
             "memory_text_key", 1,
@@ -489,12 +505,15 @@ class SQLiteStore:
         )
 
     def append_event(self, event: Event) -> Event:
-        with self._lock:
+        # A failed implicit sqlite3 write (including SQLITE_BUSY) can leave an
+        # open deferred transaction on the connection. Use our transaction owner
+        # so failed autonomous World/Space event writes always roll back, while
+        # callers already inside a larger transaction retain their atomic scope.
+        with self.transaction():
             cur = self.conn.execute(
                 "INSERT INTO events(character_id,event_type,event_time,event_time_epoch,content,metadata_json) VALUES(?,?,?,?,?,?)",
                 (event.character_id, event.event_type.value, event.event_time.isoformat(), epoch_us(event.event_time), event.content, json.dumps(event.metadata, ensure_ascii=False)),
             )
-            self._maybe_commit()
             return event.model_copy(update={"id": cur.lastrowid})
 
     def append_observation_once(self, event: Event) -> tuple[Event, bool]:

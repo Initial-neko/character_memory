@@ -234,6 +234,53 @@ def test_space_comments_persist_structured_mentions_and_durable_user_notificatio
     store.close()
 
 
+def test_ai_to_ai_space_comments_never_create_unread_for_user(tmp_path: Path):
+    """Ambient AI discussion stays in Space even if an AI emits mentions_user."""
+    path = tmp_path / "space-ai-notification-boundary.db"
+    store = SQLiteStore(path)
+    repo = SpaceRepository(store)
+    now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    post = repo.create_post("c00", "今天想出去走走。", now)
+
+    root_ai = repo.add_comment(
+        post.id, "c01", "你觉得怎么样？", now,
+        mentions_user=True,
+    )
+    reply_ai = repo.add_comment(
+        post.id, "c00", "挺好的，我们一起去。", now + timedelta(seconds=1),
+        reply_to_comment_id=root_ai.id, mentions_user=True,
+    )
+    assert root_ai.mentions_user and reply_ai.mentions_user
+    assert [item.id for item in repo.list_comments(post.id)] == [root_ai.id, reply_ai.id]
+    assert repo.list_notifications(unread_only=False) == []
+    assert repo.unread_notification_count() == 0
+
+    # A real human-authored comment remains a notification trigger; the bot
+    # does not get to fabricate that identity via mentions_user.
+    user_comment = repo.add_comment(
+        post.id, "user", "我也想一起去。", now + timedelta(seconds=2),
+        actor_type="USER",
+    )
+    directed_reply = repo.add_comment(
+        post.id, "c01", "好呀，欢迎！", now + timedelta(seconds=3),
+        reply_to_comment_id=user_comment.id,
+    )
+    notifications = repo.list_notifications()
+    assert len(notifications) == 1
+    assert notifications[0].comment_id == directed_reply.id
+    assert notifications[0].reasons == ["REPLY"]
+    store.close()
+
+    # Restart must not resurrect a notification for the ambient AI thread.
+    reopened = SQLiteStore(path)
+    try:
+        again = SpaceRepository(reopened)
+        assert again.unread_notification_count() == 1
+        assert [item.comment_id for item in again.list_notifications()] == [directed_reply.id]
+    finally:
+        reopened.close()
+
+
 def test_unread_space_notification_survives_database_reopen(tmp_path: Path):
     db_path = tmp_path / "space-notification-reopen.db"
     now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)

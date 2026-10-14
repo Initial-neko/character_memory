@@ -1,4 +1,5 @@
 from __future__ import annotations
+from character_memory.life_conversation import LifeReference
 
 from datetime import datetime
 import logging
@@ -46,6 +47,7 @@ class GroupImageRequest(BaseModel):
 
 
 class GroupChatRequest(BaseModel):
+    life_reference: LifeReference | None = None
     live2d: Live2DPresentationRequest | None = None
     message: str = Field(default="", max_length=12000)
     sticker_id: str | None = Field(default=None, max_length=64)
@@ -55,6 +57,8 @@ class GroupChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_content(self):
+        if self.life_reference and (self.image is not None or self.sticker_id):
+            raise ValueError("生活引用首版仅支持文字消息")
         if not self.message.strip() and not (self.sticker_id or "").strip() and self.image is None:
             raise ValueError("message, sticker_id or image is required")
         if self.sticker_id and self.image is not None:
@@ -339,6 +343,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
 
     @app.post("/v1/groups/{conversation_id}/chat")
     def group_chat(conversation_id: str, req: GroupChatRequest):
+        if req.life_reference:
+            raise HTTPException(422, "生活引用仅支持现有异步消息入口")
         preliminary = repo().get_group(conversation_id)
         if preliminary is None:
             raise HTTPException(status_code=404, detail="group not found")

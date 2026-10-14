@@ -2,6 +2,12 @@
 
 本文描述一个 Character 收到 Event 后，如何形成内部变化与对外行为。
 
+## Direct call invitation Action
+
+`CALL_INVITE` 是现有 PersonReaction 的 Direct 专用邀请 Action，填写邀请 `message` 与公开简短 `reason`。它不在 EXPRESSIVE_ACTIONS 中，不落成普通消息或已完成通话经历。Settings 默认关闭；服务端来源/许可/未决数量/既有冷却硬门在原反应事务中创建来源化邀请，非 Direct 不执行。状态与麦克风生命周期见 [Voice & TTS Runtime](VOICE_AND_TTS.md#人物发起的应用内来电邀请)。
+
+到期表达 Intent 实际发出邀请时可以标为 EXECUTED，但 Intent 审计明确记录 `CALL_INVITATION_PROPOSED`：仅邀请已提出，不代表通话接通或聊过。生活投影以 CALL_INVITATION_PROPOSED 明示仅邀请并保留 stored_status=EXECUTED。邀请仍为 PENDING，接受/拒绝/过期属于独立状态；共同交流事实只来自真正接通后既有语音消息入口。原派发冷却、延期和防自环规则保持。
+
 ## Autonomous Group channel
 
 Autonomous Group Chat 不创建第二套人物。一次群聊自主 Opportunity 仍然读取同一个 `PersonContextBuilder`：Persona、Mental State、Recall Memory 与真实 Recent Group Events。区别只在 channel policy：

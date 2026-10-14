@@ -106,6 +106,7 @@ def compile_context(
     sticker_catalog=None,
     image_catalog=None,
     allow_generate_image: bool = False,
+    allow_call_invite: bool = False,
     observed_events=None,
 ) -> str:
     relationship = [m for m in memories if m.memory_type.upper() in {"USER", "SHARED"}]
@@ -139,6 +140,11 @@ def compile_context(
     # provider spend before quotas/cooldowns exist.
     effective_generate_image = bool(allow_generate_image and event.event_type == EventType.USER_MESSAGE)
 
+    effective_call_invite = bool(allow_call_invite and _event_channel(event)=="DIRECT" and event.event_type in {EventType.USER_MESSAGE,EventType.TIME_TICK,EventType.PROACTIVE_INTENT})
+    call_contract = ""
+    if effective_call_invite:
+        call_contract = "CALL_INVITE 表示你自愿提出一次应用内通话邀请，不是已经接通或聊过。仅本次 Direct 机会可用，最多1个；填写简短邀请 message 和公开简短 reason（不写隐藏思考）。用户可接受、拒绝、不回应，接受前不能听见用户，未接不能写成共同通话经历，也不创建通话完成 Memory。邀请不等于系统已完成通话；intent_candidates 不使用CALL_INVITE。"
+
     resource_actions = ""
     if has_stickers:
         resource_actions += " / STICKER"
@@ -152,6 +158,8 @@ def compile_context(
         resource_actions += " / IMAGE"
     if effective_generate_image:
         resource_actions += " / GENERATE_IMAGE"
+    if effective_call_invite:
+        resource_actions += " / CALL_INVITE"
     allowed = {
         EventType.USER_MESSAGE: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；也可以完全不回复",
         EventType.TIME_TICK: f"0~3 个 MESSAGE / VOICE_MESSAGE / EMOJI{resource_actions}；只有确实想主动表达时才发送",
@@ -292,6 +300,7 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 {proactive_contract}
 {action_contract}
 {generate_contract}
+{call_contract}
 如果当前事件包含用户上传的真实图片，模型会同时收到图片本体；应根据实际视觉内容回应，不要从文件名臆测。
 如果确实没有想回复的内容，直接 actions=[]。不要为了礼貌、活跃度或“完成任务”硬补一句话。
 不要无条件迎合，也不要为了提高互动率而主动联系。

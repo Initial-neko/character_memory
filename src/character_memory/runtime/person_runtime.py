@@ -8,6 +8,7 @@ from typing import Callable
 
 import numpy as np
 
+from character_memory.call_invitations import CallInvitationPolicy, CallInvitationRepository
 from character_memory.application.action_materialization import materialize_expressive_action
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.person_context import PersonContextBuilder
@@ -96,7 +97,7 @@ def _cosine(left: list[float], right: list[float]) -> float | None:
 
 
 class PersonRuntime:
-    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None, image_catalog=None, *, intent_policy: IntentPolicy | None = None):
+    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None, image_catalog=None, *, intent_policy: IntentPolicy | None = None, call_policy: CallInvitationPolicy | None = None):
         self.store = store
         self.recall = recall
         self.embeddings = embeddings
@@ -105,6 +106,8 @@ class PersonRuntime:
         self.sticker_catalog = sticker_catalog
         self.image_catalog = image_catalog
         self.intent_policy = intent_policy or IntentPolicy()
+        self.call_policy = call_policy or CallInvitationPolicy()
+        self._call_invitations = None
         self.sticker_retriever = StickerRetriever(embeddings)
         self.context_builder = PersonContextBuilder(store, recall, persona)
 
@@ -448,6 +451,30 @@ class PersonRuntime:
         normalized_action = kept[0] if kept else ActionDecision(type=ActionType.NO_REPLY)
         return reaction.model_copy(update={"actions": kept, "action": normalized_action}), dropped
 
+    @property
+    def call_invitations(self):
+        if self._call_invitations is None:
+            self._call_invitations = CallInvitationRepository(self.store)
+        return self._call_invitations
+
+    def _call_available(self, event):
+        # Default-off runtime paths retain the existing minimal Store contract.
+        return self.call_policy.enabled and self.call_invitations.can_offer(event, self.call_policy)
+
+    def _sanitize_call_actions(self, event, reaction):
+        allowed = self._call_available(event)
+        kept, decisions = [], []
+        for action in reaction.actions:
+            if action.type != ActionType.CALL_INVITE:
+                kept.append(action)
+            elif allowed:
+                kept.append(action)
+                decisions.append({"type":"CALL_INVITE", "decision":"ALLOW_INVITATION_ONLY"})
+                allowed=False
+            else:
+                decisions.append({"type":"CALL_INVITE", "decision":"DROP_PERMISSION_CHANNEL_QUOTA_OR_COOLDOWN"})
+        return reaction.model_copy(update={"actions":kept,"action":kept[0] if kept else ActionDecision(type=ActionType.NO_REPLY)}), decisions
+
     def handle(
         self,
         event: Event,
@@ -494,6 +521,7 @@ class PersonRuntime:
             # that product boundary explicit here instead of advertising a wider
             # capability that a lower layer later removes.
             allow_generate_image=direct_visual_available() and event.event_type == EventType.USER_MESSAGE,
+            allow_call_invite=self._call_available(event),
         )
         timings.update(evaluation.timings)
         memories = evaluation.memories
@@ -524,6 +552,7 @@ class PersonRuntime:
         )
 
         reaction, channel_decisions = self._sanitize_channel_actions(event, reaction)
+        reaction, call_decisions = self._sanitize_call_actions(event, reaction)
         action_types = [action.type.value for action in reaction.actions]
         model_used = model_call.trace.model or str(getattr(self.model, "model", "") or "")
         logger.info(
@@ -613,6 +642,10 @@ class PersonRuntime:
                     pending_intents += 1
 
                 for index, action in enumerate(reaction.actions):
+                    if action.type == ActionType.CALL_INVITE:
+                        invitation = self.call_invitations.offer(event, action.message, action.reason, self.call_policy)
+                        call_decisions.append({"type":"CALL_INVITE", "decision":"PROPOSED" if invitation else "DROP_COMMIT_GUARD", "invitation_id":invitation['id'] if invitation else None})
+                        continue
                     materialized = materialize_expressive_action(
                         action,
                         action_index=index,
@@ -666,6 +699,7 @@ class PersonRuntime:
                     "sticker_decisions": sticker_decisions,
                     "image_decisions": image_decisions,
                     "channel_decisions": channel_decisions,
+                    "call_invitation_decisions": call_decisions,
                     "memory_candidates": [candidate.model_dump(mode="json") for candidate in reaction.memory_candidates],
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,

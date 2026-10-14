@@ -39,6 +39,8 @@ class ActionType(str, Enum):
     # A spoken chat message: the text is still the message body (shown when the
     # bubble is expanded), with generated audio attached via event metadata.
     VOICE_MESSAGE = "VOICE_MESSAGE"
+    # Direct invitation only; not an expressive message or completed call.
+    CALL_INVITE = "CALL_INVITE"
     # P0.19 internal visual-tool intent. This is not a visible chat message by
     # itself; direct-chat orchestration may turn it into a generated IMAGE event.
     GENERATE_IMAGE = "GENERATE_IMAGE"
@@ -142,6 +144,7 @@ class ActionDecision(BaseModel):
             ActionType.PROACTIVE_MESSAGE,
             ActionType.MESSAGE,
             ActionType.VOICE_MESSAGE,
+            ActionType.CALL_INVITE,
             ActionType.EMOJI,
             ActionType.SPACE_COMMENT,
         }

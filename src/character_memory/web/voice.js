@@ -1254,6 +1254,7 @@
 
   async function stopCall() {
     voice.active = false;
+    CM.emit?.("voiceStopped")?.catch?.(console.error);
     CM.live2d?.stop();
     voice.recoveryPending = false;
     voice.recoveryGeneration += 1;

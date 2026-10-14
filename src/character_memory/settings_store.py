@@ -179,6 +179,8 @@ SETTING_HELP: dict[str, str] = {
     "agnes_image_model": "Agnes 使用的图像模型 ID。",
     "msimg_models": "msimg/ModelScope 模型别名列表，逗号分隔；多值时允许按实现进行 failover。",
     "recall_limit": "一次普通模型回合最多注入多少条召回记忆；越大上下文越多、Token 也越高。",
+    "direct_call_invitations_enabled": "默认关闭；只允许人物在已有 Direct 反应中提出应用内来电邀请。接受前不开麦，不接真实电话线路。重启 Character Runtime 后生效；邀请冷却复用主动派发最小间隔。",
+    "direct_call_invitation_ttl_seconds": "未接受来电邀请的有效秒数，30~600；到期不重拨，重启 Character Runtime 后生效。",
     "proactive_wake_enabled": "是否允许角色按周期获得主动醒来机会。醒来后仍可选择沉默。",
     "proactive_wake_minutes": "同一角色两次正常 Wake Opportunity 的间隔分钟数。",
     "proactive_dispatch_enabled": "是否派发已经到期的主动 Intent；关闭后保留 Intent 但不继续发出。",
@@ -514,6 +516,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "description": "角色唤醒与召回参数。",
         "fields": [
             {"name": "recall_limit", "label": "Recall Limit", "type": "number", "step": 1, "level": "advanced"},
+            {"name": "direct_call_invitations_enabled", "label": "人物来电邀请", "type": "checkbox", "level": "advanced"},
+            {"name": "direct_call_invitation_ttl_seconds", "label": "邀请有效期（秒）", "type": "number", "step": 1, "level": "advanced"},
             {"name": "proactive_wake_enabled", "label": "Proactive Wake", "type": "checkbox", "level": "common"},
             {"name": "proactive_wake_minutes", "label": "Wake Interval (min)", "type": "number", "step": 1, "level": "advanced"},
         ],

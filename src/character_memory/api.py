@@ -1,4 +1,5 @@
 from __future__ import annotations
+from character_memory.call_invitations import CallInvitationPolicy
 
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -178,13 +179,13 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             stickers,
             images,
             intent_policy=IntentPolicy.from_settings(settings),
+            call_policy=CallInvitationPolicy.from_settings(settings),
         )
         current.runtimes[character_id] = runtime
         if isinstance(getattr(current.chat, "runtime", None), dict):
             current.chat.runtime[character_id] = runtime
         refresh_runtime_sticker_catalog(global_sticker_catalog())
         characters.refresh_cache()
-
 
     characters = ApiCharacterService(
         settings=settings,
@@ -487,13 +488,6 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     attach_live2d_routes(app, resolve_media_dir(settings) / "live2d", character_profiles)
     attach_core_direct_routes(app, route_access)
     attach_character_life_routes(app, route_access)
-    attach_rss_runtime(
-        app,
-        web_dir,
-        read_store,
-        background,
-        settings,
-        own_bundle=own_bundle,
-    )
+    attach_rss_runtime(app, web_dir, read_store, background, settings, own_bundle=own_bundle)
 
     return app

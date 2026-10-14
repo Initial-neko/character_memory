@@ -333,6 +333,8 @@ Relationship records are actual received Direct messages, Group events processed
 
 “围绕这件事聊天”通过只读 `GET /v1/characters/{character_id}/life/conversation?key=...` 核验来源，跳转原有 Direct/Group 会话并准备草稿。URL 只携人物和 namespaced source key；正文从服务端记录读取。查看、跳转、取消均不写事实、不调用模型。用户确认发送后，异步消息入口携 `life_reference={character_id,key}` 再次核验，追加有来源的记录引用并保存同一用户消息的 `metadata.life_reference`，再复用现有 scheduler/SSE。引用声明用户未必亲历，也不是共同活动完成凭据；World 记录正文不等同网页全文。同步旧发送入口拒绝该字段。
 
+Direct/Group 继续聊天入口按 `archived_at` 键存在判定来源人物归档，空值或损坏标记也会在写入用户消息前拒绝；历史记录仍可按原只读边界查看。
+
 首版支持明确的 Core 交流/观察、所选人物实际参与的公开 Group 消息、自己的 Space post/comment。Group 必须仍存在、未归档，用户与所选人物仍为成员，所选人物加入时间不晚于来源。参与凭据仅限本人发言，或同群/同人物且不早于来源、不晚于当前时间的实际 trace：旧 root source ID 精确匹配、`recent_group_event_ids` 前14个整数ID，或 `shared_history_retrieval.events` 前4个对象的同群整数 source ID。畸形 JSON、错群、字符串ID与缺失回执不扩大可见性；不把成员身份单独视为过去参与凭据。Direct 来源须属于所选人物并有已有私聊可续接。人物归档、来源删除/不存在、归属不符、无效时间、无正文、计划/机会类来源明确失败；不建立新会话、不总结整天，不引入自动 Memory admission。
 
 Reading details distinguish the recorded Feed scope, read/available character counts and truncation from the model appraisal. `RSS_FEED_TEXT` titles explicitly name Feed text; linked original pages are not claimed as read. Missing scope counts remain unknown. A malformed Intent execution/expiry time reports `time_status=INVALID`, not a valid not-yet-due verdict. Timeline responses include `undated_count` for otherwise matching records whose source timestamp is missing/invalid; they cannot be assigned to the selected date and are not silently treated as a quiet day.

@@ -1,5 +1,6 @@
 import os
 
+from character_memory.call_invitation_web import attach_call_invitation_routes
 from character_memory.api import create_api
 from character_memory.async_web import attach_async_routes
 from character_memory.avatar_web import attach_avatar_routes
@@ -44,6 +45,7 @@ def create_server_app(config_path: str):
     attach_space_routes(app)
     attach_encounter_routes(app)
     attach_async_routes(app)
+    attach_call_invitation_routes(app)
     attach_group_autonomy_routes(app)
     install_group_autonomous_visual(app)
     attach_visual_capture_routes(app)

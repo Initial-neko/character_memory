@@ -291,6 +291,8 @@ class Settings(BaseModel):
     # behavior. This only constrains cost and noise; it does not make the
     # deferred members "observe" the turn.
     group_max_speakers_per_turn: int = Field(default=5, ge=1, le=12)
+    cost_saving_enabled: bool = Field(default=False, description="可选群聊节省模式：仅降低未点名群成员的反应上限，不改变单聊、显式点名、媒体或World策略；关闭恢复原群聊配置。需重启。")
+    cost_saving_group_max_speakers_per_turn: int = Field(default=3, ge=1, le=12, description="开启节省时与普通群聊上限取较小值；被点名成员仍全部参与。范围1–12，不修改普通上限。需重启。")
 
     # Random Encounter: a lightweight discovery pool separate from the formal
     # character list. Candidates may be explored even when the active chat list

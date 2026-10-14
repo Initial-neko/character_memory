@@ -15,8 +15,22 @@ class Runner:
 
 
 def limits(**extra):
-    return {"backend":"claude", "claude_daily_max":3,"claude_daily_budget_usd":None,"claude_max_budget_usd":None,
+    return {"backend":"claude", "role_grant":"claude_research", "claude_skills":[], "claude_daily_max":3,"claude_daily_budget_usd":None,"claude_max_budget_usd":None,
             "cost_saving":False, **extra}
+
+
+def _grant_role(tmp_path, access, character_id, *, skills=()):
+    folder=tmp_path/"personas"/character_id
+    folder.mkdir(parents=True,exist_ok=True)
+    (folder/"persona.yaml").write_text("id: "+character_id+"\n",encoding="utf-8")
+    (folder/"capabilities.yaml").write_text(
+        "capabilities:\n  - claude_research\nskills:\n"+
+        "".join("  - "+item+"\n" for item in skills),encoding="utf-8")
+    profiles=access.character_profiles()
+    for profile in profiles:
+        if profile["id"]==character_id:
+            profile["persona_path"]=str(folder/"persona.yaml")
+    access.character_profiles=lambda:profiles
 
 
 def test_claude_backend_uses_existing_receipt_and_never_replays(tmp_path):
@@ -127,6 +141,7 @@ def test_world_chain_uses_one_planner_and_one_appraisal_without_private_cli_cont
     from test_world_activity import make_access, NOW
     from character_memory.world_activity import WorldActivityService, WorldPulseRepository
     store,access,model=make_access(tmp_path,count=2)
+    _grant_role(tmp_path,access,"c00")
     access.settings=access.settings.model_copy(update={"world_browse_execution_backend":"claude"})
     runner=Runner()
     access.services=SimpleNamespace(claude_runner=runner)
@@ -154,6 +169,7 @@ def test_failed_claude_execution_skips_appraisal_and_observation(tmp_path):
             self.calls.append(req)
             return CapabilityResult(req.request_id,"FAILED",reason="NO_VERIFIED_CONTENT")
     store,access,model=make_access(tmp_path,count=1)
+    _grant_role(tmp_path,access,"c00")
     access.settings=access.settings.model_copy(update={"world_browse_execution_backend":"claude"})
     access.services=SimpleNamespace(claude_runner=Failure())
     import pytest
@@ -161,4 +177,39 @@ def test_failed_claude_execution_skips_appraisal_and_observation(tmp_path):
         WorldActivityService(access,WorldPulseRepository(store)).browse_character("c00",now=NOW)
     assert [call[0] for call in model.calls]==["PersonalBrowsePlan"]
     assert store.conn.execute("SELECT COUNT(*) FROM events WHERE event_type='WORLD_OBSERVATION'").fetchone()[0]==0
+    store.close()
+
+
+def test_role_without_claude_grant_never_dispatches_or_mentions_skills(tmp_path):
+    from types import SimpleNamespace
+    from test_world_activity import make_access, NOW
+    from character_memory.world_activity import WorldActivityService, WorldPulseRepository
+    store, access, model = make_access(tmp_path, count=2)
+    access.settings = access.settings.model_copy(update={"world_browse_execution_backend": "claude"})
+    runner = Runner()
+    access.services = SimpleNamespace(claude_runner=runner)
+    try:
+        result = WorldActivityService(access, WorldPulseRepository(store)).browse_character(
+            "c00", now=NOW, opportunity_id="unprivileged-role"
+        )
+        assert result["kept"] and runner.calls == []
+        prompts = [item[2] for item in model.calls]
+        assert prompts and all("Claude" not in p and "Skill" not in p and "claude_research" not in p for p in prompts)
+        saved = store.conn.execute(
+            "SELECT plan_json FROM world_browse_decisions WHERE opportunity_id='unprivileged-role'"
+        ).fetchone()
+        assert "execution_policy" not in json.loads(saved[0])
+        assert store.conn.execute("SELECT execution_metadata_json FROM capability_executions").fetchone()[0] is None
+    finally:
+        store.close()
+
+
+def test_claude_executor_rejects_missing_role_grant_before_start(tmp_path):
+    store = SQLiteStore(tmp_path / "capability.db")
+    runner = Runner()
+    executor = CapabilityExecutor(store, Observer(), claude_runner=runner)
+    req = replace(request(), constraints={**request().constraints, **limits()})
+    req = replace(req, constraints={k: v for k, v in req.constraints.items() if k != "role_grant"})
+    assert executor.execute(req).reason == "ROLE_CAPABILITY_DENIED"
+    assert runner.calls == []
     store.close()

@@ -170,3 +170,26 @@ def test_non_world_or_unknown_capability_never_starts(tmp_path):
     assert runner.run(replace(request(), channel="DIRECT")).status == "DENIED"
     assert runner.run(replace(request(), capability="READ_RSS")).status == "DENIED"
     runner.close()
+
+
+def test_only_selected_skills_mount_into_temporary_claude_directory(tmp_path):
+    import hashlib
+    from character_memory.runtime.claude_process import ClaudePrintRunner
+    content = "---\nname: anime-research\ndescription: Verified seasonal anime research\n---\nCheck sourced episodes."
+    item = {"name": "anime-research", "text": content, "sha256": hashlib.sha256(content.encode()).hexdigest()}
+    base = request("research season", "skills:1")
+    req = replace(base, constraints={**base.constraints, "backend": "claude", "role_grant": "claude_research",
+        "claude_skills": [item], "claude_daily_max": 1, "claude_daily_budget_usd": None,
+        "claude_max_budget_usd": None, "cost_saving": False})
+    runner = ClaudePrintRunner(Observer(), tmp_path / "runs", command=fake_cli(tmp_path))
+    result = runner.run(req)
+    assert result.status == "SUCCESS"
+    received = json.loads((tmp_path / "received.jsonl").read_text().splitlines()[0])
+    argv = received["argv"]
+    assert argv[argv.index("--tools") + 1] == "Skill"
+    assert "--add-dir" in argv
+    assert argv[argv.index("--allowedTools") + 1] == "mcp__character_world__world_lookup"
+    assert any(argv[i:i+2] == ["--allowedTools", "Skill"] for i in range(len(argv)-1))
+    assert result.data["execution"]["selected_skills"] == [{"name":"anime-research","sha256":item["sha256"]}]
+    assert not (tmp_path / "runs" / "task-").exists()
+    runner.close()

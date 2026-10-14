@@ -5,11 +5,13 @@ import hashlib
 import json
 import logging
 import threading
+import yaml
 from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
+from character_memory.character_capabilities import select_role_research
 from character_memory.world_observation import observation_lifecycle, retain_world_observation
 from character_memory.runtime.context import render_observed_experiences
 from character_memory.runtime.capability_execution import CapabilityExecutor, CapabilityRequest, adapt_browse_decision
@@ -1126,6 +1128,18 @@ Summary: {topic["summary"]}
                     at=now,
                     recent_limit=12,
                 )
+                # Capability resolution precedes prompting and any Claude task.
+                # A missing/malformed sidecar never exposes Skill descriptions.
+                selected_skills = None
+                if getattr(self.access.settings, "world_browse_execution_backend", "direct") == "claude":
+                    profile = next(
+                        (item for item in self._active_profiles() if item.get("id") == character_id),
+                        None,
+                    )
+                    try:
+                        selected_skills = select_role_research(profile)
+                    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+                        logger.warning("world.role_capabilities denied character=%s error=%s", character_id, exc)
                 plan_prompt = f"""# Persona
 {context.persona}
 
@@ -1189,8 +1203,9 @@ Summary: {topic["summary"]}
             snapshot = {"decision": plan.model_dump(mode="json"), "persona": context.persona,
                         "max_pages": max(1, min(4, int(getattr(self.access.settings, "world_browse_max_pages", 2)))),
                         "max_chars_per_page": max(500, min(16000, int(getattr(self.access.settings, "space_world_max_chars_per_page", 6000))))}
-            if getattr(self.access.settings, "world_browse_execution_backend", "direct") == "claude":
+            if selected_skills is not None:
                 snapshot["execution_policy"] = {
+                    "role_grant": "claude_research", "claude_skills": selected_skills,
                     "backend": "claude", "claude_daily_max": self.access.settings.claude_execution_daily_max,
                     "claude_daily_budget_usd": self.access.settings.claude_execution_daily_budget_usd,
                     "claude_max_budget_usd": self.access.settings.claude_execution_max_budget_usd,

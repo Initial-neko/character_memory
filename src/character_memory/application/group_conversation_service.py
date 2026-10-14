@@ -19,6 +19,15 @@ from character_memory.visual_runtime import direct_visual_available
 logger = logging.getLogger("character_memory.application.group")
 
 
+def effective_group_speaker_limit(settings) -> int:
+    """Derive this turn's cap without changing the user's normal setting."""
+    normal = int(getattr(settings, "group_max_speakers_per_turn", 5))
+    if not bool(getattr(settings, "cost_saving_enabled", False)):
+        return normal
+    saving = int(getattr(settings, "cost_saving_group_max_speakers_per_turn", 3))
+    return min(normal, saving)
+
+
 class SupersededGroupReaction(RuntimeError):
     """Raised when newer shared user facts arrive before a member can commit."""
 
@@ -819,6 +828,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         image_data_url: str | None = None,
         sticker: dict | None = None,
         mentions: list[str] | None = None,
+        max_speakers: int | None = None,
     ) -> dict:
         source_event = self.persist_user_event(
             conversation_id,
@@ -831,6 +841,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         return self.react_from_event(
             source_event,
             image_data_urls=[image_data_url] if image_data_url else None,
+            max_speakers=max_speakers,
         )
 
     def send(
@@ -843,6 +854,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         image_data_url: str | None = None,
         sticker: dict | None = None,
         mentions: list[str] | None = None,
+        max_speakers: int | None = None,
     ) -> dict:
         with self.turn_lock:
             return self._send_locked(
@@ -853,4 +865,5 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 image_data_url=image_data_url,
                 sticker=sticker,
                 mentions=mentions,
+                max_speakers=max_speakers,
             )

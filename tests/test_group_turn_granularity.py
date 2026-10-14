@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import threading
 import time
 
+import pytest
+
 from character_memory.application.async_conversation import (
     ConversationEventHub,
     ReactionScheduler,
@@ -177,7 +179,11 @@ class GroupSequenceModel(PersonModel):
         return DiaryResult(diary="", mental_state_update="")
 
 
-def test_group_reaction_complete_reports_cap_and_deferred_speakers(tmp_path: Path):
+@pytest.mark.parametrize("saving,mentions,expected", [
+    (False, [], ["a", "b", "c"]), (True, [], ["a"]),
+    (True, ["b", "c"], ["b", "c"]), (True, ["*"], ["a", "b", "c", "d"]),
+])
+def test_group_reaction_complete_reports_cap_and_deferred_speakers(tmp_path: Path, saving, mentions, expected):
     """The scheduler reports `deferred_speaker_ids` / `max_speakers` on SSE.
 
     The UI does not need them to render (folding is driven by turn_id), but the
@@ -207,7 +213,7 @@ def test_group_reaction_complete_reports_cap_and_deferred_speakers(tmp_path: Pat
         profiles=[{"id": member, "name": member.upper()} for member in members],
     )
     group = service.create_group("回报群", members)
-    source = service.persist_user_event(group.id, "谁来接话")
+    source = service.persist_user_event(group.id, "谁来接话", mentions=mentions)
 
     hub = ConversationEventHub()
     channel = group_channel(group.id)
@@ -216,7 +222,8 @@ def test_group_reaction_complete_reports_cap_and_deferred_speakers(tmp_path: Pat
         runtimes=runtimes,
         clock=service.clock,
         chat=_LockService(),
-        settings=SimpleNamespace(group_max_speakers_per_turn=3),
+        settings=SimpleNamespace(group_max_speakers_per_turn=3, cost_saving_enabled=saving,
+                                 cost_saving_group_max_speakers_per_turn=1),
     )
     scheduler = ReactionScheduler(
         lambda: bundle,
@@ -238,7 +245,8 @@ def test_group_reaction_complete_reports_cap_and_deferred_speakers(tmp_path: Pat
     hub.close()
 
     assert completed is not None, "scheduler never published reaction_complete"
-    assert completed["max_speakers"] == 3
-    assert completed["deferred_speaker_ids"] == [members[3]]
-    assert completed["speaker_order"] == members[:3]
+    assert completed["max_speakers"] == (1 if saving else 3)
+    assert completed["deferred_speaker_ids"] == [member for member in members if member not in expected]
+    assert completed["speaker_order"] == expected
+    assert len(model.reactions) == len(members)-len(expected)
     store.close()

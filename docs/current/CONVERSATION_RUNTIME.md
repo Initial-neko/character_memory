@@ -158,6 +158,13 @@ member C -> ...
 
 **成本形状**：一条 user message 最多让 `group_max_speakers_per_turn`（默认 5，范围 1..12）位成员各产生一次模型调用；被 @ 的成员一定进入本轮，未点名成员从滚动顺序尾部截断（`deferred_speaker_ids`），因此每轮听到的人仍然轮换。设为 12 即恢复到"每个成员都被问到"的旧行为（对应旧的 12 次模型调用上限）。自主机会另有独立硬上限（`cap = 1..4`）。群成员上限是 `MAX_GROUP_CHARACTERS = 12`，所以满员群里一句用户消息默认最多 5 次模型调用、把 `group_max_speakers_per_turn` 调到 12 时最坏 12 次；这不是 bug，但改动上限或给群加人时要按这个数量级算成本。该项是后端形状旋钮，不在 `HOT_APPLY_FIELDS` 内，因此保存后按 `restart_required` 处理。
 
+`cost_saving_enabled` 默认关闭。开启后每轮使用 `min(group_max_speakers_per_turn, cost_saving_group_max_speakers_per_turn)`；节省上限默认 3、范围 1..12，可在 Settings 调整。两个上限分别保存，关闭直接恢复用户普通上限，不覆盖为默认值。同步 `/v1/groups/{id}/chat` 和异步 scheduler 现在都消费这个正式上限；同步入口此前没有消费 `group_max_speakers_per_turn`，此次补齐，因此关闭模式时也遵守用户已配置的普通上限。内部直接调用 `service.send()` 没有显式 cap 时仍保持原全员判断兼容行为。
+
+节省仅减少未点名成员的本轮反应调用，继续使用既有轮换与 @ 豁免：所有点名成员始终获得反应机会，`@所有人` 可超过有效上限；机会不强制发言。同步结果与异步 `reaction_complete` 都暴露有效 `max_speakers`、实际 `speaker_order` 和 `deferred_speaker_ids`，跳过者不伪装成已判断沉默，不产生模型调用或 Trace。上限在处理本轮时读取既有 bundle Settings 快照；字段均需重启 Character Runtime 才应用持久修改。
+
+本开关不降低单聊质量，不改变手动媒体、既有媒体权限或 World 专用节省/后台节奏，不新增判断人物意愿的模型、预算引擎或供应商账单承诺。当前作用范围只包含用户消息触发的群聊；自主 Group Opportunity 仍使用自己的硬上限。
+
+
 **展示粒度**：群聊以 **Turn** 为单位渲染，而不是以持久化 Event 为单位。一个 `PersonReaction` 可以携带多个 action，`_react_member` 按 action 逐条持久化 Group Event（这是有意的，保留），但前端 `web/groups.js` 的 `foldMessages()` 会把 `(turn_id, actor_id)` 相同的连续角色事件折回一个 `ChatTurn`：文本行合并进同一个气泡，表情/图片/语音成为该气泡内部的内容，说话人名字每个 turn 只出现一次。不同角色**永不合并**；同一角色不同 turn 也各自成块，否则会篡改真实的发言顺序。单聊不受此影响，仍然允许更细粒度的连续消息。
 
 `group_character_event` 在每个成员提交后立刻 SSE 推送，不需要等整个群组结束才展示第一条回复。

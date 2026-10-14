@@ -235,6 +235,8 @@ SETTING_HELP: dict[str, str] = {
     "group_autonomy_user_quiet_minutes": "用户刚发言后多少分钟内跳过正式自主群聊；0 = 关闭该保护。",
     "group_autonomy_poll_seconds": "自主群聊 Scheduler 的轮询延迟；不会改变 Opportunity 间隔。",
     "group_max_speakers_per_turn": "用户发一条群消息时最多让多少不同角色参与本轮回复。",
+    "cost_saving_enabled": "默认关闭。开启后仅降低未点名群成员的反应上限；显式 @ 与单聊不受影响。关闭恢复原群聊配置；不改变媒体、World 或其独立节省模式，不承诺账单节省。重启 Character Runtime 后生效。",
+    "cost_saving_group_max_speakers_per_turn": "节省模式开启时，与用户普通群聊上限取较小值；默认3、范围1–12。点名成员仍全部参与，其他成员沿原轮换顺序参与；不开启则不生效，也不覆盖普通上限。需重启。",
     "encounter_enabled": "是否允许 Random Encounter Scheduler 产生新的候选相遇。",
     "encounter_interval_minutes": "两次 Random Encounter Opportunity 的间隔。",
     "encounter_web_probability": "AUTO 邂逅选择公网资料来源的概率；其余概率走系统生成。",
@@ -823,6 +825,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "title": "Group Conversation",
         "description": "用户消息触发的一轮群聊最多让多少位成员接话。被 @ 的成员始终参与；未点名的成员从滚动顺序尾部截断，因此每轮听到的人仍然轮换。",
         "fields": [
+            {"name": "cost_saving_enabled", "label": "Optional Group Cost Saving", "type": "checkbox", "level": "advanced"},
+            {"name": "cost_saving_group_max_speakers_per_turn", "label": "Saving Max Speakers / Turn", "type": "number", "step": 1, "level": "advanced"},
             {
                 "name": "group_max_speakers_per_turn",
                 "label": "Max Speakers / Turn",

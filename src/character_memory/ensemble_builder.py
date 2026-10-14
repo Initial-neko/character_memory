@@ -132,6 +132,18 @@ class EnsembleResearch(BaseModel):
     members: list[EnsembleMemberResearch] = Field(min_length=2, max_length=MAX_GROUP_CHARACTERS)
 
 
+class EnsembleSceneDraft(BaseModel):
+    background: str = Field(min_length=3, max_length=500)
+    characters: str = Field(min_length=3, max_length=600)
+    relationships: str = Field(default="", max_length=300)
+    opening: str = Field(min_length=3, max_length=400)
+
+    @field_validator("background", "characters", "relationships", "opening", mode="before")
+    @classmethod
+    def strip_fields(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
 class EnsembleRepository:
     """Tiny durable build record around the existing Group + Persona systems."""
 
@@ -511,6 +523,7 @@ class EnsembleBuilderService:
         group = self.groups.get_group(build["group_id"], include_archived=True)
         return {
             **build,
+            "scene": self.repository._json(build.get("prompt") or "", None) if build.get("mode") == "SCENE" else None,
             "drafts": drafts,
             "ready_member_count": len(ready),
             "failed_members": [
@@ -536,7 +549,7 @@ class EnsembleBuilderService:
         clean = " ".join(str(prompt or "").split()).strip()
         if len(clean) < 3:
             raise ValueError("先描述要复刻或生成的群聊")
-        if mode not in {"SOURCE", "ORIGINAL"}:
+        if mode not in {"SOURCE", "ORIGINAL", "SCENE"}:
             raise ValueError("不支持的群聊构建模式")
         hint = self._group_name_hint(clean)
         build_id = f"ensemble-{uuid4().hex[:12]}"
@@ -568,6 +581,11 @@ class EnsembleBuilderService:
             source_query="", sources=[], drafts=drafts, now=now,
         )
         return self.payload(saved)
+
+    def start_scene(self, scene: EnsembleSceneDraft | dict, *, now: datetime | None = None) -> dict[str, Any]:
+        draft = EnsembleSceneDraft.model_validate(scene)
+        prompt = json.dumps(draft.model_dump(), ensure_ascii=False)
+        return self.start(prompt, mode="SCENE", now=now)
 
     def prepare(self, prompt: str, *, mode: str = "SOURCE", now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now().astimezone()
@@ -702,7 +720,7 @@ Content:
         if build["status"] == "CANCELLED":
             raise ValueError("这次群像构建已经取消")
         try:
-            original = build.get("mode") == "ORIGINAL"
+            original = build.get("mode") in {"ORIGINAL", "SCENE"}
             if original:
                 query, observations, sources = "", [], []
             else:
@@ -716,7 +734,8 @@ Content:
                     "identity": member.identity,
                     "relationship_notes": member.relationship_notes,
                     "research": member.model_dump(mode="json"),
-                    "existing_character_id": self._match_existing(member.name),
+                    "existing_character_id": self._match_existing(member.name) if build.get("mode") != "SCENE" else None,
+                    "reuse_existing": build.get("mode") != "SCENE",
                 }
                 try:
                     draft, method = self._build_member_draft(
@@ -806,7 +825,7 @@ Content:
             member = EnsembleMemberResearch.model_validate(raw)
             draft, method = self._build_member_draft(
                 member, group_name=build["group_name"], overview=build.get("overview") or "",
-                original=build.get("mode") == "ORIGINAL",
+                original=build.get("mode") in {"ORIGINAL", "SCENE"},
                 existing=bool(target.get("existing_character_id")),
             )
             target.update(
@@ -815,7 +834,7 @@ Content:
                     "draft": draft.model_dump(mode="json"),
                     "generation_method": method,
                     "error": "",
-                    "existing_character_id": self._match_existing(member.name),
+                    "existing_character_id": self._match_existing(member.name) if target.get("reuse_existing") is not False else None,
                 }
             )
         except Exception as exc:
@@ -1032,7 +1051,7 @@ Content:
                 draft = PersonaDraft.model_validate(item["draft"])
                 profile = creator(
                     draft,
-                    "",
+                    f"character-{uuid4().hex[:12]}" if item.get("reuse_existing") is False else "",
                     confirm_over_soft_limit=True,
                     # The batch check above gives the UI one confirmation and
                     # a useful all-or-nothing forecast. The actual character
@@ -1046,7 +1065,7 @@ Content:
                         "name_hint": str(item.get("canonical_name") or draft.name),
                         "age_hint": draft.age,
                         "tags": (["原创情景", str(item["template_id"])] if item.get("template_id")
-                                 else ["群像复刻"]),
+                                 else ["原创情景"] if build.get("mode") == "SCENE" else ["群像复刻"]),
                         "group_id": group_id,
                     },
                 )

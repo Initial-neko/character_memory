@@ -332,6 +332,7 @@ Live2D 通话展示：`live2d_web.py` 负责本地资源发现/安全路径与�
 ### Character life observation page
 
 - `character_life.py`: read-only durable event/state/Memory/Intent and execution receipt projections, absolute-time pagination and per-character usage; no runtime execution.
+- `character_relationships.py`: bounded read-only recent counterpart interactions and current User Direct pending-Intent review; no relationship scoring or runtime execution.
 - `character_life_web.py`: Core-owned `/life`, per-character life/execution GET routes and read-only reference resolution.
 - `life_conversation.py`: validates existing source ownership, participation, visibility and destination; normal async sending revalidates and persists provenance with the user fact.
 - `web/life.html`, `life.js`, `life.css`: dedicated timeline, source/detail and state comparison UI.

@@ -8,7 +8,7 @@ import threading
 from pydantic import BaseModel, Field, model_validator
 from character_memory.live2d_behavior import Live2DPresentationRequest
 
-from character_memory.application.group_conversation_service import GroupConversationService
+from character_memory.application.group_conversation_service import GroupConversationService, effective_group_speaker_limit
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.images import load_image_catalog
 from character_memory.message_projection import project_group_message, upload_caption
@@ -391,6 +391,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 image_data_url=image_data_url,
                 sticker=selected_sticker,
                 mentions=req.mentions,
+                max_speakers=effective_group_speaker_limit(bundle.settings),
             )
             group = service.repo.get_group(conversation_id)
             turn_summary = service.repo.turn_summaries(conversation_id, [result["turn_id"]]).get(result["turn_id"])
@@ -400,6 +401,8 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
                 "conversation_id": conversation_id,
                 "turn_id": result["turn_id"],
                 "speaker_order": result["speaker_order"],
+                "max_speakers": result.get("max_speakers"),
+                "deferred_speaker_ids": result.get("deferred_speaker_ids", []),
                 "mentions": result.get("mentions", []),
                 "decisions": result["decisions"],
                 "group": group_payload(group, profiles=resources["profiles"]),

@@ -134,6 +134,7 @@ class ClaudePrintRunner:
         tool_calls = bounds.get("claude_max_tool_calls", self.max_tool_calls)
         selected_model = bounds.get("claude_model", self.model)
         budget = bounds.get("claude_max_budget_usd", self.max_budget_usd)
+        selected_skills = bounds.get("claude_skills", [])
         session = str(uuid.uuid4())
         started = time.monotonic()
         final, visible, model, reason = {}, [], "", ""
@@ -163,6 +164,17 @@ class ClaudePrintRunner:
                                  max_pages=request.constraints["max_pages"],
                                  max_chars=request.constraints["max_chars_per_page"]) as bridge:
             with tempfile.TemporaryDirectory(prefix="task-", dir=self.output_dir) as cwd:
+                if selected_skills:
+                    # Only allowlisted, hash-checked text enters this disposable
+                    # directory; do not mount the Persona tree or shared library.
+                    root = Path(cwd) / "selected-skills"
+                    for skill in selected_skills:
+                        dest = root / ".claude" / "skills" / skill["name"]
+                        dest.mkdir(parents=True, exist_ok=True)
+                        (dest / "SKILL.md").write_bytes(skill["text"].encode("utf-8"))
+                    flags.extend(["--add-dir", str(root)])
+                    flags[flags.index("--tools") + 1] = "Skill"
+                    flags[flags.index("--allowedTools") + 1] = "mcp__character_world__world_lookup Skill"
                 config = {"mcpServers": {"character_world": {"command": sys.executable,
                     "args": ["-m", "character_memory.runtime.claude_tools"]}}}
                 flags.extend(["--mcp-config", json.dumps(config)])
@@ -280,7 +292,7 @@ class ClaudePrintRunner:
                             init_tools = [str(tool)[:120] for tool in message.get("tools", []) if isinstance(tool, str)]
                             mcp_servers = [{"name": str(server.get("name", ""))[:120], "status": str(server.get("status", ""))[:120]}
                                            for server in message.get("mcp_servers", []) if isinstance(server, dict)]
-                            if not self.command and (init_tools != ["mcp__character_world__world_lookup"] or
+                            if not self.command and (set(init_tools) != ({"mcp__character_world__world_lookup", "Skill"} if selected_skills else {"mcp__character_world__world_lookup"}) or
                                     mcp_servers != [{"name":"character_world", "status":"connected"}]):
                                 reason = "TOOL_PROFILE_NOT_READY"
                                 break
@@ -317,7 +329,7 @@ class ClaudePrintRunner:
                     "elapsed_ms": round((time.monotonic() - started) * 1000), "exit_code": process.returncode if process else None,
                     "process_stopped": process is None or process.poll() is not None, "tool_calls": bridge.calls,
                     "detail_path": detail_path, "limits": {"timeout_seconds": timeout, "max_turns": turns,
-                    "max_tool_calls": tool_calls, "max_budget_usd": budget}, "effective_tools": init_tools,
+                    "max_tool_calls": tool_calls, "max_budget_usd": budget}, "selected_skills": [{"name": item["name"], "sha256": item["sha256"]} for item in selected_skills], "effective_tools": init_tools,
                     "mcp_servers": mcp_servers, **_usage(final)}
                 def clean_data(value):
                     if isinstance(value, dict):

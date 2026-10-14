@@ -562,8 +562,40 @@ and shared article data. The same durable execution allowance and result cache
 apply. Channel identity and item generations come from server context, not
 external text. This is not a general Tool registry or a second Character runtime.
 
-World WEB_SEARCH can opt into `world_browse_execution_backend: claude`; the
-default remains `direct`. RuntimeServices owns one bounded ClaudePrintRunner.
+World WEB_SEARCH can opt into `world_browse_execution_backend: claude`, but
+this **global preference is never a character permission**. A character must
+also have an operator-maintained `capabilities.yaml` beside its `persona.yaml`:
+```yaml
+capabilities: [claude_research]
+skills: [shared/seasonal-research]  # optional; omit for a plain research task
+```
+No sidecar or malformed/unknown capability means **no Claude dispatch**:
+the original direct World browser remains available and the normal Person
+planning prompt gets no Claude/Skill section. `skills` may be absent or contain
+at most four explicit `shared/<slug>` or `personal/<slug>` entries. Shared
+Skills live under `skills/shared/<slug>/SKILL.md` at the persona repository
+root; personal Skills under `personas/<role>/skills/<slug>/SKILL.md`.
+Only bounded, reviewed plain `SKILL.md` files with exact `name` and
+`description` frontmatter are eligible. Other resources, scripts, symbolic
+links, tool-grant fields and undeclared Skills are rejected.
+
+Skill frontmatter accepts UTF-8 LF and CRLF line endings; parsing normalizes a
+copy only. The snapshot, SHA-256 and temporary mount preserve the exact original
+UTF-8 bytes on Windows as well as Linux.
+
+Authorized Skills are read and hashed at World planning time into the durable
+execution policy, then only selected SKILL.md texts are projected into the
+temporary `.claude/skills/` directory and loaded via `--add-dir`.
+When none are selected, the old `--bare --tools ""` profile is unchanged.
+When explicitly selected, only the `Skill` builtin joins `world_lookup`;
+other builtin tools, repository files, and other characters' Skills remain
+unmounted. A Skill is reusable methodology, not proof of having run research
+or permission to edit source. No Skill writing, generation or promotion is
+automatically granted. The CLI must still pass its effective-tool readiness
+check on a real installation; mocked tests are not a substitute for a live
+provider or isolation validation.
+
+The default remains `direct`. RuntimeServices owns one bounded ClaudePrintRunner.
 Each task starts a fresh local `claude -p` process with no resume/continue/fork
 and no session persistence. The fixed execution contract and current public
 query are its only application input; Person context stays in the existing

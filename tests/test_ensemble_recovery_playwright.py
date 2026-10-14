@@ -138,3 +138,37 @@ def test_warm_template_previews_before_confirmation_and_creates_once(ensemble_pa
     confirms = [call for call in calls if call["path"].endswith("/confirm")]
     assert len(confirms) == 1
     assert json.loads(confirms[0]["body"])["selected_indices"] == [0, 1, 2, 3]
+
+
+def test_custom_scene_sends_four_fields_and_restores_failed_input(ensemble_page):
+    page = ensemble_page
+    page.evaluate("""() => {
+      window.__baseBuild = window.__resumableBuild;
+      window.__sceneCalls = [];
+      window.CM.api = async (path, options={}) => {
+        window.__sceneCalls.push({path,body:options.body});
+        if(path === '/v1/ensembles') return {build:null};
+        return {build:{...window.__baseBuild,mode:'SCENE',status:'FAILED',
+          scene:JSON.parse(options.body),prompt:options.body}};
+      };
+    }""")
+    page.locator(".ensemble-create-button").click()
+    expect(page.locator("[data-ensemble-mode] option[value='SCENE']")).to_have_count(1)
+    page.locator("[data-ensemble-mode]").select_option("SCENE")
+    data = {
+        "background": "温暖异世界的雨后小镇",
+        "characters": "三个成年朋友，有不同关注",
+        "relationships": "彼此熟悉，对我有好感",
+        "opening": "我走进旅店，可以自由聊天",
+    }
+    for name, value in data.items():
+        page.locator(f"[data-ensemble-scene-{name}]").fill(value)
+    page.locator("[data-ensemble-start]").click()
+    expect(page.locator("[data-ensemble-edit]")).to_be_visible()
+    calls = page.evaluate("window.__sceneCalls")
+    assert calls[-1]["path"] == "/v1/ensembles/scenes/prepare"
+    assert json.loads(calls[-1]["body"]) == data
+    page.locator("[data-ensemble-edit]").click()
+    expect(page.locator("[data-ensemble-mode]")).to_have_value("SCENE")
+    for name, value in data.items():
+        expect(page.locator(f"[data-ensemble-scene-{name}]")).to_have_value(value)

@@ -6,10 +6,12 @@ from fastapi import HTTPException, Query
 from fastapi.responses import FileResponse
 
 from character_memory.character_life import CharacterLifeReader, CharacterExecutionReader
+from character_memory.character_relationships import CharacterRelationshipReader
 
 
 def attach_character_life_routes(app, access):
     reader = CharacterLifeReader(access.read_store)
+    relationships = CharacterRelationshipReader(access.read_store)
     db_path = getattr(getattr(access, "settings", None), "db_path", ":memory:")
     executions = CharacterExecutionReader(access.read_store, Path(db_path).resolve().parent / "claude-executions")
 
@@ -35,6 +37,17 @@ def attach_character_life_routes(app, access):
         if profile and profile.get("archived_at"):
             raise HTTPException(409, "人物已归档，请先恢复")
         return resolve_life_reference(access.read_store, LifeReference(character_id=character_id, key=key))
+
+    @app.get("/v1/characters/{character_id}/relationship-review")
+    def relationship_review(character_id: str, peer: str = Query(..., min_length=1, max_length=100),
+                            day: str | None = None, offset: int = Query(480, ge=-840, le=840)):
+        access.ensure_character(character_id)
+        if peer != "user":
+            access.ensure_character(peer)
+        try:
+            return relationships.review(character_id, peer, day=day, offset=offset)
+        except ValueError as error:
+            raise HTTPException(422, detail=str(error)) from error
 
     @app.get("/life")
     def life_page():

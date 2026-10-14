@@ -12,6 +12,7 @@ from typing import Callable
 from character_memory.application.group_conversation_service import (
     GroupConversationService,
     SupersededGroupReaction,
+    effective_group_speaker_limit,
 )
 from character_memory.runtime.person_runtime import SupersededReaction
 
@@ -572,9 +573,7 @@ class ReactionScheduler:
                 # settings snapshot, so it is restart_required like the rest of
                 # the config surface (HOT_APPLY_FIELDS only covers TTS).
                 # Mentioned members always participate regardless.
-                max_speakers = int(
-                    getattr(bundle.settings, "group_max_speakers_per_turn", 5)
-                )
+                max_speakers = effective_group_speaker_limit(bundle.settings)
 
                 def current() -> bool:
                     return self._latest_group_user_id(service, conversation_id) == watermark

@@ -412,6 +412,11 @@ group_autonomy_user_quiet_minutes: 30
 
 # Maximum distinct group members asked to react to one user message.
 group_max_speakers_per_turn: 5
+# 默认关闭；仅降低未点名群成员本轮反应次数。显式@与单聊不受影响，媒体/World策略不变；需重启。
+# 关闭开关恢复用户原 group_max_speakers_per_turn，不覆盖为默认值，不承诺供应商账单节省。
+cost_saving_enabled: false
+# 开启时与普通群聊上限取较小值，默认3、范围1–12；点名成员总会参与，其他成员沿原轮换顺序选择。
+cost_saving_group_max_speakers_per_turn: 3
 
 # -----------------------------------------------------------------------------
 # Random Encounter

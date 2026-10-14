@@ -83,8 +83,9 @@ def test_web_recovery_rejects_plan_constraint_mismatch(tmp_path,monkeypatch):
 
 def claude_interrupted(tmp_path,monkeypatch):
     from types import SimpleNamespace
-    from test_claude_world import Runner
+    from test_claude_world import Runner, _grant_role
     store,access,model=make_access(tmp_path)
+    _grant_role(tmp_path, access, "c00")
     access.settings=access.settings.model_copy(update={'world_browse_execution_backend':'claude'})
     runner=Runner()
     access.services=SimpleNamespace(claude_runner=runner)

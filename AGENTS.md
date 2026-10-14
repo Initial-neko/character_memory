@@ -13,6 +13,7 @@ Keep it short and stable. Detailed architecture, feature behavior, task state, a
 - Prefer extending an existing stable-domain document. Add a new `docs/current/*.md` only for an independent runtime boundary, lifecycle, or durable ownership reason.
 - Do not commit agent transcripts, generated task ledgers, review scratchpads, temporary implementation plans, secrets, model assets, or machine-specific paths.
 - CI contract tests must not require GPU access or model downloads. Browser/live-model checks belong in their explicit runtime validation paths.
+- **Visual acceptance is a separate required gate** for user-visible UI changes. The owning Issue holds reference images (if any), real rendered desktop/mobile/device screenshots, exact tested commit, findings and explicit human sign-off; CI/Playwright/DOM PASS is not visual PASS. Backend-only work records VISUAL N/A with a reason. See `CONTRIBUTING.md` and acceptance Issue #121.
 - Maintained documentation describes the current project. Git, Issues, PRs, tags, and releases preserve history.
 - Configuration is a tested contract: every non-secret `Settings` field must appear in `config.example.yaml` with a human explanation; secrets stay in `.env`. Every Settings field/Secret must expose help text, and every Dev Console input/select/textarea/button must explain its scope/effect. Formal behavior belongs in Settings; Dev runtime overrides must stay explicitly temporary and off the first screen.
 

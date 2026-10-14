@@ -90,6 +90,25 @@ Run against the real character-stack, not a mocked page:
 - Dev: LLM Usage table identifies feature/purpose hotspots and token-coverage gaps.
 - Failure recovery: microphone/camera/display denial, SSE reconnect, Media Runtime/TTS failure, generation failure.
 
+### Required visual comparison evidence
+
+The real Chromium run has two independent conclusions: **behavioral acceptance**
+and **visual acceptance**. A passing Playwright suite, mocked DOM, design preview,
+or screenshot of an isolated prototype cannot replace visual inspection of the
+actual served application. The canonical image/evidence list is in
+[Issue #121](https://github.com/Initial-neko/character_memory/issues/121);
+feature-specific UI issues link back to the corresponding entry there.
+
+For changed Chat/Group/Space/Settings/Dev/creation/call surfaces, record both the
+agreed design reference (when one exists) and **actual** desktop and narrow
+viewport screenshots, label commit and state, explain differences and mark
+VISUAL PASS / FAIL / BLOCKED. Real Android UI requires emulator evidence and
+the final physical-device visual pass separately. Do not promote a release
+candidate solely because browser automation is green; the project owner signs
+off on the exact integrated commit after reviewing the evidence. Unavailable
+real flows remain BLOCKED, and the reference image must never be presented
+as an implemented screenshot.
+
 ## 5. Release exit criteria
 
 A release candidate may be promoted only when:

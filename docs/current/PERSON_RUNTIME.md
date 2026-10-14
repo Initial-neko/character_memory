@@ -18,7 +18,7 @@ Autonomous Group Chat 不创建第二套人物。一次群聊自主 Opportunity 
 - 私聊 Memory 不得因此泄漏到共享房间；
 - 本轮不创建 Intent；
 - 每个 Character 最多一个 visible action；
-- V1 不允许后台 GENERATE_IMAGE。
+- 自主 Group 仍不允许 `GENERATE_IMAGE`。
 
 自主群消息提交后会成为真实 shared durable fact，因此同一 Opportunity 中后判断的成员能看到前一位刚刚公开说的话，后续 Direct/Group/Space 认知也可以正常受到这段真实经历影响。
 
@@ -215,6 +215,11 @@ Sticker 当前是 application/global resource：运行时可以合并内置 pack
 
 - Direct `USER_MESSAGE` reaction 可以自主生成；
 - Group 中每个 Character 的 `USER_MESSAGE` reaction 也可以独立自主生成；
+- 默认拒绝非用户事件；`direct_autonomous_image_generation_enabled` 开启后，仅显式 `channel=DIRECT` 的持久化 `TIME_TICK / PROACTIVE_INTENT` 可生成，不新增调度器；Group/Space/World/屏幕观察仍拒绝；
+- 提示词、动作过滤和执行共享资格策略，过滤 trace 记录拒绝原因；
+- 自主图片在提示词编译 LLM 和 Provider 前，使用 SQLite 原子预约：应用共用 UTC 每日默认 3 次，单人物默认冷却 8 小时（均可配置）；单应用进程内最多一个 RUNNING 预约；
+- 预约按人物/source event/action index 幂等；失败、中断、过期结果均消耗额度，重启将未知 RUNNING 标记 INTERRUPTED，不自动重试或重复付费；预约表通过 `visual/001-direct-image-generation-jobs` 迁移按需创建；恢复语义限单应用进程，不提供多进程 worker lease；默认关闭不构造预约表；用户消息现有生图不计入自主额度；
+- `SELFIE / SCENE` 是合成表达，生成事件写入 `content_scope=SYNTHETIC_CHARACTER_EXPRESSION` 和预约 provenance，不冒充现实拍照；
 - 同一 Character 单轮最多 1 个 `GENERATE_IMAGE`；
 - `SELFIE` 在 Provider 支持 reference 时使用当前头像作为 identity anchor；
 - `SCENE` 不要求人物本人出镜，也不为了身份一致性机械附带 avatar reference；

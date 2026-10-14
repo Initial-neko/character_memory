@@ -422,6 +422,8 @@ Person LLM 可以输出内部 action：
 
 Direct `USER_MESSAGE` 与 Group 中各成员的 `USER_MESSAGE` reaction 都可以自主产生 `GENERATE_IMAGE`。是否画、画什么、以及 `visual_intent` 都由对应 Character 自己决定，不需要用户先打开生图工具或手写 Prompt。
 
+非用户机会默认禁止生图；可选显式 Direct `TIME_TICK / PROACTIVE_INTENT` 的权限、UTC 应用额度、人物冷却、原子预约和中断不重试契约见 [PERSON_RUNTIME](PERSON_RUNTIME.md#generate-image)。生成图片是合成表达，不是现实拍摄证据；事件以 `content_scope` 和 `generation_job_id` 保留来源。
+
 同一 Character 单轮最多产生 1 个 `GENERATE_IMAGE`；不同群成员如果各自确实想画，可以分别产生自己的生成任务。
 
 #### SELFIE

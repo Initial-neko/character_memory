@@ -135,10 +135,8 @@ def compile_context(
     has_images = bool(image_catalog and image_catalog.images)
     images = image_catalog.prompt_text() if has_images else "- 无"
 
-    # P0.19 deliberately starts with direct user turns only. TIME_TICK and
-    # PROACTIVE_INTENT do not receive the tool contract yet, avoiding autonomous
-    # provider spend before quotas/cooldowns exist.
-    effective_generate_image = bool(allow_generate_image and event.event_type == EventType.USER_MESSAGE)
+    from character_memory.visual_policy import generation_event_denial
+    effective_generate_image = bool(allow_generate_image and not generation_event_denial(event, autonomous_enabled=True))
 
     effective_call_invite = bool(allow_call_invite and _event_channel(event)=="DIRECT" and event.event_type in {EventType.USER_MESSAGE,EventType.TIME_TICK,EventType.PROACTIVE_INTENT})
     call_contract = ""
@@ -173,7 +171,7 @@ def compile_context(
     if effective_generate_image:
         generate_contract = """
 GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片，也不是用户命令。只有当你作为这个人物自己确实想用图片表达时才使用；即使用户说“发张自拍/画给我看”，你也可以自然拒绝、文字回应或沉默，不能因为用户提出要求就机械调用。
-使用 GENERATE_IMAGE 时只填写 image_purpose 和 visual_intent：SELFIE 表示你本人愿意分享自己的自然自拍/当前样子；SCENE 表示你想把一个场景、想象或氛围画出来。visual_intent 只描述你想表达什么，不要写模型参数、画质词、镜头参数或最终绘图 Prompt，系统会在下一阶段结合 Persona、当前状态和头像参考图编译提示词。
+使用 GENERATE_IMAGE 时只填写 image_purpose 和 visual_intent：SELFIE 表示你本人愿意分享自己的合成肖像/想象中的当前样子（不是现实拍照或真实现场证据）；SCENE 表示你想把一个场景、想象或氛围画出来。visual_intent 只描述你想表达什么，不要写模型参数、画质词、镜头参数或最终绘图 Prompt，系统会在下一阶段结合 Persona、当前状态和头像参考图编译提示词。
 单轮最多使用 1 个 GENERATE_IMAGE。它可以和一条自然的 MESSAGE 搭配，例如先说“等下，给你看”，也可以只发图；不要为了展示功能而频繁生成图片。GENERATE_IMAGE 只允许出现在本轮 actions 中，不要把它写进 intent_candidates 作为未来任务。
 """
     space_contract = ""

@@ -153,6 +153,7 @@ def evaluate_reaction(
     reaction, sticker_decisions, image_decisions = runtime._sanitize_resource_actions(
         reaction,
         allowed_sticker_ids=allowed_sticker_ids,
+        event=event,
     )
     timings["model_ms"] = _ms(stage)
 

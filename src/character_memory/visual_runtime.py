@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import base64
 import logging
+import json
 import threading
+from datetime import datetime, timezone
+from uuid import uuid4
 from typing import Callable
 
 from character_memory.config import runtime_setting
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType
+from character_memory.visual_policy import generation_event_denial
+from character_memory.image_generation_store import ImageGenerationJobs
 from character_memory.visual_generation import (
     ImageGenerationRequest,
     VisualPromptPlanner,
@@ -17,6 +22,7 @@ from character_memory.visual_generation import (
 
 logger = logging.getLogger("character_memory.visual_runtime")
 _service = None
+_BOOT_ID = uuid4().hex
 
 
 class DirectVisualRuntime:
@@ -28,9 +34,31 @@ class DirectVisualRuntime:
     the existing direct SSE channel when available.
     """
 
-    def __init__(self, access):
+    def __init__(self, access, *, clock=None, boot_id=None, settings=None):
         self.access = access
-        self.settings = access.settings
+        self.settings = settings or access.settings
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.boot_id = boot_id or _BOOT_ID
+        self._jobs = None
+        self._jobs_lock = threading.Lock()
+
+    def _ledger(self, store=None):
+        with self._jobs_lock:
+            if self._jobs is None:
+                self._jobs = ImageGenerationJobs(store or self.access.store(), boot_id=self.boot_id)
+        return self._jobs
+
+    def eligibility(self, event, *, store=None):
+        denial = generation_event_denial(event, autonomous_enabled=bool(getattr(self.settings, "direct_autonomous_image_generation_enabled", False)))
+        if denial:
+            return denial
+        if not self.available():
+            return "UNAVAILABLE"
+        if event.event_type == EventType.USER_MESSAGE:
+            return ""
+        return self._ledger(store).check(event.character_id, now=self.clock(),
+            daily_max=int(getattr(self.settings, "direct_autonomous_image_daily_max_generations", 3)),
+            cooldown_hours=float(getattr(self.settings, "direct_autonomous_image_cooldown_hours", 8)))
 
     def _provider(self):
         name = str(runtime_setting(self.settings, "image_generation_provider", "agnes") or "agnes").strip().lower()
@@ -82,25 +110,50 @@ class DirectVisualRuntime:
         return result
 
     def generate(
+        self, runtime, source_event, action, *, still_current=None, action_index=0,
+    ):
+        denial = self.eligibility(source_event, store=runtime.store)
+        if denial or action.type != ActionType.GENERATE_IMAGE:
+            logger.info("visual.runtime denied source=%s reason=%s", source_event.id, denial)
+            return None
+        job_id = None
+        if source_event.event_type != EventType.USER_MESSAGE:
+            persisted = runtime.store.get_event(source_event.id) if source_event.id else None
+            if persisted is None or persisted.character_id != source_event.character_id or generation_event_denial(persisted, autonomous_enabled=True):
+                return None
+            source_event = persisted
+            if still_current is not None and not still_current():
+                return None
+            job_id, denial = self._ledger(runtime.store).reserve(
+                character_id=source_event.character_id, source_event_id=int(source_event.id), action_index=action_index,
+                request=json.dumps({"purpose": action.image_purpose, "intent": action.visual_intent}, ensure_ascii=False, sort_keys=True),
+                now=self.clock(), daily_max=int(getattr(self.settings, "direct_autonomous_image_daily_max_generations", 3)),
+                cooldown_hours=float(getattr(self.settings, "direct_autonomous_image_cooldown_hours", 8)),
+            )
+            if job_id is None:
+                logger.info("visual.runtime reservation_denied source=%s reason=%s", source_event.id, denial)
+                return None
+        try:
+            result = self._generate(runtime, source_event, action, still_current=still_current, job_id=job_id)
+            if job_id is not None and result is None:
+                self._jobs.finish(job_id, status="SUPERSEDED")
+            return result
+        except Exception as error:
+            if job_id is not None:
+                self._jobs.finish(job_id, status="FAILED", error=str(error))
+            raise
+
+    def _generate(
         self,
         runtime,
         source_event: Event,
         action: ActionDecision,
         *,
         still_current: Callable[[], bool] | None = None,
+        job_id=None,
     ) -> Event | None:
         if action.type != ActionType.GENERATE_IMAGE:
             return None
-        # P0.19 only exposes generated visuals to direct user turns. Wake and
-        # proactive paths stay cost-free until they get explicit quotas/cooldowns.
-        if source_event.event_type != EventType.USER_MESSAGE:
-            logger.info(
-                "visual.runtime skipped_non_user_turn character=%s event_type=%s",
-                source_event.character_id,
-                source_event.event_type.value,
-            )
-            return None
-
         provider_name, provider = self._provider()
         if provider is None:
             logger.warning("visual.runtime skipped_unavailable character=%s provider=%s", source_event.character_id, provider_name)
@@ -158,7 +211,8 @@ class DirectVisualRuntime:
         )
         runtime.store.add_media_asset(asset)
         try:
-            event = runtime.store.append_event(
+            with runtime.store.transaction():
+                event = runtime.store.append_event(
                 Event(
                     character_id=source_event.character_id,
                     event_type=EventType.CHARACTER_MESSAGE,
@@ -169,6 +223,8 @@ class DirectVisualRuntime:
                         "media_id": asset.id,
                         "image_label": label,
                         "generated": True,
+                        "content_scope": "SYNTHETIC_CHARACTER_EXPRESSION",
+                        "generation_job_id": job_id,
                         "generation_purpose": purpose.value,
                         "provider": result.provider,
                         "model": result.model,
@@ -177,7 +233,9 @@ class DirectVisualRuntime:
                         "conversation_id": str(source_event.metadata.get("conversation_id") or f"{source_event.character_id}:default"),
                     },
                 )
-            )
+                )
+                if job_id is not None and not self._jobs.finish(job_id, status="SUCCEEDED", event_id=event.id):
+                    raise RuntimeError("image reservation no longer owned by this worker")
         except Exception:
             runtime.store.delete_media_asset(asset.id)
             self.access.media_storage.delete(asset)
@@ -223,13 +281,14 @@ class DirectVisualRuntime:
         action: ActionDecision,
         *,
         still_current: Callable[[], bool] | None = None,
+        action_index: int = 0,
     ) -> threading.Thread | None:
         if action.type != ActionType.GENERATE_IMAGE:
             return None
 
         def worker() -> None:
             try:
-                event = self.generate(runtime, source_event, action, still_current=still_current)
+                event = self.generate(runtime, source_event, action, still_current=still_current, action_index=action_index)
                 if event is not None:
                     self._publish_event(event)
             except Exception as exc:
@@ -262,7 +321,14 @@ def direct_visual_available() -> bool:
     return bool(_service is not None and _service.available())
 
 
-def generate_direct_visual_action(runtime, source_event, action, *, still_current=None):
+def direct_visual_permission(event, *, store=None):
+    denial = generation_event_denial(event)
+    if _service is None:
+        return denial or "UNAVAILABLE"
+    return _service.eligibility(event, store=store)
+
+
+def generate_direct_visual_action(runtime, source_event, action, *, still_current=None, action_index=0):
     if _service is None:
         return None
-    return _service.submit(runtime, source_event, action, still_current=still_current)
+    return _service.submit(runtime, source_event, action, still_current=still_current, action_index=action_index)

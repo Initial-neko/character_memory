@@ -1,6 +1,8 @@
 from dataclasses import replace
 import json
+import pytest
 import sys
+from pathlib import Path
 
 from character_memory.runtime.capability_execution import CapabilityRequest
 
@@ -172,10 +174,20 @@ def test_non_world_or_unknown_capability_never_starts(tmp_path):
     runner.close()
 
 
-def test_only_selected_skills_mount_into_temporary_claude_directory(tmp_path):
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_only_selected_skills_mount_into_temporary_claude_directory(tmp_path, monkeypatch, newline):
     import hashlib
     from character_memory.runtime.claude_process import ClaudePrintRunner
     content = "---\nname: anime-research\ndescription: Verified seasonal anime research\n---\nCheck sourced episodes."
+    content = content.replace("\n", newline)
+    from character_memory.runtime import claude_process
+    original_popen = claude_process.subprocess.Popen
+    mounted = []
+    def inspect_mount(argv, *args, **kwargs):
+        root = Path(argv[argv.index("--add-dir") + 1])
+        mounted.append((root / ".claude" / "skills" / "anime-research" / "SKILL.md").read_bytes())
+        return original_popen(argv, *args, **kwargs)
+    monkeypatch.setattr(claude_process.subprocess, "Popen", inspect_mount)
     item = {"name": "anime-research", "text": content, "sha256": hashlib.sha256(content.encode()).hexdigest()}
     base = request("research season", "skills:1")
     req = replace(base, constraints={**base.constraints, "backend": "claude", "role_grant": "claude_research",
@@ -184,6 +196,7 @@ def test_only_selected_skills_mount_into_temporary_claude_directory(tmp_path):
     runner = ClaudePrintRunner(Observer(), tmp_path / "runs", command=fake_cli(tmp_path))
     result = runner.run(req)
     assert result.status == "SUCCESS"
+    assert mounted == [content.encode("utf-8")]
     received = json.loads((tmp_path / "received.jsonl").read_text().splitlines()[0])
     argv = received["argv"]
     assert argv[argv.index("--tools") + 1] == "Skill"

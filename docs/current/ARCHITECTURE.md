@@ -579,6 +579,10 @@ Only bounded, reviewed plain `SKILL.md` files with exact `name` and
 `description` frontmatter are eligible. Other resources, scripts, symbolic
 links, tool-grant fields and undeclared Skills are rejected.
 
+Skill frontmatter accepts UTF-8 LF and CRLF line endings; parsing normalizes a
+copy only. The snapshot, SHA-256 and temporary mount preserve the exact original
+UTF-8 bytes on Windows as well as Linux.
+
 Authorized Skills are read and hashed at World planning time into the durable
 execution policy, then only selected SKILL.md texts are projected into the
 temporary `.claude/skills/` directory and loaded via `--add-dir`.

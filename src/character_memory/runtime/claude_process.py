@@ -171,7 +171,7 @@ class ClaudePrintRunner:
                     for skill in selected_skills:
                         dest = root / ".claude" / "skills" / skill["name"]
                         dest.mkdir(parents=True, exist_ok=True)
-                        (dest / "SKILL.md").write_text(skill["text"], encoding="utf-8")
+                        (dest / "SKILL.md").write_bytes(skill["text"].encode("utf-8"))
                     flags.extend(["--add-dir", str(root)])
                     flags[flags.index("--tools") + 1] = "Skill"
                     flags[flags.index("--allowedTools") + 1] = "mcp__character_world__world_lookup Skill"

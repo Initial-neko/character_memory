@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -42,13 +43,15 @@ def test_no_unknown_capabilities_or_arbitrary_skill_paths(tmp_path, payload):
         select_role_research(profile)
 
 
-def test_selected_skill_is_local_scoped_and_hash_verified(tmp_path):
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_selected_skill_is_local_scoped_and_hash_verified(tmp_path, newline):
     profile, folder = _role(tmp_path)
     shared = tmp_path / "skills" / "shared" / "research"
     shared.mkdir(parents=True)
     source = shared / "SKILL.md"
     text = "---\nname: research\ndescription: Check factual source material\n---\nValidate evidence.\n"
-    source.write_text(text, encoding="utf-8")
+    text = text.replace("\n", newline)
+    source.write_bytes(text.encode("utf-8"))
     (folder / "capabilities.yaml").write_text(
         "capabilities: [claude_research]\nskills: [shared/research]\n", encoding="utf-8")
     selected = select_role_research(profile)
@@ -62,7 +65,7 @@ def test_selected_skill_is_local_scoped_and_hash_verified(tmp_path):
     assert select_role_research(other) == []
 
 
-def test_skill_cannot_use_frontmatter_to_grant_tools_or_follow_links(tmp_path):
+def test_skill_cannot_use_frontmatter_to_grant_tools(tmp_path):
     profile, folder = _role(tmp_path)
     folder_skill = folder / "skills" / "research"
     folder_skill.mkdir(parents=True)
@@ -72,7 +75,20 @@ def test_skill_cannot_use_frontmatter_to_grant_tools_or_follow_links(tmp_path):
     f.write_text("---\nname: research\ndescription: R\nallowed-tools: Bash\n---\nUnsafe", encoding="utf-8")
     with pytest.raises(ValueError, match="frontmatter"):
         select_role_research(profile)
-    f.unlink()
-    f.symlink_to(folder / "persona.yaml")
+
+
+def test_skill_cannot_follow_links(tmp_path):
+    profile, folder = _role(tmp_path)
+    folder_skill = folder / "skills" / "research"
+    folder_skill.mkdir(parents=True)
+    f = folder_skill / "SKILL.md"
+    (folder / "capabilities.yaml").write_text(
+        "capabilities: [claude_research]\nskills: [personal/research]\n", encoding="utf-8")
+    try:
+        f.symlink_to(folder / "persona.yaml")
+    except OSError as error:
+        if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows session lacks symbolic-link privilege; Linux CI checks real links")
+        raise
     with pytest.raises(ValueError, match="linked"):
         select_role_research(profile)

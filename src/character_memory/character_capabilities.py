@@ -79,9 +79,10 @@ def select_role_research(profile: dict | None) -> list[dict] | None:
         # files or arbitrary filesystem grants are copied into Claude's cwd.
         raw = _regular_bounded_file(source, MAX_SKILL_BYTES)
         content = raw.decode("utf-8")
-        if not content.startswith("---\n") or "\n---\n" not in content[4:]:
+        header_text = content.replace("\r\n", "\n")
+        if not header_text.startswith("---\n") or "\n---\n" not in header_text[4:]:
             raise ValueError("Skill requires YAML frontmatter")
-        header = content.split("\n---\n", 1)[0][4:]
+        header = header_text.split("\n---\n", 1)[0][4:]
         metadata = yaml.safe_load(header)
         if not isinstance(metadata, dict) or set(metadata) != {"name", "description"} or metadata.get("name") != slug or not isinstance(metadata.get("description"), str) or not metadata["description"].strip():
             raise ValueError("Skill frontmatter must contain matching name and description only")

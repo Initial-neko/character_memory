@@ -49,12 +49,32 @@ uv run pytest -q
 
 If your change affects browser behavior, also run the relevant browser smoke checks. If it affects a real local model or CUDA sidecar, document the live validation separately from CI.
 
+## Frontend design gate: approved references before implementation
+
+Before writing or changing user-visible frontend code, the owning Issue must
+identify a user-approved reference image and map it to the affected pages,
+components and interaction states. Record the exact image, its provenance,
+approval and the shared visual system: navigation, typography, spacing, color,
+cards, avatars, media and desktop/mobile behavior. Do not independently invent
+a different style for each page.
+
+If an affected page or state has no approved reference, stop frontend
+implementation for that scope, prepare the missing design and obtain user
+approval first. Text-only requirements, an unapproved generated mockup, an
+unrelated reference or a screenshot supplied after coding do not satisfy this
+gate. An existing user-approved product screenshot can serve as the reference
+for a maintenance change when its scope is explicitly recorded. A desktop
+reference alone does not establish an approved mobile layout.
+
+Design approval authorizes implementation; it does not prove the implementation
+matches the design. Keep the following post-implementation gate separate.
+
 ## Visual acceptance: Issue-owned evidence (mandatory for UI changes)
 
 A passing unit/Playwright/browser smoke test only establishes its asserted behavior.
 It **does not** establish that the final UI is readable, attractive, aligned or usable.
 Any PR that changes visible Web/Android UI must have a **separate visual acceptance
-result** before final sign-off. Backend-only PRs explicitly say `VISUAL N/A` and why.
+result** before final feature acceptance/release sign-off. Backend-only PRs explicitly say `VISUAL N/A` and why.
 
 Record the evidence **in the originating GitHub Issue** and link the relevant
 entry in [#121: real Chromium frontend acceptance](https://github.com/Initial-neko/character_memory/issues/121)
@@ -64,10 +84,11 @@ code-source assertions and prose PASS summaries are not sufficient.
 
 For each affected user-visible surface:
 
-1. **Reference/expectation** — attach the previously agreed mock/design image
-   if one exists, label it as *design reference* or *previous accepted product
-   screenshot*, and identify the desired state; do not invent a reference
-   when none was agreed. **Reference provenance is mandatory:** link
+1. **Reference/expectation** — attach the approved mock/design image required
+   by the pre-implementation gate, label it as *design reference* or *previous
+   accepted product screenshot*, and identify the covered page/component/state.
+   Missing approved references block frontend implementation and final visual
+   acceptance. **Reference provenance is mandatory:** link
    the originating conversation/Issue and explicit user approval for that
    exact image. AI-generated drafts, unrelated image-search previews or
    plausible filenames are not accepted design baselines by default.

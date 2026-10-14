@@ -210,7 +210,7 @@ def attach_async_routes(app):
         if req.life_reference:
             ensure_character(req.life_reference.character_id)
             profile = profiles_by_id()[req.life_reference.character_id]
-            if profile and profile.get("archived_at"):
+            if profile and "archived_at" in profile:
                 raise HTTPException(409, "人物已归档，请先恢复")
             message, reference = prepare_life_message(store, req.life_reference, message, character_id=req.character_id, conversation_id=req.conversation_id)
         selected_image = None
@@ -279,7 +279,7 @@ def attach_async_routes(app):
         if req.life_reference:
             ensure_character(req.life_reference.character_id)
             profile = profiles_by_id()[req.life_reference.character_id]
-            if profile and profile.get("archived_at"):
+            if profile and "archived_at" in profile:
                 raise HTTPException(409, "人物已归档，请先恢复")
             message, reference = prepare_life_message(store, req.life_reference, message, conversation_id=conversation_id)
         try:

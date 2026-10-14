@@ -24,7 +24,7 @@ def attach_call_invitation_routes(app):
             raise HTTPException(409, '人物来电邀请许可未开启；需要重启后生效')
         item = repository.get(identifier)
         profile = next((p for p in access.character_profiles() if p['id'] == item['character_id']), None)
-        if profile is None or profile.get('archived_at'):
+        if profile is None or 'archived_at' in profile:
             repository.cancel_open(character_id=item['character_id'], reason='CHARACTER_UNAVAILABLE')
             raise HTTPException(409, '邀请人物已归档或不可用')
         return item
@@ -33,7 +33,7 @@ def attach_call_invitation_routes(app):
     def invitations():
         enabled = permission()
         items = repository.list() if enabled else []
-        available = {p['id'] for p in access.character_profiles() if not p.get('archived_at')}
+        available = {p['id'] for p in access.character_profiles() if 'archived_at' not in p}
         for item in items:
             if item['character_id'] not in available:
                 repository.cancel_open(character_id=item['character_id'], reason='CHARACTER_UNAVAILABLE')

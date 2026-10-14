@@ -6,8 +6,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import hashlib
 import json
 import math
+import re
 
 from httpx import TimeoutException
 
@@ -118,9 +120,23 @@ class CapabilityExecutor:
             return "INVALID_CONSTRAINTS"
         base = {"max_pages", "max_chars_per_page", "max_calls"}
         policy = {"backend", "claude_daily_max", "claude_daily_budget_usd", "claude_max_budget_usd", "cost_saving"}
-        optional = {"claude_timeout_seconds", "claude_max_turns", "claude_max_tool_calls", "claude_model"}
+        optional = {"claude_timeout_seconds", "claude_max_turns", "claude_max_tool_calls", "claude_model", "role_grant", "claude_skills"}
         if bounds.get("backend") == "claude":
+            if bounds.get("role_grant") != "claude_research":
+                return "ROLE_CAPABILITY_DENIED"
             if not base | policy <= set(bounds) or set(bounds) - base - policy - optional:
+                return "INVALID_CONSTRAINTS"
+            skills = bounds.get("claude_skills", [])
+            if (not isinstance(skills, list) or len(skills) > 4
+                    or any(not isinstance(item, dict) or set(item) != {"name", "text", "sha256"}
+                           or not isinstance(item["name"], str) or not isinstance(item["text"], str)
+                           or not isinstance(item["sha256"], str)
+                           or len(item["text"].encode("utf-8")) > 8192
+                           or re.fullmatch(r"[a-z][a-z0-9-]{0,47}", item["name"]) is None
+                           or re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is None
+                           or hashlib.sha256(item["text"].encode("utf-8")).hexdigest() != item["sha256"]
+                           for item in skills)
+                    or len({item["name"] for item in skills}) != len(skills)):
                 return "INVALID_CONSTRAINTS"
             if type(bounds["claude_daily_max"]) is not int or not 0 <= bounds["claude_daily_max"] <= 200 or type(bounds["cost_saving"]) is not bool:
                 return "INVALID_CONSTRAINTS"

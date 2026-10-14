@@ -45,9 +45,12 @@
       <article class="card runtime-card"><div><strong>TTS Lab</strong><span>:9002</span></div><span id="runtime-tts_lab" class="badge unknown">unknown</span></article>
     </section>
 
-    <section id="settingsSections" class="settings-grid" aria-label="Settings"></section>
+    <div class="settings-workspace">
+      <nav id="settingsNav" class="settings-category-nav" aria-label="配置分类"></nav>
+      <div class="settings-main">
+        <section id="settingsSections" class="settings-grid" aria-label="Settings"></section>
 
-    <section class="card secrets-card">
+        <section id="settings-secrets" class="card secrets-card">
       <div class="section-heading">
         <div>
           <h2>Secrets</h2>
@@ -61,11 +64,13 @@
       </details>
     </section>
 
-    <section class="card footer-card">
+        <section id="settings-lifecycle" class="card footer-card">
       <h2>生效规则</h2>
       <p>普通 YAML 配置仍以字段级 patch 方式保存，并保留未知字段、注释和原有顺序；Secret 与 GSV Runtime 资产参数写入项目 <code>.env</code>，不会覆盖其他已有环境变量。</p>
       <p><strong>TTS Provider / Voice / Speed / Device</strong> 与 GSV Runtime 参数支持热生效：Media Runtime 每次请求读取最新 TTS 选择，GSV 参数变更只重配/重载 <code>:9014</code> sidecar，不需要重启 Character / Media / Settings 整个 stack。其他非 TTS 字段仍以页面返回的 restart_required 为准。</p>
-    </section>
+        </section>
+      </div>
+    </div>
   </main>
   <script src="/static/settings.js"></script>
 </body>

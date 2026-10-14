@@ -224,3 +224,39 @@ def test_diagnostic_settings_stay_out_of_the_operator_surface(page, settings_ser
     guidance = page.locator(".secrets-card")
     expect(guidance).to_contain_text("底层轮询、超时、路径等参数使用后端默认值")
     expect(guidance).to_contain_text("Dev Console 的 Detailed Dev")
+
+
+def test_schema_driven_category_navigation_survives_saving_and_mobile_layout(page, settings_server):
+    page.set_default_timeout(10000)
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{settings_server}/settings", wait_until="domcontentloaded")
+    _wait_for_render(page)
+    nav = page.locator("#settingsNav")
+    expect(nav).to_be_visible()
+
+    sections = page.locator("#settingsSections > .settings-section")
+    links = nav.locator("a.settings-category-link")
+    assert links.count() == sections.count() + 2
+    assert links.first.get_attribute("href") == "#settings-category-0"
+    assert links.nth(sections.count()).get_attribute("href") == "#settings-secrets"
+    assert links.last.get_attribute("href") == "#settings-lifecycle"
+    assert page.evaluate("getComputedStyle(document.querySelector('.settings-workspace')).display") == "grid"
+
+    # Native anchors retain navigation semantics without mounting a second
+    # router. The target is part of the server-derived section tree.
+    links.first.click()
+    assert page.evaluate("location.hash") == "#settings-category-0"
+    expect(page.locator("#settings-category-0")).to_be_visible()
+
+    page.locator("#saveSettings").click()
+    expect(page.locator("#notice")).to_contain_text("配置没有变化")
+    assert nav.locator("a.settings-category-link").count() == sections.count() + 2
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("getComputedStyle(document.querySelector('.settings-workspace')).display") == "block"
+    expect(nav).to_be_visible()
+    # Navigation should scroll *within* itself, not widen the document.
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 2")
+    nav.locator('a[href="#settings-secrets"]').click()
+    assert page.evaluate("location.hash") == "#settings-secrets"
+    expect(page.locator("#settings-secrets")).to_be_visible()

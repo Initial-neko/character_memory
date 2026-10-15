@@ -32,7 +32,7 @@ WEB = ROOT / "src" / "character_memory" / "web"
 _PAGE = """<!doctype html>
 <html lang="zh"><head><meta charset="utf-8"><title>ensemble recovery</title></head>
 <body>
-  <section id="sidebarGroups"><div class="group-section-actions"></div></section>
+  <section id="sidebarGroups"><div class="group-section-head"><div class="group-section-actions"></div></div></section>
   <div id="drawerBody"></div>
   <script>
   window.CM = {
@@ -47,6 +47,7 @@ _PAGE = """<!doctype html>
     closeDrawer: () => {},
     loadCharacters: async () => {},
     registerFeature: (name, feature) => { window.CM.features[name] = feature; },
+    on: () => {},
     initialFor: draft => String(draft.name || "?").slice(0, 1),
     escapeHtml: value => String(value).replace(/[&<>"']/g, ch => (
       {"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[ch]

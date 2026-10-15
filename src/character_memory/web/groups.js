@@ -10,6 +10,7 @@
   let groupStream = null;
   let groupStreamId = null;
   let historyState = {groupId:null, messages:[], hasMore:false, nextBeforeId:null, loadingOlder:false};
+  const sceneAdvanceRequests = new Map();
   const section = document.getElementById("sidebarGroups");
   if (!section) throw new Error("sidebar group slot is missing");
   section.classList.add("group-section");
@@ -219,19 +220,28 @@
     CM.dom.chat.appendChild(row);
   }
 
+  function sceneToolbar(group) {
+    if (!group?.scene) return "";
+    const scene = group.scene;
+    return `<section class="scene-toolbar" aria-label="灯溪镇故事进度"><strong>灯溪镇 · 第 ${Number(scene.story_day)} 天${scene.phase === "EVENING" ? "傍晚" : "早晨"}</strong><span>虚构情景 · 只有你推进故事时间，不补写离开期间的共同经历。</span><button type="button" data-scene-advance title="进入下一天早晨，不调用模型、不自动生成期间经历" ${pending.has(group.id) ? "disabled" : ""}>推进到下一天早晨 →</button><p role="status" data-scene-status></p></section>`;
+  }
+
   function renderHistory(messages, {preserveScroll = false} = {}) {
     const beforeHeight = document.body.scrollHeight;
     const beforeY = window.scrollY;
     CM.dom.chat.innerHTML = "";
     const group = current();
     if (!messages.length) {
-      CM.dom.chat.innerHTML = group?.status === "BUILDING"
+      CM.dom.chat.innerHTML = sceneToolbar(group) + (group?.scene
+        ? `<section class="scene-opening"><small>开场设定，尚未发生对话</small><h2>${group.scene.story_day === 1 ? "雨后傍晚，你来到栖灯旅店" : "栖灯旅店的新一天"}</h2><p>这里有${CM.escapeHtml((group.members || []).map(member => member.name || member.id).join("、"))}。你可以打招呼、聊聊灯溪节，或只是坐一会儿。不必完成任务，也不用替自己决定感受。</p><button type="button" data-scene-say="我推开旅店的门，向大家打了个招呼。">进门打个招呼</button><button type="button" data-scene-say="我问大家灯溪节有什么有趣的事，想听听你们的介绍。">聊聊灯溪节</button><button type="button" data-scene-say="我想先安静坐一会儿，看看这里的大家。">先坐一会儿</button></section>`
+        : group?.status === "BUILDING"
         ? `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」正在构建成员。<br>确认人物后就可以直接开始聊天。</div>`
-        : `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」还没有消息。<br>说第一句话，看看谁会接话。</div>`;
+        : `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」还没有消息。<br>说第一句话，看看谁会接话。</div>`);
       if (pending.has(activeId())) appendPending("群成员正在输入…");
       appendReactionError();
       return;
     }
+    if (group?.scene) CM.dom.chat.insertAdjacentHTML("beforeend",sceneToolbar(group));
     if (historyState.hasMore) {
       const older = document.createElement("div");
       older.className = "date-separator history-load-more";
@@ -423,7 +433,7 @@
     const isPending = pending.has(group.id);
     const building = group.status === "BUILDING";
     CM.dom.characterName.textContent = group.name;
-    CM.dom.characterIdentity.textContent = building ? "正在根据资料构建群成员…" : `${names}${isPending ? " · 有人正在输入" : ""}`;
+    CM.dom.characterIdentity.textContent = building ? "正在根据资料构建群成员…" : `${names}${group.scene ? ` · 故事第${group.scene.story_day}天` : ""}${isPending ? " · 有人正在输入" : ""}`;
     CM.dom.headerAvatar.textContent = initial(group);
     CM.dom.input.placeholder = group.status === "BUILDING" ? "群聊构建完成后即可发送消息" : `发到「${group.name}」`;
     CM.dom.runtimeButton.disabled = true;
@@ -617,6 +627,33 @@
   });
   CM.dom.chat.addEventListener("click", event => {
     if (!CM.isGroupConversation()) return;
+    const sceneSay = event.target.closest("[data-scene-say]");
+    if (sceneSay) { sendText(sceneSay.dataset.sceneSay).catch(console.error); return; }
+    const advance = event.target.closest("[data-scene-advance]");
+    if (advance) {
+      const group = current();
+      if (!group?.scene || pending.has(group.id)) return;
+      const expected = group.scene.story_day;
+      const key = `${group.id}:${expected}`;
+      if (!sceneAdvanceRequests.has(key)) sceneAdvanceRequests.set(key,crypto.randomUUID());
+      advance.disabled = true;
+      CM.api(`/v1/groups/${encodeURIComponent(group.id)}/scene/advance`,{method:"POST",body:JSON.stringify({expected_day:expected,request_id:sceneAdvanceRequests.get(key)})})
+        .then(data => {
+          const target = groups.find(item => item.id === group.id);
+          if (target) target.scene = data.scene;
+          if (activeId() === group.id && CM.isGroupConversation()) { applyHeader(); renderHistory(historyState.messages); }
+        })
+        .catch(async error => {
+          // Another tab may already have advanced. Refresh the durable day,
+          // but never turn a conflict into an automatic extra advancement.
+          try { await loadGroups(); } catch (_) {}
+          if (activeId() !== group.id || !CM.isGroupConversation()) return;
+          applyHeader(); renderHistory(historyState.messages);
+          const status = CM.dom.chat.querySelector('[data-scene-status]');
+          if (status) status.textContent = `${error.message}。已尝试同步当前进度，请查看日序后重试。`;
+        });
+      return;
+    }
     const older = event.target.closest("[data-group-load-older]");
     if (older) { loadOlderHistory().catch(console.error); return; }
     const button = event.target.closest("[data-group-turn]");

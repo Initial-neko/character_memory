@@ -169,13 +169,19 @@ Settings Center owns the persisted Random Encounter configuration:
 
 ```yaml
 encounter_enabled: true
+encounter_persona_preference: "18–25 岁的原创成年女性，以可爱、活泼、有活力为主；职业、兴趣、性格和外观各有区别，不预设亲密关系。"
+encounter_portraits_enabled: true
 encounter_interval_minutes: 1440
 encounter_web_probability: 0.5
 encounter_max_pending: 3
 encounter_poll_seconds: 60
 ```
 
-The enabled flag, interval, and web/generated mix are advanced settings; pending and poll limits stay diagnostic. Dev Console exposes only status/manual-trigger diagnostics and never becomes a second persisted editor for these fields.
+The enabled flag, portraits, interval, and web/generated mix are advanced settings; pending and poll limits stay diagnostic. Dev Console exposes only status/manual-trigger diagnostics and never becomes a second persisted editor for these fields.
+
+`encounter_persona_preference` is an advanced creation preference, defaulting to original adult women aged 18–25 with a cute, lively and energetic tone, while retaining distinct occupations, interests and appearance. It is supplied to both generated and web-inspired drafts (including web seed abstraction), without an extra LLM call or retry. An empty value removes the additional preference. It affects new candidates only, does not rewrite existing people or portraits, and requires restart after saving. This is a generation preference, not a deterministic gender classifier.
+
+`encounter_portraits_enabled` generates one persistent portrait for each new candidate using the selected image provider. It adds one image request and no text-model request. Failed images do not discard candidates and are retried only by the user's explicit “生成肖像” button. Existing candidates use the same button to backfill. GET/list/refresh never generates images; repeated generation requests reuse the saved portrait. Disabling generation preserves existing images. Portraits remain candidate assets and do not create formal characters or experiences.
 
 ### 3.3 World Activity
 

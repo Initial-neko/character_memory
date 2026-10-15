@@ -414,12 +414,18 @@ def space_server(tmp_path):
         process.wait(timeout=5)
 
 
-def _open_space_on_mobile(page, base_url: str) -> None:
+def _open_app_on_mobile(page, base_url: str) -> None:
     page.set_viewport_size(MOBILE_VIEWPORT)
     page.goto(base_url, wait_until="domcontentloaded")
-    page.locator(".space-nav-button").wait_for(state="attached")
-    page.locator("#sidebarMobileButton").click()
-    page.locator(".space-nav-button").click()
+    expect(page.locator("body")).to_have_attribute("data-cm-ready", "true")
+
+
+def _open_space_on_mobile(page, base_url: str) -> None:
+    _open_app_on_mobile(page, base_url)
+    space_navigation = page.locator('.cm-global-nav [data-cm-nav="space"]')
+    expect(space_navigation).to_be_visible()
+    space_navigation.click()
+    expect(page.locator(".space-shell")).to_be_visible()
 
 
 def test_space_comment_ui_submits_deferred_role_as_structured_mention(page, space_server):
@@ -457,6 +463,8 @@ def test_space_comment_ui_submits_deferred_role_as_structured_mention(page, spac
         page,
         "space-mobile-deferred-mention-submit",
         (
+            "src/character_memory/web/frontend_v2.js",
+            "src/character_memory/web/frontend_v2.css",
             "src/character_memory/web/space.js",
             "src/character_memory/web/space.css",
             "src/character_memory/space_web.py",
@@ -466,11 +474,16 @@ def test_space_comment_ui_submits_deferred_role_as_structured_mention(page, spac
 
 
 def test_space_notification_opens_target_marks_read_and_highlights_comment(page, space_server):
+    detail_source = page.request.post(
+        f"{space_server}/v1/space/posts",
+        data={"character_id": "rin", "content": "打开通知前停留的另一条动态"},
+    )
     created = page.request.post(
         f"{space_server}/v1/space/posts",
         data={"character_id": "rin", "content": "移动端通知定位验收"},
     )
-    assert created.ok
+    assert detail_source.ok and created.ok
+    detail_source_id = str(detail_source.json()["post"]["id"])
     post_id = str(created.json()["post"]["id"])
     user_comment = page.request.post(
         f"{space_server}/v1/space/posts/{post_id}/comments",
@@ -499,10 +512,13 @@ def test_space_notification_opens_target_marks_read_and_highlights_comment(page,
     assert "REPLY" in target["reasons"]
     notification_id = str(target["id"])
 
-    page.set_viewport_size(MOBILE_VIEWPORT)
-    page.goto(space_server, wait_until="domcontentloaded")
-    notice_button = page.locator(".space-notification-button")
+    _open_space_on_mobile(page, space_server)
+    page.locator(f'[data-space-post="{detail_source_id}"] [data-space-post-open]').click()
+    expect(page.locator(".space-detail-view")).to_be_visible()
+    notice_button = page.get_by_role("button", name="空间提醒", exact=True)
+    expect(notice_button).to_be_visible()
     notice_button.click()
+    expect(page.locator(".space-detail-view")).to_be_hidden()
     notice_item = page.locator(f'[data-space-notification="{notification_id}"]')
     expect(notice_item).to_be_visible()
     with page.expect_response(
@@ -528,6 +544,8 @@ def test_space_notification_opens_target_marks_read_and_highlights_comment(page,
         page,
         "space-mobile-notification-read-highlight",
         (
+            "src/character_memory/web/frontend_v2.js",
+            "src/character_memory/web/frontend_v2.css",
             "src/character_memory/web/space.js",
             "src/character_memory/web/space.css",
             "src/character_memory/space_web.py",

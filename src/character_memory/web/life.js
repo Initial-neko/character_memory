@@ -7,10 +7,25 @@
   const actions={MESSAGE:"发送消息",PROACTIVE_MESSAGE:"主动表达",SPACE_COMMENT:"发表了评论",SPACE_LIKE:"点赞",NO_REPLY:"未回复",VOICE:"语音表达",STICKER:"发送表情",IMAGE:"发送图片"};
   const statuses = {CALL_INVITATION_PROPOSED:"仅提出邀请，未证明通话",NO_POST:"未发动态",POSTED:"已发动态",RECORDED:"已记录",SUCCESS:"已完成",SUCCEEDED:"已完成",APPLIED:"已处理",FAILED:"失败",DENIED:"被拒绝",TIMEOUT:"超时",NO_ACTION:"未行动",SKIPPED:"未执行",PLANNING:"决策中",PENDING:"计划中",PROCESSING:"处理中",EXECUTED:"已执行",ABANDONED:"已放弃",EXPIRED:"已失效",DEFERRED:"已延期",COMPLETED:"已完成"};
   let profiles=[], items=[], selected="", view="life", channel="ALL", cursor=null, request=0, undated=0;
+  document.addEventListener('error', event => {
+    const image=event.target;
+    if(!(image instanceof HTMLImageElement)||!image.closest('#lifeCharacters')) return;
+    const fallback=document.createElement('span'); fallback.className='life-character-fallback';
+    fallback.setAttribute('aria-hidden','true'); fallback.textContent=image.closest('button')?.querySelector('strong')?.textContent?.slice(0,1)||'?';
+    image.replaceWith(fallback);
+  },true);
   const dateString = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const formatted = t => {if(!t)return "未设置";const d=new Date(t);return Number.isNaN(+d)?"时间未记录":d.toLocaleString("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});};
   const safeURL = value => {try {const u=new URL(value,location.origin);return ["http:","https:"].includes(u.protocol)?u.href:"";}catch{return "";}};
   async function get(url) {const r=await fetch(url);if(!r.ok){const data=await r.json().catch(()=>({}));throw new Error(data.detail||`请求失败 (${r.status})`);}return r.json();}
+  function renderCharacterList() {
+    const host=$("lifeCharacters");
+    if(!profiles.length){host.innerHTML='<p class="life-character-empty">没有可选择的人物。</p>';return;}
+    host.innerHTML=profiles.map(p=>{
+      const name=p.name||p.id, photo=p.avatar_url&&safeURL(p.avatar_url);
+      return `<button type="button" class="life-character" data-life-character="${esc(p.id)}" aria-pressed="${String(p.id)===$("character").value}" title="查看${esc(name)}的生活记录">${photo?`<img src="${esc(photo)}" alt="">`:`<span class="life-character-fallback" aria-hidden="true">${esc(name.slice(0,1))}</span>`}<span class="life-character-copy"><strong>${esc(name)}</strong><small>${esc(p.tagline||"")}</small></span></button>`;
+    }).join("");
+  }
   function renderRelationshipReview(data) {
     const area=$("relationshipReview"), name=profiles.find(p=>p.id===data.peer)?.name||(data.peer==="user"?"用户":data.peer);
     const character=$("character").value;
@@ -70,7 +85,7 @@
       }
     } catch(e) {if(token!==request)return;items=[];cursor=null;$("timeline").replaceChildren();$("details").innerHTML='<p class="hint">记录加载失败，未展示旧人物的数据。</p>';$("status").textContent=e.message;$("retry").hidden=false;$("more").hidden=true;}finally{if(token===request)document.body.classList.remove("loading");}
   }
-  function identity() {const p=profiles.find(i=>i.id===$("character").value);$("heading").textContent=`人物生活 · ${p?.name||p?.id||""}`;$("avatar").textContent=(p?.name||"人").slice(0,1);if(p?.avatar_url&&safeURL(p.avatar_url)){const img=document.createElement("img");img.src=safeURL(p.avatar_url);img.alt="";img.onerror=()=>img.remove();$("avatar").append(img);}$("dateLabel").textContent=$("day").value;}
+  function identity() {const p=profiles.find(i=>i.id===$("character").value);$("heading").textContent=`${p?.name||p?.id||"人物"}的生活`;$("avatar").textContent=(p?.name||"人").slice(0,1);if(p?.avatar_url&&safeURL(p.avatar_url)){const img=document.createElement("img");img.src=safeURL(p.avatar_url);img.alt="";img.onerror=()=>img.remove();$("avatar").append(img);}$("dateLabel").textContent=$("day").value;renderCharacterList();}
   document.querySelectorAll('[data-view]').forEach(b=>b.onclick=async()=>{view=b.dataset.view;$("peerLabel").hidden=view!=="relationships";$("peer").value="";document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute("aria-selected",String(x===b)));await load();});
   document.querySelectorAll('[data-channel]').forEach(b=>b.onclick=()=>{channel=b.dataset.channel;document.querySelectorAll('[data-channel]').forEach(x=>x.setAttribute("aria-pressed",String(x===b)));load();});
   $("timeline").onclick=e=>{const b=e.target.closest('[data-key]');if(b){selected=b.dataset.key;render();}};
@@ -89,6 +104,7 @@
       return;
     }
     const b=e.target.closest('[data-peer]');if(b){view="relationships";$("peerLabel").hidden=false;document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute("aria-selected",String(x.dataset.view===view)));$("peer").value=b.dataset.peer;await load();}};
+  $("lifeCharacters").onclick=e=>{const b=e.target.closest("[data-life-character]");if(!b||b.dataset.lifeCharacter===$("character").value)return;$("character").value=b.dataset.lifeCharacter;identity();load();};
   $("peer").onchange=()=>load();$("searchForm").onsubmit=e=>{e.preventDefault();load();};$("retry").onclick=()=>load();$("more").onclick=()=>load(true);$("character").onchange=()=>{identity();load();};$("day").onchange=()=>{identity();load();};$("today").onclick=()=>{$("day").value=dateString(new Date());identity();load();};
   for(const [id,delta] of [["previous",-1],["next",1]])$(id).onclick=()=>{const d=new Date($("day").value+"T12:00:00");d.setDate(d.getDate()+delta);$("day").value=dateString(d);identity();load();};
   $("day").value=dateString(new Date());

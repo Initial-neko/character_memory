@@ -30,6 +30,109 @@ def draft():
     }
 
 
+@pytest.mark.parametrize('source', ['GENERATED', 'WEB'])
+@pytest.mark.parametrize('preference', [None, '不限制性别，偏好安静的原创成年人物'])
+def test_new_candidate_preference_reaches_both_generation_paths_without_extra_calls(tmp_path, monkeypatch, source, preference):
+    from character_memory.config import Settings
+    from character_memory.persona_builder import PersonaDraft
+    from character_memory.encounter import EncounterWebSeed
+    settings = Settings()
+    if preference is not None:
+        settings.encounter_persona_preference = preference
+    else:
+        assert '成年女性' in settings.encounter_persona_preference
+        assert '18–25' in settings.encounter_persona_preference
+        assert '可爱、活泼、有活力' in settings.encounter_persona_preference
+    expected = settings.encounter_persona_preference
+    descriptions, seed_prompts = [], []
+    def generate(description, **kwargs):
+        descriptions.append(description)
+        return PersonaDraft.model_validate(draft())
+    def seed(prompt, *args):
+        seed_prompts.append(prompt)
+        return EncounterWebSeed(inspiration_description='一位喜欢修理老设备、生活节奏独特且有自己边界的原创人物。', suggested_name='Mika', tags=['修理'])
+    observation = SimpleNamespace(title='修理日常', url='https://example.org/repair', source_domain='example.org',
+        snippet='修理旧电器', content='一篇谈论维修爱好的公开文章。')
+    access = SimpleNamespace(settings=settings, require_bundle=lambda: SimpleNamespace(model=SimpleNamespace(structured_for_session=seed)),
+        world_observer=SimpleNamespace(observe=lambda *args, **kwargs: {'observations':[observation]}))
+    store = SQLiteStore(str(tmp_path / 'preference.db'))
+    service = EncounterService(access, EncounterRepository(store))
+    monkeypatch.setattr(service, '_persona_builder', lambda: SimpleNamespace(generate=generate))
+    now = datetime.now(timezone.utc)
+    if source == 'WEB':
+        service._web_draft(now)
+        assert len(seed_prompts) == 1 and expected in seed_prompts[0]
+    else:
+        service._generated_draft(now)
+        assert seed_prompts == []
+    assert len(descriptions) == 1 and expected in descriptions[0]
+    store.close()
+
+
+def test_candidate_portrait_is_cached_concurrent_and_restart_safe(tmp_path):
+    from character_memory.avatars import AvatarStore
+    from character_memory.visual_generation import ImageGenerationResult
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = SQLiteStore(str(tmp_path / 'portrait.db'))
+    repo = EncounterRepository(store)
+    candidate = repo.create_candidate(source_type='GENERATED', draft=draft(),
+        encounter_hook='修理铺的客人', opening_message='你好', now=datetime.now(timezone.utc))
+    calls = []
+    def generate(request):
+        calls.append(request)
+        time.sleep(.02)
+        return ImageGenerationResult(provider='test', model='test', payload=b'portrait', mime_type='image/webp')
+    avatars = AvatarStore(tmp_path / 'avatars')
+    access = SimpleNamespace(settings=SimpleNamespace(encounter_portraits_enabled=True, image_generation_provider='test'),
+        services=SimpleNamespace(avatar_store=avatars, image_generation_providers={'test': SimpleNamespace(
+            configured=lambda: True, available=lambda: True, generate=generate)}))
+    service = EncounterService(access, repo)
+    assert service.portrait_url(candidate['id']) == ''
+    assert calls == []  # Reading/listing never purchases an image.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(service.ensure_portrait, [candidate['id']] * 2))
+    assert results[0] == results[1]
+    assert len(calls) == 1
+    assert calls[0].aspect_ratio == '3:4'
+    assert 'Mika' in calls[0].prompt
+    restarted = EncounterService(access, EncounterRepository(store))
+    assert restarted.ensure_portrait(candidate['id']) == results[0]
+    assert len(calls) == 1
+    assert repo.pending_count() == 1
+    assert avatars.asset_path(f"encounter-{candidate['id']}") is None
+    assert service.portraits.asset_path(f"encounter-{candidate['id']}").read_bytes() == b'portrait'
+    assert repo.get_candidate(candidate['id'])['status'] == 'NEW'
+    avatars.close()
+    store.close()
+
+
+def test_candidate_portrait_failure_does_not_create_asset_or_change_lifecycle(tmp_path):
+    from character_memory.avatars import AvatarStore
+    store = SQLiteStore(str(tmp_path / 'portrait.db'))
+    repo = EncounterRepository(store)
+    candidate = repo.create_candidate(source_type='GENERATED', draft=draft(), encounter_hook='客人',
+        opening_message='你好', now=datetime.now(timezone.utc))
+    avatars = AvatarStore(tmp_path / 'avatars')
+    def fail(request):
+        raise RuntimeError('provider unavailable')
+    access = SimpleNamespace(settings=SimpleNamespace(encounter_portraits_enabled=True, image_generation_provider='test'),
+        services=SimpleNamespace(avatar_store=avatars, image_generation_providers={'test': SimpleNamespace(
+            configured=lambda: True, available=lambda: True, generate=fail)}))
+    service = EncounterService(access, repo)
+    with pytest.raises(RuntimeError, match='provider unavailable'):
+        service.ensure_portrait(candidate['id'])
+    assert service.portrait_url(candidate['id']) == ''
+    assert repo.get_candidate(candidate['id'])['status'] == 'NEW'
+    access.settings.encounter_portraits_enabled = False
+    with pytest.raises(ValueError, match='关闭'):
+        service.ensure_portrait(candidate['id'])
+    with pytest.raises(KeyError):
+        service.ensure_portrait(999)
+    avatars.close()
+    store.close()
+
+
 def test_encounter_candidate_pool_and_trial_messages_are_durable(tmp_path):
     store = SQLiteStore(str(tmp_path / "x.db"))
     repo = EncounterRepository(store)

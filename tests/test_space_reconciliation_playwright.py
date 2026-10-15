@@ -120,7 +120,7 @@ def test_space_mention_picker_includes_deferred_roles(page, space_server):
     post_id = str(created.json()["post"]["id"])
 
     page.goto(space_server, wait_until="domcontentloaded")
-    page.locator(".space-nav-button").click()
+    page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
     post = page.locator(f'[data-space-post="{post_id}"]')
     expect(post).to_be_visible()
     post.locator("[data-space-comments-panel-toggle]").click()
@@ -138,7 +138,7 @@ def test_open_comment_panel_re_reads_scheduler_replies(page, space_server):
     post_id = str(created.json()["post"]["id"])
 
     page.goto(space_server, wait_until="domcontentloaded")
-    page.locator(".space-nav-button").click()
+    page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
     post = page.locator(f'[data-space-post="{post_id}"]')
     expect(post).to_be_visible()
     post.locator("[data-space-comments-panel-toggle]").click()
@@ -173,7 +173,7 @@ def test_delayed_reconcile_preserves_comment_draft_and_focus(page, space_server)
     assert response.ok
     post_id = str(response.json()["post"]["id"])
     page.goto(space_server, wait_until="domcontentloaded")
-    page.locator(".space-nav-button").click()
+    page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
     post = page.locator(f'[data-space-post="{post_id}"]')
     expect(post).to_be_visible()
     post.locator("[data-space-comments-panel-toggle]").click()

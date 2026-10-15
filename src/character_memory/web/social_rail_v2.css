@@ -1,0 +1,23 @@
+.space-mode .space-shell.cm-with-social-rail { display:grid; grid-template-columns:minmax(0,1fr) 260px; grid-template-areas:"heading rail" "feed rail"; align-content:start; align-items:start; gap:12px; padding-right:20px; }
+.cm-with-social-rail > .space-page-heading { grid-area:heading; min-width:0; }
+.cm-with-social-rail > .space-feed-wrap { grid-area:feed; min-width:0; }
+.cm-with-social-rail > .cm-social-rail { grid-area:rail; min-width:0; }
+.cm-social-rail { display:grid; gap:18px; padding-top:24px; }
+.cm-social-card { border:1px solid var(--ui-line); border-radius:18px; padding:22px; background:#fff; }
+.cm-social-card h2,.cm-social-card summary { font-size:16px; margin:0 0 14px; font-weight:650; }
+.cm-social-card summary { margin:0; cursor:pointer; color:var(--ui-accent); }
+.cm-social-card p { color:var(--ui-muted); font-size:13px; line-height:1.8; overflow-wrap:anywhere; }
+.cm-discovery-card { background:linear-gradient(135deg,#f2ebff,#fff); }
+.cm-discovery-card > img { width:60px; height:60px; margin-bottom:18px; }
+.cm-discovery-card button { width:100%; color:var(--ui-accent); background:#fff; border-color:var(--ui-line-strong); border-radius:12px; font-size:13px; }
+.cm-social-card article { margin-top:16px; padding-top:16px; border-top:1px solid var(--ui-line); font-size:13px; }
+.cm-social-card article p { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.cm-social-card a { color:var(--ui-accent); font-size:12px; text-decoration:none; }
+.cm-space-context { display:none; gap:6px; margin:8px 0 16px; }
+.space-mode .cm-space-context { display:grid; }
+.cm-space-context button,.cm-space-context a { display:block; padding:10px 12px; background:transparent; border:0; border-radius:12px; color:var(--ui-text); text-align:left; text-decoration:none; font:inherit; font-size:13px; }
+.cm-space-context button:hover,.cm-space-context a:hover { background:var(--ui-surface-sunken); color:var(--ui-accent); }
+.sidebar-collapsed .cm-space-context { display:none; }
+.cm-with-social-rail:has(.is-detail) { grid-template-columns:1fr !important; grid-template-areas:"heading" "feed" !important; padding-right:0 !important; }
+.cm-with-social-rail:has(.is-detail) .cm-social-rail { display:none; }
+@media(max-width:1300px){.space-mode .space-shell.cm-with-social-rail { grid-template-columns:minmax(0,1fr); grid-template-areas:"heading" "feed"; padding-right:0; }.cm-social-rail { display:none; }}

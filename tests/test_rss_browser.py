@@ -76,7 +76,8 @@ def test_default_today_search_category_and_detail_return(rss_page):
     expect(page.locator("#articlePanel")).to_be_visible()
     expect(page.locator("#articleBody")).to_contain_text("Feed 提供")
     page.keyboard.press("Escape")
-    expect(page.locator("#articlePanel")).not_to_be_visible()
+    expect(page.locator("#articlePanel")).to_be_visible()
+    expect(page.locator("#articleBody")).to_contain_text("选择一篇文章")
     expect(page.locator("#feedSearch")).to_have_value("react")
     expect(page.locator(".feed-card")).to_be_focused()
 
@@ -93,8 +94,11 @@ def test_pagination_all_articles_and_desktop_layout(rss_page):
     expect(page.locator("#feedGrid")).to_contain_text("发布时间未知")
     cards = page.locator(".feed-card")
     first, second = cards.nth(0).bounding_box(), cards.nth(1).bounding_box()
-    assert abs(first["y"] - second["y"]) < 2
-    assert first["x"] < second["x"]
+    assert second["y"] > first["y"]
+    assert abs(first["x"] - second["x"]) < 2
+    reader = page.locator("#articlePanel").bounding_box()
+    feed = page.locator("#feedGrid").bounding_box()
+    assert reader["x"] > feed["x"] + feed["width"]
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     evidence = os.getenv("RSS_EVIDENCE_DIR")
     if evidence:
@@ -169,6 +173,8 @@ def test_detail_failure_retry_and_close_during_request(rss_page):
     page.locator("[data-article-retry]").click()
     expect(page.locator("#articleBody")).to_contain_text("GPT API")
     page.keyboard.press("Escape")
+    expect(page.locator("#articlePanel")).to_be_visible()
+    expect(page.locator("#articleBody")).to_contain_text("选择一篇文章")
     held = []
     page.route("**/v1/rss/items/1", lambda route: held.append(route))
     page.locator('[data-item-id="1"]').click()
@@ -176,7 +182,73 @@ def test_detail_failure_retry_and_close_during_request(rss_page):
     page.keyboard.press("Escape")
     assert held
     held[0].fulfill(status=200, json={"item": {"title": "关闭后的结果"}})
-    expect(page.locator("#articlePanel")).not_to_be_visible()
+    expect(page.locator("#articlePanel")).to_be_visible()
+    expect(page.locator("#articleBody")).to_contain_text("选择一篇文章")
+
+
+def test_desktop_reader_is_inline_and_does_not_lock_keyboard(rss_page):
+    from playwright.sync_api import expect
+    page = rss_page
+    expect(page.locator(".rss-brand")).not_to_be_visible()
+    panel = page.locator("#articlePanel")
+    expect(panel).to_be_visible()
+    expect(panel).to_have_attribute("role", "region")
+    expect(panel).not_to_have_attribute("aria-modal", "true")
+    assert page.locator(".rss-shell").evaluate("el => !el.inert")
+
+    card = page.locator("[data-item-id='1']")
+    card.focus()
+    page.keyboard.press("Enter")
+    expect(page.locator("#articleBody")).to_contain_text("Feed 提供")
+    expect(card).to_be_focused()
+    expect(panel).not_to_have_attribute("aria-modal", "true")
+    assert page.locator(".rss-shell").evaluate("el => !el.inert")
+
+    page.locator("#closeArticleButton").focus()
+    page.keyboard.press("Shift+Tab")
+    assert page.evaluate("!document.querySelector('#articlePanel').contains(document.activeElement)")
+    page.keyboard.press("Escape")
+    expect(page.locator("#articleBody")).to_contain_text("选择一篇文章")
+
+
+def test_mobile_reader_keeps_modal_return_and_focus(rss_page):
+    from playwright.sync_api import expect
+    page = rss_page
+    page.set_viewport_size({"width": 390, "height": 844})
+    mobile = page.evaluate("""() => ({
+      globalBottom: document.querySelector('.cm-global-header').getBoundingClientRect().bottom,
+      navigationTop: document.querySelector('.rss-nav').getBoundingClientRect().top,
+      mainTop: document.querySelector('.rss-main').getBoundingClientRect().top,
+      sidebarBottom: document.querySelector('.rss-sidebar').getBoundingClientRect().bottom
+    })""")
+    assert mobile["navigationTop"] >= mobile["globalBottom"]
+    assert mobile["mainTop"] >= mobile["sidebarBottom"]
+    page.keyboard.press("Escape")
+    card = page.locator("[data-item-id='1']")
+    card.click()
+    panel = page.locator("#articlePanel")
+    expect(panel).to_be_visible()
+    expect(panel).to_have_attribute("role", "dialog")
+    expect(panel).to_have_attribute("aria-modal", "true")
+    expect(page.locator("#closeArticleButton")).to_be_focused()
+    assert page.locator(".rss-main").evaluate("el => el.inert")
+    assert page.locator(".cm-global-header").evaluate("el => el.inert")
+    page.keyboard.press("Escape")
+    expect(panel).not_to_be_visible()
+    expect(card).to_be_focused()
+    assert page.locator(".rss-main").evaluate("el => !el.inert")
+    assert page.locator(".cm-global-header").evaluate("el => !el.inert")
+
+
+def test_reader_tracks_the_active_feed_filter(rss_page):
+    from playwright.sync_api import expect
+    page = rss_page
+    page.locator("#feedSearch").fill("React")
+    page.locator("#feedSearchForm").evaluate("form => form.requestSubmit()")
+    expect(page.locator(".feed-card")).to_have_count(1)
+    expect(page.locator("#articleBody")).to_contain_text("React Native")
+    expect(page.locator("#articleBody")).not_to_contain_text("GPT API")
+    expect(page.locator(".feed-card")).to_have_attribute("aria-pressed", "true")
 
 
 def test_successful_subscription_fetch_deduplicates_on_refresh(rss_page):
@@ -290,7 +362,7 @@ def test_image_proxy_preserves_recorded_unicode_url(rss_page):
     page.locator('[data-item-id="1"]').click()
     expect(page.locator('.article-rich img')).to_be_visible()
     page.wait_for_function('document.querySelector(".article-rich img").naturalWidth > 0')
-    assert requested == [raw]
+    assert requested.count(raw) == 1
 
 
 def test_subscription_navigation_scopes_search_and_pagination(rss_page, rss_server):

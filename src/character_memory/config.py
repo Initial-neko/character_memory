@@ -303,6 +303,8 @@ class Settings(BaseModel):
     # character list. Candidates may be explored even when the active chat list
     # is full; accepting one consumes a formal slot (warn after 10, hard-stop at 20).
     encounter_enabled: bool = True
+    encounter_persona_preference: str = Field(default="18–25 岁的原创成年女性，以可爱、活泼、有活力为主；职业、兴趣、性格和外观各有区别，不预设亲密关系。", max_length=1200, description="新来客创作偏好，默认18–25岁、可爱活泼的成年女性，适用于随机与互联网灵感；留空不额外限制。只影响新候选，不改现有人物/肖像，不增加模型调用。需重启。")
+    encounter_portraits_enabled: bool = Field(default=True, description="新来客生成一次持久化肖像，使用当前生图服务；失败仅手动重试，刷新不生成。不增加文字模型调用。关闭后保留已有图片。")
     encounter_interval_minutes: float = Field(default=1440.0, ge=10.0, le=10080.0)
     encounter_web_probability: float = Field(default=0.5, ge=0.0, le=1.0)
     encounter_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)

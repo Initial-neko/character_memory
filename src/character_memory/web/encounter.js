@@ -59,15 +59,19 @@
     const acceptLabel = accepted ? "已经留下" : full ? "聊天列表已满" : "留下 TA";
     return `
       <article class="encounter-card" data-encounter-id="${candidate.id}">
+        <div class="encounter-portrait">
+          ${candidate.portrait_url ? `<img src="${CM.escapeHtml(candidate.portrait_url)}" alt="${CM.escapeHtml(draft.name || '来客')}的 AI 生成肖像" loading="lazy"><span class="encounter-portrait-label">AI 生成肖像</span>` : `<div class="encounter-portrait-placeholder"><span>还差一张见面照</span><button type="button" data-encounter-portrait="${candidate.id}" title="使用当前生图服务生成一次肖像并保存，可能产生生图费用；刷新不会重复生成">生成肖像</button></div>`}
+          <div class="encounter-portrait-error hidden" data-portrait-error role="status"></div>
+        </div>
         <div class="encounter-card-top">
           <span class="encounter-source ${candidate.source_type === "WEB" ? "web" : "generated"}">${sourceLabel(candidate)}</span>
           <span class="encounter-status">${CM.escapeHtml(candidate.status || "NEW")}</span>
         </div>
         <div class="encounter-identity">
-          <div class="encounter-avatar">${CM.escapeHtml(CM.initialFor(draft))}</div>
+          <div class="encounter-avatar">${candidate.portrait_url ? `<img src="${CM.escapeHtml(candidate.portrait_url)}" alt="" loading="lazy">` : CM.escapeHtml(CM.initialFor(draft))}</div>
           <div>
             <h3>${CM.escapeHtml(draft.name || "陌生人")}</h3>
-            <p>${CM.escapeHtml(draft.identity || draft.tagline || "")}</p>
+            <p title="${CM.escapeHtml(draft.identity || draft.tagline || '')}">${CM.escapeHtml(draft.identity || draft.tagline || "")}</p>
           </div>
         </div>
         <p class="encounter-hook">${CM.escapeHtml(candidate.encounter_hook || draft.description || "")}</p>
@@ -100,7 +104,7 @@
     capacity.textContent = `正式角色 ${Math.min(total, limit)}/${limit}`;
     list.innerHTML = state.encounters.length
       ? state.encounters.map(cardHtml).join("")
-      : '<div class="encounter-empty"><strong>今天还没有遇见谁</strong><span>系统会按自己的节奏产生下一次邂逅。</span></div>';
+      : '<div class="encounter-empty"><strong>暂时没有可展示的新朋友</strong><span>已有邂逅候选出现后，会在这里显示。</span></div>';
   }
 
   async function refresh() {
@@ -121,6 +125,23 @@
   }
 
   list.addEventListener("click", async event => {
+    const portrait = event.target.closest("[data-encounter-portrait]");
+    if (portrait) {
+      const card = portrait.closest('[data-encounter-id]');
+      portrait.disabled = true;
+      portrait.textContent = '正在绘制…';
+      try {
+        await CM.api(`/v1/encounters/${portrait.dataset.encounterPortrait}/portrait`, {method:'POST'});
+        await refresh();
+      } catch (error) {
+        const box = card.querySelector('[data-portrait-error]');
+        box.textContent = error.message;
+        box.classList.remove('hidden');
+        portrait.disabled = false;
+        portrait.textContent = '重试肖像';
+      }
+      return;
+    }
     const chat = event.target.closest("[data-encounter-chat]");
     if (chat) {
       const card = chat.closest("[data-encounter-id]");

@@ -208,6 +208,7 @@
   });
   document.addEventListener("click", event => { if (!event.target.closest(".sticker-panel") && !event.target.closest(".sticker-trigger")) close(); });
   CM.on("composerPopoverOpened", name => { if (name !== "stickers") close(); });
+  document.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
   CM.on("conversationChanged", () => { close(); selectedPackId = null; });
 
   CM.registerFeature("stickers", {load, open, close, send, setDisabled, trigger});

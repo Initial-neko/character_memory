@@ -251,7 +251,12 @@
     CM.scrollToBottom(false);
     return true;
   };
-  CM.scrollToBottom = (smooth = true) => window.scrollTo({top: document.body.scrollHeight, behavior: smooth ? "smooth" : "auto"});
+  CM.scrollToBottom = (smooth = true) => {
+    // History/SSE also updates while another user page is open. A hidden chat
+    // must never scroll Space, World or the character profile beneath the user.
+    if (!CM.dom.chat.getClientRects().length) return;
+    window.scrollTo({top: document.body.scrollHeight, behavior: smooth ? "smooth" : "auto"});
+  };
 
   CM.renderCharacterList = () => {
     const unread = CM.features.unread;

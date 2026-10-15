@@ -339,6 +339,12 @@ Visual Capture 是可选输入能力：
 
 ## Visual Generation
 
+### 用户页面的图片呈现
+
+头像统一复用人物的 `avatar_url`，包括人物列表、聊天、主页和群成员拼图；缺失或加载失败时保留文字回退。人物主页的肖像是清晰的身份插图，不以放大模糊的头像冒充场景照片。`web/artwork/` 中的紫猫与窗景为一次性通过已配置 ImageGen Provider 生成的界面装饰，不代表人物的真实位置或经历；页面访问不触发生图调用。
+
+聊天图片、Space 单图和人物动态图保留源图比例并限制最大显示尺寸；Space 多图仍使用缩略图网格，点开可查看完整图片。聊天图片延迟解码时只在读者没有向上浏览、或已处于底部时跟随最新消息。RSS 仅展示 Feed/原文实际提供的图片，不用生成的装饰图补成新闻内容。预览的合成人物对话、设定图与帖子只放入隔离预览库。
+
 本文描述当前图片生成能力。它与“用户上传/采集图片给 Vision 看”是两个不同方向。
 
 ### 1. Visual Capture vs Visual Generation
@@ -832,6 +838,8 @@ This means：
 - sidebar/header/direct/group UI can all resolve the same local versioned avatar URL。
 
 ### 8. Boundaries
+
+World guest portraits reuse AvatarStore under the candidate-owned `encounter-{id}` namespace, separate from formal character avatars. `GET /v1/encounters` exposes a versioned `portrait_url`; `GET /v1/encounters/{id}/portrait/asset` reads the file; `POST /v1/encounters/{id}/portrait` generates or reuses one image under the candidate lifecycle lock. The configured image provider receives the existing draft directly, without another prompt-planning LLM. Closed candidates cannot generate new portraits. Provider failure leaves lifecycle state unchanged and returns a retryable UI error; no automatic retry loop runs on page load. Accepting a candidate still follows the existing formal onboarding/avatar policy.
 
 - Avatar is an asset, not a relationship score.
 - Search result selection does not become long-term Memory by default.

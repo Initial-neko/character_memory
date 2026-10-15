@@ -49,7 +49,9 @@
       const names = (group.members || []).map(item => item.name || item.id).join("、") || (group.status === "BUILDING" ? "正在构建…" : "暂无成员");
       const active = CM.isGroupConversation() && group.id === activeId();
       const id = CM.escapeHtml(group.id);
-      return `<div class="group-item-wrap" data-group-row="${id}"><button class="group-item ${active ? "active" : ""}" type="button" data-group="${id}"><span class="group-avatar">${CM.escapeHtml(initial(group))}</span><span class="group-copy"><span class="group-name">${CM.escapeHtml(group.name)}</span><span class="group-members">${CM.escapeHtml(names)}</span></span></button><button class="group-more-button" type="button" data-group-more="${id}" title="群聊操作" aria-label="群聊操作">···</button><div class="group-context-menu hidden" data-group-menu="${id}"><button type="button" data-group-archive="${id}">归档</button></div></div>`;
+      const portraits = (group.members || []).map(member => CM.state.characters.find(profile => profile.id === (member.id || member.character_id))?.avatar_url).filter(Boolean).slice(0,4);
+      const avatar = portraits.length ? portraits.map(url => `<img src="${CM.escapeHtml(url)}" alt="" loading="lazy">`).join("") : CM.escapeHtml(initial(group));
+      return `<div class="group-item-wrap" data-group-row="${id}"><button class="group-item ${active ? "active" : ""}" type="button" data-group="${id}"><span class="group-avatar">${avatar}</span><span class="group-copy"><span class="group-name">${CM.escapeHtml(group.name)}</span><span class="group-members">${CM.escapeHtml(names)}</span></span></button><button class="group-more-button" type="button" data-group-more="${id}" title="群聊操作" aria-label="群聊操作">···</button><div class="group-context-menu hidden" data-group-menu="${id}"><button type="button" data-group-archive="${id}">归档</button></div></div>`;
     }).join("");
   }
 

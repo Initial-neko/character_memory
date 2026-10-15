@@ -209,3 +209,18 @@ def test_world_portrait_button_persists_real_image_and_refresh_is_free(page, liv
         access.services.avatar_store.close()
         access.services.avatar_store = original_store
         access.services.image_generation_providers = original_providers
+
+
+def test_world_entry_is_not_scrolled_by_hidden_chat_initialization(page, live_world_candidates):
+    from playwright.sync_api import expect
+    base, _, _, _, _ = live_world_candidates
+    page.set_viewport_size({'width': 1440, 'height': 720})
+    with page.expect_response('**/v1/chat/history-page?*'):
+        page.goto(base + '/?view=world')
+    expect(page.locator('.encounter-card')).to_have_count(3)
+    page.wait_for_function('window.CM.state.lastRenderedSignature !== null && window.CM.state.lastRenderedSignature !== undefined')
+    page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    assert page.evaluate('scrollY') < 5
+    # The same helper is called when hidden Direct SSE messages arrive.
+    page.evaluate('window.CM.scrollToBottom(false)')
+    assert page.evaluate('scrollY') < 5

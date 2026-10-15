@@ -75,6 +75,20 @@ def test_independent_runs_only_send_current_task_and_verified_sources(tmp_path):
     runner.close()
 
 
+def test_direct_task_can_return_analysis_without_claiming_external_observation(tmp_path):
+    from character_memory.runtime.claude_process import ClaudePrintRunner
+    runner=ClaudePrintRunner(Observer(),tmp_path/'runs',command=fake_cli(tmp_path,'no_tool'))
+    task=replace(request(),channel='DIRECT',capability='CLAUDE_TASK',constraints={**request().constraints,
+        'backend':'claude','role_grant':'claude_task','claude_skills':[], 'claude_daily_max':3,
+        'claude_daily_budget_usd':None,'claude_max_budget_usd':None,'cost_saving':False})
+    result=runner.run(task)
+    assert result.status=='SUCCESS'
+    assert result.data['assistant_response']=='Visible answer'
+    assert result.data['knowledge_scope']=='MODEL_RESPONSE' and not result.data['observations']
+    assert result.data['execution']['tool_calls']==0
+    runner.close()
+
+
 def test_exited_parent_cannot_leave_child_holding_pipes_past_timeout(tmp_path):
     import time
     from character_memory.runtime.claude_process import ClaudePrintRunner

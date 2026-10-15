@@ -365,6 +365,8 @@ world_pulse_commenter_count: 4
 world_browse_enabled: true
 # World WEB_SEARCH 执行后端：direct 保留现有服务；claude 每次独立 -p，无历史。需重启。
 world_browse_execution_backend: direct
+# 单聊委托独立开关；仅有 claude_task sidecar 授权的人物可用，不影响 World，需重启。
+direct_claude_tasks_enabled: false
 # Claude 模型；空值沿用本地 CLI 配置，不自动升级模型。
 claude_execution_model: ""
 # Claude 一项任务总超时秒数，超时撤销工具并结束进程。

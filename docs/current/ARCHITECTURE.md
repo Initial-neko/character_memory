@@ -669,9 +669,13 @@ distinguishable from a successful empty response or a zero bill. CLI costs are
 estimates, not account balance or remaining subscription quota. Inspecting a
 record never re-executes it or resumes a Claude session.
 
-V1 exposes this executor only through the existing World WEB_SEARCH choice.
-There is no general “ask Claude” decision, automatic Direct question delegation,
-native interactive window manager or complete intermediate tool transcript.
+The World WEB_SEARCH path retains its `claude_research` grant. An independently
+enabled Direct `DELEGATE_TASK` choice uses `claude_task` and the same executor,
+fresh CLI isolation, bounded tools, durable reservations and receipts. It sends
+only the chosen current task, then returns the result for one Person response;
+it does not automatically delegate every question or enable shell/file access.
+Plain analysis may succeed as `MODEL_RESPONSE` without claiming fetched sources.
+There is no native interactive window manager or arbitrary specialist toolchain.
 The backend defaults to direct; code availability does not establish that a
 running deployment has restarted, enabled Claude or passed live Persona quality
 acceptance. Character life/source display semantics belong to [Memory](MEMORY.md).

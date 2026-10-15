@@ -197,7 +197,7 @@ def build_runtime_services(settings: Settings) -> RuntimeServices:
     )
     world_observer = WorldObservationService(web_search_provider, world_fetcher)
     claude_runner = None
-    if getattr(settings, "world_browse_execution_backend", "direct") == "claude":
+    if getattr(settings, "world_browse_execution_backend", "direct") == "claude" or getattr(settings, "direct_claude_tasks_enabled", False):
         from pathlib import Path
         from character_memory.runtime.claude_process import ClaudePrintRunner
         claude_runner = ClaudePrintRunner(world_observer, Path(settings.db_path).resolve().parent / "claude-executions",

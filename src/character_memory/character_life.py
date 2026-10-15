@@ -293,7 +293,7 @@ class CharacterLifeReader:
                 decision['result']='、'.join(types) or '本次机会未对外表达'
                 if not types or all(t in ('NO_REPLY','NO_ACTION') for t in types): status='NO_ACTION'
         reading=obj(metadata.get('rss_reading'))
-        decision['execution_request_id']=metadata.get('capability_request_id')
+        decision['execution_request_id']=metadata.get('capability_request_id') or obj(trace.get('direct_delegation')).get('request_id')
         if kind=='world':
             plan=obj(row.get('plan_json')); result=obj(row.get('result_json'))
             choice=obj(plan.get('decision')).get('choice')

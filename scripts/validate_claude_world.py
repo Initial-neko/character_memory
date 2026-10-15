@@ -57,7 +57,7 @@ def main():
             request = CapabilityRequest(identifier, "fixture-alice", identifier, None, "WORLD", "WEB_SEARCH", {"query": task},
                 {"max_pages": 2, "max_chars_per_page": 2000, "max_calls": 1, "backend": "claude",
                  "claude_daily_max": 3, "claude_daily_budget_usd": None, "claude_max_budget_usd": settings.claude_execution_max_budget_usd,
-                 "cost_saving": False})
+                 "cost_saving": False,"role_grant":"claude_research","claude_skills":[]})
             result = executor.execute(request)
             execution = result.data.get("execution", {})
             detail = json.loads((root / "claude-executions" / execution["detail_path"]).read_text(encoding="utf-8")) if execution.get("detail_path") else {}

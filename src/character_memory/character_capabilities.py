@@ -20,18 +20,18 @@ MAX_CONFIG_BYTES = 4096
 
 class CharacterCapabilities(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    capabilities: list[str] = Field(default_factory=list, max_length=1)
+    capabilities: list[str] = Field(default_factory=list, max_length=2)
     skills: list[str] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
     def check_allowlist(self):
-        if len(set(self.capabilities)) != len(self.capabilities) or set(self.capabilities) - {"claude_research"}:
+        if len(set(self.capabilities)) != len(self.capabilities) or set(self.capabilities) - {"claude_research", "claude_task"}:
             raise ValueError("unknown or duplicate character capability")
         if len(set(self.skills)) != len(self.skills):
             raise ValueError("duplicate selected Skills")
         if any(SKILL_ID.fullmatch(item) is None for item in self.skills):
             raise ValueError("Skill must be shared/<slug> or personal/<slug>")
-        if self.skills and "claude_research" not in self.capabilities:
+        if self.skills and not {"claude_research", "claude_task"}.intersection(self.capabilities):
             raise ValueError("Skills require explicit claude_research permission")
         return self
 
@@ -48,7 +48,7 @@ def _regular_bounded_file(path: Path, maximum: int) -> bytes:
     return raw
 
 
-def select_role_research(profile: dict | None) -> list[dict] | None:
+def select_role_research(profile: dict | None, *, capability: str = "claude_research") -> list[dict] | None:
     """Return selected immutable Skill snapshots; None means no Claude grant.
 
     Missing or invalid sidecars fail closed. An authorized role with no Skills
@@ -66,7 +66,7 @@ def select_role_research(profile: dict | None) -> list[dict] | None:
     if not isinstance(payload, dict):
         raise ValueError("capabilities.yaml must be a mapping")
     permissions = CharacterCapabilities.model_validate(payload)
-    if "claude_research" not in permissions.capabilities:
+    if capability not in {"claude_research", "claude_task"} or capability not in permissions.capabilities:
         return None
     picked: list[dict] = []
     for identity in permissions.skills:

@@ -2,6 +2,35 @@
 
 本文描述一个 Character 收到 Event 后，如何形成内部变化与对外行为。
 
+## Optional Direct external-task decision
+
+`direct_claude_tasks_enabled` (default false) and the named person's operator
+sidecar `capabilities: [claude_task]` jointly enable one `DELEGATE_TASK` decision
+in a normal Direct USER_MESSAGE reaction. `task` is a self-contained public
+question of at most 240 characters; no Persona, Memory or chat transcript is
+sent to the executor. An unauthorized, archived or malformed grant fails closed;
+`claude_research` alone still grants only the existing World path. Group, Visual,
+World and autonomous events do not gain Direct delegation.
+
+PersonRuntime first decides normally, then the shared CapabilityExecutor reserves
+the existing per-character daily quota/budget and invokes fresh `claude -p` once.
+World's backend selector stays independent. A durable execution result and an
+ACTION fact (`fact_kind=CLAUDE_TASK_RESULT`) record what actually returned. One
+further normal Person reaction interprets the result; it cannot delegate again,
+generate another image, propose a call, or create a future tool Intent. Ordinary
+turns keep their original model-call count. A delegated turn costs the original
+decision plus one result interpretation, and bounded CLI calls counted separately.
+
+The CLI may analyze a question without tools (`MODEL_RESPONSE`). Such output is
+not proof of browsing or physical execution. Only actual `world_lookup` receipts
+establish fetched source scope. The visible bounded assistant response is also
+stored in the durable execution result, independently of the 30-day detail file.
+New user input before dispatch prevents the task; supersession after dispatch
+retains its real receipt but prevents stale result interpretation/output/state.
+Existing async ordering, Direct SSE, Memory admission and trace ownership remain.
+Life/Execution read-only details expose the linked request and result; failures
+are not converted into success or automatic retries.
+
 ## Direct call invitation Action
 
 `CALL_INVITE` 是现有 PersonReaction 的 Direct 专用邀请 Action，填写邀请 `message` 与公开简短 `reason`。它不在 EXPRESSIVE_ACTIONS 中，不落成普通消息或已完成通话经历。Settings 默认关闭；服务端来源/许可/未决数量/既有冷却硬门在原反应事务中创建来源化邀请，非 Direct 不执行。状态与麦克风生命周期见 [Voice & TTS Runtime](VOICE_AND_TTS.md#人物发起的应用内来电邀请)。

@@ -1096,6 +1096,44 @@ def test_settings_center_exposes_random_encounter_formal_configuration(tmp_path:
     assert loaded.encounter_max_pending == 2
 
 
+@pytest.mark.parametrize('item_indent', ['  ', ''])
+def test_settings_replaces_existing_block_sources_without_orphaned_items(tmp_path: Path, monkeypatch, item_indent):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / 'config.yaml'
+    config.write_text(
+        '# My sources\nworld_pulse_sources:\n'
+        f'{item_indent}- https://old.example/one\n'
+        f'{item_indent}- https://old.example/two\n'
+        '# Keep the following field explanation\n'
+        'world_pulse_refresh_minutes: 60\n'
+        '"custom-setting":\n  nested: keep\n', encoding='utf-8')
+    store = SettingsStore(str(config), str(tmp_path / '.env'))
+    sources = ['https://movie.example/chart', 'https://games.example/top']
+    result = store.save_values({'world_pulse_sources':sources})
+    raw = yaml.safe_load(config.read_text(encoding='utf-8'))
+    assert raw['world_pulse_sources'] == sources
+    assert raw['custom-setting'] == {'nested':'keep'}
+    assert raw['world_pulse_refresh_minutes'] == 60
+    assert '# Keep the following field explanation' in config.read_text(encoding='utf-8')
+    assert load_settings(str(config)).world_pulse_sources == sources
+    assert result['restart_required'] == ['world_pulse_sources']
+    assert store.snapshot()['values']['world_pulse_sources'] == sources
+    store.save_values({'world_pulse_sources':[]})
+    assert load_settings(str(config)).world_pulse_sources == []
+
+
+def test_invalid_rendered_yaml_never_replaces_settings(tmp_path: Path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / 'config.yaml'
+    original = 'world_pulse_sources: &feeds\n  - https://old.example/\ncustom_copy: *feeds\n'
+    config.write_text(original, encoding='utf-8')
+    store = SettingsStore(str(config), str(tmp_path / '.env'))
+    with pytest.raises(ValueError, match='YAML'):
+        store.save_values({'world_pulse_sources':['https://new.example/']})
+    assert config.read_text(encoding='utf-8') == original
+    assert not list(tmp_path.glob('*.bak.*'))
+
+
 def test_settings_center_persists_world_activity_sources_as_a_real_list(tmp_path: Path, monkeypatch):
     _clear_secret_env(monkeypatch)
     config = tmp_path / "config.yaml"

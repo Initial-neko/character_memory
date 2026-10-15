@@ -116,13 +116,20 @@ Normal YAML saves:
 
 ```text
 validate complete Settings model
-  -> patch only edited top-level keys
+  -> patch edited top-level values, including complete block-list spans
   -> preserve comments / unknown extension keys / ordering
+  -> parse rendered YAML before writing; reject invalid output without replacing files
   -> atomic replace
   -> config.yaml.bak.YYYYMMDD-HHMMSS
 ```
 
 GSV runtime fields are updated in `.env` as one atomic multi-key edit. Unrelated variables are preserved. If the second persistence surface fails, Settings rolls the first surface back so one logical save does not leave `config.yaml` and `.env` describing different states.
+
+Replacing an indented or indentless block list removes the old value's items;
+empty-list updates remain real lists. Trailing comments for the next setting and
+unrelated quoted/nested extension keys are preserved. An update that would break
+a cross-field YAML anchor/alias is rejected before persistence rather than
+writing a configuration that cannot be reloaded.
 
 All Settings mutations are serialized per Settings Server process. The lock
 covers reading the previous state, validation, backup, `config.yaml` / `.env`

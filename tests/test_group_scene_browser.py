@@ -25,12 +25,15 @@ def test_warm_entry_confirm_day_advance_and_resume(page,scene_server,width):
     output=os.getenv('SCENE_SCREENSHOTS')
     if output:
         Path(output).mkdir(parents=True,exist_ok=True)
+        page.wait_for_function("document.querySelector('#drawer').getAnimations({subtree:true}).every(a => a.playState !== 'running')")
         page.screenshot(path=str(Path(output)/f'isolated-preview-{width}.png'),full_page=True)
     page.locator('[data-ensemble-confirm]').click()
     expect(page.locator('.scene-opening')).to_be_visible(timeout=20000)
     expect(page.locator('.scene-toolbar')).to_contain_text('第 1 天傍晚')
     expect(page.locator('[data-scene-say]')).to_have_count(3)
-    if output: page.screenshot(path=str(Path(output)/f'isolated-opening-{width}.png'),full_page=True)
+    if output:
+        page.wait_for_function("document.querySelector('#drawer').getAnimations({subtree:true}).every(a => a.playState !== 'running')")
+        page.screenshot(path=str(Path(output)/f'isolated-opening-{width}.png'),full_page=True)
     page.locator('[data-scene-advance]').click()
     expect(page.locator('.scene-toolbar')).to_contain_text('第 2 天早晨')
     group_id = page.evaluate('CM.state.conversation.groupId')

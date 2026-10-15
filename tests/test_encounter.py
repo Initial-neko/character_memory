@@ -30,6 +30,43 @@ def draft():
     }
 
 
+@pytest.mark.parametrize('source', ['GENERATED', 'WEB'])
+@pytest.mark.parametrize('preference', [None, '不限制性别，偏好安静的原创成年人物'])
+def test_new_candidate_preference_reaches_both_generation_paths_without_extra_calls(tmp_path, monkeypatch, source, preference):
+    from character_memory.config import Settings
+    from character_memory.persona_builder import PersonaDraft
+    from character_memory.encounter import EncounterWebSeed
+    settings = Settings()
+    if preference is not None:
+        settings.encounter_persona_preference = preference
+    else:
+        assert '成年女性' in settings.encounter_persona_preference
+    expected = settings.encounter_persona_preference
+    descriptions, seed_prompts = [], []
+    def generate(description, **kwargs):
+        descriptions.append(description)
+        return PersonaDraft.model_validate(draft())
+    def seed(prompt, *args):
+        seed_prompts.append(prompt)
+        return EncounterWebSeed(inspiration_description='一位喜欢修理老设备、生活节奏独特且有自己边界的原创人物。', suggested_name='Mika', tags=['修理'])
+    observation = SimpleNamespace(title='修理日常', url='https://example.org/repair', source_domain='example.org',
+        snippet='修理旧电器', content='一篇谈论维修爱好的公开文章。')
+    access = SimpleNamespace(settings=settings, require_bundle=lambda: SimpleNamespace(model=SimpleNamespace(structured_for_session=seed)),
+        world_observer=SimpleNamespace(observe=lambda *args, **kwargs: {'observations':[observation]}))
+    store = SQLiteStore(str(tmp_path / 'preference.db'))
+    service = EncounterService(access, EncounterRepository(store))
+    monkeypatch.setattr(service, '_persona_builder', lambda: SimpleNamespace(generate=generate))
+    now = datetime.now(timezone.utc)
+    if source == 'WEB':
+        service._web_draft(now)
+        assert len(seed_prompts) == 1 and expected in seed_prompts[0]
+    else:
+        service._generated_draft(now)
+        assert seed_prompts == []
+    assert len(descriptions) == 1 and expected in descriptions[0]
+    store.close()
+
+
 def test_candidate_portrait_is_cached_concurrent_and_restart_safe(tmp_path):
     from character_memory.avatars import AvatarStore
     from character_memory.visual_generation import ImageGenerationResult

@@ -137,6 +137,9 @@ class EncounterService:
     def _persona_builder(self) -> PersonaBuilder:
         return PersonaBuilder(self.access.require_bundle().model)
 
+    def _persona_preference(self) -> str:
+        return str(getattr(self.access.settings, "encounter_persona_preference", "") or "").strip()
+
     def _presentation(self, draft: PersonaDraft, now: datetime, source_type: str) -> EncounterPresentation:
         prompt = f"""你正在为一次偶然邂逅写一个很短的出场片段。
 
@@ -164,6 +167,8 @@ class EncounterService:
             "不要做成模板化客服；给 TA 一个具体职业或日常、2~3 个明确兴趣、一个小怪癖或反差，"
             "同时保留边界、沉默和不同意见。名字、年龄、表达方式自然即可。"
         )
+        if preference := self._persona_preference():
+            description += f"\n本次新人物的创作偏好：{preference}"
         with llm_usage_scope(
             feature="ENCOUNTER",
             purpose="ENCOUNTER_PERSONA",
@@ -212,6 +217,8 @@ Excerpt:
 角色姓名或可识别经历。可以吸收职业、爱好、生活气息、审美或场景感，但必须重新组合成独立人物。
 如果网页涉及现实人物，只能抽象成灵感，不能做真人克隆。
 
+本次新人物的创作偏好（优先于网页灵感中的人物属性）：{self._persona_preference() or '无额外偏好'}
+
 {chr(10).join(blocks)}
 
 只返回结构化结果：
@@ -231,7 +238,7 @@ Excerpt:
             override=True,
         ):
             draft = self._persona_builder().generate(
-                seed.inspiration_description,
+                seed.inspiration_description + (f"\n本次新人物的创作偏好：{preference}" if (preference := self._persona_preference()) else ""),
                 name=seed.suggested_name,
                 tags=["互联网邂逅", *seed.tags[:6]],
             )

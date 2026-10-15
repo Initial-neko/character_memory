@@ -247,6 +247,7 @@ SETTING_HELP: dict[str, str] = {
     "cost_saving_enabled": "默认关闭。开启后仅降低未点名群成员的反应上限；显式 @ 与单聊不受影响。关闭恢复原群聊配置；不改变媒体、World 或其独立节省模式，不承诺账单节省。重启 Character Runtime 后生效。",
     "cost_saving_group_max_speakers_per_turn": "节省模式开启时，与用户普通群聊上限取较小值；默认3、范围1–12。点名成员仍全部参与，其他成员沿原轮换顺序参与；不开启则不生效，也不覆盖普通上限。需重启。",
     "encounter_enabled": "是否允许 Random Encounter Scheduler 产生新的候选相遇。",
+    "encounter_persona_preference": "新来客的创作偏好，默认原创成年女性；应用于随机与互联网灵感，不增加模型调用。只影响新候选，不改现有人物/肖像；留空不额外限制。保存后需重启。",
     "encounter_portraits_enabled": "为新来客生成一次持久化肖像，使用当前生图服务；消耗一次生图，不增加文字模型调用。刷新不生成，失败仅手动重试。关闭后保留已有图片。",
     "encounter_interval_minutes": "两次 Random Encounter Opportunity 的间隔。",
     "encounter_web_probability": "AUTO 邂逅选择公网资料来源的概率；其余概率走系统生成。",
@@ -869,6 +870,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "description": "随机邂逅的正式调度配置。这里保存重启后仍生效的值；手动触发和临时验收留在 Dev Console。",
         "fields": [
             {"name": "encounter_enabled", "label": "Random Encounter", "type": "checkbox", "level": "advanced"},
+            {"name": "encounter_persona_preference", "label": "来客创作偏好", "type": "textarea", "level": "advanced"},
             {"name": "encounter_portraits_enabled", "label": "来客肖像生成", "type": "checkbox", "level": "advanced"},
             {
                 "name": "encounter_interval_minutes",

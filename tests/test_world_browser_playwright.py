@@ -21,6 +21,7 @@ class _RenderedHandler(BaseHTTPRequestHandler):
 <body>
   <nav>navigation noise</nav>
   <main id="content">loading</main>
+  <p><a href="/original-report">A linked original report</a></p>
   <script>
     setTimeout(() => {
       document.getElementById('content').textContent =
@@ -97,3 +98,5 @@ def test_headless_world_browser_reads_javascript_rendered_text(rendered_page_url
     assert "Rendered after JavaScript: world browser works" in page.content
     assert "loading" not in page.content
     assert "navigation noise" not in page.content
+    assert {"title": "A linked original report", "url": rendered_page_url + "original-report"} in page.links
+    assert page.requested_url == rendered_page_url

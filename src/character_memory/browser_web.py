@@ -188,6 +188,9 @@ class HeadlessBrowserWebFetcher(WebFetcher):
                                     title: document.title || '',
                                     content: best,
                                     description,
+                                    links: Array.from(document.querySelectorAll('a[href]'))
+                                      .filter(a => !a.closest('nav,footer') && (a.innerText || '').trim().length >= 8)
+                                      .slice(0, 80).map(a => ({url:a.href,title:(a.innerText || '').trim().slice(0,240)})),
                                     lang: document.documentElement.lang || ''
                                   };
                                 }"""
@@ -199,10 +202,13 @@ class HeadlessBrowserWebFetcher(WebFetcher):
                             pages.append(
                                 FetchedPage(
                                     url=final_url,
+                                    requested_url=target,
                                     title=_normalize_text(extracted.get("title", ""), 500),
                                     content=content,
                                     content_type=mime or "text/html",
                                     description=_normalize_text(extracted.get("description", ""), 1000),
+                                    links=[{"url": str(item.get("url", ""))[:2000], "title": str(item.get("title", ""))[:240]}
+                                           for item in extracted.get("links", [])[:80] if isinstance(item, dict)],
                                 )
                             )
                         except Exception as exc:

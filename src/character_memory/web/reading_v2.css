@@ -10,6 +10,7 @@ body.reading-page {
 
 /* Life timeline */
 .identity-copy { min-width:0; }
+.article-image { height:auto; max-height:560px; object-fit:contain; background:var(--ui-bg); }
 .life-nav {
   position: fixed;
   inset: 72px auto 0 0;

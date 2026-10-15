@@ -141,6 +141,7 @@
     $("[data-profile-side-tagline]").textContent = tagline || "尚未填写";
     $("[data-profile-initial]").textContent = initial;
     setImage($("[data-profile-portrait]"), profile.avatar_url, `${name}的头像`);
+    // Render the identity portrait as a clear illustration, never a blurred room.
     setImage($("[data-profile-backdrop]"), profile.avatar_url);
 
     const archived = Boolean(profile.archived || profile.archived_at);

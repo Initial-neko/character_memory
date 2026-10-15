@@ -7,6 +7,13 @@
   const actions={MESSAGE:"发送消息",PROACTIVE_MESSAGE:"主动表达",SPACE_COMMENT:"发表了评论",SPACE_LIKE:"点赞",NO_REPLY:"未回复",VOICE:"语音表达",STICKER:"发送表情",IMAGE:"发送图片"};
   const statuses = {CALL_INVITATION_PROPOSED:"仅提出邀请，未证明通话",NO_POST:"未发动态",POSTED:"已发动态",RECORDED:"已记录",SUCCESS:"已完成",SUCCEEDED:"已完成",APPLIED:"已处理",FAILED:"失败",DENIED:"被拒绝",TIMEOUT:"超时",NO_ACTION:"未行动",SKIPPED:"未执行",PLANNING:"决策中",PENDING:"计划中",PROCESSING:"处理中",EXECUTED:"已执行",ABANDONED:"已放弃",EXPIRED:"已失效",DEFERRED:"已延期",COMPLETED:"已完成"};
   let profiles=[], items=[], selected="", view="life", channel="ALL", cursor=null, request=0, undated=0;
+  document.addEventListener('error', event => {
+    const image=event.target;
+    if(!(image instanceof HTMLImageElement)||!image.closest('#lifeCharacters')) return;
+    const fallback=document.createElement('span'); fallback.className='life-character-fallback';
+    fallback.setAttribute('aria-hidden','true'); fallback.textContent=image.closest('button')?.querySelector('strong')?.textContent?.slice(0,1)||'?';
+    image.replaceWith(fallback);
+  },true);
   const dateString = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const formatted = t => {if(!t)return "未设置";const d=new Date(t);return Number.isNaN(+d)?"时间未记录":d.toLocaleString("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});};
   const safeURL = value => {try {const u=new URL(value,location.origin);return ["http:","https:"].includes(u.protocol)?u.href:"";}catch{return "";}};

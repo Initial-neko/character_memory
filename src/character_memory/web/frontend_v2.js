@@ -14,6 +14,7 @@
   header.className = 'cm-global-header';
   header.innerHTML = `<a class="cm-global-brand" href="/" aria-label="Character Memory 首页"><img src="/static/stickers/default/round_cat_happy.svg" alt=""><span><strong>Character Memory</strong><small>让人物拥有自己的生活</small></span></a><nav class="cm-global-nav" aria-label="页面导航"><button type="button" data-cm-nav="space">${spaceIcon}Space</button><button type="button" data-cm-nav="chat">${chatIcon}聊天</button><a href="/?view=world" data-cm-nav="world">${worldIcon}World</a><a href="/?view=profile" data-cm-nav="people">${personIcon}人物</a></nav>${CM ? '<button class="cm-global-search" type="button" title="打开现有聊天搜索">搜索人物与聊天内容</button>' : ''}`;
   document.body.prepend(header);
+  header.querySelector('.cm-global-brand img').src = '/static/artwork/brand-cat.webp';
   const notifications = document.querySelector('.space-notification-button');
   if (notifications) {
     notifications.classList.add('cm-global-notification');
@@ -98,6 +99,7 @@
   const shared = document.createElement('button');
   shared.className = 'ghost-button cm-shared-button';
   shared.type = 'button'; shared.textContent = '共同经历';
+  shared.insertAdjacentHTML('afterbegin', icon('<path d="M12 5c-3-2-7-2-10 0v15c3-2 7-2 10 0 3-2 7-2 10 0V5c-3-2-7-2-10 0Z"/><path d="M12 5v15"/>'));
   shared.title = '点击查看经历入口；不会自动发送消息或调用模型';
   actions?.prepend(shared);
   shared.addEventListener('click', () => {
@@ -112,4 +114,41 @@
   profile.addEventListener('click', () => navigate('people'));
   function sync() { shared.hidden = CM.isGroupConversation(); profile.hidden = CM.isGroupConversation(); }
   CM.on('conversationChanged', sync); CM.on('ready', sync); sync();
+  const controlIcons = {
+    voiceCallButton:'<path d="M5 3H3v4c0 8 6 14 14 14h4v-5l-5-2-2 3c-4-2-5-3-7-7l3-2-2-5Z"/>',
+    conversationSearchButton:'<circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/>',
+    voiceInputButton:'<rect x="8" y="2" width="8" height="13" rx="4"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/>'
+  };
+  Object.entries(controlIcons).forEach(([id, paths]) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    const label = button.getAttribute('aria-label') || button.title || button.textContent;
+    button.setAttribute('aria-label', label);
+    button.innerHTML = icon(paths);
+  });
+  document.addEventListener('error', event => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement) || !image.closest('.image-bubble,.space-media-cell')) return;
+    const host = image.parentElement;
+    if (host.dataset.mediaFailed) return;
+    host.dataset.mediaFailed = 'true';
+    image.hidden = true;
+    const fallback = document.createElement('span');
+    fallback.className = 'cm-media-error'; fallback.textContent = '图片暂时无法加载';
+    host.append(fallback);
+  }, true);
+  let readerMoved = false;
+  window.addEventListener('wheel', () => { readerMoved = true; }, {passive:true});
+  window.addEventListener('touchmove', () => { readerMoved = true; }, {passive:true});
+  window.addEventListener('keydown', event => {
+    if (['PageUp','Home','ArrowUp'].includes(event.key)) readerMoved = true;
+  });
+  CM.on('conversationChanged', () => { readerMoved = false; });
+  document.addEventListener('load', event => {
+    if (!(event.target instanceof HTMLImageElement) || !event.target.closest('.chat .image-bubble') || document.body.matches('.space-mode,.world-mode,.profile-mode')) return;
+    // Image decoding changes history height after its first scroll. Follow only
+    // while the reader has not moved away, or is already at the latest message.
+    const nearLatest = document.documentElement.scrollHeight - scrollY - innerHeight < 100;
+    if (!readerMoved || nearLatest) requestAnimationFrame(() => CM.scrollToBottom(false));
+  }, true);
 })();

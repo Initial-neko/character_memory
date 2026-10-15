@@ -338,6 +338,8 @@
       const image = document.createElement("img");
       image.className = imageRetry.dataset.imageClass || "";
       image.alt = imageRetry.dataset.imageAlt || "";
+      image.loading = "lazy";
+      image.referrerPolicy = "no-referrer";
       image.src = imageRetry.dataset.imageRetry;
       imageRetry.closest(".image-failure").replaceWith(image);
     }

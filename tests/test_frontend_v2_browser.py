@@ -7,6 +7,61 @@ from test_life_conversation import isolated_app
 pytestmark = [pytest.mark.browser, pytest.mark.skipif(os.getenv('RUN_PLAYWRIGHT') != '1', reason='explicit browser run')]
 
 
+def test_late_chat_image_keeps_latest_message_above_composer(page, live_life):
+    from datetime import datetime, timedelta, timezone
+    import io
+    from PIL import Image
+    from playwright.sync_api import expect
+    from character_memory.domain.models import Event, EventType
+
+    base, character, _, store, access = live_life
+    picture = io.BytesIO()
+    Image.new('RGB', (400, 480), '#c6b5ef').save(picture, format='PNG')
+    now = datetime.now(timezone.utc)
+    asset = access.media_storage.save_bytes(character_id=character, original_name='test.png',
+        payload=picture.getvalue(), created_at=now, source='GENERATED_TEST')
+    store.add_media_asset(asset)
+    for index in range(10):
+        store.append_event(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
+            event_time=now + timedelta(seconds=index), content=f'旧消息 {index}',
+            metadata={'action':'MESSAGE', 'conversation_id':character+':default'}))
+    store.append_event(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
+        event_time=now+timedelta(seconds=11), content='图片',
+        metadata={'action':'IMAGE','media_id':asset.id,'conversation_id':character+':default'}))
+    store.append_event(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
+        event_time=now+timedelta(seconds=12), content='图片之后的最新消息',
+        metadata={'action':'MESSAGE','conversation_id':character+':default'}))
+    held = []
+    page.route('**/v1/media/'+asset.id, lambda route: held.append(route))
+    with page.expect_request(lambda request: request.url.endswith('/v1/media/'+asset.id)):
+        page.goto(base+'/')
+        page.locator(f'[data-character="{character}"]').click()
+        expect(page.get_by_text('图片之后的最新消息', exact=True)).to_be_visible()
+    page.evaluate('() => new Promise(requestAnimationFrame)')
+    assert held
+    held.pop().fulfill(content_type='image/png', body=picture.getvalue())
+    page.wait_for_function("""() => {
+      const image=document.querySelector('.chat .image-bubble img');
+      const last=document.querySelector('.message-row:last-child');
+      const composer=document.querySelector('.composer-wrap');
+      return image?.complete && image.naturalWidth>0 && last.getBoundingClientRect().bottom<=composer.getBoundingClientRect().top;
+    }""")
+
+
+def test_chat_broken_image_has_readable_fallback(page, live_life):
+    from playwright.sync_api import expect
+    base, _, _, _, _ = live_life
+    page.goto(base+'/')
+    # Exercise the same DOM structure supplied by the real shared renderer.
+    page.evaluate("""() => {
+      const host=document.createElement('div'); host.className='image-bubble';
+      const image=document.createElement('img'); image.src='/missing-image-for-browser-test.png';
+      host.append(image); document.querySelector('.chat').append(host);
+    }""")
+    expect(page.get_by_text('图片暂时无法加载', exact=True)).to_be_visible()
+    expect(page.locator('.image-bubble img')).to_be_hidden()
+
+
 def test_shared_experiences_require_click_and_never_send(page, live_life):
     from playwright.sync_api import expect
     base, character, event, store, access = live_life

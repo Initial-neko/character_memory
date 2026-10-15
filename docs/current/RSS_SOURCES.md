@@ -52,7 +52,11 @@ the store lock. Recreating a repository for a World RSS signal reuses that funct
 without replacing it while another query is active; a new connection registers it
 independently.
 
-User-supplied URLs pass the same public-http target guard used by existing remote media paths. Redirect destinations are checked again.
+RSS, article image proxies, avatar downloads and Space remote images share the public-address validator and pinned HTTP transport. Every request resolves once, rejects an empty/invalid or partly non-public address set (including CGNAT `100.64.0.0/10`), and connects only to a validated numeric address. Each RSS redirect repeats that process. HTTP Host, TLS SNI and certificate verification retain the original hostname; HTTP(S) proxy selection and NO_PROXY matching happen against that original URL, while proxy forwarding/CONNECT targets the validated IP. Configured proxies remain trusted infrastructure.
+
+The transport uses a request-owned connection pool to prevent TLS connection reuse across different hostnames sharing an IP. IPv4/IPv6 connect fallback shares the remaining connect timeout. This trades connection reuse for a narrow, auditable fetch boundary; it adds no dependencies or model calls. The HTTPX 0.28.1 proxy matcher and httpcore backend integration are isolated in `remote_media.py` and covered by socket/TLS/proxy tests; re-run these tests on dependency upgrades. Explicitly injected clients are trusted application/test infrastructure and must enforce the same policy; the formal composition uses the pinned client.
+
+This does not pin Chromium navigation sockets or impose an interruptible OS DNS deadline; those remain separate browser/lifecycle boundaries.
 
 Feeds containing DOCTYPE/ENTITY declarations are rejected before XML parsing, and article/origin URLs are normalized to credential-free HTTP(S). During shutdown, in-flight fetching may finish its network read, but it cannot write to the closed SQLite store. The HTTP client is closed when the last active fetch returns.
 

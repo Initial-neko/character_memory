@@ -116,7 +116,7 @@ def test_space_local_navigation_uses_existing_feed_and_world_routes(page, space_
     page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
 
     local_nav = page.get_by_role("navigation", name="Space 页面导航")
-    expect(local_nav.get_by_role("button", name="全部动态")).to_be_visible()
+    expect(local_nav.get_by_role("button", name="全部", exact=True)).to_be_visible()
     expect(local_nav.get_by_role("button", name="当前人物")).to_be_visible()
     expect(local_nav.get_by_role("button", name="世界来客")).to_be_visible()
 
@@ -130,8 +130,8 @@ def test_space_local_navigation_uses_existing_feed_and_world_routes(page, space_
     expect(page.locator(".space-detail-view")).to_be_hidden()
     expect(current_button).to_have_attribute("aria-current", "page")
 
-    all_button = local_nav.get_by_role("button", name="全部动态")
-    with page.expect_response(lambda response: "/v1/space/posts?" in response.url and "character_id=" not in response.url):
+    all_button = local_nav.get_by_role("button", name="全部", exact=True)
+    with page.expect_response(lambda response: "/v1/space/feed?" in response.url and "character_id=" not in response.url):
         all_button.click()
     expect(page.locator(f'.space-feed [data-space-post="{post_ids[1]}"]')).to_be_visible()
 

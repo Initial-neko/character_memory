@@ -79,19 +79,28 @@
   title.textContent = "Space";
   const subtitle = document.createElement("p");
   subtitle.className = "space-subtitle";
-  subtitle.textContent = "角色们公开留下的近况";
+  subtitle.textContent = "角色近况、订阅资讯与世界话题，在这里相遇";
   pageHeadingCopy.append(title, subtitle);
   const pageNav = document.createElement("nav");
   pageNav.className = "space-page-nav";
   pageNav.setAttribute("aria-label", "Space 页面导航");
-  pageNav.innerHTML = '<button type="button" data-space-page-action="all" aria-current="page">全部动态</button><button type="button" data-space-page-action="current">当前人物</button><button type="button" data-space-page-action="world">世界来客</button>';
+  pageNav.innerHTML = '<button type="button" data-space-page-action="all" aria-current="page">全部</button><button type="button" data-space-page-action="POST">角色动态</button><button type="button" data-space-page-action="RSS">订阅资讯</button><button type="button" data-space-page-action="TOPIC">热点讨论</button><button type="button" data-space-page-action="current">当前人物</button><button type="button" data-space-page-action="world">世界来客</button>';
   const currentPageButton = pageNav.querySelector('[data-space-page-action="current"]');
   pageHeading.append(pageHeadingCopy, pageNav);
   shell.prepend(pageHeading);
   shell.querySelector(".space-header")?.remove();
+  const sourceFilter = document.createElement("label");
+  sourceFilter.className = "space-source-filter";
+  sourceFilter.innerHTML = '订阅来源 <select aria-label="按订阅来源筛选 Space" title="只筛选资讯，不代表角色已经阅读"><option value="">全部订阅</option></select><a href="/sources">管理订阅 ↗</a>';
+  pageHeading.after(sourceFilter);
+  const sourceSelect = sourceFilter.querySelector("select");
 
   let opened = false;
   let filterCharacterId = null;
+  let filterKind = "ALL";
+  let filterSourceId = null;
+  let navigationEpoch = 0;
+  let feedKeys = new Set();
   let detailPostId = null;
   let detailReturn = null;
   let detailRequestEpoch = 0;
@@ -105,6 +114,7 @@
   let feedNextBeforeId = null;
   let feedTotal = 0;
   let feedActiveCharacterCount = 0;
+  let pulseCollectionEnabled = null;
   let feedLoading = false;
   let feedLoaded = false;
   let feedEpoch = 0;
@@ -542,6 +552,28 @@
     </div>`;
   }
 
+  function feedEntryHtml(item) {
+    if (item.kind === "POST") return item.post ? postHtml(item.post) : "";
+    const esc = CM.escapeHtml;
+    const rss = item.kind === "RSS";
+    const urls = rss ? [item.source?.url].filter(Boolean) : (item.source_urls || []);
+    const links = urls.map((url, index) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${rss ? "查看原文" : `聚合来源 ${index + 1}`} ↗</a>`).join("");
+    const comments = (item.comments || []).map(comment => `<div class="space-topic-take">${avatarHtml(comment.author || profileFor(comment.character_id), "space-avatar")}<div><strong>${esc(comment.author?.name || comment.character_id)}</strong><p>${esc(comment.content)}</p><time>${esc(CM.fmtTime(comment.created_at))}</time></div></div>`).join("");
+    const evidence = (item.evidence || []).map(entry => `<blockquote class="space-outside-excerpt"><small>${entry.kind === "OPINION" ? "外界观点" : "来源节选"} · ${esc(entry.author || "作者未标明")}${entry.published_at ? ` · ${esc(entry.published_at)}` : " · 原文时间未标明"}</small><p>${esc(entry.quote)}</p><a href="${esc(entry.url)}" target="_blank" rel="noopener noreferrer">查看引用所在页面 ↗</a></blockquote>`).join("");
+    return `<article class="space-post space-external-card" data-space-entry="${esc(item.key)}">
+      ${rss && item.image_url ? `<a href="/sources?item=${esc(item.id)}" class="space-external-cover"><img loading="lazy" src="${esc(item.image_url)}" alt="${esc(item.title)}"></a>` : ""}
+      <div class="space-post-body">
+        <div class="space-external-label"><span>${rss ? "订阅资讯" : "热点讨论"}</span><time>${esc(CM.fmtTime(item.created_at))}</time></div>
+        <h2>${esc(item.title)}</h2>
+        <p class="space-external-summary">${esc(item.summary || "该来源未提供摘要。")}</p>
+        <p class="space-source-name">${rss ? esc(item.source?.name || "RSS 来源") : "World Pulse · 聚合话题"}</p>
+        <p class="space-source-caveat">${rss ? `${item.published_at ? "Feed 摘要或节选" : "发布时间未知 · 按收集时间排列"} · 来源内容未经独立核实，出现在这里不代表角色已读` : "聚合摘要未经独立核实，热度不代表事实；请核对原始信源"}</p>
+        <div class="space-source-links">${rss ? `<a href="/sources?item=${esc(item.id)}">阅读 Feed 内容 →</a>` : ""}${links || '<span>原始链接缺失</span>'}</div>
+        ${evidence ? `<details class="space-topic-discussion"><summary>来源节选与外界观点 · ${(item.evidence || []).length}</summary>${evidence}</details>` : ""}
+        ${!rss ? `<details class="space-topic-discussion"><summary>角色的回应 · ${(item.comments || []).length}</summary>${comments || '<p class="space-source-caveat">尚无角色回应；没有自然想法时可以不评论。</p>'}</details>` : ""}
+      </div></article>`;
+  }
+
   function postHtml(post, {detail = false} = {}) {
     const author = post.author || profileFor(post.character_id);
     const archived = author.archived ? '<span class="space-archived-badge">已归档</span>' : "";
@@ -771,24 +803,26 @@
   }
 
   function updatePageNav() {
-    const selected = filterCharacterId ? "current" : "all";
+    const selected = filterCharacterId ? "current" : filterKind === "ALL" ? "all" : filterKind;
     for (const button of pageNav.querySelectorAll("[data-space-page-action]")) {
       if (button.dataset.spacePageAction === selected) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     }
     currentPageButton.hidden = CM.isGroupConversation() || !CM.state.characterId;
+    sourceFilter.hidden = Boolean(filterCharacterId) || !["ALL", "RSS"].includes(filterKind) || Boolean(detailPostId);
   }
 
   function updateFeedMeta() {
-    const loaded = postsById.size;
+    const loaded = feedKeys.size;
     meta.textContent = loaded
-      ? `已加载 ${loaded}${feedTotal ? ` / ${feedTotal}` : ""} 条 · ${feedActiveCharacterCount} 个活跃角色可看到新动态`
+      ? `已加载 ${loaded}${feedTotal ? ` / ${feedTotal}` : ""} 条 · 资讯不是人物经历，回应由角色自主决定`
       : `${feedActiveCharacterCount} 个活跃角色可看到新动态`;
+    if (filterKind === "TOPIC" && pulseCollectionEnabled === false) meta.textContent += " · 热点采集未开启，当前展示历史话题";
   }
 
   function updateFeedMore() {
     if (!more) return;
-    if (!opened || detailPostId || !postsById.size) {
+    if (!opened || detailPostId || !feedKeys.size) {
       more.classList.add("hidden");
       return;
     }
@@ -798,7 +832,7 @@
       ? "正在自动加载更多动态…"
       : feedHasMore
         ? "更多动态会自动加载"
-        : "已经看到全部动态";
+        : "已经看到全部内容";
   }
 
   function clearAutoPrefetch() {
@@ -833,6 +867,7 @@
       clearAutoPrefetch();
       autoPrefetchPages = 0;
       postsById = new Map();
+      feedKeys = new Set();
       feedLoaded = false;
       feedHasMore = false;
       feedNextBeforeId = null;
@@ -848,21 +883,29 @@
 
     const params = new URLSearchParams({limit:"10"});
     if (filterCharacterId) params.set("character_id", filterCharacterId);
-    if (append && feedNextBeforeId) params.set("before_id", String(feedNextBeforeId));
+    const mixed = !filterCharacterId && filterKind !== "POST";
+    if (mixed) {
+      params.set("kind", filterKind);
+      if (filterSourceId) params.set("source_id", String(filterSourceId));
+    }
+    if (append && feedNextBeforeId) params.set(mixed ? "cursor" : "before_id", String(feedNextBeforeId));
 
     let failed = false;
     try {
-      const data = await CM.api(`/v1/space/posts?${params.toString()}`);
+      const data = await CM.api(`/v1/space/${mixed ? "feed" : "posts"}?${params.toString()}`);
       if (epoch !== feedEpoch) return;
 
-      const posts = Array.isArray(data.posts) ? data.posts : [];
+      const entries = mixed ? (data.items || []) : (data.posts || []).map(post => ({key:`post:${post.id}`, kind:"POST", post}));
+      const posts = entries.filter(item => item.kind === "POST" && item.post).map(item => item.post);
       feedLoaded = true;
-      const freshPosts = posts.filter(post => !postsById.has(String(post.id)));
+      const freshEntries = entries.filter(item => !feedKeys.has(item.key));
+      entries.forEach(item => feedKeys.add(item.key));
       posts.forEach(post => postsById.set(String(post.id), post));
       feedHasMore = Boolean(data.has_more);
-      feedNextBeforeId = data.next_before_id ?? null;
-      feedTotal = Number(data.total || postsById.size);
+      feedNextBeforeId = (mixed ? data.next_cursor : data.next_before_id) ?? null;
+      feedTotal = Number(data.total || 0);
       feedActiveCharacterCount = Number(data.active_character_count || 0);
+      pulseCollectionEnabled = data.collection_status?.pulse_enabled ?? null;
 
       if (filterCharacterId) {
         const profile = profileFor(filterCharacterId);
@@ -870,18 +913,18 @@
         subtitle.textContent = "这个角色公开留下的动态";
       } else {
         title.textContent = "Space";
-        subtitle.textContent = "角色们公开留下的近况";
+        subtitle.textContent = filterKind === "TOPIC" ? "先看来源，再看不同角色的真实回应；历史话题保留原日期" : "角色近况、订阅资讯与世界话题，在这里相遇";
       }
       updatePageNav();
 
       if (append) {
-        if (freshPosts.length) feed.insertAdjacentHTML("beforeend", freshPosts.map(postHtml).join(""));
+        if (freshEntries.length) feed.insertAdjacentHTML("beforeend", freshEntries.map(feedEntryHtml).join(""));
       } else {
-        feed.innerHTML = posts.length
-          ? posts.map(postHtml).join("")
-          : '<div class="space-empty"><strong>这里还没有动态</strong><span>角色真正想公开表达时，内容会出现在这里。</span></div>';
+        feed.innerHTML = entries.length
+          ? entries.map(feedEntryHtml).join("")
+          : '<div class="space-empty"><strong>这里还没有内容</strong><span>已收集的订阅资讯、热点和角色自主表达会出现在这里，不强制生成评论。</span></div>';
       }
-      if (append && automatic && freshPosts.length) autoPrefetchPages += 1;
+      if (append && automatic && freshEntries.length) autoPrefetchPages += 1;
       updateFeedMeta();
       if (opened) refreshNotifications();
     } catch (error) {
@@ -905,13 +948,31 @@
     }
   }
 
-  async function open(characterId = null) {
+  async function open(characterId = null, kind = "ALL", sourceId = null) {
+    const navigation = ++navigationEpoch;
     if (detailPostId) await restorePostDetail({clearUrl:true, restoreFocus:false, loadFeedAfter:false});
+    if (navigation !== navigationEpoch) return;
+    clearAutoPrefetch();
+    ++feedEpoch;
+    feed.innerHTML = '<div class="space-loading">正在读取空间…</div>';
     filterCharacterId = characterId || null;
+    filterKind = kind;
+    filterSourceId = sourceId;
+    sourceSelect.value = sourceId || "";
     setOpen(true);
     updatePageNav();
     window.scrollTo({top:0, behavior:"auto"});
     await loadMentionProfiles();
+    if (navigation !== navigationEpoch || !opened) return;
+    if (!characterId && ["ALL", "RSS"].includes(kind)) {
+      try {
+        const data = await CM.api("/v1/rss/sources");
+        if (navigation !== navigationEpoch || !opened) return;
+        sourceSelect.innerHTML = '<option value="">全部订阅</option>' + (data.sources || []).map(source => `<option value="${CM.escapeHtml(source.id)}">${CM.escapeHtml(source.name)}</option>`).join("");
+        sourceSelect.value = sourceId || "";
+      } catch (error) { console.warn("[space] subscription filters", error); }
+    }
+    if (navigation !== navigationEpoch || !opened) return;
     await loadFeed();
     await refreshNotifications();
   }
@@ -924,6 +985,8 @@
   }
 
   function close() {
+    ++navigationEpoch;
+    ++feedEpoch;
     clearAutoPrefetch();
     stopVoice();
     closeLightbox({restoreFocus:false});
@@ -1198,6 +1261,7 @@
     const button = event.target.closest("[data-space-page-action]");
     if (!button) return;
     if (button.dataset.spacePageAction === "all") open(null).catch(console.error);
+    else if (["POST", "RSS", "TOPIC"].includes(button.dataset.spacePageAction)) open(null, button.dataset.spacePageAction).catch(console.error);
     else if (button.dataset.spacePageAction === "current") {
       if (!CM.isGroupConversation() && CM.state.characterId) open(CM.state.characterId).catch(console.error);
     } else if (button.dataset.spacePageAction === "world") {
@@ -1205,6 +1269,7 @@
       else window.location.assign("/?view=world");
     }
   });
+  sourceSelect.addEventListener("change", () => open(null, "RSS", sourceSelect.value || null).catch(console.error));
   notificationsButton.addEventListener("click", () => openNotifications().catch(console.error));
   notificationInbox.addEventListener("click", event => {
     const button = event.target.closest("[data-space-notification]");

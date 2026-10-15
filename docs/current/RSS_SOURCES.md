@@ -13,7 +13,9 @@ RSS / Atom
   -> Sources UI
 ```
 
-Collection deliberately stops at shared storage. The optional personal reading
+Collection deliberately stops at shared storage. Space may display these same
+shared items through its read-only typed feed, without copying them into
+`space_posts` or implying a character has read them. The optional personal reading
 path below consumes selected local items through World; it does not change ingestion.
 
 RSS ingestion does **not**:
@@ -108,7 +110,7 @@ The V1 surface intentionally stays small:
 
 1. RSS subscription list: add, enable/disable, manual refresh, confirmed cancellation and restoration (including historical article retention), and status.
 2. Information feed: two-column image/text cards, today's latest by default, all-history toggle, title search, preset type filters and incremental pagination. A sidebar lists real subscriptions and their article counts. Selecting a source opens its full history and scopes search, type filters and pagination to that source; selecting all subscriptions restores today's view. Source changes reset pagination and ignore older responses, while retaining keyword/type filters. Narrow widths below 380px use one column.
-3. Article detail: sanitized Feed HTML preserving paragraphs, headings, lists, links and inline images, with an explicit excerpt caveat, original links in the header and below the content, retry on failure, keyboard activation and Escape/back return preserving the source, other feed filters, position and focus. The bottom original link opens the article's HTTP(S) URL in a new tab; missing/unsafe URLs show an unavailable notice instead.
+3. Article detail: sanitized Feed HTML preserving paragraphs, headings, lists, links and inline images, with an explicit excerpt caveat, original links in the header and below the content, retry on failure, keyboard activation and Escape/back return preserving the source, other feed filters, position and focus. `/sources?item=<id>` opens the same reader directly from Space. The bottom original link opens the article's HTTP(S) URL in a new tab; missing/unsafe URLs show an unavailable notice instead.
 
 `content_html` is added by the repeatable `rss/002-rich-content` migration. `content_text` retains paragraph line breaks for API consumers. Refresh repairs existing articles in place without changing their IDs, first fetch or first publication times, keeping pagination sort keys stable. Old rows use their plain text until the next source refresh. Feed images are displayed through the item image endpoint, which only accepts URLs recorded on that article, checks public HTTP targets and redirects, applies the same size/deadline bounds and validates raster file signatures (PNG/JPEG/GIF/WebP/AVIF). Scripts, embedded frames, styles and event attributes are removed. Image failures remain visible with a retry action. Feeds providing only an excerpt or no image remain incomplete; no original-site scraping or invented cover is performed.
 

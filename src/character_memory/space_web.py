@@ -10,6 +10,7 @@ from character_memory.domain.models import SpaceMediaIntent, SpaceMediaIntentTyp
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, MAX_SPACE_MENTIONS, SpaceRepository
+from character_memory.space_feed import SpaceFeed
 
 
 logger = logging.getLogger("character_memory.space")
@@ -118,7 +119,7 @@ class SpaceDevVideoSmokeRequest(BaseModel):
 def attach_space_routes(app):
     """Attach Character Space without initializing the LLM runtime."""
 
-    from fastapi import HTTPException
+    from fastapi import HTTPException, Query
 
     access = getattr(app.state, "character_memory", None)
     if access is None:
@@ -356,6 +357,34 @@ def attach_space_routes(app):
                 for item in likes[:10]
             ],
         }
+
+    @app.get("/v1/space/feed")
+    def mixed_space_feed(
+        kind: str = Query(default="ALL", description="ALL / POST / RSS / TOPIC，确定性内容类型"),
+        limit: int = Query(default=10, ge=1, le=30),
+        cursor: str | None = Query(default=None, max_length=200),
+        source_id: int | None = Query(default=None, ge=1, description="只看指定 RSS 订阅"),
+        character_id: str | None = None,
+    ):
+        if character_id:
+            require_known(character_id)
+        try:
+            page = SpaceFeed(access.read_store).page(
+                kind=kind, limit=limit, cursor=cursor, source_id=source_id, character_id=character_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        for item in page["items"]:
+            if item["kind"] == "POST":
+                post = repository.get_post(item["id"])
+                item["post"] = post_payload(repository, post) if post else None
+            elif item["kind"] == "TOPIC":
+                for comment in item["comments"]:
+                    comment["author"] = profile_payload(comment["character_id"])
+        return {**page, "active_character_count": sum(1 for p in access.character_profiles() if "archived_at" not in p),
+                "collection_status": {"pulse_enabled": bool(getattr(access.settings, "world_pulse_enabled", False)),
+                                      "rss_enabled": bool(getattr(access.settings, "rss_enabled", True))},
+                "query": {"kind": kind, "source_id": source_id, "character_id": character_id}}
 
     @app.get("/v1/space/posts")
     def list_space_posts(character_id: str | None = None, limit: int = 10, before_id: int | None = None):

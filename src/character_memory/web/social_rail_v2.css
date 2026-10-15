@@ -1,6 +1,7 @@
-.space-mode .space-shell.cm-with-social-rail { display:grid; grid-template-columns:minmax(0,1fr) 260px; grid-template-areas:"heading rail" "feed rail"; align-content:start; align-items:start; gap:12px; padding-right:20px; }
+.space-mode .space-shell.cm-with-social-rail { display:grid; grid-template-columns:minmax(0,1fr) 260px; grid-template-areas:"heading rail" "filters rail" "feed rail"; align-content:start; align-items:start; gap:12px; padding-right:20px; }
 .cm-with-social-rail > .space-page-heading { grid-area:heading; min-width:0; }
 .cm-with-social-rail > .space-feed-wrap { grid-area:feed; min-width:0; }
+.cm-with-social-rail > .space-source-filter { grid-area:filters; min-width:0; }
 .cm-with-social-rail > .cm-social-rail { grid-area:rail; min-width:0; }
 .cm-social-rail { display:grid; gap:18px; padding-top:24px; }
 .cm-social-card { border:1px solid var(--ui-line); border-radius:18px; padding:22px; background:#fff; }
@@ -18,6 +19,6 @@
 .cm-space-context button,.cm-space-context a { display:block; padding:10px 12px; background:transparent; border:0; border-radius:12px; color:var(--ui-text); text-align:left; text-decoration:none; font:inherit; font-size:13px; }
 .cm-space-context button:hover,.cm-space-context a:hover { background:var(--ui-surface-sunken); color:var(--ui-accent); }
 .sidebar-collapsed .cm-space-context { display:none; }
-.cm-with-social-rail:has(.is-detail) { grid-template-columns:1fr !important; grid-template-areas:"heading" "feed" !important; padding-right:0 !important; }
+.cm-with-social-rail:has(.is-detail) { grid-template-columns:1fr !important; grid-template-areas:"heading" "filters" "feed" !important; padding-right:0 !important; }
 .cm-with-social-rail:has(.is-detail) .cm-social-rail { display:none; }
-@media(max-width:1300px){.space-mode .space-shell.cm-with-social-rail { grid-template-columns:minmax(0,1fr); grid-template-areas:"heading" "feed"; padding-right:0; }.cm-social-rail { display:none; }}
+@media(max-width:1300px){.space-mode .space-shell.cm-with-social-rail { grid-template-columns:minmax(0,1fr); grid-template-areas:"heading" "filters" "feed"; padding-right:0; }.cm-social-rail { display:none; }}

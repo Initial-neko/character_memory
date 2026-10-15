@@ -972,17 +972,38 @@ def _patch_flat_yaml(text: str, updates: dict[str, Any], *, remove: set[str] | N
     lines = text.splitlines()
     remaining = dict(updates)
     output: list[str] = []
-    top_level = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:")
-    for line in lines:
-        match = top_level.match(line)
-        if not match:
+    # Use YAML's value spans: replacing only the key line leaves orphaned block
+    # sequence items behind (including valid indentless YAML sequences).
+    root = yaml.compose(text, Loader=yaml.SafeLoader)
+    entries = {}
+    if isinstance(root, yaml.MappingNode):
+        for key, value in root.value:
+            if not isinstance(key, yaml.ScalarNode):
+                continue
+            end = value.end_mark.line + int(value.end_mark.column > 0)
+            if isinstance(value, (yaml.SequenceNode, yaml.MappingNode)):
+                # A block collection's end mark may include the next field's
+                # explanatory comments. Preserve that trailing trivia.
+                while end > key.start_mark.line + 1 and (
+                    not lines[end - 1].strip() or lines[end - 1].lstrip().startswith('#')
+                ):
+                    end -= 1
+            entries[key.start_mark.line] = (key.value, end)
+    skip_until = 0
+    for index, line in enumerate(lines):
+        if index < skip_until:
+            continue
+        entry = entries.get(index)
+        if entry is None:
             output.append(line)
             continue
-        key = match.group(1)
+        key, end = entry
         if key in remove:
+            skip_until = end
             continue
         if key in remaining:
             output.append(f"{key}: {_yaml_scalar(remaining.pop(key))}")
+            skip_until = end
             continue
         output.append(line)
     if remaining:
@@ -1135,6 +1156,11 @@ class SettingsStore:
         original_text = self._config_text()
         updated_text = _patch_flat_yaml(original_text, normalized_config) if normalized_config else original_text
         config_changed = updated_text != original_text
+        if config_changed:
+            try:
+                yaml.safe_load(updated_text)
+            except yaml.YAMLError as exc:
+                raise ValueError("生成的 YAML 无效，未修改配置。") from exc
 
         env_before = parse_env_file(self.env_path)
         changed_env = {

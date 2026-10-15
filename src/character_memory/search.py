@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 from urllib.parse import urlparse
 
@@ -44,6 +44,8 @@ class FetchedPage:
     content: str
     content_type: str = "text/plain"
     description: str = ""
+    links: list[dict[str, str]] = field(default_factory=list)
+    requested_url: str = ""
 
 
 class SearchProvider(ABC):

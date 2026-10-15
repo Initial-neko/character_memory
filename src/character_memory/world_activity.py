@@ -856,12 +856,44 @@ class WorldActivityService:
         if not pages:
             return {"refreshed": False, "topics": [], "errors": errors}
 
+        from character_memory.space_feed import source_url
+        origins = {source_url(getattr(page, "url", "")): "" for page in pages}
+        selected_links = {}
+        detail_limit = max(0, min(4, int(getattr(settings, "world_pulse_detail_max_pages", 2))))
+        for page in pages:
+            for link in getattr(page, "links", [])[:80]:
+                url = source_url(link.get("url", "")).split("#", 1)[0]
+                if not url or url in origins or url in selected_links:
+                    continue
+                if len(selected_links) >= detail_limit:
+                    break
+                selected_links[url] = source_url(getattr(page, "url", ""))
+        if selected_links:
+            # Only observed anchors may be followed, never a model-proposed URL.
+            # The existing browser validates each target and every redirect again.
+            if callable(fetch_many):
+                detail_pages, detail_errors = fetch_many(list(selected_links), max_chars=max_chars)
+            else:
+                detail_pages, detail_errors = [], []
+                for url in selected_links:
+                    try:
+                        detail_pages.append(fetcher.fetch(url, max_chars=max_chars))
+                    except Exception as exc:
+                        detail_errors.append({"url": url, "error": str(exc)[:800]})
+            errors.extend(detail_errors)
+            for page in detail_pages:
+                actual = source_url(getattr(page, "url", ""))
+                requested = source_url(getattr(page, "requested_url", "")) or actual
+                origins[actual] = selected_links.get(requested, "")
+                pages.append(page)
+
         blocks = []
         for index, page in enumerate(pages, start=1):
             blocks.append(
                 f"""[Aggregation Source {index}]
 Title: {getattr(page, "title", "")}
 URL: {getattr(page, "url", "")}
+Role: {"LINKED_PAGE" if origins.get(source_url(getattr(page, "url", ""))) else "CONFIGURED_SOURCE"}
 Rendered text:
 {getattr(page, "content", "")}
 """
@@ -885,6 +917,9 @@ Rendered text:
   不把标题推断成网友观点，不编造作者、日期、热度或共识；没有可引用原句就 evidence=[]。
 - 热度只是候选信号，不代表角色一定关心，也不代表一定要发 Space。
 - 不需要把每个榜单条目都塞进结果，没有可靠内容就少输出。
+- 输出具体事件或具体争议，不把“某页面未显示内容/只有导航”“多个平台热榜”包装成话题。
+- 已打开的 LINKED_PAGE 若支持该话题，优先引用它的编号；榜单索引不是原始报道。
+- 来源只证明页面实际提供了什么；区分报道、个人观点和传闻，不能根据名次推断共识。
 
 {chr(10).join(blocks)}
 """
@@ -911,13 +946,9 @@ Rendered text:
                     if url:
                         urls.append(url)
             if not urls:
-                urls = [
-                    str(getattr(page, "url", "") or "").strip()
-                    for page in pages
-                    if str(getattr(page, "url", "") or "").strip()
-                ][:3]
+                errors.append({"stage": "source_validation", "error": "topic has no valid source index", "title": draft.title})
+                continue
             evidence = []
-            from character_memory.space_feed import source_url
             for entry in draft.evidence:
                 if not 1 <= entry.source_index <= len(pages):
                     continue
@@ -930,6 +961,8 @@ Rendered text:
                 evidence.append({"kind": entry.kind, "quote": quote, "url": url,
                                  "author": entry.author if entry.author and entry.author in text else "",
                                  "published_at": entry.published_at if entry.published_at and entry.published_at in text else "",
+                                 "source_role": "LINKED_PAGE" if origins.get(url) else "CONFIGURED_SOURCE",
+                                 "discovered_from": origins.get(url) or "",
                                  "fetched_at": now.isoformat(), "verification": "EXACT_FETCHED_EXCERPT"})
             topics.append(self.repository.upsert_topic(draft, urls, now, evidence=evidence))
 

@@ -63,6 +63,16 @@ crawler are not implemented by this projection; those require actual source
 access and evidence, not generated stand-ins. Existing Pulse scheduling/config
 is respected: displaying history does not enable a disabled collector.
 
+Pulse refresh can follow a bounded number of links actually extracted from the
+configured pages (`world_pulse_detail_max_pages`, default 2, range 0–4). The
+existing browser's public-URL/redirect protections apply again. Model-generated
+URLs never select these targets. The same single digest call receives the
+configured pages and successfully fetched linked pages; matching excerpts retain
+the actual final URL, source role and discovery URL when known. A linked page is
+not automatically a reliable or first-hand report. Bad source indexes drop the
+topic instead of assigning every fetched source as a false citation. Fetch errors
+remain visible and never become “news topics” by design.
+
 ### Current contract
 
 The current implementation provides:

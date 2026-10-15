@@ -352,6 +352,8 @@ world_pulse_discussion_interval_minutes: 360
 
 # Maximum readable characters retained from each Pulse source.
 world_pulse_source_max_chars: 8000
+# 每轮最多额外打开榜单中实际存在的2个原文/讨论链接；0关闭，范围0–4；不新增摘要模型调用。需重启。
+world_pulse_detail_max_pages: 2
 
 # Maximum active topics retained/exposed by one Pulse refresh.
 world_pulse_max_topics: 8

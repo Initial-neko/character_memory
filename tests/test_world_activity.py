@@ -60,6 +60,53 @@ def test_pulse_evidence_requires_fetched_quote_and_survives_restart(tmp_path):
     store.close()
 
 
+def test_pulse_reads_bounded_original_links_before_one_digest_call(tmp_path):
+    store, access, model = make_access(tmp_path)
+    access.settings.world_pulse_detail_max_pages = 1
+    class LinkedFetcher:
+        calls = []
+        def fetch_many(self, urls, *, max_chars):
+            self.calls.append(list(urls))
+            if len(self.calls) == 1:
+                return [SimpleNamespace(url=urls[0], title='榜单', content='原文报道与讨论', links=[
+                    {'url':'javascript:alert(1)', 'title':'恶意链接不应跟随'},
+                    {'url':'https://original.example/report', 'title':'A real original report'},
+                    {'url':'https://original.example/extra', 'title':'Another report over budget'},
+                ])], []
+            return [SimpleNamespace(url=urls[0], title='原始报道', content='The release is available on Friday.', links=[])], []
+    fetcher = LinkedFetcher()
+    access.world_fetcher = fetcher
+    original = model.structured_for_session
+    def sourced(prompt, schema, session):
+        result = original(prompt, schema, session)
+        if schema is WorldPulseDigest:
+            result.topics = [WorldPulseTopicDraft(title='实际发布信息', summary='来源提及周五开放', source_indexes=[2],
+                evidence=[{'source_index':2,'quote':'The release is available on Friday.','kind':'REPORT'}])]
+        return result
+    model.structured_for_session = sourced
+    result = WorldActivityService(access, WorldPulseRepository(store)).refresh_pulse(now=NOW)
+    assert fetcher.calls[1] == ['https://original.example/report']
+    assert len(model.calls) == 1
+    assert result['topics'][0]['source_urls'] == ['https://original.example/report']
+    assert result['topics'][0]['evidence'][0]['source_role'] == 'LINKED_PAGE'
+    assert result['topics'][0]['evidence'][0]['discovered_from'] == 'https://aggregate.example/one'
+    store.close()
+
+
+def test_pulse_does_not_invent_sources_when_model_indexes_are_invalid(tmp_path):
+    store, access, model = make_access(tmp_path)
+    original = model.structured_for_session
+    def invalid(prompt, schema, session):
+        result = original(prompt, schema, session)
+        if schema is WorldPulseDigest:
+            result.topics = [WorldPulseTopicDraft(title='无来源话题', summary='不能自动把所有来源分配给它', source_indexes=[999])]
+        return result
+    model.structured_for_session = invalid
+    result = WorldActivityService(access, WorldPulseRepository(store)).refresh_pulse(now=NOW)
+    assert result['topics'] == []
+    store.close()
+
+
 class FakeContextBuilder:
     def build(self, character_id, query, *, at, recent_limit, observed_projection="PERSONAL"):
         return SimpleNamespace(

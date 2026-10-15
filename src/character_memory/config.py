@@ -253,6 +253,7 @@ class Settings(BaseModel):
     world_pulse_refresh_minutes: float = Field(default=60.0, ge=10.0, le=10080.0)
     world_pulse_discussion_interval_minutes: float = Field(default=360.0, ge=10.0, le=10080.0)
     world_pulse_source_max_chars: int = Field(default=8000, ge=1000, le=20000)
+    world_pulse_detail_max_pages: int = Field(default=2, ge=0, le=4)
     world_pulse_max_topics: int = Field(default=8, ge=1, le=12)
     world_pulse_commenter_count: int = Field(default=4, ge=0, le=10)
     world_browse_enabled: bool = True

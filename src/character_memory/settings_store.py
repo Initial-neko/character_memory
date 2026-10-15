@@ -220,6 +220,7 @@ SETTING_HELP: dict[str, str] = {
     "world_pulse_refresh_minutes": "自动刷新 World Pulse 的间隔分钟数。",
     "world_pulse_discussion_interval_minutes": "角色获得评论 Pulse Topic 机会的最小间隔。",
     "world_pulse_source_max_chars": "每个 Pulse 来源最多保留的可读正文字符数。",
+    "world_pulse_detail_max_pages": "每轮热点采集最多额外打开几篇榜单实际链接的页面；0 不跟进。复用浏览器防护，不新增摘要模型调用；需要重启。原文可访问不代表其内容已独立核实。",
     "world_pulse_max_topics": "一次 Pulse 刷新最多保留/暴露的主题数量。",
     "world_pulse_commenter_count": "一个 Pulse Topic 最多邀请多少角色独立判断是否评论。",
     "world_browse_enabled": "是否允许每个角色独立进行 Personal Browse。",
@@ -757,6 +758,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "step": 1,
                 "level": "advanced",
             },
+            {"name": "world_pulse_detail_max_pages", "label": "Pulse Linked Pages", "type": "number", "step": 1, "level": "advanced"},
             {
                 "name": "world_pulse_commenter_count",
                 "label": "Pulse Commenter Candidates",

@@ -591,6 +591,21 @@ def test_space_api_projects_audio_assets_as_voice_media(tmp_path: Path):
         assert item["url"] == f"/v1/media/{audio.id}"
 
 
+def test_mixed_space_feed_route_keeps_existing_post_contract(tmp_path: Path):
+    app = create_api(str(_config(tmp_path, count=1)))
+    attach_space_routes(app)
+    with TestClient(app) as client:
+        post = client.post('/v1/space/posts', json={'character_id': 'c00', 'content': '真实动态'}).json()['post']
+        data = client.get('/v1/space/feed').json()
+        assert data['items'][0]['kind'] == 'POST'
+        assert data['items'][0]['post'] == post
+        assert not client.get('/health').json()['runtime_loaded']
+        assert client.get('/v1/space/feed?cursor=broken').status_code == 400
+        assert client.get('/v1/space/feed?kind=WRONG').status_code == 400
+        assert client.get('/v1/space/feed?source_id=-1').status_code == 422
+        assert client.get('/v1/space/posts').json()['posts'] == [post]
+
+
 def test_browser_user_can_comment_and_reload_the_same_space_fact(tmp_path: Path):
     config = _config(tmp_path, count=2)
     app = create_api(str(config))

@@ -413,4 +413,6 @@
   window.matchMedia("(max-width: 760px)").addEventListener("change", syncReaderMode);
   syncReaderMode();
   renderSourceNavigation(); loadSources(); loadCategories(); loadFeed();
+  const entryItem = new URLSearchParams(window.location.search).get("item");
+  if (/^[1-9]\d*$/.test(entryItem || "")) openArticle(entryItem, null);
 })();

@@ -28,6 +28,38 @@ from character_memory.world_activity import (
 NOW = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
 
 
+def test_pulse_evidence_requires_fetched_quote_and_survives_restart(tmp_path):
+    store, access, model = make_access(tmp_path)
+    original = model.structured_for_session
+    def with_evidence(prompt, schema, session_id):
+        result = original(prompt, schema, session_id)
+        if schema is WorldPulseDigest:
+            result.topics[0] = WorldPulseTopicDraft.model_validate({
+                **result.topics[0].model_dump(),
+                'evidence': [
+                    {'source_index': 1, 'kind': 'OPINION', 'quote': '包含 Agent Memory 与开发工具趋势。'},
+                    {'source_index': 1, 'kind': 'REPORT', 'quote': '根本没有出现的事实'},
+                    {'source_index': 999, 'kind': 'OPINION', 'quote': '一个完全伪造的来源引用'},
+                    {'source_index': 1, 'kind': 'OPINION', 'quote': '        '},
+                ],
+            })
+        return result
+    model.structured_for_session = with_evidence
+    service = WorldActivityService(access, WorldPulseRepository(store))
+    topic = service.refresh_pulse(now=NOW)['topics'][0]
+    assert len(topic['evidence']) == 1
+    assert topic['evidence'][0]['url'] == 'https://aggregate.example/one'
+    assert topic['evidence'][0]['kind'] == 'OPINION'
+    assert topic['evidence'][0]['verification'] == 'EXACT_FETCHED_EXCERPT'
+    reloaded = WorldPulseRepository(store).get_topic(topic['id'])
+    assert reloaded['evidence'] == topic['evidence']
+    prompt = service._take_prompt(None, access.require_bundle().runtimes['c00'].context_builder.build('c00', '', at=NOW, recent_limit=1), reloaded)
+    assert 'EXACT_FETCHED_EXCERPT' in prompt
+    assert 'https://aggregate.example/one' in prompt
+    assert len(model.calls) == 1
+    store.close()
+
+
 class FakeContextBuilder:
     def build(self, character_id, query, *, at, recent_limit, observed_projection="PERSONAL"):
         return SimpleNamespace(

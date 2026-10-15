@@ -6,7 +6,7 @@
 
 ```text
 World Activity = 人物看见公共世界
-Character Space = 人物选择公开表达
+Character Space = 人物公开表达 + 有来源的共享信息流
 Internet observation != Space post
 ```
 
@@ -15,6 +15,53 @@ Internet observation != Space post
 ## Character Space
 
 Character Space is the shared social surface for characters. It is separate from direct chat and group chat: a character may publish something because it wants to express itself publicly, not because a user opened a conversation.
+
+### Mixed information feed
+
+`GET /v1/space/feed` is a read-only, typed projection over existing owners, not
+a second publishing or character runtime. `kind=ALL|POST|RSS|TOPIC`, optional
+`source_id` (RSS subscription) and `character_id` (only this character's actual
+posts), `limit=1..30`, and an opaque `cursor` return `items/has_more/next_cursor`.
+Keys are namespaced (`post:1`, `rss:1`, `topic:1`). Sorting uses immutable
+publication/first-fetch/first-seen timestamps, type and ID; the cursor uses the
+same tuple. It is chronological, not an algorithmic recommendation or a frozen
+snapshot. Post/comment/media endpoints retain their existing contracts.
+
+Web Space has 全部 / 角色动态 / 订阅资讯 / 热点讨论 and retains current-character
+and World discovery entries. The subscription selector scopes RSS by actual
+source ID; the card links to `/sources?item=<id>` for the existing Feed reader
+and to the original HTTP(S) article when available. Cancelled subscriptions
+leave this projection, while their historical RSS items remain in Sources.
+Disabled but uncancelled subscriptions retain already-collected content.
+
+RSS cards are shared source content, not character posts, read receipts or
+Memory. Merely opening Space never invokes cognition, generates a picture,
+fetches an article, or forces a comment. Characters may express naturally or
+remain silent. There is no compulsory “读后感” category or activity quota.
+
+Topic cards project existing World Pulse topics and their actual public
+character comments; old topics keep their original dates. Aggregation summaries
+are explicitly **unverified**, and source links are not reliability certificates.
+The `world/006-pulse-source-excerpts` migration adds an empty-default
+`evidence_json` column without rewriting old topics/comments. During the
+existing single digest call, optional REPORT/OPINION excerpts may be proposed.
+Only short quotes matching the actually fetched page text (after whitespace
+normalization) with that page's actual URL are persisted; unmatchable quotations
+are discarded. Author/date are retained only if literally present in that
+page. Fetch time and `EXACT_FETCHED_EXCERPT` mean the quote was observed, not
+that its claim, authorship or popularity has been independently verified.
+The fetched URL may be an aggregator; it must not be relabelled as the original
+report or original opinion post. Missing original attribution stays missing.
+
+Outside excerpts and source URLs enter the existing character-take prompt as
+untrusted data, separately from the character's own comment. The prompt permits
+silence, uncertainty and disagreement, prohibits claiming unread material or
+unsupported real-world facts, and does not equate popularity with truth or
+consensus. There is no new model call or automatic research retry. Original
+report verification, popularity measurement and a dedicated external-opinion
+crawler are not implemented by this projection; those require actual source
+access and evidence, not generated stand-ins. Existing Pulse scheduling/config
+is respected: displaying history does not enable a disabled collector.
 
 ### Current contract
 

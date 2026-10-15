@@ -41,6 +41,8 @@ def test_new_candidate_preference_reaches_both_generation_paths_without_extra_ca
         settings.encounter_persona_preference = preference
     else:
         assert '成年女性' in settings.encounter_persona_preference
+        assert '18–25' in settings.encounter_persona_preference
+        assert '可爱、活泼、有活力' in settings.encounter_persona_preference
     expected = settings.encounter_persona_preference
     descriptions, seed_prompts = [], []
     def generate(description, **kwargs):

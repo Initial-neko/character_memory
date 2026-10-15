@@ -44,6 +44,7 @@ class ActionType(str, Enum):
     # P0.19 internal visual-tool intent. This is not a visible chat message by
     # itself; direct-chat orchestration may turn it into a generated IMAGE event.
     GENERATE_IMAGE = "GENERATE_IMAGE"
+    DELEGATE_TASK = "DELEGATE_TASK"
     # Space-only social actions. They are intentionally not part of
     # EXPRESSIVE_ACTIONS, so PersonRuntime never persists them as chat messages.
     SPACE_LIKE = "SPACE_LIKE"
@@ -114,6 +115,7 @@ class ActionDecision(BaseModel):
     image_id: str | None = None
     image_purpose: str | None = None
     visual_intent: str | None = None
+    task: str | None = Field(default=None, max_length=240)
     # Space-only structured mention. When true on SPACE_COMMENT, persist an
     # unread in-app notification for the user; it has no effect on chat.
     mentions_user: bool = False
@@ -138,6 +140,12 @@ class ActionDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_message_contract(self):
+        if self.type == ActionType.DELEGATE_TASK:
+            self.task = str(self.task or "").strip()
+            if not self.task:
+                raise ValueError("DELEGATE_TASK requires task")
+            self.message = None
+            return self
         message_actions = {
             ActionType.REPLY,
             ActionType.MINIMAL_RESPONSE,

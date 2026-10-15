@@ -84,9 +84,10 @@ class CapabilityExecutor:
 
     @staticmethod
     def _denial(request: CapabilityRequest) -> str:
-        if request.channel != "WORLD":
+        task = request.channel == "DIRECT" and request.capability == "CLAUDE_TASK"
+        if request.channel != "WORLD" and not task:
             return "CHANNEL_DENIED"
-        if request.capability not in {"WEB_SEARCH", "READ_RSS"}:
+        if request.capability not in {"WEB_SEARCH", "READ_RSS"} and not task:
             return "CAPABILITY_DENIED"
         if any(not isinstance(value, str) or not value.strip() or len(value) > 256
                for value in (request.request_id, request.character_id, request.opportunity_id)):
@@ -122,7 +123,7 @@ class CapabilityExecutor:
         policy = {"backend", "claude_daily_max", "claude_daily_budget_usd", "claude_max_budget_usd", "cost_saving"}
         optional = {"claude_timeout_seconds", "claude_max_turns", "claude_max_tool_calls", "claude_model", "role_grant", "claude_skills"}
         if bounds.get("backend") == "claude":
-            if bounds.get("role_grant") != "claude_research":
+            if bounds.get("role_grant") != ("claude_task" if task else "claude_research"):
                 return "ROLE_CAPABILITY_DENIED"
             if not base | policy <= set(bounds) or set(bounds) - base - policy - optional:
                 return "INVALID_CONSTRAINTS"
@@ -152,7 +153,7 @@ class CapabilityExecutor:
                     return "INVALID_CONSTRAINTS"
             if "claude_model" in bounds and (not isinstance(bounds["claude_model"], str) or len(bounds["claude_model"]) > 120):
                 return "INVALID_CONSTRAINTS"
-        elif set(bounds) != base:
+        elif task or set(bounds) != base:
             return "INVALID_CONSTRAINTS"
         if (any(type(bounds[key]) is not int for key in base)
                 or not 1 <= bounds["max_pages"] <= 4
@@ -169,7 +170,7 @@ class CapabilityExecutor:
             return CapabilityResult(request.request_id, "DENIED", reason=denial)
         now = now or datetime.now().astimezone()
         payload = asdict(request)
-        is_claude = request.capability == "WEB_SEARCH" and request.constraints.get("backend") == "claude"
+        is_claude = request.capability in {"WEB_SEARCH", "CLAUDE_TASK"} and request.constraints.get("backend") == "claude"
         metadata = {}
         # Reserve before any external call; failed/time-out attempts consume the
         # opportunity's finite allowance just like successful attempts.

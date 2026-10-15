@@ -124,6 +124,7 @@ def test_production_eager_warmup_starts_runtime_without_waiting_for_first_chat(t
     class FakeBundle:
         settings = SimpleNamespace(chat_model="fake", vision_model="fake")
         characters = []
+        runtimes = {}
         init_timings = {"total_ms": 1.0}
 
         def close(self):

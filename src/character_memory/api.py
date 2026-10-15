@@ -133,6 +133,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             runtime_loading = True
             try:
                 app_bundle = build_app(config_path, store=read_store)
+                from character_memory.runtime.direct_research import DirectResearchService
+                research = DirectResearchService(settings,read_store,services.world_observer,services.claude_runner,character_profiles)
+                for person_runtime in app_bundle.runtimes.values():
+                    person_runtime.research_service = research
                 runtime_error = None
                 logger.info(
                     "api.runtime init ready model=%s vision_model=%s characters=%d total_ms=%.1f",
@@ -182,6 +186,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
             call_policy=CallInvitationPolicy.from_settings(settings),
         )
         current.runtimes[character_id] = runtime
+        from character_memory.runtime.direct_research import DirectResearchService
+        runtime.research_service = DirectResearchService(settings,read_store,services.world_observer,services.claude_runner,character_profiles)
         if isinstance(getattr(current.chat, "runtime", None), dict):
             current.chat.runtime[character_id] = runtime
         refresh_runtime_sticker_catalog(global_sticker_catalog())

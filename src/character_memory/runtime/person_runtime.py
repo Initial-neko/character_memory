@@ -108,6 +108,7 @@ class PersonRuntime:
         self.intent_policy = intent_policy or IntentPolicy()
         self.call_policy = call_policy or CallInvitationPolicy()
         self._call_invitations = None
+        self.research_service = None
         self.sticker_retriever = StickerRetriever(embeddings)
         self.context_builder = PersonContextBuilder(store, recall, persona)
 
@@ -520,7 +521,14 @@ class PersonRuntime:
             image_data_urls=image_data_urls,
             allow_generate_image=not direct_visual_permission(event, store=self.store),
             allow_call_invite=self._call_available(event),
+            context_suffix=self.research_service.prompt(event) if self.research_service else '',
         )
+        research_info = None
+        if self.research_service is not None:
+            evaluation, research_info = self.research_service.resolve(self,event,evaluation,still_current=commit_guard)
+        else:
+            from character_memory.runtime.direct_research import DirectResearchService
+            evaluation.reaction = DirectResearchService.strip(evaluation.reaction)
         timings.update(evaluation.timings)
         memories = evaluation.memories
         recent = evaluation.recent
@@ -653,6 +661,7 @@ class PersonRuntime:
                             "source_event_id": event.id,
                             "source_event_type": event.event_type.value,
                             "conversation_id": conversation_id,
+                            **({'capability_request_id':research_info['request_id']} if research_info and research_info.get('request_id') else {}),
                             **behavior_metadata(event, action),
                         },
                     )
@@ -698,6 +707,7 @@ class PersonRuntime:
                     "image_decisions": image_decisions,
                     "channel_decisions": channel_decisions,
                     "call_invitation_decisions": call_decisions,
+                    "direct_delegation": research_info,
                     "memory_candidates": [candidate.model_dump(mode="json") for candidate in reaction.memory_candidates],
                     "memory_decisions": memory_decisions,
                     "created_memory_ids": created_memory_ids,

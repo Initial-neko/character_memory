@@ -225,6 +225,7 @@ SETTING_HELP: dict[str, str] = {
     "world_pulse_commenter_count": "一个 Pulse Topic 最多邀请多少角色独立判断是否评论。",
     "world_browse_enabled": "是否允许每个角色独立进行 Personal Browse。",
     "world_browse_execution_backend": "World WEB_SEARCH 后端；direct 保留现有服务，claude 使用每次独立且不继承历史的本地 claude -p。需重启 Character Runtime。",
+    "direct_claude_tasks_enabled": "允许单聊人物在本轮主动选择委托一项问题给 fresh claude -p；还需人物独立 claude_task 授权。不开启 World 后端，不授权文件/命令；每次最多一次委托，结果不递归。需重启。",
     "claude_execution_model": "Claude 模型；留空沿用本地 CLI 认证配置。不自动切换模型。需重启。",
     "claude_execution_timeout_seconds": "单项 Claude 任务的总超时秒数；超时撤销工具并结束进程。需重启。",
     "claude_execution_max_turns": "单项 Claude 任务最多 agentic turns，不等于工具调用或模型请求数。需重启。",
@@ -768,6 +769,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "help": "只是候选人数；每个角色仍可独立判断保持沉默。",
             },
             {"name": "world_browse_enabled", "label": "Personal Browse", "type": "checkbox", "level": "advanced"},
+            {"name": "direct_claude_tasks_enabled", "label": "Direct Claude Tasks", "type": "checkbox", "level": "advanced"},
             {"name": "world_rss_reading_enabled", "label": "Personal RSS Reading", "type": "checkbox", "level": "advanced"},
             {"name": "world_cost_saving_enabled", "label": "Optional World Cost Saving", "type": "checkbox", "level": "advanced"},
             {

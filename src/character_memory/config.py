@@ -258,6 +258,7 @@ class Settings(BaseModel):
     world_pulse_commenter_count: int = Field(default=4, ge=0, le=10)
     world_browse_enabled: bool = True
     world_browse_execution_backend: Literal["direct", "claude"] = "direct"
+    direct_claude_tasks_enabled: bool = False
     claude_execution_model: str = Field(default="", max_length=120)
     claude_execution_timeout_seconds: float = Field(default=120, ge=1, le=600)
     claude_execution_max_turns: int = Field(default=6, ge=1, le=20)

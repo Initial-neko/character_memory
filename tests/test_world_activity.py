@@ -40,6 +40,7 @@ def test_pulse_evidence_requires_fetched_quote_and_survives_restart(tmp_path):
                     {'source_index': 1, 'kind': 'OPINION', 'quote': '包含 Agent Memory 与开发工具趋势。'},
                     {'source_index': 1, 'kind': 'REPORT', 'quote': '根本没有出现的事实'},
                     {'source_index': 999, 'kind': 'OPINION', 'quote': '一个完全伪造的来源引用'},
+                    {'source_index': 1, 'kind': 'OPINION', 'quote': '        '},
                 ],
             })
         return result

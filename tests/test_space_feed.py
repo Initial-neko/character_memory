@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import base64
+import json
 
 import pytest
 
@@ -61,6 +63,9 @@ def test_cursor_ties_filters_and_new_arrivals(mixed):
         feed.page(cursor='bad')
     with pytest.raises(ValueError):
         feed.page(kind='WRONG')
+    oversized = base64.urlsafe_b64encode(json.dumps([10**40, 'RSS', 1]).encode()).decode()
+    with pytest.raises(ValueError):
+        feed.page(cursor=oversized)
 
 
 def test_cancelled_subscriptions_leave_space_but_keep_rss_history(mixed):

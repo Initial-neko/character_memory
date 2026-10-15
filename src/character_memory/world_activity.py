@@ -925,7 +925,7 @@ Rendered text:
                 text = " ".join(str(getattr(page, "content", "")).split())
                 quote = " ".join(entry.quote.split())
                 url = source_url(getattr(page, "url", ""))
-                if not url or quote not in text:
+                if not url or len(quote) < 8 or quote not in text:
                     continue
                 evidence.append({"kind": entry.kind, "quote": quote, "url": url,
                                  "author": entry.author if entry.author and entry.author in text else "",

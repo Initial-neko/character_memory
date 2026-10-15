@@ -33,6 +33,7 @@ class SpaceFeed:
                 after = json.loads(base64.urlsafe_b64decode(cursor.encode('ascii')))
                 if (not isinstance(after, list) or len(after) != 3
                         or type(after[0]) is not int or type(after[2]) is not int
+                        or not -(2**63) <= after[0] < 2**63 or not 1 <= after[2] < 2**63
                         or after[1] not in {'POST', 'RSS', 'TOPIC'}):
                     raise ValueError()
             except (ValueError, TypeError, UnicodeError) as exc:

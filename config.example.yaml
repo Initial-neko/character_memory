@@ -431,6 +431,8 @@ cost_saving_group_max_speakers_per_turn: 3
 
 # Master switch for scheduled Random Encounter opportunities.
 encounter_enabled: true
+# 新来客使用当前生图服务生成一次肖像；刷新复用，失败仅手动重试。关闭保留已有图。
+encounter_portraits_enabled: true
 
 # Minutes between encounter opportunities.
 encounter_interval_minutes: 1440

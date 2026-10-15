@@ -60,27 +60,32 @@ body.cm-user-page {
 @media(max-width:620px) { .cm-global-brand span { display:none; } .cm-global-header { justify-content:space-between; gap:6px; } .cm-user-page .topbar-actions { gap:4px; } .cm-user-page .cm-shared-button { padding:8px; font-size:12px; } }
 
 /* One image-led presentation for every user surface; real media keeps its ratio. */
-.cm-user-page { --cm-sidebar-expanded:304px; --cm-sidebar-width:var(--cm-sidebar-expanded); }
+.cm-user-page { --cm-sidebar-expanded:272px; --cm-sidebar-width:var(--cm-sidebar-expanded); }
 .cm-global-brand img { object-fit:contain; }
 .cm-global-header { background:#fff; }
 .cm-user-page:not(.space-mode):not(.world-mode):not(.profile-mode) .chat-shell { margin:14px 18px 0; border:1px solid var(--ui-line); border-radius:20px 20px 0 0; min-height:calc(100dvh - 86px); }
 .cm-user-page .topbar { border-radius:20px 20px 0 0; }
-.cm-user-page .character-item { grid-template-columns:56px minmax(0,1fr); padding-block:15px; }
-.cm-user-page .character-avatar { width:56px; height:56px; }
-.cm-user-page .character-name { font-size:15px; }
+.cm-user-page .character-item { grid-template-columns:44px minmax(0,1fr); padding-block:11px; gap:10px; }
+.cm-user-page .character-avatar { width:44px; height:44px; }
+.cm-user-page .character-name { font-size:14px; }
 .cm-user-page .character-avatar-image { object-position:center 36%; }
-.cm-user-page .avatar { width:46px; height:46px; overflow:hidden; }
+.cm-user-page .avatar { width:36px; height:36px; overflow:hidden; flex-shrink:0; }
 .cm-user-page .message-row.user .avatar { display:grid; background:#e5def9; color:#5b4589; }
 .cm-user-page .message-row.user .avatar:empty::before { content:'你'; font-size:12px; }
-.cm-user-page .bubble { font-size:16px; line-height:1.8; }
-.cm-user-page .chat { width:100%; max-width:1200px; padding:22px 26px 178px; }
+.cm-user-page .bubble { font-size:14px; line-height:1.65; padding:10px 14px; border-radius:15px; }
+.cm-user-page .chat { width:100%; max-width:1100px; padding:18px 24px max(136px,calc(var(--cm-composer-height,112px) + 24px)); }
 .cm-user-page .image-bubble { width:min(380px,100%); margin-top:8px; border:1px solid var(--ui-line); box-shadow:0 4px 16px rgba(48,30,93,.05); }
 .cm-user-page .image-bubble img { width:100%; height:auto; max-height:480px; object-fit:contain; }
-.cm-user-page .composer-wrap { padding:12px 36px 14px; }
-.cm-user-page .composer { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:12px 15px; }
-.cm-user-page .composer textarea { order:-1; flex:1 0 100%; width:100%; min-height:36px; padding:5px; }
+.cm-user-page .composer-wrap { padding:8px 24px 10px; }
+.cm-user-page .composer { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:8px 12px; border-radius:16px; }
+.cm-user-page .composer textarea { order:-1; flex:1 0 100%; width:100%; min-height:28px; padding:3px; font-size:14px; }
+.cm-user-page .composer button { height:34px; min-height:34px; }
+.cm-user-page .topbar { min-height:66px; padding:8px 20px; }
+.cm-user-page .header-avatar { width:38px; height:38px; flex-basis:38px; }
+.cm-user-page .topbar h1 { font-size:17px; }
+.cm-user-page .meta { font-size:10px; margin-top:5px; }
 .cm-user-page .composer #sendButton { margin-left:auto; }
-.cm-user-page .message-row { margin-block:16px; }
+.cm-user-page .message-row { margin-block:12px; gap:10px; }
 .cm-user-page .group-avatar img { width:100%; height:100%; object-fit:cover; }
 .cm-user-page .group-avatar:has(img) { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); gap:1px; overflow:hidden; padding:0; }
 .cm-shared-button { display:inline-flex; align-items:center; gap:8px; }

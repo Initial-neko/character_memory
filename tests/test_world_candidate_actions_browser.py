@@ -132,6 +132,7 @@ def test_world_candidate_chat_accept_confirmation_and_dismiss(page, live_world_c
     assert access.settings.api_key == ""
     assert page.request.get(base + "/health").json()["runtime_loaded"] is False
 
+
     accept_card = world.locator(f'[data-encounter-id="{candidate_ids["accept"]}"]')
     expect(accept_card).to_be_visible()
     accept_button = accept_card.get_by_role("button", name="留下 TA")
@@ -162,3 +163,49 @@ def test_world_candidate_chat_accept_confirmation_and_dismiss(page, live_world_c
     dismissed_candidate = next(item for item in closed["encounters"] if item["id"] == candidate_ids["dismiss"])
     assert dismissed_candidate["status"] == "DISMISSED"
     assert not any(method == "POST" and "/v1/encounters/dev/" in url for method, url in requests)
+
+
+def test_world_portrait_button_persists_real_image_and_refresh_is_free(page, live_world_candidates, tmp_path):
+    import io
+    from types import SimpleNamespace
+    from PIL import Image
+    from playwright.sync_api import expect
+    from character_memory.avatars import AvatarStore
+    from character_memory.visual_generation import ImageGenerationResult
+    base, ids, _, access, _ = live_world_candidates
+    image = io.BytesIO()
+    Image.new('RGB', (300, 400), '#a08bc9').save(image, format='PNG')
+    calls = []
+    def generate(request):
+        calls.append(request)
+        return ImageGenerationResult(provider='test', model='test', payload=image.getvalue(), mime_type='image/png')
+    original_store = access.services.avatar_store
+    original_providers = access.services.image_generation_providers
+    access.services.avatar_store = AvatarStore(tmp_path / 'guest-portraits')
+    access.services.image_generation_providers = {'test': SimpleNamespace(configured=lambda: True,
+        available=lambda: True, generate=generate)}
+    access.settings.image_generation_provider = 'test'
+    access.settings.encounter_portraits_enabled = True
+    from character_memory.encounter import EncounterService
+    access.encounter_service.portraits = EncounterService(access, access.encounter_repository).portraits
+    try:
+        page.goto(base + '/?view=world')
+        card = page.locator(f'[data-encounter-id="{ids["chat"]}"]')
+        expect(card).to_be_visible()
+        assert not calls
+        card.get_by_role('button', name='生成肖像').click()
+        portrait = card.locator('.encounter-portrait > img')
+        expect(portrait).to_be_visible()
+        page.wait_for_function("""() => {const img=document.querySelector('.encounter-portrait > img'); return img?.naturalWidth>0;}""")
+        url = portrait.get_attribute('src')
+        assert page.request.get(base + url).headers['content-type'] == 'image/png'
+        assert len(calls) == 1
+        assert page.request.post(f'{base}/v1/encounters/{ids["chat"]}/portrait').ok
+        page.reload()
+        expect(card.locator('.encounter-portrait > img')).to_have_attribute('src', url)
+        assert len(calls) == 1
+        assert page.request.post(base + '/v1/encounters/9999/portrait').status == 404
+    finally:
+        access.services.avatar_store.close()
+        access.services.avatar_store = original_store
+        access.services.image_generation_providers = original_providers

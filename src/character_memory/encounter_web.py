@@ -61,6 +61,7 @@ def attach_encounter_routes(app):
         soft_limit = int(getattr(access, "soft_active_characters", 10))
         return {
             **candidate,
+            "portrait_url": service.portrait_url(candidate["id"]),
             "messages": repository.list_messages(candidate["id"], limit=50),
             "active_character_count": active_count(),
             "active_character_limit": limit,
@@ -112,6 +113,29 @@ def attach_encounter_routes(app):
     @app.post("/v1/encounters/dev/due")
     def force_encounter_due():
         return {"state": scheduler.force_due(now=datetime.now().astimezone())}
+
+    @app.get("/v1/encounters/{candidate_id}/portrait/asset")
+    def encounter_portrait_asset(candidate_id: int):
+        from fastapi.responses import FileResponse
+        if repository.get_candidate(candidate_id) is None:
+            raise HTTPException(status_code=404, detail="来客不存在")
+        path = service.portraits.asset_path(f"encounter-{candidate_id}") if service.portraits else None
+        if path is None:
+            raise HTTPException(status_code=404, detail="肖像尚未生成")
+        return FileResponse(path)
+
+    @app.post("/v1/encounters/{candidate_id}/portrait")
+    def generate_encounter_portrait(candidate_id: int):
+        try:
+            url = service.ensure_portrait(candidate_id)
+            return {"portrait_url": url}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="来客不存在") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("encounter.portrait request_failed candidate=%s", candidate_id, exc_info=True)
+            raise HTTPException(status_code=502, detail="肖像生成失败，可以稍后手动重试") from exc
 
     @app.post("/v1/encounters/{candidate_id}/seen")
     def see_encounter(candidate_id: int):

@@ -138,6 +138,17 @@
     host.append(fallback);
   }, true);
   let readerMoved = false;
+  const composerWrap = document.querySelector('.composer-wrap');
+  if (composerWrap) {
+    new ResizeObserver(() => {
+      // The input and call notices can grow. Reserve the actual occupied space
+      // so a smaller base composer never hides the last message.
+      document.body.style.setProperty('--cm-composer-height', `${composerWrap.getBoundingClientRect().height}px`);
+      if (!readerMoved && !document.body.matches('.space-mode,.world-mode,.profile-mode')) {
+        requestAnimationFrame(() => CM.scrollToBottom(false));
+      }
+    }).observe(composerWrap);
+  }
   window.addEventListener('wheel', () => { readerMoved = true; }, {passive:true});
   window.addEventListener('touchmove', () => { readerMoved = true; }, {passive:true});
   window.addEventListener('keydown', event => {

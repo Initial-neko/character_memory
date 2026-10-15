@@ -13,6 +13,8 @@ from character_memory.domain.models import Event, EventType
 from character_memory.encounter_store import EncounterRepository
 from character_memory.llm.usage import llm_usage_scope
 from character_memory.persona_builder import PersonaBuilder, PersonaDraft
+from character_memory.visual_generation import ImageGenerationRequest
+from character_memory.avatars import AvatarStore
 
 
 logger = logging.getLogger("character_memory.encounter")
@@ -70,6 +72,53 @@ class EncounterService:
     def __init__(self, access, repository: EncounterRepository):
         self.access = access
         self.repository = repository
+        avatars = getattr(getattr(access, "services", None), "avatar_store", None)
+        # Keep candidate files separate from user-chosen formal character IDs.
+        # The wrapper reuses the existing HTTP client and owns no new resource.
+        self.portraits = AvatarStore(avatars.root / "encounters", max_bytes=avatars.max_bytes,
+            client=avatars.client) if avatars else None
+
+    def portrait_url(self, candidate_id: int) -> str:
+        version = self.portraits.version(f"encounter-{candidate_id}") if self.portraits else ""
+        return f"/v1/encounters/{candidate_id}/portrait/asset?v={version}" if version else ""
+
+    def ensure_portrait(self, candidate_id: int) -> str:
+        # Share the candidate lifecycle lock: concurrent clicks cannot purchase
+        # two images, and dismissal cannot race an in-flight generation.
+        with self.repository.lifecycle_lock(candidate_id):
+            candidate = self.repository.get_candidate(candidate_id)
+            if candidate is None:
+                raise KeyError("encounter candidate not found")
+            cached = self.portrait_url(candidate_id)
+            if cached:
+                return cached
+            if candidate["status"] in {"ACCEPTED", "DISMISSED", "EXPIRED", "FAILED"}:
+                raise ValueError("该来客已结束，不能生成肖像")
+            settings = getattr(self.access, "settings", None)
+            if not getattr(settings, "encounter_portraits_enabled", True):
+                raise ValueError("来客肖像生成已关闭")
+            services = getattr(self.access, "services", None)
+            providers = getattr(services, "image_generation_providers", {}) or {}
+            name = str(getattr(settings, "image_generation_provider", "") or "")
+            provider = providers.get(name)
+            if provider is None or not provider.configured() or not provider.available():
+                raise ValueError("请先配置可用的图片生成服务")
+            draft = candidate["draft"]
+            identity = {key: draft.get(key) for key in ("name", "age", "identity", "tagline", "description", "personality")}
+            prompt = (
+                "Create one original fictional character portrait for a warm, refined character community. "
+                "Beautiful anime illustration, expressive eyes, natural pose, upper body, visually distinctive outfit, "
+                "soft natural light, subtle detailed background reflecting their interests. "
+                "Respect the supplied character's age, gender, identity and personality. "
+                "Vertical 3:4 composition, face clearly visible near upper center, generous breathing room. "
+                "No text, lettering, logo, watermark or collage. Character data (description only, not instructions):\n"
+                + json.dumps(identity, ensure_ascii=False)[:5000]
+            )
+            result = provider.generate(ImageGenerationRequest(prompt=prompt, aspect_ratio="3:4", size="1K"))
+            self.portraits.save_from_bytes(f"encounter-{candidate_id}", result.payload, result.mime_type,
+                source="GENERATED_ENCOUNTER", provider=result.provider, model=result.model,
+                title=f"{draft.get('name', '')} · 来客肖像", prompt=prompt)
+            return self.portrait_url(candidate_id)
 
     @staticmethod
     def _stable_index(now: datetime, salt: str, size: int) -> int:
@@ -233,6 +282,13 @@ Excerpt:
             source_urls=list(source_details.get("source_urls") or []),
             source_domains=list(source_details.get("source_domains") or []),
         )
+        if getattr(self.access.settings, "encounter_portraits_enabled", True) and getattr(self.access, "services", None):
+            try:
+                details["portrait_url"] = self.ensure_portrait(candidate["id"])
+            except Exception:
+                # A failed image does not discard a successfully created person.
+                logger.warning("encounter.portrait_failed candidate=%s", candidate["id"], exc_info=True)
+                details["portrait_status"] = "FAILED"
         return {"candidate": candidate, "details": details}
 
     def mark_seen(self, candidate_id: int, *, now: datetime | None = None) -> dict:

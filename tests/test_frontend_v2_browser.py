@@ -7,6 +7,19 @@ from test_life_conversation import isolated_app
 pytestmark = [pytest.mark.browser, pytest.mark.skipif(os.getenv('RUN_PLAYWRIGHT') != '1', reason='explicit browser run')]
 
 
+def test_desktop_chat_has_compact_readable_sizes(page, live_life):
+    from playwright.sync_api import expect
+    base, character, _, _, _ = live_life
+    page.set_viewport_size({'width': 1440, 'height': 960})
+    page.goto(base + '/')
+    page.wait_for_function("document.body.dataset.cmReady === 'true'")
+    page.locator(f'[data-character="{character}"]').click()
+    expect(page.locator('.composer')).to_be_visible()
+    assert page.locator('.composer').bounding_box()['height'] <= 115
+    assert page.locator('.topbar').bounding_box()['height'] <= 95
+    assert page.locator('.sidebar').bounding_box()['width'] == 272
+
+
 def test_late_chat_image_keeps_latest_message_above_composer(page, live_life):
     from datetime import datetime, timedelta, timezone
     import io
@@ -45,7 +58,7 @@ def test_late_chat_image_keeps_latest_message_above_composer(page, live_life):
       const last=document.querySelector('.message-row:last-child');
       const composer=document.querySelector('.composer-wrap');
       return image?.complete && image.naturalWidth>0 && last.getBoundingClientRect().bottom<=composer.getBoundingClientRect().top;
-    }""")
+    }""", timeout=5000)
 
 
 def test_chat_broken_image_has_readable_fallback(page, live_life):

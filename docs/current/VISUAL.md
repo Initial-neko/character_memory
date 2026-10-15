@@ -839,6 +839,8 @@ This means：
 
 ### 8. Boundaries
 
+World guest portraits reuse AvatarStore under the candidate-owned `encounter-{id}` namespace, separate from formal character avatars. `GET /v1/encounters` exposes a versioned `portrait_url`; `GET /v1/encounters/{id}/portrait/asset` reads the file; `POST /v1/encounters/{id}/portrait` generates or reuses one image under the candidate lifecycle lock. The configured image provider receives the existing draft directly, without another prompt-planning LLM. Closed candidates cannot generate new portraits. Provider failure leaves lifecycle state unchanged and returns a retryable UI error; no automatic retry loop runs on page load. Accepting a candidate still follows the existing formal onboarding/avatar policy.
+
 - Avatar is an asset, not a relationship score.
 - Search result selection does not become long-term Memory by default.
 - Search Provider is not exposed as arbitrary Character web browsing.

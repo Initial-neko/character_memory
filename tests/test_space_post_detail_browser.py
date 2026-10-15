@@ -35,6 +35,24 @@ def _create_post(page, base: str, content: str) -> str:
     return str(response.json()["post"]["id"])
 
 
+@pytest.mark.parametrize('width', [1440, 390])
+def test_text_detail_is_one_reading_column_with_comments_below(page, space_server, width):
+    page.set_viewport_size({'width': width, 'height': 960})
+    post_id = _create_post(page, space_server, '第二锅饭还在蒸。空档里翻了几个炖菜的做法。\n下周三想试试，盐和酱油还得自己慢慢调。')
+    page.goto(f'{space_server}/?view=space&space_post={post_id}')
+    detail = page.locator('.space-post-detail-text-only')
+    expect(detail).to_be_visible()
+    head = detail.locator('.space-post-head').bounding_box()
+    body = detail.locator('.space-content').bounding_box()
+    comments = detail.locator('.space-comments').bounding_box()
+    assert head['y'] + head['height'] <= body['y'] + 1
+    assert body['y'] + body['height'] <= comments['y'] + 20
+    assert detail.bounding_box()['width'] <= 822
+    assert detail.locator('.space-content').evaluate('el => parseFloat(getComputedStyle(el).fontSize)') == (15 if width < 560 else 16)
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    expect(page.locator('.space-page-heading')).to_be_hidden()
+
+
 @pytest.fixture
 def space_server_with_image(tmp_path_factory, monkeypatch):
     """Start the isolated browser server and seed one repository-owned image."""

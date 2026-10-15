@@ -30,6 +30,70 @@ def draft():
     }
 
 
+def test_candidate_portrait_is_cached_concurrent_and_restart_safe(tmp_path):
+    from character_memory.avatars import AvatarStore
+    from character_memory.visual_generation import ImageGenerationResult
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = SQLiteStore(str(tmp_path / 'portrait.db'))
+    repo = EncounterRepository(store)
+    candidate = repo.create_candidate(source_type='GENERATED', draft=draft(),
+        encounter_hook='修理铺的客人', opening_message='你好', now=datetime.now(timezone.utc))
+    calls = []
+    def generate(request):
+        calls.append(request)
+        time.sleep(.02)
+        return ImageGenerationResult(provider='test', model='test', payload=b'portrait', mime_type='image/webp')
+    avatars = AvatarStore(tmp_path / 'avatars')
+    access = SimpleNamespace(settings=SimpleNamespace(encounter_portraits_enabled=True, image_generation_provider='test'),
+        services=SimpleNamespace(avatar_store=avatars, image_generation_providers={'test': SimpleNamespace(
+            configured=lambda: True, available=lambda: True, generate=generate)}))
+    service = EncounterService(access, repo)
+    assert service.portrait_url(candidate['id']) == ''
+    assert calls == []  # Reading/listing never purchases an image.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(service.ensure_portrait, [candidate['id']] * 2))
+    assert results[0] == results[1]
+    assert len(calls) == 1
+    assert calls[0].aspect_ratio == '3:4'
+    assert 'Mika' in calls[0].prompt
+    restarted = EncounterService(access, EncounterRepository(store))
+    assert restarted.ensure_portrait(candidate['id']) == results[0]
+    assert len(calls) == 1
+    assert repo.pending_count() == 1
+    assert avatars.asset_path(f"encounter-{candidate['id']}") is None
+    assert service.portraits.asset_path(f"encounter-{candidate['id']}").read_bytes() == b'portrait'
+    assert repo.get_candidate(candidate['id'])['status'] == 'NEW'
+    avatars.close()
+    store.close()
+
+
+def test_candidate_portrait_failure_does_not_create_asset_or_change_lifecycle(tmp_path):
+    from character_memory.avatars import AvatarStore
+    store = SQLiteStore(str(tmp_path / 'portrait.db'))
+    repo = EncounterRepository(store)
+    candidate = repo.create_candidate(source_type='GENERATED', draft=draft(), encounter_hook='客人',
+        opening_message='你好', now=datetime.now(timezone.utc))
+    avatars = AvatarStore(tmp_path / 'avatars')
+    def fail(request):
+        raise RuntimeError('provider unavailable')
+    access = SimpleNamespace(settings=SimpleNamespace(encounter_portraits_enabled=True, image_generation_provider='test'),
+        services=SimpleNamespace(avatar_store=avatars, image_generation_providers={'test': SimpleNamespace(
+            configured=lambda: True, available=lambda: True, generate=fail)}))
+    service = EncounterService(access, repo)
+    with pytest.raises(RuntimeError, match='provider unavailable'):
+        service.ensure_portrait(candidate['id'])
+    assert service.portrait_url(candidate['id']) == ''
+    assert repo.get_candidate(candidate['id'])['status'] == 'NEW'
+    access.settings.encounter_portraits_enabled = False
+    with pytest.raises(ValueError, match='关闭'):
+        service.ensure_portrait(candidate['id'])
+    with pytest.raises(KeyError):
+        service.ensure_portrait(999)
+    avatars.close()
+    store.close()
+
+
 def test_encounter_candidate_pool_and_trial_messages_are_durable(tmp_path):
     store = SQLiteStore(str(tmp_path / "x.db"))
     repo = EncounterRepository(store)

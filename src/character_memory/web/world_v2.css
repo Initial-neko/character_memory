@@ -21,7 +21,9 @@
 .encounter-portrait-placeholder { min-height:160px; display:grid; place-content:center; justify-items:center; gap:12px; color:var(--ui-muted); font-size:13px; }
 .encounter-portrait-placeholder button { border:1px solid var(--ui-line-strong); border-radius:9px; padding:8px 14px; background:white; color:var(--ui-accent); cursor:pointer; }
 .encounter-portrait-error { padding:10px; color:#a22b4b; font-size:12px; }
-.cm-world-page .encounter-avatar { width:40px; height:40px; overflow:hidden; }
+.cm-world-page .encounter-avatar { width:40px; height:40px; overflow:hidden; flex:0 0 40px; }
+.encounter-identity > div:last-child { min-width:0; }
+.encounter-identity p { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .encounter-avatar img { width:100%; height:100%; object-fit:cover; object-position:center 30%; border-radius:50%; }
 .cm-world-page .encounter-card { padding:16px; border-radius:18px; }
 .cm-world-page .encounter-empty { grid-column:1/-1; border:1px dashed var(--ui-line-strong); border-radius:20px; background:var(--ui-surface-soft); padding:48px 24px; }

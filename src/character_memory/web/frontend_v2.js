@@ -145,7 +145,9 @@
       // so a smaller base composer never hides the last message.
       document.body.style.setProperty('--cm-composer-height', `${composerWrap.getBoundingClientRect().height}px`);
       if (!readerMoved && !document.body.matches('.space-mode,.world-mode,.profile-mode')) {
-        requestAnimationFrame(() => CM.scrollToBottom(false));
+        requestAnimationFrame(() => {
+          if (!readerMoved && !document.body.matches('.space-mode,.world-mode,.profile-mode')) CM.scrollToBottom(false);
+        });
       }
     }).observe(composerWrap);
   }

@@ -71,7 +71,7 @@
           <div class="encounter-avatar">${candidate.portrait_url ? `<img src="${CM.escapeHtml(candidate.portrait_url)}" alt="" loading="lazy">` : CM.escapeHtml(CM.initialFor(draft))}</div>
           <div>
             <h3>${CM.escapeHtml(draft.name || "陌生人")}</h3>
-            <p>${CM.escapeHtml(draft.identity || draft.tagline || "")}</p>
+            <p title="${CM.escapeHtml(draft.identity || draft.tagline || '')}">${CM.escapeHtml(draft.identity || draft.tagline || "")}</p>
           </div>
         </div>
         <p class="encounter-hook">${CM.escapeHtml(candidate.encounter_hook || draft.description || "")}</p>

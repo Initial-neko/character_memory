@@ -699,6 +699,9 @@
     if (!feedLoaded && loadFeedAfter) await loadFeed();
     updateFeedMore();
     requestAnimationFrame(() => {
+      // Closing Space for another page must not carry the old feed position
+      // into that page after its navigation has already completed.
+      if (!opened) return;
       window.scrollTo({top:Number(previous?.scrollY || 0), behavior:"auto"});
       const focusTarget = previous?.focusTarget?.isConnected
         ? previous.focusTarget

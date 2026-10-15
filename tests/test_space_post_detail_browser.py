@@ -140,6 +140,25 @@ def test_space_local_navigation_uses_existing_feed_and_world_routes(page, space_
     expect(page.locator(".space-shell")).to_be_hidden()
 
 
+def test_leaving_scrolled_detail_does_not_restore_feed_scroll_into_world(page, space_server):
+    page.set_viewport_size({'width': 1440, 'height': 720})
+    candidates = [{'id': i, 'status': 'NEW', 'draft': {'name': f'Guest {i}', 'identity': '修理旧机器的人'},
+        'portrait_url': '/static/call-room.png', 'encounter_hook': '候选介绍' * 30,
+        'opening_message': '你好', 'can_accept': True} for i in range(3)]
+    page.route('**/v1/encounters?*', lambda route: route.fulfill(json={
+        'encounters': candidates, 'active_character_count': 1, 'active_character_limit': 20}))
+    ids = [_create_post(page, space_server, f'滚动来源 {i}\n' + '饭蒸好了，稍后一起看看。\n' * 16) for i in range(12)]
+    page.goto(space_server + '/?view=space')
+    card = page.locator(f'.space-feed [data-space-post="{ids[0]}"]')
+    expect(card).to_be_visible()
+    card.get_by_role('button', name='打开 Rin 的动态详情').click()
+    expect(page.locator('.space-detail-view')).to_be_visible()
+    page.locator('.cm-global-nav').get_by_role('link', name='World', exact=True).click()
+    expect(page.locator('.cm-world-page')).to_be_visible()
+    page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    assert page.evaluate('scrollY') < 5
+
+
 def test_space_card_detail_returns_to_same_feed_position(page, space_server):
     post_id = _create_post(page, space_server, "可从卡片打开并返回的详情测试")
     page.goto(space_server, wait_until="domcontentloaded")

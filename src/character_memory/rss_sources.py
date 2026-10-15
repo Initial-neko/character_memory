@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-from character_memory.remote_media import ensure_public_http_url, _sniff_image_mime
+from character_memory.remote_media import ensure_public_http_url, _sniff_image_mime, public_http_client
 from character_memory.rss_content import article_url, parse_article_content
 from character_memory.time_utils import epoch_us, parse_datetime
 
@@ -553,7 +553,7 @@ class RssService:
         # forever. The deadline below covers one fetch including its redirects.
         self.total_timeout_seconds = float(total_timeout_seconds)
         self.max_response_bytes = int(max_response_bytes)
-        self.client = client or httpx.Client(timeout=timeout_seconds, follow_redirects=False, headers={"User-Agent": "character-memory-rss/1.0"})
+        self.client = client or public_http_client(timeout=timeout_seconds, follow_redirects=False, headers={"User-Agent": "character-memory-rss/1.0"})
         self._owns_client = client is None
         # close() must not interrupt an in-flight fetch or allow it to access a
         # SQLite store that the application is about to close.
@@ -605,7 +605,8 @@ class RssService:
         deadline = time.monotonic() + self.total_timeout_seconds
         current = url
         for _ in range(4):
-            ensure_public_http_url(current)
+            if not self._owns_client:
+                ensure_public_http_url(current)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("RSS 抓取超过总时限")

@@ -89,8 +89,8 @@ class AvatarStore:
         self.max_bytes = max(64 * 1024, int(max_bytes))
         self.root.mkdir(parents=True, exist_ok=True)
         self._owns_client = client is None
-        self.client = client or httpx.Client(timeout=30.0, follow_redirects=False)
-        self.remote_fetcher = RemoteMediaFetcher(max_bytes=self.max_bytes, client=self.client)
+        self.remote_fetcher = RemoteMediaFetcher(max_bytes=self.max_bytes, client=client)
+        self.client = self.remote_fetcher.client
 
     def _character_dir(self, character_id: str) -> Path:
         value = str(character_id or "").strip()

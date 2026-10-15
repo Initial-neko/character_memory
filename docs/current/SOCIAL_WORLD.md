@@ -57,7 +57,11 @@ Outside excerpts and source URLs enter the existing character-take prompt as
 untrusted data, separately from the character's own comment. The prompt permits
 silence, uncertainty and disagreement, prohibits claiming unread material or
 unsupported real-world facts, and does not equate popularity with truth or
-consensus. There is no new model call or automatic research retry. Original
+consensus. Personal anecdotes must also be supported by the supplied Memory /
+Observed Experiences; persona occupations and imagined analogies are not past
+events. Unsupported analogies must be explicitly hypothetical. This is a prompt
+contract, not a semantic fact validator; prior comments are not rewritten and
+real-model adherence still requires review. There is no new model call or automatic research retry. Original
 report verification, popularity measurement and a dedicated external-opinion
 crawler are not implemented by this projection; those require actual source
 access and evidence, not generated stand-ins. Existing Pulse scheduling/config

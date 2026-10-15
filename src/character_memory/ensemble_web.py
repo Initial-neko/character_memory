@@ -78,6 +78,14 @@ def attach_ensemble_routes(app):
     def list_ensemble_templates():
         return {"templates": ensemble_template_catalog()}
 
+    @app.get("/v1/ensembles/templates/{template_id}/experience")
+    def resume_template_experience(template_id: str):
+        from character_memory.group_scenes import GroupScenes
+        try:
+            return {"experience":GroupScenes(access.read_store).resume(template_id)}
+        except KeyError as exc:
+            raise HTTPException(status_code=404,detail=str(exc)) from exc
+
     @app.post("/v1/ensembles/templates/{template_id}/prepare")
     def prepare_ensemble_template(template_id: str):
         try:

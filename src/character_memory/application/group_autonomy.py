@@ -308,6 +308,9 @@ class GroupAutonomyScheduler:
         profiles = self.service._profiles()
         groups = []
         for group in self.repository.list_groups():
+            from character_memory.group_scenes import GroupScenes
+            if GroupScenes(self.repository.store).state(group.id) is not None:
+                continue  # User-controlled story groups do not advance while the user is away.
             state = self._state_for(group.id, now)
             active_members = [
                 cid for cid in group.member_ids
@@ -388,6 +391,9 @@ class GroupAutonomyScheduler:
         outcomes = []
         interval = self.interval_minutes()
         for group in self.repository.list_groups():
+            from character_memory.group_scenes import GroupScenes
+            if GroupScenes(self.repository.store).state(group.id) is not None:
+                continue
             state = self._state_for(group.id, now)
             if epoch_us(now) < int(state["next_opportunity_at_epoch"]):
                 continue

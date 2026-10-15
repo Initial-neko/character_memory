@@ -10,11 +10,17 @@ from character_memory.live2d_behavior import Live2DPresentationRequest
 
 from character_memory.application.group_conversation_service import GroupConversationService, effective_group_speaker_limit
 from character_memory.group_store import GroupRepository, MAX_GROUP_CHARACTERS
+from character_memory.group_scenes import GroupScenes
 from character_memory.images import load_image_catalog
 from character_memory.message_projection import project_group_message, upload_caption
 
 
 logger = logging.getLogger("character_memory.group_web")
+
+
+class SceneAdvanceRequest(BaseModel):
+    expected_day: int = Field(ge=1,le=9999)
+    request_id: str = Field(min_length=1,max_length=64)
 
 
 class CreateGroupRequest(BaseModel):
@@ -127,6 +133,7 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             "updated_at": group.updated_at.isoformat(),
             "archived_at": group.archived_at.isoformat() if group.archived_at else None,
             "status": "ACTIVE" if len(group.member_ids) >= 2 else "BUILDING",
+            "scene": GroupScenes(access.store()).state(group.id),
         }
 
     def resource_snapshot(group=None) -> dict:
@@ -227,6 +234,18 @@ def attach_group_routes(app, config_path: str = "config.yaml"):
             profile = profiles.get(character_id)
             if runtime is not None and profile is not None:
                 runtime.image_catalog = load_image_catalog(profile["persona_path"])
+
+    @app.post("/v1/groups/{conversation_id}/scene/advance")
+    def advance_scene(conversation_id: str, req: SceneAdvanceRequest):
+        from character_memory.group_scenes import GroupScenes
+        with turn_lock_for(conversation_id):
+            try:
+                state=GroupScenes(access.read_store).advance(conversation_id,expected_day=req.expected_day,request_id=req.request_id)
+            except KeyError as exc:
+                raise HTTPException(status_code=404,detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409,detail=str(exc)) from exc
+        return {"scene":state}
 
     @app.get("/v1/groups")
     def list_groups(archived: bool = False):

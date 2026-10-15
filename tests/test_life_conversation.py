@@ -48,13 +48,20 @@ def test_group_participation_archive_delete_and_target(tmp_path):
 @pytest.fixture
 def isolated_app(tmp_path):
     from pathlib import Path
+    import shutil
     from character_memory.api import create_api
     from character_memory.group_web import attach_group_routes
     from character_memory.async_web import attach_async_routes
     from character_memory.character_life_web import attach_character_life_routes
     root=Path(__file__).parents[1]
+    # Use only tracked persona documents, never the operator's archive markers
+    # or additional local characters when choosing the two test participants.
+    for name in ('rin', 'momo'):
+        folder = tmp_path / 'personas' / name
+        folder.mkdir(parents=True)
+        shutil.copyfile(root / 'personas' / name / 'persona.yaml', folder / 'persona.yaml')
     config=tmp_path/'config.yaml'
-    config.write_text(f'api_key: ""\nembedding_provider: deterministic\ndb_path: "{(tmp_path/"isolated.db").as_posix()}"\npersona_path: "{(root/"personas/rin/persona.yaml").as_posix()}"\n',encoding='utf-8')
+    config.write_text(f'api_key: ""\nembedding_provider: deterministic\ndb_path: "{(tmp_path/"isolated.db").as_posix()}"\npersona_path: "{(tmp_path/"personas/rin/persona.yaml").as_posix()}"\n',encoding='utf-8')
     app=create_api(str(config));attach_group_routes(app,str(config));attach_async_routes(app)
     attach_character_life_routes(app,app.state.character_memory)
     from character_memory.history_web import attach_history_routes

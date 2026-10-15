@@ -12,6 +12,32 @@
   button.title = "一句话按资料创建多个角色并组成群聊";
   button.textContent = "AI";
   actions.insertBefore(button, actions.firstChild);
+  const warmEntry = document.createElement("button");
+  warmEntry.type = "button";
+  warmEntry.className = "scene-entry-button";
+  warmEntry.textContent = "☾ 灯溪镇的一晚 →";
+  warmEntry.title = "进入温暖异世界；有进度则继续，否则先预览四位人物，不自动创建或发送消息";
+  section.querySelector(".group-section-head").after(warmEntry);
+
+  async function openWarmExperience() {
+    CM.features.sidebarCollapse?.closeMobile?.();
+    const response = await CM.api("/v1/ensembles/templates/warm-isekai/experience");
+    const experience = response.experience;
+    if (experience?.status === "ACTIVE") {
+      await CM.features.groups.loadGroups();
+      CM.features.space?.close?.();
+      CM.features.world?.close?.();
+      await CM.features.groups.enter(experience.group_id);
+    } else if (experience?.status === "READY") {
+      const saved = await CM.api(`/v1/ensembles/${encodeURIComponent(experience.group_id)}`);
+      CM.openDrawer("温暖异世界", "继续预览之前保留的灯溪镇设定");
+      renderConfirmation(saved.build);
+    } else await prepareTemplate("warm-isekai");
+  }
+  warmEntry.addEventListener("click", () => openWarmExperience().catch(error => {
+    CM.openDrawer("温暖异世界", "暂时无法恢复进度，已有草稿不会被删除");
+    CM.dom.drawerBody.textContent = error.message;
+  }));
 
   let currentBuild = null;
   let useVoiceDesignRequested = false;
@@ -481,4 +507,7 @@
   });
 
   CM.registerFeature("ensemble", {open:() => openBuilder()});
+  CM.on("ready", () => {
+    if (new URLSearchParams(location.search).get("experience") === "warm-isekai") openWarmExperience().catch(console.error);
+  });
 })();

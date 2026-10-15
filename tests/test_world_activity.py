@@ -56,6 +56,8 @@ def test_pulse_evidence_requires_fetched_quote_and_survives_restart(tmp_path):
     prompt = service._take_prompt(None, access.require_bundle().runtimes['c00'].context_builder.build('c00', '', at=NOW, recent_limit=1), reloaded)
     assert 'EXACT_FETCHED_EXCERPT' in prompt
     assert 'https://aggregate.example/one' in prompt
+    assert '个人经历自述也需要当前 Memory / Observed Experiences 的记录支持' in prompt
+    assert '不能把假设写成往事' in prompt
     assert len(model.calls) == 1
     store.close()
 

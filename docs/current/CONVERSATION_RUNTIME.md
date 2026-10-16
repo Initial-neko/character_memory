@@ -1023,7 +1023,21 @@ and Space ACTIVE_CHARACTERS visibility are rechecked in the write transaction;
 permission revocation during a recipient decision preserves the already-sent fact
 and records a FAILED/PERMISSION_CHANGED receipt without writing a reply.
 A Group contact is a real CHARACTER_MESSAGE with recipient/source metadata;
-Space contact and reply are real character comments linked in the same post.
+Space contact and reply are real character comments linked in the same post. Each shared
+message atomically writes a source-linked ACTION fact for its actual sender and
+recipient in the existing Person events store. Metadata preserves the channel,
+shared fact ID, participants, original source and opportunity; direction records
+SENT or RECEIVED. This makes the real exchange available to later Person context
+and after restart without inventing Web observations, copying private chat, or
+automatically admitting Memory. Nonparticipants receive no local projection.
+
+Production injects an after-commit publisher for each newly persisted Group
+message, using the existing Group channel and `group_character_event` payload.
+It never publishes Direct SSE or push. The sender fact is published before the
+recipient decision, so silence, failure or interruption cannot erase a real send.
+Cached receipts do not emit events or publish again. SSE remains ephemeral: a
+process crash between commit and publication, or a disconnected publisher, is
+reconciled through durable Group history rather than replaying the send.
 Character contact cannot reply to a User comment, mention User, publish Direct
 SSE, or create a User notification. Receipt IDs identify the real sent/reply facts.
 

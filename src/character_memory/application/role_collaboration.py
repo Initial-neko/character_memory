@@ -30,12 +30,14 @@ class RoleCollaborationService:
         self.store, self.groups, self.space = store, groups, space
         self.profiles, self.reply_decider = profiles, reply_decider
         self.research, self.research_policy = research, research_policy
-        with store.transaction():
-            store.conn.execute('CREATE TABLE IF NOT EXISTS role_collaboration_receipts ('
-                'request_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, receipt_json TEXT NOT NULL)')
+        store.apply_schema_migration('collaboration/001-contact-receipts', self._create_schema, immediate=True)
+
+    def _create_schema(self):
+        self.store.conn.execute('CREATE TABLE IF NOT EXISTS role_collaboration_receipts ('
+            'request_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, receipt_json TEXT NOT NULL)')
 
     def available_channels(self, sender_id, recipient_id):
-        ids = {p['id'] for p in self.profiles() if not p.get('archived_at')}
+        ids = {p['id'] for p in self.profiles() if 'archived_at' not in p}
         if sender_id == recipient_id or not {sender_id, recipient_id} <= ids:
             return []
         channels = [{'channel': 'GROUP', 'channel_id': g.id} for g in self.groups.list_groups()
@@ -47,10 +49,10 @@ class RoleCollaborationService:
 
     def eligible_recipients(self, sender_id):
         return [{'recipient_id':p['id'], 'channels':self.available_channels(sender_id,p['id'])}
-                for p in self.profiles() if p['id'] != sender_id and not p.get('archived_at')]
+                for p in self.profiles() if p['id'] != sender_id and 'archived_at' not in p]
 
     def _validate(self, recipient, topic, c):
-        ids = {p['id'] for p in self.profiles() if not p.get('archived_at')}
+        ids = {p['id'] for p in self.profiles() if 'archived_at' not in p}
         if not {c.sender_id, recipient} <= ids or recipient == c.sender_id:
             return 'INVALID_PARTICIPANTS'
         if not isinstance(topic, str) or not topic.strip() or len(topic) > 240:
@@ -88,11 +90,19 @@ class RoleCollaborationService:
             (key, payload, json.dumps(receipt, ensure_ascii=False)))
 
     def _emit(self, actor, recipient, content, c, key, reply_to=None):
+        # Caller holds the write transaction: validate immediately before fact insertion.
+        active = {p['id'] for p in self.profiles() if 'archived_at' not in p}
+        if not {actor, recipient} <= active:
+            raise PermissionError('PERMISSION_CHANGED')
+        if c.channel == 'SPACE':
+            post = self.space.get_post(int(c.channel_id))
+            if post is None or post.visibility != 'ACTIVE_CHARACTERS':
+                raise PermissionError('PERMISSION_CHANGED')
         if c.channel == 'GROUP':
             # Membership is rechecked inside the same transaction as the fact.
             group = self.groups.get_group(c.channel_id)
             if group is None or not {actor, recipient} <= set(group.member_ids):
-                raise ValueError('CHANNEL_MEMBERSHIP_CHANGED')
+                raise PermissionError('PERMISSION_CHANGED')
             return self.groups.append_event(GroupEvent(conversation_id=c.channel_id,
                 turn_id=key, actor_type='CHARACTER', actor_id=actor,
                 event_type='CHARACTER_MESSAGE', event_time=c.now, content=content,
@@ -109,7 +119,7 @@ class RoleCollaborationService:
             return {'status':'DENIED', 'reason':denial}
         key = hashlib.sha256(json.dumps([c.sender_id,c.opportunity_id,c.channel,c.channel_id,recipient_id]).encode()).hexdigest()
         payload = json.dumps([topic,c.source_event_id], ensure_ascii=False)
-        with self.store.transaction():
+        with self.store.transaction(immediate=True):
             row = self.store.conn.execute('SELECT payload_json,receipt_json FROM role_collaboration_receipts WHERE request_id=?', (key,)).fetchone()
             if row:
                 if row['payload_json'] != payload:
@@ -141,14 +151,14 @@ class RoleCollaborationService:
             reply = choice.message if isinstance(choice, CollaborationReply) else choice
             if reply is not None and (not isinstance(reply,str) or len(reply)>6000):
                 raise ValueError('INVALID_REPLY')
-            with self.store.transaction():
+            with self.store.transaction(immediate=True):
                 if reply and reply.strip():
                     receipt['reply_event_id'] = self._emit(recipient_id,c.sender_id,reply,c,key,receipt['sent_event_id'])
                 receipt['status'] = 'COMPLETED' if reply and reply.strip() else 'SILENT'
                 self._save(key,payload,receipt)
         except Exception as exc:
-            receipt.update(status='FAILED',reason=type(exc).__name__)
-            with self.store.transaction():
+            receipt.update(status='FAILED',reason='PERMISSION_CHANGED' if isinstance(exc, PermissionError) else type(exc).__name__)
+            with self.store.transaction(immediate=True):
                 self._save(key,payload,receipt)
         return receipt
 
@@ -177,9 +187,11 @@ class GitHubIssueAdapter:
         if not 1 <= timeout_seconds <= 60:
             raise ValueError('INVALID_TIMEOUT')
         self.timeout_seconds = timeout_seconds
-        with store.transaction():
-            store.conn.execute('CREATE TABLE IF NOT EXISTS collaboration_issue_writes ('
-                'request_id TEXT PRIMARY KEY, character_id TEXT NOT NULL, payload_json TEXT NOT NULL, receipt_json TEXT NOT NULL)')
+        store.apply_schema_migration('collaboration/002-issue-write-receipts', self._create_schema, immediate=True)
+
+    def _create_schema(self):
+        self.store.conn.execute('CREATE TABLE IF NOT EXISTS collaboration_issue_writes ('
+            'request_id TEXT PRIMARY KEY, character_id TEXT NOT NULL, payload_json TEXT NOT NULL, receipt_json TEXT NOT NULL)')
 
     def create(self, *, character_id, request_id, repository, title, body, grant=None):
         import re
@@ -195,7 +207,7 @@ class GitHubIssueAdapter:
         if not request_id or not title.strip() or len(title)>240 or len(body)>20000:
             return {'status':'DENIED', 'reason':'INVALID_REQUEST'}
         payload = json.dumps([character_id,repository,title,body],ensure_ascii=False)
-        with self.store.transaction():
+        with self.store.transaction(immediate=True):
             row = self.store.conn.execute('SELECT * FROM collaboration_issue_writes WHERE request_id=?',(request_id,)).fetchone()
             if row:
                 if row['payload_json'] != payload:
@@ -219,7 +231,7 @@ class GitHubIssueAdapter:
         except Exception as exc:
             receipt = {'status':'UNKNOWN','request_id':request_id,'reason':type(exc).__name__,
                 'operator_id':grant.operator_id,'character_id':character_id,'repository':repository}
-        with self.store.transaction():
+        with self.store.transaction(immediate=True):
             self.store.conn.execute('UPDATE collaboration_issue_writes SET receipt_json=? WHERE request_id=?',
                 (json.dumps(receipt),request_id))
         return receipt

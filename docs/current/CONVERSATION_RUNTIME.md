@@ -1017,6 +1017,11 @@ Opaque 3×3 RGBA sticker sheets have an explicit `normalize_background` import o
 server-owned sender/opportunity/source/channel context. Eligible recipients are
 active real profiles; channels are existing groups containing both people or
 Space posts visible to active characters. It never creates or joins a room.
+Every fact insertion rechecks both participants as active (the presence of an
+`archived_at` field means archived, even when its value is null). Group membership
+and Space ACTIVE_CHARACTERS visibility are rechecked in the write transaction;
+permission revocation during a recipient decision preserves the already-sent fact
+and records a FAILED/PERMISSION_CHANGED receipt without writing a reply.
 A Group contact is a real CHARACTER_MESSAGE with recipient/source metadata;
 Space contact and reply are real character comments linked in the same post.
 Character contact cannot reply to a User comment, mention User, publish Direct
@@ -1029,7 +1034,9 @@ recipient decision interprets the actual result. CLI output remains research
 material rather than automatically admitted Memory. Composition owns recipient
 Person context, model calls, grants, quotas and scheduler integration.
 
-The durable collaboration receipt claims before dispatch. Identical completed
+The durable collaboration receipt claims before dispatch with BEGIN IMMEDIATE,
+serializing claims across independent SQLite connections. Both receipt tables
+register atomic schema migrations in the shared migration ledger. Identical completed
 requests replay only their stored receipt; changed content conflicts. A RUNNING
 claim after interruption reports UNKNOWN and is never executed again. Failures
 retain the real sent fact and do not imply a reply. No automatic retry occurs.

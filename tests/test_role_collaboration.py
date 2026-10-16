@@ -147,3 +147,100 @@ def test_issue_success_and_bad_url_are_durable(tmp_path):
     assert calls[0]['timeout_seconds']==20 and calls[0]['idempotency_key']=='1'
     adapter.transport=lambda **kw:{'html_url':'https://example.org/invented'}
     assert adapter.create(**{**args,'request_id':'2'})['status']=='UNKNOWN'
+
+import pytest
+
+
+@pytest.mark.parametrize('channel', ['GROUP', 'SPACE'])
+@pytest.mark.parametrize('archived_id', ['alice', 'claude'])
+def test_archive_during_decision_blocks_reply(tmp_path, channel, archived_id):
+    profiles = [{'id':'alice'}, {'id':'claude'}]
+    def decide(*args):
+        next(p for p in profiles if p['id']==archived_id)['archived_at']=None
+        return 'reply must not be sent'
+    store,groups,space,service,now=make_service(tmp_path,decide)
+    service.profiles=lambda:profiles
+    target = groups.create_group('g',['alice','claude'],now).id if channel=='GROUP' else str(space.create_post('alice','post',now).id)
+    r=service.contact('claude','question',context=CollaborationContext('alice',channel,target,'revocation',None,now))
+    events=groups.list_events(target) if channel=='GROUP' else space.list_comments(int(target))
+    assert len(events)==1
+    assert r['status']=='FAILED' and r['reason']=='PERMISSION_CHANGED'
+    assert 'reply_event_id' not in r
+
+
+def test_space_visibility_revoked_during_decision(tmp_path):
+    store,groups,space,service,now=make_service(tmp_path,lambda *args:None)
+    post=space.create_post('alice','post',now)
+    def decide(*args):
+        with store.transaction():
+            store.conn.execute("UPDATE space_posts SET visibility='PRIVATE' WHERE id=?",(post.id,))
+        return 'blocked reply'
+    service.reply_decider=decide
+    r=service.contact('claude','question',context=CollaborationContext('alice','SPACE',str(post.id),'private',None,now))
+    assert r['status']=='FAILED' and r['reason']=='PERMISSION_CHANGED'
+    assert len(space.list_comments(post.id))==1
+
+
+def test_receipt_migrations_registered(tmp_path):
+    store,groups,space,service,now=make_service(tmp_path,lambda *args:None)
+    GitHubIssueAdapter(store,lambda **kw:None)
+    assert 'collaboration/001-contact-receipts' in store.list_schema_migrations()
+    assert 'collaboration/002-issue-write-receipts' in store.list_schema_migrations()
+
+
+def test_independent_connections_concurrent_contact_claim_is_unknown(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    entered, release=Event(),Event()
+    def decide(*args):
+        entered.set()
+        assert release.wait(5)
+        return 'single reply'
+    store,groups,space,service,now=make_service(tmp_path,decide)
+    group=groups.create_group('g',['alice','claude'],now)
+    other=SQLiteStore(tmp_path/'roles.db')
+    second=RoleCollaborationService(other,GroupRepository(other),SpaceRepository(other),
+        profiles=service.profiles,reply_decider=lambda *args:pytest.fail('duplicate execution'))
+    c=CollaborationContext('alice','GROUP',group.id,'concurrent',None,now)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first=pool.submit(service.contact,'claude','question',context=c)
+        try:
+            assert entered.wait(5)
+            duplicate=pool.submit(second.contact,'claude','question',context=c).result(timeout=5)
+            assert duplicate['status']=='UNKNOWN'
+            assert len(groups.list_events(group.id))==1
+        finally:
+            release.set()
+        receipt=first.result(timeout=5)
+    assert receipt['status']=='COMPLETED'
+    assert len(groups.list_events(group.id))==2
+    assert second.contact('claude','question',context=c)==receipt
+    other.close()
+
+
+def test_independent_connections_concurrent_issue_claim_is_unknown(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    entered,release=Event(),Event()
+    store=SQLiteStore(tmp_path/'issue-concurrent.db')
+    def transport(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return {'html_url':'https://github.com/owner/repo/issues/1'}
+    first=GitHubIssueAdapter(store,transport)
+    other=SQLiteStore(tmp_path/'issue-concurrent.db')
+    second=GitHubIssueAdapter(other,lambda **kwargs:pytest.fail('duplicate external write'))
+    args=dict(character_id='claude',request_id='same',repository='owner/repo',title='title',body='body',
+        grant=IssueWriteGrant('operator',('owner/repo',),1,'claude'))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future=pool.submit(first.create,**args)
+        try:
+            assert entered.wait(5)
+            duplicate=pool.submit(second.create,**args).result(timeout=5)
+            assert duplicate['status']=='UNKNOWN' and 'url' not in duplicate
+        finally:
+            release.set()
+        receipt=future.result(timeout=5)
+    assert receipt['status']=='CREATED'
+    assert second.create(**args)==receipt
+    other.close()

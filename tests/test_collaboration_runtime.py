@@ -144,3 +144,20 @@ def test_worker_accepts_entire_valid_unicode_and_control_character_body(monkeypa
         monkeypatch.setattr(sys,'stdout',output)
         assert github_issue_worker.main()==0
         assert received==[body]
+
+
+def test_factory_prepared_before_space_routes_uses_current_repository(tmp_path):
+    from character_memory.space_store import SpaceRepository
+    store=SQLiteStore(tmp_path/'late-space.db')
+    now=datetime.now(timezone.utc)
+    builder=SimpleNamespace(build=lambda *args,**kwargs:SimpleNamespace(persona='Bob',mental_state='',memories=[],observed_events=[]))
+    access=SimpleNamespace(store=lambda:store,character_profiles=lambda:[{'id':'alice'},{'id':'bob'}],
+        require_bundle=lambda:SimpleNamespace(runtimes={'bob':SimpleNamespace(context_builder=builder)},
+            model=SimpleNamespace(structured_for_session=lambda p,s,k:s(message='Hello'))),
+        services=SimpleNamespace(claude_runner=None),world_observer=None,settings=SimpleNamespace(),space_repository=None)
+    service=build_role_collaboration(access)
+    access.space_repository=SpaceRepository(store)
+    post=access.space_repository.create_post('alice','post',now)
+    assert service.available_channels('alice','bob')==[{'channel':'SPACE','channel_id':str(post.id)}]
+    receipt=service.contact('bob','Question',context=CollaborationContext('alice','SPACE',str(post.id),'late',None,now))
+    assert receipt['status']=='COMPLETED'

@@ -14,6 +14,20 @@ from character_memory.runtime.capability_execution import CapabilityExecutor, Ca
 from character_memory.runtime.context import render_observed_experiences
 
 
+class _CurrentSpaceRepository:
+    def __init__(self, access):
+        self.access = access
+
+    def __bool__(self):
+        return getattr(self.access, 'space_repository', None) is not None
+
+    def __getattr__(self, name):
+        repository = getattr(self.access, 'space_repository', None)
+        if repository is None:
+            raise PermissionError('CHANNEL_UNAVAILABLE')
+        return getattr(repository, name)
+
+
 class RecipientChoice(BaseModel):
     model_config = ConfigDict(extra='forbid')
     message: str = Field(default='', max_length=6000)
@@ -29,7 +43,7 @@ def build_role_collaboration(access) -> RoleCollaborationService:
     """
     store = access.store()
     groups = GroupRepository(store)
-    space = getattr(access, 'space_repository', None)
+    space = _CurrentSpaceRepository(access)
     settings = access.settings
 
     def profile(character_id):

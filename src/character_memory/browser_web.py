@@ -56,8 +56,10 @@ class HeadlessBrowserWebFetcher(WebFetcher):
             return
         ensure_public_http_url(url)
 
-    def _launch(self, playwright):
+    def _launch(self, playwright, *, launch_args: list[str] | None = None):
         launch_kwargs = {"headless": True}
+        if launch_args is not None:
+            launch_kwargs["args"] = launch_args
         if self.channel == "chrome":
             return playwright.chromium.launch(channel="chrome", **launch_kwargs)
         if self.channel == "chromium":

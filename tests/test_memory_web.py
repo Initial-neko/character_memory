@@ -37,7 +37,7 @@ def test_memory_governance_http_round_trip(tmp_path):
     app = FastAPI()
     app.state.character_memory = SimpleNamespace(
         store=lambda: store,
-        character_profiles=lambda: [{"id": "momo", "name": "Momo"}],
+        character_profiles=lambda: [{"id": "momo", "name": "Momo"}, {"id": "rin", "name": "Rin"}],
         require_bundle=lambda: SimpleNamespace(embeddings=embeddings),
     )
     attach_memory_routes(app)
@@ -47,6 +47,15 @@ def test_memory_governance_http_round_trip(tmp_path):
     assert listed[0]["id"] == memory.id
     assert listed[0]["source"]["event_id"] == source.id
     assert listed[0]["source"]["content"] == "我其实更喜欢绿茶。"
+
+    before = store.conn.total_changes
+    detail = client.get(f"/v1/characters/momo/memories/{memory.id}")
+    assert detail.status_code == 200
+    assert detail.json()["memory"]["source"]["event_id"] == source.id
+    assert store.conn.total_changes == before
+    assert client.get("/v1/characters/momo/memories/999999").status_code == 404
+    assert client.get(f"/v1/characters/other/memories/{memory.id}").status_code == 404
+    assert client.get(f"/v1/characters/rin/memories/{memory.id}").status_code == 404
 
     pinned = client.post(
         f"/v1/characters/momo/memories/{memory.id}/pin",

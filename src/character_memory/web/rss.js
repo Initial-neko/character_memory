@@ -1,7 +1,10 @@
 (() => {
+  const entryItem = new URLSearchParams(window.location.search).get("item");
+  const entryArticle = /^[1-9]\d*$/.test(entryItem || "") ? entryItem : "";
+  let preserveEntry = !!entryArticle;
   const state = {view:"feed", period:"today", q:"", category:"", sourceId:"", sources:[], cancelledSources:[], cancelCandidate:null, items:[],
     next:null, feedDate:null, feedRequest:0, sourceRequest:0, modalVersion:0, articleRequest:0,
-    loading:false, retryAppend:false, articleOrigin:null, articleId:"", articleOpen:false, initialReaderReady:false, readerMobile:null};
+    loading:false, retryAppend:false, articleOrigin:null, articleId:"", articleOpen:false, initialReaderReady:!!entryArticle, readerMobile:null};
   const $ = selector => document.querySelector(selector);
   const escapeHtml = value => String(value ?? "").replaceAll("&","&amp;")
     .replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
@@ -75,6 +78,9 @@
     document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
     $("#feedView").classList.toggle("hidden", !isFeed);
     $("#sourcesView").classList.toggle("hidden", !isSources);
+    document.body.classList.toggle("rss-managing", isSources);
+    $("#articlePanel").hidden = isSources;
+    syncReaderMode();
     const source = state.sources.find(source => String(source.id) === state.sourceId);
     $("#viewTitle").textContent = view === "feed" ? (source?.name || "外部信息") : "RSS 订阅";
     $("#viewSubtitle").textContent = view === "feed" ? "来自你订阅的信息源" : "管理订阅、开关和抓取状态";
@@ -171,7 +177,7 @@
       $("#feedEmpty").classList.toggle("hidden", state.items.length > 0);
       $("#feedHint").textContent = `${data.query?.date ? `${data.query.date} · ` : ""}北京时间 · 类型按标题关键词筛选`;
       feedback("feed", `已显示 ${state.items.length} 篇${data.has_more ? "" : " · 已全部加载"}`);
-      if (state.articleOpen && state.articleId && !state.items.some(item=>String(item.id)===state.articleId)) {
+      if (state.articleOpen && state.articleId && !preserveEntry && !state.items.some(item=>String(item.id)===state.articleId)) {
         const first=state.items[0];
         if (first && !isMobileReader()) openArticle(first.id, document.querySelector(`[data-item-id="${first.id}"]`));
         else closeArticle();
@@ -205,6 +211,14 @@
   const syncReaderMode = () => {
     const panel=$("#articlePanel"), mobile=isMobileReader(), changed=state.readerMobile!==null&&state.readerMobile!==mobile;
     state.readerMobile=mobile;
+    if (state.view !== "feed") {
+      panel.hidden = true;
+      panel.removeAttribute("aria-modal");
+      panel.setAttribute("role", "region");
+      setReaderBackgroundInert(false);
+      return;
+    }
+    panel.hidden = false;
     panel.classList.remove("hidden");
     panel.removeAttribute("aria-hidden");
     panel.setAttribute("role", mobile?"dialog":"region");
@@ -282,6 +296,7 @@
     const target = event.target, view = target.closest("[data-view]");
     const source = target.closest("[data-feed-source]");
     if (source) {
+      preserveEntry = false;
       state.sourceId = source.dataset.feedSource; state.period = state.sourceId ? "all" : "today";
       document.querySelectorAll("[data-feed-source]").forEach(button => button.setAttribute("aria-pressed", String(button === source)));
       setView("feed");
@@ -292,12 +307,14 @@
     if (view) { setView(view.dataset.view); return; }
     const period = target.closest("[data-period]");
     if (period) {
+      preserveEntry = false;
       state.period = period.dataset.period;
       document.querySelectorAll("[data-period]").forEach(button => button.setAttribute("aria-pressed", String(button === period)));
       loadFeed(); return;
     }
     const category = target.closest("[data-category]");
     if (category) {
+      preserveEntry = false;
       state.category = category.dataset.category;
       document.querySelectorAll("[data-category]").forEach(button => button.setAttribute("aria-pressed", String(button === category)));
       loadFeed(); return;
@@ -353,7 +370,7 @@
     if (card && ["Enter", " "].includes(event.key)) { event.preventDefault(); openArticle(card.dataset.itemId, card); }
     if (event.key === "Tab") {
       const dialog = !$("#sourceModal").classList.contains("hidden") ? $("#sourceModal") :
-        (state.articleOpen && isMobileReader() ? $("#articlePanel") : null);
+        (state.view === "feed" && state.articleOpen && isMobileReader() ? $("#articlePanel") : null);
       if (!dialog) return;
       const focusable = [...dialog.querySelectorAll("button:not(:disabled), input:not(:disabled), a[href]")].filter(node => node.getClientRects().length);
       const first = focusable[0], last = focusable.at(-1);
@@ -380,7 +397,7 @@
     } catch (error) { toggle.checked = !toggle.checked; feedback("source", `更新失败：${error.message}`, true); }
     finally { toggle.disabled = false; }
   });
-  $("#feedSearchForm").addEventListener("submit", event => { event.preventDefault(); state.q = $("#feedSearch").value.trim(); loadFeed(); });
+  $("#feedSearchForm").addEventListener("submit", event => { event.preventDefault(); preserveEntry = false; state.q = $("#feedSearch").value.trim(); loadFeed(); });
   $("#feedSearch").addEventListener("search", () => { if (!$("#feedSearch").value) { state.q = ""; loadFeed(); } });
   $("#loadMoreButton").addEventListener("click", () => loadFeed(true));
   $("#retryFeedButton").addEventListener("click", () => loadFeed(state.retryAppend));
@@ -413,6 +430,5 @@
   window.matchMedia("(max-width: 760px)").addEventListener("change", syncReaderMode);
   syncReaderMode();
   renderSourceNavigation(); loadSources(); loadCategories(); loadFeed();
-  const entryItem = new URLSearchParams(window.location.search).get("item");
-  if (/^[1-9]\d*$/.test(entryItem || "")) openArticle(entryItem, null);
+  if (entryArticle) openArticle(entryArticle, null);
 })();

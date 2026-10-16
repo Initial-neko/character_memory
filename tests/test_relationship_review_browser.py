@@ -16,7 +16,7 @@ def test_relationship_review_source_plans_peer_and_character_switch(page):
         requests.append((request.request.method, url))
         if "/static/" in url:
             name = url.split("/static/")[1]
-            request.fulfill(body=(WEB / name).read_text(encoding="utf-8"), content_type="application/javascript" if name.endswith(".js") else "text/css")
+            request.fulfill(body=(WEB / name).read_bytes(), content_type=__import__("mimetypes").guess_type(name)[0] or "application/octet-stream")
         elif "/v1/characters?" in url:
             request.fulfill(json={"characters": [{"id": "a", "name": "莉娅"}, {"id": "b", "name": "芙露"}]})
         elif "/relationship-review?" in url:

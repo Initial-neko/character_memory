@@ -41,11 +41,12 @@
   function routeUrl(mode, original = location.href) {
     const url = new URL(original);
     url.searchParams.delete('space_post');
+    url.searchParams.delete('character');
     if (mode === 'chat') url.searchParams.delete('view');
     else url.searchParams.set('view', mode === 'people' ? 'profile' : mode === 'notifications' ? 'space' : mode);
     return url;
   }
-  function navigate(mode, {writeHistory = true} = {}) {
+  function navigate(mode, {writeHistory = true, characterId = null} = {}) {
     if (!CM) { location.assign(mode === 'chat' ? '/' : `/?view=${mode === 'people' ? 'profile' : mode}`); return; }
     if (!ready) { pendingNavigation = mode; return; }
     // A character/group switch may have updated state before its listeners finish.
@@ -53,12 +54,13 @@
     if (conversationKey() !== handledConversation) { pendingNavigation = mode; return; }
     const original = location.href;
     const next = routeUrl(mode, original);
+    if (mode === 'people') next.searchParams.set('character', characterId || CM.state.characterId);
     CM.features.world?.close(); CM.features.profile?.close(); CM.features.space?.close();
     if (writeHistory && next.href !== original) history.pushState(null, '', next);
     else if (writeHistory && next.href !== location.href) history.replaceState(null, '', next);
     if (mode === 'space') CM.features.space?.open(null).catch(console.error);
     else if (mode === 'world') CM.features.world?.open();
-    else if (mode === 'people') CM.features.profile?.open(CM.state.characterId).catch(console.error);
+    else if (mode === 'people') CM.features.profile?.open(characterId || CM.state.characterId).catch(console.error);
     else if (mode === 'notifications') notifications?.click();
     active();
   }
@@ -75,7 +77,7 @@
     const requested = pendingNavigation;
     pendingNavigation = null;
     if (requested) navigate(requested);
-    else if (new URLSearchParams(location.search).get('view') === 'profile') navigate('people', {writeHistory:false});
+    else if (new URLSearchParams(location.search).get('view') === 'profile') navigate('people', {writeHistory:false, characterId:new URLSearchParams(location.search).get('character')});
   });
   window.addEventListener('popstate', () => {
     const params = new URLSearchParams(location.search);
@@ -85,7 +87,7 @@
     if (view === 'space' && document.body.classList.contains('space-mode')) {
       CM.features.world?.close(); CM.features.profile?.close(); active(); return;
     }
-    navigate(view === 'profile' ? 'people' : ['world','space'].includes(view) ? view : 'chat', {writeHistory:false});
+    navigate(view === 'profile' ? 'people' : ['world','space'].includes(view) ? view : 'chat', {writeHistory:false, characterId:params.get('character')});
   });
   CM.on('conversationChanged', () => {
     handledConversation = conversationKey();
@@ -103,8 +105,14 @@
   shared.title = '点击查看经历入口；不会自动发送消息或调用模型';
   actions?.prepend(shared);
   shared.addEventListener('click', () => {
-    const id = CM.state.characterId;
     CM.openDrawer('共同经历', '已有记录的只读入口');
+    if (CM.isGroupConversation()) {
+      const group = CM.features.groups?.current();
+      const members = group?.members || [];
+      CM.dom.drawerBody.innerHTML = `<section class="cm-shared-entry"><h3>${CM.escapeHtml(group?.name || '当前群聊')}</h3><p>选择本群人物查看她的关系经历；各人物记录分别展示，不混用上一次私聊对象。</p>${members.map(member => `<a href="/life?character=${encodeURIComponent(member.id || member.character_id)}&view=relationships">${CM.escapeHtml(member.name || member.id || member.character_id)}的共同经历 →</a>`).join('<br>') || '<p>尚无可查看的成员。</p>'}</section>`;
+      return;
+    }
+    const id = CM.state.characterId;
     CM.dom.drawerBody.innerHTML = `<section class="cm-shared-entry"><h3>从经历继续认识彼此</h3><p>查看已记录的互动、原始来源和关联记忆。没有记录的部分不推测，也不会替你发送消息。</p><a href="/life?character=${encodeURIComponent(id)}&view=relationships">查看共同经历 →</a></section>`;
   });
   const profile = document.createElement('button');
@@ -112,7 +120,7 @@
   profile.title = '查看当前人物主页';
   document.querySelector('.character-heading-copy')?.append(profile);
   profile.addEventListener('click', () => navigate('people'));
-  function sync() { shared.hidden = CM.isGroupConversation(); profile.hidden = CM.isGroupConversation(); }
+  function sync() { shared.hidden = false; profile.hidden = CM.isGroupConversation(); }
   CM.on('conversationChanged', sync); CM.on('ready', sync); sync();
   const controlIcons = {
     voiceCallButton:'<path d="M5 3H3v4c0 8 6 14 14 14h4v-5l-5-2-2 3c-4-2-5-3-7-7l3-2-2-5Z"/>',

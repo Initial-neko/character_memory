@@ -92,6 +92,12 @@ Run against the real character-stack, not a mocked page:
 
 ### Required visual comparison evidence
 
+Frontend implementation starts only after the owning Issue maps each affected
+page/component/state to a user-approved reference image. Missing designs must
+be prepared and approved before that frontend scope is implemented; coding
+first and adding a mockup afterward is not allowed. Shared visual conventions
+and mobile layouts follow the design gate in `CONTRIBUTING.md`.
+
 The real Chromium run has two independent conclusions: **behavioral acceptance**
 and **visual acceptance**. A passing Playwright suite, mocked DOM, design preview,
 or screenshot of an isolated prototype cannot replace visual inspection of the
@@ -100,7 +106,7 @@ actual served application. The canonical image/evidence list is in
 feature-specific UI issues link back to the corresponding entry there.
 
 For changed Chat/Group/Space/Settings/Dev/creation/call surfaces, record both the
-agreed design reference (when one exists) and **actual** desktop and narrow
+approved design reference and **actual** desktop and narrow
 viewport screenshots, label commit and state, explain differences and mark
 VISUAL PASS / FAIL / BLOCKED. Real Android UI requires emulator evidence and
 the final physical-device visual pass separately. Do not promote a release

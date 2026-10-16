@@ -2,6 +2,11 @@
 
 RSS/Atom is the first deterministic external-information ingestion path.
 
+The Web reader accepts `/sources?item=<id>` as an explicit article selection,
+including older articles outside the current list page. Initial list loading must
+not replace that selection with the first article. Subscription management hides
+the reader and uses the available width; returning to the feed restores reading.
+
 ## Boundary
 
 ```text

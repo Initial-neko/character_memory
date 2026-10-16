@@ -212,6 +212,11 @@ one shared conversation event
 
 V1 已提供最小的人为干预闭环，入口在 Character Runtime 抽屉的 **Memory Inspector**：
 
+人物生活中的关联记忆可通过 `/?memory_character=<id>&memory_id=<id>`
+直达同一 Inspector 卡片。只读 `GET /v1/characters/{character_id}/memories/{memory_id}`
+读取指定记忆及来源，不受最近记忆列表的数量限制，不加载人物模型；
+人物不存在、记忆不存在或不属于该人物均返回 `404`。
+
 - 查看 active / inactive Memory、importance、来源和原始 Direct Event 摘要；
 - **固定 / 取消固定**：`pinned` Memory 永远进入 bounded recall candidate union，并获得小幅 ranking bonus；
 - **忘记 / 恢复**：只切换派生 Memory 的 `active`，不删除原始 durable fact；

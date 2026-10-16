@@ -463,6 +463,7 @@
       ? `<span class="space-comment-text">${CM.escapeHtml(comment.content)}</span>`
       : "";
     return `<div class="space-comment${actorClass}${reply ? " space-comment-reply" : ""}${markers.length ? " space-comment-notice" : ""}" data-space-comment="${CM.escapeHtml(comment.id)}">
+      <span class="space-comment-avatar">${comment.actor_type === "CHARACTER" ? avatarHtml(profileFor(comment.character_id), "space-avatar") : '<span class="space-avatar">你</span>'}</span>
       <div class="space-comment-main">
         <strong class="space-comment-author">${CM.escapeHtml(name)}</strong>
         ${markerHtml}
@@ -584,7 +585,7 @@
       <article class="space-post${detailClass}${textOnlyClass}" data-space-post="${CM.escapeHtml(post.id)}">
         <div class="space-post-body">
           <div class="space-post-head">
-            <div class="space-post-author">${avatarHtml(author, "space-avatar")}<span class="space-post-author-copy"><strong class="space-author">${CM.escapeHtml(author.name || author.id)}</strong>${archived}<time class="space-time">${CM.escapeHtml(CM.fmtTime(post.created_at))}</time></span></div>
+            <a class="space-post-author" href="/?view=profile&character=${encodeURIComponent(post.character_id || author.id)}" aria-label="查看 ${CM.escapeHtml(author.name || author.id)} 的人物主页">${avatarHtml(author, "space-avatar")}<span class="space-post-author-copy"><strong class="space-author">${CM.escapeHtml(author.name || author.id)}</strong>${archived}<time class="space-time">${CM.escapeHtml(CM.fmtTime(post.created_at))}</time></span></a>
             ${detail ? "" : `<button class="space-post-detail-trigger" type="button" data-space-post-open="${CM.escapeHtml(post.id)}" aria-label="打开 ${CM.escapeHtml(author.name || author.id)} 的动态详情">详情 ›</button>`}
           </div>
           ${media ? `<div class="space-post-media">${media}</div>` : ""}

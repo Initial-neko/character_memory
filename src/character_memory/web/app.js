@@ -830,10 +830,29 @@
       if (!CM.isGroupConversation()) CM.connectDirectStream();
       CM.updateComposerState();
       await CM.openLifeReference();
+      await CM.openMemoryReference();
     } catch (error) {
       d.chat.innerHTML = `<div class="error">页面初始化失败：${CM.escapeHtml(error.message)}</div>`;
       console.error(error);
     }
+  };
+
+  CM.openMemoryReference = async () => {
+    const params=new URLSearchParams(location.search), character=params.get("memory_character"), id=params.get("memory_id");
+    if(!character || !/^[1-9]\d*$/.test(id || ""))return;
+    if(!CM.state.characters.some(profile=>profile.id===character))return;
+    const consumed=new URL(location.href);consumed.searchParams.delete("memory_character");consumed.searchParams.delete("memory_id");
+    history.replaceState(null,"",consumed);
+    await CM.switchCharacter(character);
+    CM.openDrawer("关联记忆", "真实保存的记忆及来源；查看不会调用模型");
+    const pending=document.createElement("p");pending.textContent="正在读取记忆…";
+    CM.dom.drawerBody.replaceChildren(pending);
+    try {
+      const data=await CM.api(`/v1/characters/${encodeURIComponent(character)}/memories/${id}`);
+      if(!pending.isConnected || CM.state.characterId!==character || CM.isGroupConversation())return;
+      CM.state.runtimeMemories=[data.memory];
+      CM.dom.drawerBody.innerHTML=CM.memoryCardHtml(data.memory);
+    } catch(error) { if(pending.isConnected) CM.dom.drawerBody.textContent=`记忆无法读取：${error.message}`; }
   };
 
   CM.clearLifeReference = () => {

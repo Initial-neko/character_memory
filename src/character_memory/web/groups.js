@@ -223,7 +223,7 @@
   function sceneToolbar(group) {
     if (!group?.scene) return "";
     const scene = group.scene;
-    return `<section class="scene-toolbar" aria-label="灯溪镇故事进度"><strong>灯溪镇 · 第 ${Number(scene.story_day)} 天${scene.phase === "EVENING" ? "傍晚" : "早晨"}</strong><span>虚构情景 · 只有你推进故事时间，不补写离开期间的共同经历。</span><button type="button" data-scene-advance title="进入下一天早晨，不调用模型、不自动生成期间经历" ${pending.has(group.id) ? "disabled" : ""}>推进到下一天早晨 →</button><p role="status" data-scene-status></p></section>`;
+    return `<section class="scene-toolbar" aria-label="灯溪镇故事进度"><figure class="scene-atmosphere"><img src="/static/artwork/ambient-window.webp" alt="雨后窗边与灯火的氛围插画"><figcaption>灯溪镇 · 氛围示意，非已发生经历</figcaption></figure><strong>灯溪镇 · 第 ${Number(scene.story_day)} 天${scene.phase === "EVENING" ? "傍晚" : "早晨"}</strong><span>虚构情景 · 只有你推进故事时间，不补写离开期间的共同经历。</span><button type="button" data-scene-advance title="进入下一天早晨，不调用模型、不自动生成期间经历" ${pending.has(group.id) ? "disabled" : ""}>推进到下一天早晨 →</button><p role="status" data-scene-status></p></section>`;
   }
 
   function renderHistory(messages, {preserveScroll = false} = {}) {

@@ -75,6 +75,15 @@ def attach_memory_routes(app) -> None:
             "memories": [_memory_payload(store, item) for item in reversed(items)],
         }
 
+    @app.get("/v1/characters/{character_id}/memories/{memory_id}")
+    def get_memory(character_id: str, memory_id: int):
+        _ensure_character(access, character_id)
+        store = access.store()
+        memory = store.get_memory(memory_id)
+        if memory is None or memory.character_id != character_id:
+            raise HTTPException(status_code=404, detail="memory not found")
+        return {"memory": _memory_payload(store, memory)}
+
     @app.post("/v1/characters/{character_id}/memories/{memory_id}/active")
     def set_memory_active(character_id: str, memory_id: int, req: MemoryActiveRequest):
         _ensure_character(access, character_id)

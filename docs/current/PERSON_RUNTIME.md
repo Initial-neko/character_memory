@@ -593,3 +593,17 @@ has VISUAL N/A because no user interface is changed.
 `build_role_collaboration(access)` binds the recipient's existing PersonContextBuilder, current model, current role/Skill permissions and shared CapabilityExecutor. It supplies the actual shared Group messages or visible Space post and comments, while private memories remain private reasoning context. Contact permits silence or disagreement and at most two recipient decisions plus one separately authorized public research call; these internal calls are attributed to `role_collaboration`, separately from the initiating World's step count. The World continuation composition owns exposing and authorizing the initiating contact tool.
 
 `GitHubIssueHTTPTransport` is an optional operator-owned transport for the separately scoped IssueWriteGrant, not a grant itself. Production POST runs in a disposable HTTP-only child with credentials through stdin, fixed GitHub HTTPS origin, no redirects/retries, a bounded response and a parent-enforced wall timeout including DNS and EOF. Timeout kills/reaps the worker; the durable adapter records UNKNOWN and does not retry an irreversible request. Without a grant the existing adapter returns a draft and never starts HTTP. No UI changes (VISUAL N/A).
+
+
+## Bounded World reconsideration
+
+Optional World continuation reuses PersonContextBuilder and the existing Browse
+opportunity; it does not introduce a universal Person action schema or new
+scheduler. At most three outer World decisions consume actual, scoped executor
+receipts as untrusted evidence. STOP may retain a meaningful personal note through
+WORLD_OBSERVATION only with matching successful read receipts, preserving the
+reading scope. It creates neither Direct actions nor future self Intents, and
+does not automatically admit long-term Memory. Interrupted model/provider phases
+are never replayed. The source receipt and the character's later interpretation
+remain distinct. See [SOCIAL_WORLD.md](SOCIAL_WORLD.md#optional-bounded-world-continuation)
+for configuration, local-only recovery and nested collaboration cost boundaries.

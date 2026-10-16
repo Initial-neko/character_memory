@@ -460,3 +460,25 @@ interpretation, legacy granted-suffix compatibility, channel recipient/privacy
 rules and external/RSS reading scope. Existing World/Space/Direct/Group/Visual
 regressions remain required. Live-provider Persona fidelity and joint autonomous
 acceptance are separate gates; deterministic prompt tests do not mark them PASS.
+
+## Bounded World continuation verification
+
+`tests/test_world_continuation.py` exercises the actual World Browse entry point:
+default-off behavior, silence, three-step exhaustion, identity rejection,
+concurrent CAS, unknown model/provider outcomes, local receipt-write failure,
+context deadline, late worker scheduling, RSS scope/application, and production
+shared-channel/Issue composition. Issue transport tests use a controlled adapter;
+they are not evidence of a real external write.
+
+With RUN_PLAYWRIGHT=1, the Browser fixture opens a real page, lets the decision
+adapter select a reference actually returned by Chromium, reads JavaScript text
+on its second page, then keeps or stops through the normal receipt path. This
+proves real execution and result feedback, not live-model autonomous choice. The
+separate Browser tests cover transient PNGs, source metadata, unsafe redirects,
+DNS cancellation, finite budgets and full Windows process-tree cleanup.
+
+Live-model initiative, different Persona interest, multi-day behavior, real
+third-party accounts and actual external writes remain separate acceptance gates.
+Unit/schema success and scripted decision adapters cannot substitute for those
+observations or human UI visual acceptance. Backend-only continuation changes
+are VISUAL N/A; fixture screenshots are execution evidence.

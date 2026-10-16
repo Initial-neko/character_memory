@@ -363,6 +363,20 @@ world_pulse_commenter_count: 4
 
 # Whether per-character autonomous public-web browsing is enabled.
 world_browse_enabled: true
+# Optional bounded continuation inside the existing Browse cadence. Default off;
+# at most 3 decisions/tool attempts, and no automatic Direct/Space message.
+world_continuation_enabled: false
+# Exact operator-approved GitHub owner/repository targets. Empty disables writes;
+# a per-character github_issue_write sidecar grant and env token are also required.
+github_issue_write_repositories: []
+# Operator identity carried by server-generated write grants; empty disables writes.
+github_issue_write_operator_id: ""
+# Persistent total create allowance per character across all approved repositories (0..100). Not daily;
+# failed or unknown external attempts consume the allowance. Zero disables writes.
+github_issue_write_max_issues: 0
+# Overall continuation deadline, including decision and tool waits (5..300 seconds).
+# A timeout has an unknown outcome and never authorizes a replay.
+world_continuation_max_seconds: 60
 # World WEB_SEARCH 执行后端：direct 保留现有服务；claude 每次独立 -p，无历史。需重启。
 world_browse_execution_backend: direct
 # 单聊委托独立开关；仅有 claude_task sidecar 授权的人物可用，不影响 World，需重启。

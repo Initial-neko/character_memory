@@ -793,6 +793,10 @@ class WorldActivityService:
         self.repository = repository
         # Composition owns schema preparation; capability queries below only read.
         self.capability_executor = CapabilityExecutor(repository.store, getattr(access, "world_observer", None))
+        self.continuation_tools = None
+        if getattr(getattr(access, 'settings', None), 'world_continuation_enabled', False):
+            from character_memory.application.continuation_tools import prepare_world_continuation_tools
+            self.continuation_tools = prepare_world_continuation_tools(access)
 
     def capabilities(self, character_id: str, *, now: datetime,
                      rss_candidates=(), remaining_calls: int = 1):
@@ -1185,6 +1189,10 @@ Rendered text:
 
     def _browse_character(self, character_id: str, *, now: datetime, opportunity_id: str) -> dict:
         previous = self.repository.get_browse_decision(opportunity_id)
+        continuation = bool(previous and (previous.get('plan') or {}).get('mode') == 'CONTINUATION')
+        if continuation or (previous is None and getattr(self.access.settings, 'world_continuation_enabled', False)):
+            from character_memory.world_continuation import WorldContinuation
+            return WorldContinuation(self).run(character_id, opportunity_id, now=now)
         if previous and previous['character_id'] != character_id:
             raise ValueError("browse opportunity belongs to another character")
         if previous and previous['phase'] == 'APPRAISED':

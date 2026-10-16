@@ -24,6 +24,7 @@ class Settings(BaseModel):
     # Settings Center migrates their persisted values out of config.yaml and into
     # the project-local .env file.
     api_key: str = ""
+    github_issue_token: str = Field(default="", repr=False, description="GitHub Issue API token loaded from GITHUB_ISSUE_TOKEN in .env; never persist to config.yaml.")
     base_url: str = "https://opencode.ai/zen/go/v1"
     chat_model: str = "deepseek-flash"
     # Optional compatibility override for providers that still require a
@@ -257,6 +258,11 @@ class Settings(BaseModel):
     world_pulse_max_topics: int = Field(default=8, ge=1, le=12)
     world_pulse_commenter_count: int = Field(default=4, ge=0, le=10)
     world_browse_enabled: bool = True
+    github_issue_write_repositories: list[str] = Field(default_factory=list, max_length=20, description="Exact owner/repository targets permitted by the operator; empty means no external issue writes.")
+    github_issue_write_operator_id: str = Field(default="", max_length=120, description="Operator identity attached to explicit issue-write grants; empty disables external writes.")
+    github_issue_write_max_issues: int = Field(default=0, ge=0, le=100, description="Persistent total issue-create allowance per character across all approved repositories; zero disables writes, never resets daily.")
+    world_continuation_enabled: bool = Field(default=False, description="Enable at most three optional decisions/tools inside one existing World Browse opportunity; no new scheduler or posting permission.")
+    world_continuation_max_seconds: float = Field(default=60, ge=5, le=300, description="Overall wall-clock deadline for one bounded World continuation; unknown model/provider outcomes are never replayed.")
     world_browse_execution_backend: Literal["direct", "claude"] = "direct"
     direct_claude_tasks_enabled: bool = False
     claude_execution_model: str = Field(default="", max_length=120)
@@ -324,6 +330,7 @@ def load_settings(path: str = "config.yaml") -> Settings:
 
     # Secrets resolve without mutating os.environ:
     # system environment > adjacent .env > legacy config field.
+    data["github_issue_token"] = effective_env_value("GITHUB_ISSUE_TOKEN", env_path, "")
     data["api_key"] = effective_env_value("OPENCODE_GO_API_KEY", env_path, str(data.get("api_key", "") or ""))
     data["embedding_api_key"] = effective_env_value(
         "EMBEDDING_API_KEY",

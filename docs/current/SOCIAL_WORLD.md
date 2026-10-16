@@ -353,6 +353,71 @@ requests including rejected requests, 4 MiB aggregate response bytes, 12,000 tex
 characters, 40 links, and 2 MiB per screenshot. `close` is outside the operation
 budget. Public batch fetcher lifecycle limitations remain separate.
 
+### Optional bounded World continuation
+
+`world_continuation_enabled` defaults to false. When enabled, a **new** existing
+Personal Browse opportunity may use `world_continuation.WorldContinuation` instead
+of the legacy one-plan/one-read path. Existing legacy receipts keep their original
+path, even after settings change. Cadence, per-day opportunity reservation and
+scheduler ownership remain unchanged; no new wake event or scheduler is created.
+
+The World-specific decision is `STOP` or `CALL` with one current catalog tool and
+its arguments. Each opportunity has at most three outer decisions and three tool
+attempts, sharing `CapabilityExecutor.MAX_OPPORTUNITY_CALLS`. Persona, Mental
+State, recall and observed experiences come from the existing Person context.
+No interest, silence, failed tools and observing without keeping anything are
+valid outcomes. It does not mandate Claude or a tool chain, publish Space posts,
+or send Direct attention requests. Successful WEB_SEARCH, eligible local READ_RSS
+and explicitly granted Browser tools use existing providers and guards. Browser
+identity, grant, scopes and budgets remain server-owned; internal scopes default
+to empty. Raw screenshots stay transient and out of durable receipts; screenshot
+metadata is labelled generated, not seen. Only an actual image-input model call
+is recorded as receiving screenshot pixels.
+
+The existing `world_browse_decisions` row owns CAS phases `CONT_MODEL:n`,
+`CONT_EXECUTING:n`, `CONT_RECEIVED:n`, `CONT_APPRAISED`, then `APPLIED` or `FAILED`.
+Before paid decisions or tools, the row records step identity, inputs, current
+approved scope and UTC time. Actual executor receipts reach only that same
+character's next decision as **untrusted data**. Interrupted model/tool phases
+remain unknown and never restart providers; a duplicate opportunity returns its
+durable result or unknown state. `CONT_APPRAISED` may retry only local atomic
+application. A meaningful STOP note may be retained through the existing
+WORLD_OBSERVATION lifecycle only when matching successful executor receipts
+establish actual reading. RSS text retains RSS_FEED_TEXT scope and its existing
+reading receipt finishes atomically. Screenshot metadata, tool plans, failed
+results and another person's private context cannot establish a read experience.
+There is no automatic long-term Memory admission or outward action.
+
+`world_continuation_max_seconds` defaults to 60 (5–300) and bounds context recall,
+model waits and tool waits. At most two outer loops, model/recall workers and
+non-Browser tool workers are admitted per process. A timed-out provider may still
+be unwinding under its existing contract; its worker slot stays occupied until
+it actually exits, the durable result remains unknown, and no retry is allowed.
+Browser uses its own cancellable process and always closes in `finally`.
+The three outer decisions are logical structured calls; existing provider retry
+policy is separate. ROLE_CONTACT can independently use at most two recipient
+model decisions plus one authorized recipient research request, with its own
+usage and receipts; these are not falsely counted as part of the three outer
+calls.
+
+Production extension preparation happens once at World service composition,
+including the shared-channel/Issue ledgers. Discovery thereafter reads current
+sidecars and facts only. ROLE_CONTACT requires `role_contact` and exposes stable
+server-mapped shared channel references; World event IDs never become Group reply
+IDs. A real shared reply or silence returns through its actual receipt. Optional
+`access.services.world_continuation_tools(character_id)` may supply trusted
+catalog/adapter extensions through the same grant and execution contracts.
+
+`github_issue_write` authorizes a local GITHUB_ISSUE_DRAFT, not a remote write.
+GITHUB_ISSUE_CREATE is available only with the current role grant **and** exact
+operator `github_issue_write_repositories`, nonempty
+`github_issue_write_operator_id`, positive `github_issue_write_max_issues` and
+`.env` `GITHUB_ISSUE_TOKEN`. Defaults disable all external creation. The allowance
+is a persistent per-character total across all approved repositories, including
+unknown attempts; it never resets daily. Dispatch rechecks current grants and
+operator scope. The existing Issue adapter reserves before POST and never retries
+an unknown external write. Drafting, declining and stopping remain valid.
+
 ### Interval autonomy
 
 When Character Runtime has an API key, Space autonomy is enabled by default.

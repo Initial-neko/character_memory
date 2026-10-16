@@ -131,6 +131,8 @@ runtime_services.py          Search/Avatar/ImageGen/World composition root
 browser_web.py               public headless Chromium renderer
 world_observation.py         search discovery -> rendered WorldObservation
 world_activity.py            Pulse aggregation/comments + Personal Browse + durable scheduler
+world_continuation.py        optional bounded decisions within one existing Browse opportunity
+application/continuation_tools.py  trusted shared-channel/Issue adapters for World continuation
 world_recovery.py            Read-only receipt inspection + local atomic APPRAISED recovery; no provider replay
 remote_media.py              SSRF-safe public image downloader
 space_store.py               Character Space shared posts/comments/reactions/views + schedule ledger

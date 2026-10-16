@@ -2,6 +2,26 @@
 
 本文描述一个 Character 收到 Event 后，如何形成内部变化与对外行为。
 
+## Read-only capability discovery
+
+`runtime.capability_discovery.available_capabilities(profile, channel=...,
+availability=...)` describes the existing WEB_SEARCH / READ_RSS World tools
+and eligible Direct CLAUDE_TASK. The caller supplies a trusted per-turn
+`CapabilityAvailability` snapshot of configuration, dependency availability,
+Direct event eligibility and remaining opportunity allowance. Existing readers
+do not acquire a new sidecar permission; Claude and selected Skills still use
+the named person's operator-owned `select_role_research` grant. Archived or
+invalid people and exhausted opportunities expose no tools. Identity, channel,
+budget and grants are absent from model arguments.
+
+Discovery reads local grant/Skill files without initializing providers, calling
+a model, reserving budget or persisting an event. Descriptions are not execution
+permissions: dispatch must revalidate current grants and use existing executor
+checks and receipts. This query does not itself change channel prompts, launch
+a continuation loop, register Browser sessions or grant external writes. Prompt
+consumption and the additional capability adapters remain separate integration
+work.
+
 ## Optional Direct external-task decision
 
 `direct_claude_tasks_enabled` (default false) and the named person's operator

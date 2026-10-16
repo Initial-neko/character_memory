@@ -588,3 +588,8 @@ of existing boundaries. They do not establish long-term Persona fidelity with a
 live provider, real browser visits, or the combined autonomous runtime's behavior;
 those require their separate runtime acceptance paths. This backend-only change
 has VISUAL N/A because no user interface is changed.
+### Role contact production composition
+
+`build_role_collaboration(access)` binds the recipient's existing PersonContextBuilder, current model, current role/Skill permissions and shared CapabilityExecutor. It supplies the actual shared Group messages or visible Space post and comments, while private memories remain private reasoning context. Contact permits silence or disagreement and at most two recipient decisions plus one separately authorized public research call; these internal calls are attributed to `role_collaboration`, separately from the initiating World's step count. The World continuation composition owns exposing and authorizing the initiating contact tool.
+
+`GitHubIssueHTTPTransport` is an optional operator-owned transport for the separately scoped IssueWriteGrant, not a grant itself. Production POST runs in a disposable HTTP-only child with credentials through stdin, fixed GitHub HTTPS origin, no redirects/retries, a bounded response and a parent-enforced wall timeout including DNS and EOF. Timeout kills/reaps the worker; the durable adapter records UNKNOWN and does not retry an irreversible request. Without a grant the existing adapter returns a draft and never starts HTTP. No UI changes (VISUAL N/A).

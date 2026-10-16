@@ -680,3 +680,8 @@ There is no native interactive window manager or arbitrary specialist toolchain.
 The backend defaults to direct; code availability does not establish that a
 running deployment has restarted, enabled Claude or passed live Persona quality
 acceptance. Character life/source display semantics belong to [Memory](MEMORY.md).
+
+Prompt assembly uses the pure five-part `PromptParts` contract; source ownership,
+capability snapshot injection and the retained per-channel policies are recorded
+in [Person Runtime](PERSON_RUNTIME.md#prompt-composition-ownership). Tool discovery
+and execution remain outside the compiler.

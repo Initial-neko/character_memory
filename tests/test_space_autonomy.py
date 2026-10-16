@@ -1096,7 +1096,8 @@ def test_space_prompt_asks_a_video_for_words_and_for_this_character_look(tmp_pat
     assert "GENERATE_VIDEO 当前可用" in prompt
     assert "选择了视频就必须同时写 social_post" in prompt
     assert "贴合这个人物自己的视觉身份" in prompt
-    assert "可爱" in prompt
+    assert "遵循当前 Persona 的表达风格" in prompt
+    assert "可爱、柔软" not in prompt
     store.close()
 
 

@@ -48,6 +48,8 @@
 .profile-v2-post-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px; }
 .profile-v2-post-card,.profile-v2-story-card,.profile-v2-side-card { min-width:0; border:1px solid var(--profile-line); border-radius:16px; background:var(--profile-surface); box-shadow:0 3px 12px rgba(58,35,112,.035); }
 .profile-v2-post-card { overflow:hidden; padding:15px; }
+.profile-v2-post-link { display:block; color:inherit; text-decoration:none; }
+.profile-v2-post-link:focus-visible { outline:3px solid var(--ui-focus); outline-offset:3px; }
 .profile-v2-card-label { display:inline-flex; margin:0 0 7px; padding:4px 9px; border-radius:999px; background:#f0ebff; color:#6540d2; font-size:11px; font-weight:650; }
 .profile-v2-card-time { display:block; color:var(--profile-muted); font-size:11px; line-height:1.5; }
 .profile-v2-post-image { display:block; width:100%; height:auto; max-height:320px; margin:12px 0 10px; border-radius:11px; object-fit:contain; background:#f3f1fa; }
@@ -94,6 +96,7 @@ body.profile-mode .chat-shell { min-height:calc(100vh - 72px); }
   .profile-v2-hero-content { align-content:flex-end; align-items:flex-end; gap:12px; padding:19px 17px; }
   .profile-v2-avatar { flex-basis:76px; width:76px; height:76px; font-size:26px; }
   .profile-v2-identity { flex-basis:calc(100% - 95px); min-width:140px; }
+  .profile-v2-identity { padding:10px; border-radius:12px; background:rgba(25,19,50,.72); }
   .profile-v2-identity h2 { margin:2px 0 6px; font-size:26px; }
   .profile-v2-tagline { font-size:13px; }
   .profile-v2-hero-actions { gap:8px; margin-left:0; }

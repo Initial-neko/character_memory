@@ -124,7 +124,7 @@ def test_space_local_navigation_uses_existing_feed_and_world_routes(page, space_
     with page.expect_response(lambda response: "/v1/space/posts?" in response.url and "character_id=rin" in response.url):
         current_button.click()
     expect(page.locator(f'.space-feed [data-space-post="{post_ids[0]}"]')).to_be_visible()
-    page.locator(f'.space-feed [data-space-post="{post_ids[0]}"]').click(position={"x": 20, "y": 20})
+    page.locator(f'.space-feed [data-space-post="{post_ids[0]}"] .space-content').click()
     expect(page.locator(".space-detail-view")).to_be_visible()
     page.keyboard.press("Escape")
     expect(page.locator(".space-detail-view")).to_be_hidden()
@@ -170,7 +170,7 @@ def test_space_card_detail_returns_to_same_feed_position(page, space_server):
     assert card.get_attribute("role") is None
     card.scroll_into_view_if_needed()
     before = page.evaluate("window.scrollY")
-    card.click(position={"x": 20, "y": 20})
+    card.locator(".space-content").click()
 
     detail = page.locator(".space-detail-view")
     expect(detail).to_be_visible()

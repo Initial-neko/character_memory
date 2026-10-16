@@ -10,13 +10,7 @@ from character_memory.application.group_autonomy import (
     GroupAutonomyScheduler,
     GroupAutonomyService,
 )
-from character_memory.domain.models import (
-    ActionDecision,
-    ActionType,
-    DailyLifePlan,
-    DiaryResult,
-    PersonReaction,
-)
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
@@ -57,12 +51,6 @@ class AutonomousGroupModel(PersonModel):
                 model="group-autonomy-fake",
             ),
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def _access(tmp_path, *, ids=("c00", "c01"), model=None, now=None):

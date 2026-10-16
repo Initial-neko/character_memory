@@ -212,6 +212,11 @@ one shared conversation event
 
 V1 已提供最小的人为干预闭环，入口在 Character Runtime 抽屉的 **Memory Inspector**：
 
+人物生活中的关联记忆可通过 `/?memory_character=<id>&memory_id=<id>`
+直达同一 Inspector 卡片。只读 `GET /v1/characters/{character_id}/memories/{memory_id}`
+读取指定记忆及来源，不受最近记忆列表的数量限制，不加载人物模型；
+人物不存在、记忆不存在或不属于该人物均返回 `404`。
+
 - 查看 active / inactive Memory、importance、来源和原始 Direct Event 摘要；
 - **固定 / 取消固定**：`pinned` Memory 永远进入 bounded recall candidate union，并获得小幅 ranking bonus；
 - **忘记 / 恢复**：只切换派生 Memory 的 `active`，不删除原始 durable fact；
@@ -317,7 +322,7 @@ prompt. Optional malformed metadata does not manufacture a title or summary.
 
 ## Character life observer
 
-`/life` is a user-facing, read-only view of real character records, separate from Dev Console and the frozen life simulator. The page shares the user visual shell and uses actual character profiles for its selection list and avatar; timeline/detail views preserve the existing source and fact boundaries. `GET /v1/characters/{character_id}/life` projects Core events, actually participated Group events, own Space posts/comments and actual Space opportunity receipts, durable World decisions and future expression Intents. It does not initialize a character runtime, call a model, fetch external content, write schemas or create observations, Memory or Intent.
+`/life` is a user-facing, read-only view of real character records, separate from Dev Console. It reads retained historical LIFE_EVENT/DIARY records but does not offer virtual-life simulation or diary generation. The page shares the user visual shell and uses actual character profiles for its selection list and avatar; timeline/detail views preserve the existing source and fact boundaries. `GET /v1/characters/{character_id}/life` projects Core events, actually participated Group events, own Space posts/comments and actual Space opportunity receipts, durable World decisions and future expression Intents. It does not initialize a character runtime, call a model, fetch external content, write schemas or create observations, Memory or Intent.
 
 The page offers a date (with client UTC offset), literal content/title search, channel filters, life/change/relationship/intent views and bounded keyset paging (default 30, maximum 50). Source identities are namespaced. Unknown characters are rejected, optional absent subsystem tables remain absent, invalid cursors/date/filter inputs are rejected. Records without usable persisted time cannot be placed in a dated timeline.
 

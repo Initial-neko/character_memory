@@ -7,15 +7,7 @@ from fastapi.testclient import TestClient
 from character_memory.api import create_api
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
-from character_memory.domain.models import (
-    ActionDecision,
-    ActionType,
-    DailyLifePlan,
-    DiaryResult,
-    Event,
-    EventType,
-    PersonReaction,
-)
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, PersonReaction
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.group_web import attach_group_routes
 from character_memory.history_web import attach_history_routes
@@ -419,12 +411,6 @@ class _VoiceActionModel(PersonModel):
         if self._reactions:
             return self._reactions.pop(0)
         return _voice_reaction()
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def _voice_reaction(message="  晚上好呀  ") -> PersonReaction:

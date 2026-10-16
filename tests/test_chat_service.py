@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -24,12 +24,6 @@ class SessionAwareFake(PersonModel):
     @staticmethod
     def _reaction():
         return PersonReaction(perception="收到", reaction="正常回应", mental_state_update="平静", action=ActionDecision(type=ActionType.REPLY, reason="自然回应", message="你好"))
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="平静。", mental_state_update="平静")
 
 
 def test_chat_service_owns_clock_and_conversation_session(tmp_path):

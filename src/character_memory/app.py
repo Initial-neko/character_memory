@@ -10,9 +10,6 @@ from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import Clock, RealClock
 from character_memory.config import Settings, discover_character_profiles, load_persona, load_settings, resolve_sticker_dir
 from character_memory.images import load_image_catalog
-from character_memory.life.runner import DayRunner
-from character_memory.life.simulator import LifeSimulator
-from character_memory.life.ticker import TimeTicker
 from character_memory.llm.client import OpenAICompatibleModel
 from character_memory.llm.usage import LlmUsageRecorder
 from character_memory.memory.embedding import DeterministicEmbedding, OpenAICompatibleEmbedding, SentenceTransformerEmbedding
@@ -37,9 +34,6 @@ class AppBundle:
     runtimes: dict[str, PersonRuntime]
     characters: list[dict[str, str]]
     chat: ChatService
-    life: LifeSimulator
-    ticker: TimeTicker
-    days: DayRunner
     embeddings: object
     model: OpenAICompatibleModel
     clock: Clock
@@ -155,20 +149,13 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None, s
         app_clock = clock or RealClock()
         chat = ChatService(store, runtimes, app_clock)
 
-        # Life simulation is frozen in the current phase and continues to use
-        # the configured default character until multi-character life is needed.
-        default_persona = persona_by_id[default_character_id]
-        life = LifeSimulator(store, embeddings, model, default_persona, runtime)
-        ticker = TimeTicker(store, runtime)
-        days = DayRunner(store, life, ticker)
-
         timings["total_ms"] = _ms(total)
         logger.info(
             "app.init timings characters=%d %s",
             len(profiles),
             " ".join(f"{key}={value:.1f}ms" for key, value in timings.items()),
         )
-        return AppBundle(settings, store, runtime, runtimes, profiles, chat, life, ticker, days, embeddings, model, app_clock, timings, owns_store)
+        return AppBundle(settings, store, runtime, runtimes, profiles, chat, embeddings, model, app_clock, timings, owns_store)
     except Exception:
         if owns_store:
             store.close()

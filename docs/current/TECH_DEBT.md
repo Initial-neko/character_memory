@@ -178,7 +178,7 @@ ReactionScheduler/SSE delivery remains process-local. SQLite is durable, but mul
 
 ### Life / Inspector and historical CSS
 
-The frozen life simulation/inspector and milestone-named CSS remain supported code, not dead code. Removal/renaming would create broad churn and belongs to a larger version if product direction warrants it.
+The read-only Streamlit inspector and milestone-named CSS remain supported code, not dead code. Consolidation or renaming needs an explicit product or maintenance reason. Virtual-life simulation has no supported CLI, HTTP or runtime entry point; character Life observation remains supported.
 
 ## Priority rule
 

@@ -11,7 +11,7 @@ from character_memory.application.clock import RealClock
 from character_memory.async_web import attach_async_routes
 from character_memory.avatar_web import attach_avatar_routes
 from character_memory.config import Settings, discover_character_profiles, load_persona, resolve_sticker_dir
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.group_web import attach_group_routes
 from character_memory.group_autonomy_web import attach_group_autonomy_routes
 from character_memory.history_web import attach_history_routes
@@ -55,7 +55,7 @@ class DeterministicPersonModel(PersonModel):
             raise RuntimeError("E2E direct provider failure")
         if "# Group Conversation Contract" in context:
             message = f"E2E group reply: {current}"
-        elif "TIME_TICK" in context or "手动唤醒后的主动判断" in context or "时间自然过去了一段" in context:
+        elif "TIME_TICK" in context or "时间自然过去了一段" in context:
             message = "E2E wake reply"
         else:
             message = f"E2E reply: {current}"
@@ -75,12 +75,6 @@ class DeterministicPersonModel(PersonModel):
 
     def react_with_images_for_session(self, context: str, image_data_urls: list[str], session_id: str) -> PersonReaction:
         return self._reaction(context)
-
-    def plan_day(self, context: str) -> DailyLifePlan:
-        return DailyLifePlan()
-
-    def write_diary(self, context: str) -> DiaryResult:
-        return DiaryResult(diary="E2E", mental_state_update="", memory_candidates=[])
 
 
 settings = Settings(

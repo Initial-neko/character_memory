@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from character_memory.api import create_api
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, EventType, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, EventType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -37,12 +37,6 @@ class VisionFakeModel(PersonModel):
             perception="用户给我看了一张图片",
             actions=[ActionDecision(type=ActionType.MESSAGE, message="我看到了。")],
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def _bundle(tmp_path):

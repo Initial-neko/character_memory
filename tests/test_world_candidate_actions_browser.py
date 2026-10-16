@@ -155,6 +155,10 @@ def test_world_candidate_chat_accept_confirmation_and_dismiss(page, live_world_c
     assert accepted_candidate["status"] == "ACCEPTED"
     assert accepted_candidate["accepted_character_id"] == "world-browser-accepted"
     assert created_profiles == [{"id": "world-browser-accepted", "name": "Browser Accept Guest"}]
+    world.get_by_role("button", name="已留下", exact=True).click()
+    expect(world.get_by_role("link", name="人物主页与真实动态 →")).to_have_attribute(
+        "href", "/?view=profile&character=world-browser-accepted")
+    world.get_by_role("button", name="今日邂逅", exact=True).click()
 
     dismiss_card = world.locator(f'[data-encounter-id="{candidate_ids["dismiss"]}"]')
     expect(dismiss_card).to_be_visible()

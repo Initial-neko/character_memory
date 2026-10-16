@@ -29,7 +29,6 @@ src/character_memory/
 ├─ memory/                  embedding + recall
 ├─ storage/                 SQLite core persistence/search/history
 ├─ llm/                     cloud model adapter
-├─ life/                    frozen life/time simulation
 └─ eval/                    eval runner
 ```
 
@@ -103,7 +102,7 @@ space_web.py            Character Space HTTP surface
 avatar_web.py           avatar HTTP/search adapter
 visual_web.py           ImageGen/visual tool HTTP surface
 visual_capture_web.py   Camera/Screen transient Vision routes
-wake_web.py             wake/debug HTTP surface
+wake_web.py             process-local periodic wake worker (no manual HTTP action)
 ```
 
 `api.py` 只保留 Character Runtime composition、共享 lifecycle、lazy runtime 和少量跨 route orchestration；不要再把新 endpoint 直接堆回这个文件。核心历史 route 已按 Character / Resource / Direct 三个 surface 拆到 `core_*_web.py`，通过 `CoreApiRouteAccess` 显式取得依赖。
@@ -257,7 +256,6 @@ search.js               message search
 space.js                Character Space masonry feed, deep-linked post detail + per-character Space entry
 space.css               Character Space layout
 intent.js               intent UX
-wake.js                 wake
 dictation.js            speech-to-text
 voice.js                call UI + ASR validity gate + optional Visual Capture
 visual_capture.js       Camera/Display sampling/keyframe selection
@@ -282,14 +280,11 @@ message_content.js      Direct/Group shared message body renderer
 - `web/call_invitations.js`: foreground invitation cards and explicit acceptance into the existing `voice.js` lifecycle.
 - `tests/test_call_invitations*.py`: Person/API state contracts and isolated Chromium microphone substitutes.
 
-## Life / Inspector
+## Inspector
 
-当前：
-
-- `life/runner.py / simulator.py / ticker.py` 仍有 CLI/运行入口，不是 dead code；
-- `ui.py` 仍通过 `uv run character-memory inspector` 提供 read-only developer inspector。
-
-产品方向已经冻结它们的扩张，但 **V1 保留**。是否整体删除属于后续大版本，不做零碎删减。
+`ui.py` 通过 `uv run character-memory inspector` 提供 read-only developer inspector。
+正式人物经历页由 `character_life.py` / `character_life_web.py` 提供，读取已有事实，不生成虚构生活。
+CLI 不提供 `day` / `simulate` / `tick`，AppBundle 不装配生活模拟器或虚拟时间 runner。
 
 ## Tests
 
@@ -345,4 +340,4 @@ Live2D 通话展示：`live2d_web.py` 负责本地资源发现/安全路径与�
 - `web/life.html`, `life.js`, `life.css`: dedicated timeline, source/detail and state comparison UI.
 - `tests/test_character_life*.py`, `test_character_executions*.py`, `test_life_conversation*.py`: provenance/isolation/paging contracts and explicit isolated browser checks.
 
-The owning durable observation contract is [MEMORY](MEMORY.md); `life/` continues to own the separate frozen simulator.
+The owning durable observation contract is [MEMORY](MEMORY.md).

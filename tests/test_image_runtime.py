@@ -1,7 +1,7 @@
 import base64
 from datetime import datetime, timezone
 
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, Event, EventType, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, PersonReaction
 from character_memory.images import load_image_catalog
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
@@ -21,12 +21,6 @@ class ImageFakeModel(PersonModel):
 
     def react(self, context):
         return PersonReaction(actions=[ActionDecision(type=ActionType.IMAGE, image_id=self.image_id)])
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def _catalog(tmp_path):

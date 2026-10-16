@@ -18,7 +18,7 @@ from character_memory.application.group_conversation_service import (
     build_group_user_event,
     resolve_group_mentions,
 )
-from character_memory.domain.models import DailyLifePlan, DiaryResult, Event, EventType, PersonReaction
+from character_memory.domain.models import Event, EventType, PersonReaction
 from character_memory.group_store import GroupRepository
 from character_memory.group_web import attach_group_routes
 from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
@@ -53,12 +53,6 @@ class MentionModel(PersonModel):
                 model="mention-fake",
             ),
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def _runtime(store, emb, model, persona):

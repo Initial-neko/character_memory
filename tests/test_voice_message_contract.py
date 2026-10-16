@@ -64,14 +64,3 @@ def test_every_action_gate_consults_the_shared_set():
 
     for module in (action_materialization, proactive_service, eval_runner):
         assert module.EXPRESSIVE_ACTIONS is EXPRESSIVE_ACTIONS, module.__name__
-
-
-def test_the_intent_ticker_counts_a_voice_reply_as_executed():
-    """life/ticker.py keeps a narrower set on purpose -- it excludes STICKER and
-    IMAGE, and this task must not widen that. But a voice reply does execute the
-    intent, so VOICE_MESSAGE belongs there or the intent is logged as dropped."""
-    from character_memory.life import ticker
-
-    assert ActionType.VOICE_MESSAGE in ticker._INTENT_EXECUTED_ACTIONS
-    assert ActionType.STICKER not in ticker._INTENT_EXECUTED_ACTIONS
-    assert ActionType.IMAGE not in ticker._INTENT_EXECUTED_ACTIONS

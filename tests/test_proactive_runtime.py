@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, EventType, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, EventType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -13,12 +13,6 @@ from character_memory.storage.sqlite import SQLiteStore
 class ProactiveFakeModel(PersonModel):
     def react(self, context):
         return PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="那个汇报结束了吗？")])
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def test_proactive_turn_reuses_latest_conversation_and_marks_message_source(tmp_path):
@@ -59,12 +53,6 @@ class ProactiveVoiceModel(PersonModel):
         return PersonReaction(
             actions=[ActionDecision(type=ActionType.VOICE_MESSAGE, message="我直接说吧，路上慢一点。")]
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def test_proactive_intent_contract_allows_and_persists_voice_message(tmp_path):

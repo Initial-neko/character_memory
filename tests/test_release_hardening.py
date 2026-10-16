@@ -60,12 +60,15 @@ def test_lifecycle_registration_preserves_startup_and_shutdown_callbacks():
     assert stop() == "stopped"
 
 
-def test_release_candidate_version_and_policy_are_pinned():
+def test_release_version_and_policy_are_pinned():
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     releases = (ROOT / "docs" / "current" / "RELEASES.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'version = "0.5.0rc1"' in pyproject
-    assert "v0.5.0-rc.1" in releases
-    assert "0.5.0-rc.1" in changelog
+    assert 'version = "0.5.0"' in pyproject
+    # The release-candidate pin must not survive the stable promotion, otherwise a
+    # stale string keeps this guard green while the shipped version says otherwise.
+    assert 'version = "0.5.0rc1"' not in pyproject
+    assert "v0.5.0" in releases
+    assert "## 0.5.0 " in changelog
     assert "stable" in releases.lower()

@@ -188,6 +188,12 @@
     const image = mediaImage(post);
     if (image) article.append(image);
     article.append(make("p", "profile-v2-card-content", post.content || (image ? "图片动态" : "这条动态没有正文。")));
+    const link = make("a", "profile-v2-post-link");
+    link.href = `/?view=space&space_post=${encodeURIComponent(post.id)}`;
+    link.setAttribute("aria-label", "查看动态");
+    while (article.firstChild) link.append(article.firstChild);
+    link.append(make("span", "profile-v2-text-button", "查看动态"));
+    article.append(link);
     return article;
   }
 

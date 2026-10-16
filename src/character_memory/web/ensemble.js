@@ -261,6 +261,7 @@
     CM.openDrawer(build.group_name || build.group?.name || "确认群成员", "勾选要加入的角色，然后一次确认创建");
     CM.dom.drawerBody.innerHTML = `
       <div class="ensemble-confirmation">
+        ${build.mode === "SCENE" ? '<figure class="scene-atmosphere"><img src="/static/artwork/ambient-window.webp" alt="温暖窗边的情景氛围插画"><figcaption>场景氛围示意 · 不是已经发生的经历</figcaption></figure>' : ''}
         <div class="ensemble-confirm-head">
           <div>
             <span class="ensemble-kicker">GROUP READY</span>

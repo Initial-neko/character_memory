@@ -2,6 +2,20 @@
 
 本文统一描述 Character Memory 的社会表达面与公共互联网观察面。
 
+Web navigation keeps the originating person and durable record: profile Space
+cards link to their post, post authors link to that person's profile, and life
+details link back to their associated post and exact saved memory. Group shared
+experience entry lists the current group's members rather than using the last
+Direct selection. On narrow screens, selecting a life record moves to its detail
+with a return-to-record control; chat identity and actions occupy separate rows.
+
+World distinguishes pending encounter candidates from accepted characters. Its
+accepted section reads the latest 50 encounter records and links to existing
+profiles and their real Space posts; acceptance alone is not public interaction.
+Warm-scene previews and story progress reuse the bundled ambient illustration,
+explicitly labelled as atmosphere rather than evidence of an event. Neither UI
+projection invokes an extra model or creates a second life runtime.
+
 核心边界：
 
 ```text

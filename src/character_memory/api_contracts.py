@@ -39,11 +39,6 @@ class ChatRequest(BaseModel):
         return self
 
 
-class SimulateRequest(BaseModel):
-    days: int = Field(default=1, ge=1, le=365)
-    character_id: str = "rin"
-
-
 class PersonaDraftRequest(BaseModel):
     description: str = Field(min_length=3, max_length=4000)
     name: str = Field(default="", max_length=48)

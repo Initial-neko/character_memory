@@ -8,7 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from character_memory.app import build_app, build_app_from_settings, build_embedding, build_model
@@ -174,13 +174,6 @@ def main():
     chat.add_argument("--conversation", default="cli")
     chat.add_argument("--at", default=None, help="ISO datetime; default uses RealClock")
 
-    day = sub.add_parser("day")
-    day.add_argument("--character", default="rin")
-    sim = sub.add_parser("simulate")
-    sim.add_argument("days", type=int)
-    sim.add_argument("--character", default="rin")
-    tick = sub.add_parser("tick")
-    tick.add_argument("--character", default="rin")
     inspect = sub.add_parser("inspect")
     inspect.add_argument("--character", default="rin")
     doctor = sub.add_parser("doctor")
@@ -253,18 +246,6 @@ def main():
             at = datetime.fromisoformat(args.at) if args.at else None
             result = bundle.chat.send(args.message, character_id=args.character, conversation_id=args.conversation, at=at)
             _print_json({"event_id": result.event.id, "event_time": result.event.event_time, "action": result.reaction.action.model_dump(mode="json") if result.reaction.action else None, "actions": [action.model_dump(mode="json") for action in result.reaction.actions], "perception": result.reaction.perception, "reaction": result.reaction.reaction, "mental_state": result.reaction.mental_state_update, "recalled_memories": [m.model_dump(mode="json", exclude={"embedding"}) for m in result.recalled_memories]})
-        elif args.cmd == "day":
-            _print_json(bundle.days.run_next_day(args.character))
-        elif args.cmd == "simulate":
-            if args.days < 1 or args.days > 3650:
-                raise SystemExit("days must be between 1 and 3650")
-            for index, result in enumerate(bundle.days.simulate(args.character, args.days), start=1):
-                print(f"day {index}: {result['date']} | life={result['life_events']} | ticks={result['ticks']} | proactive={result['proactive_messages']}")
-        elif args.cmd == "tick":
-            now = bundle.days.current_time(args.character)
-            results = bundle.ticker.tick(args.character, now)
-            bundle.store.set_world_time(args.character, now + timedelta(hours=1))
-            _print_json([{"action": r.reaction.action.model_dump(mode="json") if r.reaction.action else None, "actions": [action.model_dump(mode="json") for action in r.reaction.actions], "reaction": r.reaction.reaction, "recalled_memories": [m.id for m in r.recalled_memories]} for r in results])
     finally:
         bundle.close()
 

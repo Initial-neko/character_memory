@@ -96,7 +96,6 @@ Source Event 先成为 durable fact。Provider 超时或人物 reaction 失败�
 - `ChatService`
 - Reaction/SSE wiring
 - Visual runtime
-- frozen Life / Ticker / DayRunner
 - Clock
 
 不同人物共享 Provider、Embedding 与 SQLite，但 Persona、Memory、Mental State、聊天历史和 Runtime 行为按 Character 隔离。
@@ -507,7 +506,7 @@ LLM 用量 GET 使用 SQLite `mode=ro`，不建立或迁移正式库表；无数
 - React / Next.js
 - 多 worker durable reaction queue
 
-Life Simulation 与 Streamlit Inspector 仍有正式入口，因此 V1 保留但冻结扩张。是否整体移除属于后续大版本决策，不做零碎删除。
+正式人物经历页只投影真实持久记录。CLI 不提供 `day` / `simulate` / `tick`；Runtime 不装配虚构生活、日记生成或虚拟时间模拟器。历史 LIFE_EVENT / DIARY 记录仍可读取，不做数据删除。Streamlit Inspector 仍是只读开发入口。
 
 这些边界不是永远禁止，而是必须由真实瓶颈或产品 contract 证明必要。
 ## Character execution evolution boundary

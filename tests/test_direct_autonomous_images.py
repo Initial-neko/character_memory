@@ -187,7 +187,6 @@ def test_lazy_schema_migration_is_recorded_once_and_reopens(tmp_path):
     store.close()
 
 
-
 @pytest.mark.parametrize("entry", ["wake", "intent"])
 @pytest.mark.parametrize("enabled,fail", [(False,False),(True,False),(True,True)])
 def test_formal_dispatch_through_person_and_async_worker(tmp_path, monkeypatch, entry, enabled, fail):
@@ -205,10 +204,6 @@ def test_formal_dispatch_through_person_and_async_worker(tmp_path, monkeypatch, 
         def react(self, context):
             self.contexts.append(context)
             return PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="Here is a quiet moment."), ACTION])
-        def plan_day(self, context):
-            raise AssertionError("unexpected day planner")
-        def write_diary(self, context):
-            raise AssertionError("unexpected diary")
         def _request(self, *args, **kwargs):
             compiled.append(args)
             return "synthetic scene"

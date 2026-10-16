@@ -1,7 +1,7 @@
 [project]
 name = "character-memory"
 version = "0.5.0"
-description = "Experimental persistent AI person runtime with language memory, vector recall and simulated life."
+description = "Persistent AI person runtime with language memory, vector recall and grounded experiences."
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "pydantic==2.13.5",

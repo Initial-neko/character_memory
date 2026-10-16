@@ -14,17 +14,8 @@ import pytest
 
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService
-from character_memory.domain.models import (
-    ActionDecision,
-    ActionType,
-    DailyLifePlan,
-    DiaryResult,
-    Event,
-    EventType,
-    PersonReaction,
-)
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, PersonReaction
 from character_memory.eval.runner import EvalRunner
-from character_memory.life.runner import DayRunner
 from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -52,12 +43,6 @@ class PerCallTraceModel(PersonModel):
         self.last_attempt = 99
         self.last_model = "WRONG-SHARED-MODEL"
         return ModelCallResult(value=PersonReaction(actions=[]), trace=trace)
-
-    def plan_day(self, context: str) -> DailyLifePlan:
-        return DailyLifePlan()
-
-    def write_diary(self, context: str) -> DiaryResult:
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def test_runtime_trace_uses_exact_model_call_snapshot_not_shared_last_fields(tmp_path: Path):
@@ -118,12 +103,6 @@ class BlockingGroupModel(PersonModel):
             self.entered.set()
             assert self.release.wait(timeout=2)
         return PersonReaction(actions=[])
-
-    def plan_day(self, context: str) -> DailyLifePlan:
-        return DailyLifePlan()
-
-    def write_diary(self, context: str) -> DiaryResult:
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def test_two_group_services_sharing_app_lock_cannot_interleave_user_turns(tmp_path: Path):
@@ -235,12 +214,6 @@ class CaptureContextModel(PersonModel):
         self.contexts.append(context)
         return PersonReaction(actions=[])
 
-    def plan_day(self, context: str) -> DailyLifePlan:
-        return DailyLifePlan()
-
-    def write_diary(self, context: str) -> DiaryResult:
-        return DiaryResult(diary="", mental_state_update="")
-
 
 def test_future_mental_state_does_not_leak_into_past_runtime_context(tmp_path: Path):
     store = SQLiteStore(tmp_path / "state.db")
@@ -350,31 +323,6 @@ def test_concurrent_sticker_imports_merge_instead_of_losing_manifest_updates(tmp
     assert catalog.get("b") is not None
     assert catalog.asset_path("a").read_bytes() == b"A"
     assert catalog.asset_path("b").read_bytes() == b"B"
-
-
-class EmptyLife:
-    def simulate_day(self, character_id, day):
-        return []
-
-    def end_day(self, character_id, day):
-        return SimpleNamespace(diary="")
-
-
-class EmptyTicker:
-    def tick(self, character_id, at):
-        return []
-
-
-def test_consecutive_simulation_runs_do_not_skip_dates(tmp_path: Path):
-    store = SQLiteStore(tmp_path / "days.db")
-    store.set_world_time("rin", datetime(2026, 9, 11, 10, tzinfo=timezone.utc))
-    runner = DayRunner(store, EmptyLife(), EmptyTicker())
-
-    result = runner.simulate("rin", 3, tick_hours=())
-
-    assert [item["date"] for item in result] == ["2026-09-12", "2026-09-13", "2026-09-14"]
-    assert store.get_world_time("rin") == datetime(2026, 9, 15, 0, tzinfo=timezone.utc)
-    store.close()
 
 
 class FakeEvalStore:

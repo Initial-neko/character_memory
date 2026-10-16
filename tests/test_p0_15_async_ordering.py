@@ -9,7 +9,7 @@ from character_memory.application.async_conversation import ConversationEventHub
 from character_memory.application.chat_service import build_user_event
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService, SupersededGroupReaction
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.group_store import GroupEvent, GroupRepository
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
@@ -28,12 +28,6 @@ class _SequenceModel(PersonModel):
 
     def react_for_session(self, context, session_id):
         return self.react(context)
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def _runtime(store, embeddings, model, persona):

@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import shutil
 import subprocess
+import pytest
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
@@ -41,16 +42,19 @@ def test_chat_service_dispatch_wake_is_time_tick_and_never_forces_a_message(tmp_
         output = chat.dispatch_wake(
             character_id="rin",
             at=now,
-            reason="MANUAL",
+            reason="PERIODIC",
             conversation_id="wake-conversation",
         )
         assert output.reaction.actions == []
         assert len(runtime.events) == 1
         event = runtime.events[0]
         assert event.event_type == EventType.TIME_TICK
-        assert event.metadata["wake_reason"] == "MANUAL"
+        assert event.metadata["wake_reason"] == "PERIODIC"
         assert event.metadata["conversation_id"] == "wake-conversation"
-        assert "不是要求你必须回复" in event.content
+        assert "不要为了活跃而强行说话" in event.content
+        with pytest.raises(ValueError):
+            chat.dispatch_wake(character_id="rin", at=now, reason="MANUAL")
+        assert len(runtime.events) == 1
     finally:
         store.close()
 
@@ -73,7 +77,7 @@ def test_time_tick_wake_contract_offers_voice_message():
     assert "VOICE_MESSAGE" in context
 
 
-def test_periodic_wake_is_due_at_60_minutes_and_manual_bypasses_interval(tmp_path):
+def test_periodic_wake_keeps_interval_and_rejects_manual_dispatch(tmp_path):
     store = SQLiteStore(tmp_path / "wake-service.db")
     calls = []
 
@@ -104,19 +108,10 @@ def test_periodic_wake_is_due_at_60_minutes_and_manual_bypasses_interval(tmp_pat
         assert periodic.silent is True
         assert len(calls) == 1
 
-        # The periodic call just marked the character, but manual Wake is an
-        # explicit user action and deliberately bypasses the interval.
-        manual = service.wake(
-            "rin",
-            reason="MANUAL",
-            at=t0 + timedelta(minutes=61),
-            conversation_id="manual-conversation",
-            force=True,
-        )
-        assert manual is not None
-        assert manual.reason == "MANUAL"
-        assert manual.conversation_id == "manual-conversation"
-        assert calls[-1][2] == "MANUAL"
+        assert service.wake("rin", reason="PERIODIC", at=t0 + timedelta(minutes=61)) is None
+        with pytest.raises(ValueError):
+            service.wake("rin", reason="MANUAL", at=t0 + timedelta(minutes=61))
+        assert len(calls) == 1
     finally:
         store.close()
 
@@ -150,18 +145,15 @@ def test_failed_periodic_wake_marks_interval_before_provider_call(tmp_path):
 
 
 def test_wake_frontend_contract_and_javascript_syntax():
-    script = (WEB / "wake.js").read_text(encoding="utf-8")
+    script = (WEB / "topbar_menu.js").read_text(encoding="utf-8")
     index = (WEB / "index.html").read_text(encoding="utf-8")
 
-    assert 'button.id = "wakeButton"' in script
-    assert "/v1/characters/${encodeURIComponent(characterId)}/wake" in script
-    assert "CM.connectDirectStream()" in script
-    assert "result.silent" in script
-    assert "button.hidden = group" in script
-    assert '/static/wake.js' in index
+    assert 'wakeButton' not in script
+    assert '/static/wake.js' not in index
+    assert not (WEB / "wake.js").exists()
     wake_backend = (ROOT / "src" / "character_memory" / "wake_web.py").read_text(encoding="utf-8")
     assert "scheduler.publish_direct_responses(" in wake_backend
 
     node = shutil.which("node")
     if node:
-        subprocess.run([node, "--check", str(WEB / "wake.js")], check=True, capture_output=True, text=True)
+        subprocess.run([node, "--check", str(WEB / "topbar_menu.js")], check=True, capture_output=True, text=True)

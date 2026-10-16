@@ -12,7 +12,7 @@ from character_memory.persona_builder import PersonaDraft
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
 from character_memory.config import Settings, discover_character_profiles
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -28,12 +28,6 @@ class CreationFakeModel(PersonModel):
             mental_state_update="",
             actions=[ActionDecision(type=ActionType.MESSAGE, message="记住啦")],
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="平静。", mental_state_update="")
 
 
 def valid_draft():
@@ -90,7 +84,6 @@ def test_created_character_is_immediately_chat_ready(tmp_path):
         runtimes=runtimes,
         characters=discover_character_profiles(settings),
         chat=chat,
-        days=None,
         embeddings=emb,
         model=model,
         clock=clock,
@@ -220,7 +213,6 @@ def test_character_creation_hard_stops_at_twenty_active_slots(tmp_path):
     assert detail["confirmation_required"] is False
     assert not (persona_root / "nova" / "persona.yaml").exists()
     store.close()
-
 
 
 def test_character_onboarding_runs_after_character_write_lock_is_released(tmp_path):

@@ -40,7 +40,7 @@ def test_disabled_wrong_channel_and_expiry(tmp_path):
     store.close()
 
 
-from character_memory.domain.models import ActionDecision, ActionType, PersonReaction, DailyLifePlan, DiaryResult
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -52,8 +52,6 @@ class InviteModel(PersonModel):
     def react(self,context):
         self.contexts.append(context)
         return PersonReaction(actions=[ActionDecision(type=ActionType.CALL_INVITE,message='想听听近况，聊会儿吗？',reason='想联系用户')])
-    def plan_day(self,context):return DailyLifePlan()
-    def write_diary(self,context):return DiaryResult(diary='',mental_state_update='')
 
 
 @pytest.mark.parametrize('channel,event_type,enabled,expected',[

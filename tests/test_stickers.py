@@ -4,7 +4,7 @@ import pytest
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, EventType, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, EventType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -21,12 +21,6 @@ class StickerFakeModel(PersonModel):
     def react(self, context):
         self.last_context = context
         return PersonReaction(actions=[ActionDecision(type=ActionType.STICKER, sticker_id=self.sticker_id)])
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def test_sticker_action_requires_catalog_id():

@@ -21,12 +21,6 @@ class ReplyModel(PersonModel):
         self.calls.append(context)
         return PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE, message="今天汇报结束了吗？")])
 
-    def plan_day(self, context):
-        raise AssertionError("unexpected life planning")
-
-    def write_diary(self, context):
-        raise AssertionError("unexpected diary")
-
 
 @pytest.mark.parametrize("event_type,metadata", [
     (EventType.SPACE_COMMENT_RECEIVED, {"channel": "SPACE", "commenter_id": "rin"}),

@@ -3,14 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import threading
 
-from character_memory.domain.models import (
-    DailyLifePlan,
-    DiaryResult,
-    Event,
-    EventType,
-    MemoryCandidate,
-    PersonReaction,
-)
+from character_memory.domain.models import Event, EventType, MemoryCandidate, PersonReaction
 from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -41,12 +34,6 @@ class ConcurrentMemoryModel(PersonModel):
                 model="concurrent-memory-test",
             ),
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 class CandidateBarrierEmbedding(DeterministicEmbedding):

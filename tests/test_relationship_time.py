@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from character_memory.domain.models import DailyLifePlan, DiaryResult, Event, EventType, PersonReaction
+from character_memory.domain.models import Event, EventType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -15,12 +15,6 @@ class CaptureModel(PersonModel):
     def react(self, context):
         self.context = context
         return PersonReaction(actions=[])
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def test_relationship_time_ignores_future_chat_events(tmp_path):

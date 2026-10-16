@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from character_memory.avatar_intent import AvatarSearchIntent
-from character_memory.domain.models import DiaryResult, PersonReaction
+from character_memory.domain.models import PersonReaction
 from character_memory.llm.client import OpenAICompatibleModel
 from character_memory.storage.sqlite import SQLiteStore
 
@@ -61,12 +61,17 @@ def test_person_reaction_retry_keeps_action_specific_contract():
     assert "STICKER" in repair
 
 
-def test_generic_retry_names_diary_schema_instead_of_actions_contract():
+def test_generic_retry_names_requested_schema_instead_of_actions_contract():
+    from pydantic import BaseModel
+
+    class SummaryResult(BaseModel):
+        summary: str
+
     model = OpenAICompatibleModel("test-key", attempts=2)
     calls = []
     responses = iter([
-        '{"diary":123,"memory_candidates":"bad"}',
-        '{"diary":"今天很平静。","mental_state_update":"","memory_candidates":[]}',
+        '{"summary":123}',
+        '{"summary":"今天很平静。"}',
     ])
 
     def fake_request(messages, **_kwargs):
@@ -75,15 +80,14 @@ def test_generic_retry_names_diary_schema_instead_of_actions_contract():
 
     model._request = fake_request
     try:
-        result = model.structured_for_session("write diary", DiaryResult, "diary:test")
+        result = model.structured_for_session("summarize", SummaryResult, "summary:test")
     finally:
         model.close()
 
-    assert result.diary == "今天很平静。"
+    assert result.summary == "今天很平静。"
     repair = calls[1][-1]["content"]
-    assert "DiaryResult" in repair
-    assert "diary" in repair
-    assert "memory_candidates" in repair
+    assert "SummaryResult" in repair
+    assert "summary" in repair
     assert "actions 为 0~3" not in repair
 
 

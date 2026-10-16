@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, Event, EventType, Memory, MemoryCandidate, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, MemoryCandidate, PersonReaction
 from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -28,12 +28,6 @@ class FakeModel(PersonModel):
                 model="fake-model",
             ),
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="今天很平静。", mental_state_update="平静")
 
 
 def test_runtime_writes_action_message_memory_and_trace(tmp_path):
@@ -80,12 +74,6 @@ class SparseModel(PersonModel):
         self.last_response_text = '{"actions":[]}'
         self.last_attempt = 1
         return PersonReaction(actions=[])
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def test_periodic_visual_observation_can_react_but_cannot_persist_screen_memory(tmp_path):

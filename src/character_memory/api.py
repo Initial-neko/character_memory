@@ -20,7 +20,6 @@ from character_memory.api_contracts import (
     MAX_ACTIVE_CHARACTERS,
     PersonaDraftRequest,
     SOFT_ACTIVE_CHARACTERS,
-    SimulateRequest,
 )
 from character_memory.api_character_service import ApiCharacterService
 from character_memory.api_resource_service import ApiResourceService

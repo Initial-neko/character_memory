@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from character_memory.api import create_api
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -25,12 +25,6 @@ class ApiFakeModel(PersonModel):
             ActionDecision(type=ActionType.EMOJI, message="🙂"),
         ])
 
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="平静。", mental_state_update="平静")
-
 
 def test_html_and_chat_share_same_application_service(tmp_path):
     store = SQLiteStore(tmp_path / "x.db")
@@ -39,7 +33,7 @@ def test_html_and_chat_share_same_application_service(tmp_path):
     clock = FixedClock(datetime(2026, 9, 7, 21, 30, tzinfo=timezone.utc))
     service = ChatService(store, runtime, clock)
     settings = SimpleNamespace(chat_model="fake", embedding_provider="deterministic", embedding_model="deterministic", db_path=str(tmp_path / "x.db"), base_url="fake")
-    bundle = SimpleNamespace(settings=settings, chat=service, store=store, clock=clock, runtime=runtime, days=None)
+    bundle = SimpleNamespace(settings=settings, chat=service, store=store, clock=clock, runtime=runtime)
     app = create_api(bundle=bundle)
     client = TestClient(app)
 

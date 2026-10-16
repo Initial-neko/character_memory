@@ -425,17 +425,16 @@ def test_archive_api_is_idempotent_and_refuses_unknown_characters(tmp_path: Path
         assert client.post("/v1/characters/nobody/restore").status_code == 404
 
 
-def test_archived_character_cannot_be_manually_woken(tmp_path: Path):
+def test_manual_wake_api_is_not_exposed(tmp_path: Path):
     config = _config(tmp_path)
     app = create_api(str(config))
     attach_async_routes(app)
     attach_wake_routes(app)
 
     with TestClient(app) as client:
+        assert client.post("/v1/characters/momo/wake", json={}).status_code == 404
         assert client.post("/v1/characters/momo/archive").status_code == 200
-        response = client.post("/v1/characters/momo/wake", json={})
-        assert response.status_code == 409
-        assert "Archived character cannot wake" in response.text
+        assert client.post("/v1/characters/momo/wake", json={}).status_code == 404
 
 
 def test_archive_refuses_to_hide_the_last_active_character(tmp_path: Path):

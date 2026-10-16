@@ -24,16 +24,7 @@ from character_memory.application.group_conversation_service import (
     SupersededGroupReaction,
 )
 from character_memory.async_web import attach_async_routes
-from character_memory.domain.models import (
-    ActionDecision,
-    ActionType,
-    DailyLifePlan,
-    DiaryResult,
-    Event,
-    EventType,
-    MemoryCandidate,
-    PersonReaction,
-)
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, MemoryCandidate, PersonReaction
 from character_memory.group_web import attach_group_routes
 from character_memory.llm.client import ModelCallResult, ModelCallTrace, PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
@@ -69,12 +60,6 @@ class DerivedWriteModel(PersonModel):
                 model="fake-async",
             ),
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def test_superseded_direct_reaction_cannot_commit_derived_state(tmp_path):
@@ -217,12 +202,6 @@ class GroupSequenceModel(PersonModel):
     def react_for_session(self, context, session_id):
         self.contexts.append(context)
         return self.reactions.pop(0)
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def _group_runtime(store, emb, model, persona):

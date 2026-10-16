@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService
-from character_memory.domain.models import DiaryResult, PersonReaction
+from character_memory.domain.models import PersonReaction
 from character_memory.llm.client import OpenAICompatibleModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -58,18 +58,6 @@ def test_complex_invalid_optional_memory_candidate_is_dropped_locally():
 
     assert reaction.actions[0].message == "主体回复仍然有效。"
     assert reaction.memory_candidates == []
-
-
-def test_diary_memory_candidates_share_the_same_string_compatibility():
-    result = DiaryResult.model_validate(
-        {
-            "diary": "今天记录了一件事。",
-            "mental_state_update": "",
-            "memory_candidates": ["用户希望下次继续讨论。"],
-        }
-    )
-
-    assert result.memory_candidates[0].content == "用户希望下次继续讨论。"
 
 
 def test_vision_reaction_string_memory_candidate_parses_without_retry():

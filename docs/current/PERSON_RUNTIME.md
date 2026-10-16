@@ -387,7 +387,7 @@ resolution 也进入 Runtime Trace。旧行和原时间保留，旧查询继续�
 - `proactive_dispatch_enabled` / `proactive_poll_seconds` 控制循环本身；轮询只决定多快发现一个到期 Intent，不改变派发节奏。
 - `proactive_min_dispatch_interval_minutes` 是同一角色两次派发之间的最小间隔，**任何派发都会消耗它，包括模型选择沉默的那一轮**——那次 LLM 调用已经花掉了。冷却游标持久化在 `proactive_dispatch_state`，重启不会重置；`has_due()` 也会查它，避免为一个正在冷却的角色白白加载 Runtime。
 
-当前还存在 process-local Character Wake：
+普通聊天界面不提供手动唤醒按钮或 `/v1/characters/{character_id}/wake` 写接口。当前仍存在 process-local 定时 Character Wake：
 
 - `proactive_wake_enabled`
 - 默认约每 60 分钟一次机会

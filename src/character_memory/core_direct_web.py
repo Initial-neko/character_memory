@@ -4,7 +4,7 @@ from datetime import datetime
 import logging
 import time
 
-from character_memory.api_contracts import ChatRequest, SimulateRequest
+from character_memory.api_contracts import ChatRequest
 from character_memory.api_route_access import CoreApiRouteAccess
 from character_memory.config import (
     load_persona,
@@ -243,11 +243,6 @@ def attach_core_direct_routes(app, access: CoreApiRouteAccess):
             "images": images.public_items(character_id),
             "image_source": images.source,
         }
-
-    @app.post("/v1/simulate")
-    def simulate(req: SimulateRequest):
-        current = access.require_bundle()
-        return {"days": current.days.simulate(req.character_id, req.days)}
 
     @app.get("/v1/state/{character_id}")
     def state(character_id: str):

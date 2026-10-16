@@ -118,16 +118,19 @@ def test_world_candidate_chat_accept_confirmation_and_dismiss(page, live_world_c
     with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith(f"/v1/encounters/{candidate_ids['chat']}/seen")) as seen_response:
         chat_card.get_by_role("button", name="打个招呼").click()
     assert seen_response.value.ok
-    expect(chat_card.locator("[data-encounter-panel]")).to_be_visible()
-    chat_form = chat_card.locator("[data-encounter-form]")
-    chat_form.locator("input").fill("我想看看修理店附近有什么。");
+    expect(page.locator('[data-world-detail]')).to_be_visible()
+    chat_form = page.locator('[data-world-composer]')
+    chat_form.locator("textarea").fill("我想看看修理店附近有什么。")
     with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith(f"/v1/encounters/{candidate_ids['chat']}/messages")) as message_response:
         chat_form.get_by_role("button", name="发送").click()
     sent = message_response.value.json()
     assert message_response.value.ok and sent["reply_pending"] is True
     assert [item["role"] for item in sent["messages"]] == ["USER"]
-    expect(chat_card.locator("[data-encounter-panel]")).to_be_visible()
-    expect(chat_card.get_by_text("我想看看修理店附近有什么。", exact=True)).to_be_visible()
+    expect(page.locator('[data-world-detail]')).to_be_visible()
+    expect(page.locator('[data-world-messages]').get_by_text("我想看看修理店附近有什么。", exact=True)).to_be_visible()
+    page.reload()
+    expect(page.locator('[data-world-messages]')).to_contain_text('我想看看修理店附近有什么。')
+    page.locator('[data-world-back]').click()
     assert repository.list_messages(candidate_ids["chat"])[0]["content"] == "我想看看修理店附近有什么。"
     assert access.settings.api_key == ""
     assert page.request.get(base + "/health").json()["runtime_loaded"] is False
@@ -221,6 +224,103 @@ def test_world_entry_is_not_scrolled_by_hidden_chat_initialization(page, live_wo
     page.wait_for_function('window.CM.state.lastRenderedSignature !== null && window.CM.state.lastRenderedSignature !== undefined')
     page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     assert page.evaluate('scrollY') < 5
-    # The same helper is called when hidden Direct SSE messages arrive.
+    # Hidden Direct SSE uses the same scroll helper.
     page.evaluate('window.CM.scrollToBottom(false)')
     assert page.evaluate('scrollY') < 5
+
+
+@pytest.mark.parametrize('width',[1440,390])
+def test_world_full_chat_reply_metrics_back_refresh_and_refusal(page,live_world_candidates,width):
+    from types import SimpleNamespace
+    from playwright.sync_api import expect
+    base,ids,repo,access,_=live_world_candidates
+    def structured(prompt,schema,session):
+        if schema.__name__=='EncounterCallDecision':
+            return schema(accept=False,reason='我正在看书，稍后再聊吧。')
+        return schema(message='听到了，这段相遇还在继续。')
+    fake=SimpleNamespace(require_bundle=lambda:SimpleNamespace(model=SimpleNamespace(structured_for_session=structured)))
+    access.encounter_service.access=fake
+    access.encounter_scheduler.service.access=fake
+    page.set_viewport_size({'width':width,'height':844 if width==390 else 960})
+    page.goto(base+'/?view=world')
+    page.locator(f'[data-encounter-chat="{ids["chat"]}"]').click()
+    expect(page.locator('[data-world-composer]')).to_be_visible()
+    page.locator('[data-world-composer] textarea').fill('我想继续认识你。')
+    page.locator('[data-world-composer] [type=submit]').click()
+    expect(page.locator('[data-world-messages]')).to_contain_text('我想继续认识你。')
+    access.encounter_scheduler.drain_pending_replies()
+    expect(page.locator('[data-world-messages]')).to_contain_text('听到了，这段相遇还在继续。')
+    expect(page.locator('[data-world-metrics]')).to_contain_text('1 次')
+    assert 'encounter='+str(ids['chat']) in page.url
+    page.reload()
+    expect(page.locator('[data-world-messages]')).to_contain_text('听到了，这段相遇还在继续。')
+    page.locator('[data-world-call]').click()
+    expect(page.locator('.encounter-call-dialog')).to_contain_text('我正在看书，稍后再聊吧。')
+    assert repo.metrics(ids['chat'])['connected_calls']==0
+    assert not page.evaluate('window.CM.features.voice.state.active')
+    page.locator('[data-call-close]').click()
+    page.locator('[data-world-back]').click()
+    expect(page.locator('[data-world-cards]')).to_be_visible()
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
+
+def test_encounter_call_reuses_media_capture_and_tts_without_formal_person(browser_type,live_world_candidates):
+    import io,re,wave
+    from types import SimpleNamespace
+    from playwright.sync_api import expect
+    base,ids,repo,access,_=live_world_candidates
+    def structured(prompt,schema,session):
+        return schema(accept=True,reason='现在可以聊。') if schema.__name__=='EncounterCallDecision' else schema(message='电话里也听到了你的话。')
+    fake=SimpleNamespace(require_bundle=lambda:SimpleNamespace(model=SimpleNamespace(structured_for_session=structured)))
+    access.encounter_service.access=fake;access.encounter_scheduler.service.access=fake
+    wav=io.BytesIO()
+    with wave.open(wav,'wb') as audio:
+        audio.setnchannels(1);audio.setsampwidth(2);audio.setframerate(16000);audio.writeframes(b'\0\0'*1600)
+    browser=browser_type.launch(headless=True,args=['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream'])
+    context=browser.new_context(permissions=['microphone'])
+    page=context.new_page();tts=[]
+    page.route(re.compile(r'http://127\.0\.0\.1:8001/health'),lambda route:route.fulfill(json={'asr':{'ready':True},'tts':{'ready':True}}))
+    def synthesize(route):
+        tts.append(route.request.post_data_json)
+        route.fulfill(body=wav.getvalue(),content_type='audio/wav')
+    page.route(re.compile(r'http://127\.0\.0\.1:8001/v1/tts'),synthesize)
+    page.route(re.compile(r'http://127\.0\.0\.1:8001/v1/asr'),lambda route:route.fulfill(json={'text':''}))
+    try:
+        page.goto(base+'/?view=world')
+        page.locator(f'[data-encounter-chat="{ids["chat"]}"]').click()
+        page.locator('[data-world-call]').click()
+        page.wait_for_function("window.CM.features.voice.state.target?.scope==='encounter' && window.CM.features.voice.state.micActive")
+        page.wait_for_function("document.querySelector('#voiceCallStatus').textContent.includes('正在听')")
+        assert page.request.get(base+f'/v1/encounters/{ids["chat"]}').json()['candidate']['metrics']['connected_calls']==1
+        assert repo.pending_count()==3
+        page.locator('#voiceMinimizeButton').click()
+        page.locator('[data-world-composer] textarea').fill('电话里继续认识。')
+        with page.expect_response(lambda r:r.request.method=='POST' and r.url.endswith(f'/v1/encounters/{ids["chat"]}/messages')):
+            page.locator('[data-world-composer] [type=submit]').click()
+        access.encounter_scheduler.drain_pending_replies()
+        page.wait_for_function('document.querySelector("#voiceCallTranscript").textContent.includes("电话里也听到了你的话")')
+        assert tts and tts[-1]['voice'] is None
+        page.locator('#voiceDockHangupButton').click()
+        page.wait_for_function('!window.CM.features.voice.state.active')
+        assert all('token' not in call for call in repo.list_calls(ids['chat']))
+    finally:
+        context.close();browser.close()
+
+
+def test_hidden_chat_poll_resumes_and_older_active_guest_remains_findable(page,live_world_candidates):
+    from datetime import timedelta
+    from playwright.sync_api import expect
+    base,ids,repo,access,_=live_world_candidates
+    old=ids['chat']; now=datetime.now(timezone.utc)
+    repo.append_open_message(old,'USER','离开前的问题',now)
+    for n in range(55):
+        c=repo.create_candidate(source_type='GENERATED',draft=_candidate_draft('closed '+str(n)),encounter_hook='old',opening_message='hi',now=now+timedelta(seconds=n))
+        repo.set_status(c['id'],'DISMISSED',now)
+    page.goto(base+'/?view=world&world_tab=ongoing')
+    page.locator(f'[data-encounter-chat="{old}"]').click()
+    expect(page.locator('[data-world-messages]')).to_contain_text('离开前的问题')
+    page.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>true})")
+    page.wait_for_timeout(2300)
+    repo.append_open_message(old,'CHARACTER','回到页面后仍能收到回答。',datetime.now(timezone.utc))
+    page.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>false})")
+    expect(page.locator('[data-world-messages]')).to_contain_text('回到页面后仍能收到回答。')

@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 
 from pydantic import BaseModel, Field
 
@@ -29,6 +30,9 @@ REPLIES_PER_DRAIN = 4
 
 
 _GENERATED_THEMES = (
+    "成年二次元猫系少女，夜间电台主播，嘴硬心软、表情丰富，和黑猫玩偶有一套秘密暗号",
+    "成年二次元魔法道具店店主，软萌外表但对冷门魔法异常执着，偶尔小迷糊又有自己的坚持",
+    "成年二次元独立游戏美术师，俏皮吐槽、喜欢星星发饰和毛绒玩具，外向但保留安静的一面",
     "深夜城市里做一份有点冷门工作的年轻人，兴趣具体，有自己的生活节奏",
     "喜欢旧电子设备、修理、收集或拆解东西的人，话不多但观察很细",
     "独立游戏、声音、像素画、模型或小众创作领域的创作者",
@@ -64,6 +68,11 @@ class EncounterPresentation(BaseModel):
 
 class EncounterReply(BaseModel):
     message: str = Field(min_length=1, max_length=1600)
+
+
+class EncounterCallDecision(BaseModel):
+    accept: bool
+    reason: str = Field(min_length=1, max_length=600)
 
 
 class EncounterService:
@@ -140,6 +149,27 @@ class EncounterService:
     def _persona_preference(self) -> str:
         return str(getattr(self.access.settings, "encounter_persona_preference", "") or "").strip()
 
+    def _classic_draft(self, now: datetime) -> tuple[PersonaDraft, dict]:
+        roster = str(getattr(self.access.settings, 'encounter_classic_roster', '芙莉莲｜葬送的芙莉莲\n赫萝｜狼与香辛料\n约尔·福杰｜间谍过家家'))
+        choices = [line.strip() for line in roster.splitlines() if '｜' in line]
+        profiles = getattr(self.access, 'character_profiles', lambda: [])()
+        excluded = {p.get('name', '') for p in profiles}
+        excluded.update(c['draft'].get('name', '') for c in self.repository.list_candidates(limit=100)
+                        if c['status'] in {'NEW', 'SEEN', 'CHATTING', 'ACCEPTED'})
+        choices = [line for line in choices if line.split('｜', 1)[0].strip() not in excluded]
+        if not choices:
+            raise ValueError('经典角色名单已用完，请在设置中补充尚未认识的人物')
+        key = choices[self._stable_index(now, 'classic-character', len(choices))]
+        name, work = (part.strip() for part in key.split('｜', 1))
+        draft = self._persona_builder().generate(
+            f'创作经典二次元角色「{name}」（作品《{work}》）的角色演绎。保留可辨认的姓名、外观、'
+            '核心性格、说话习惯与世界背景，不改造成普通都市原创人物。保留萌点、反差和自主性；'
+            '不凭空假定与用户有亲密关系，不将未知的原作细节写成确凿事实。', name=name,
+            tags=['经典角色', '二次元', work],
+        )
+        draft = draft.model_copy(update={'name': name})
+        return draft, {'classic_key': key, 'work': work}
+
     def _presentation(self, draft: PersonaDraft, now: datetime, source_type: str) -> EncounterPresentation:
         prompt = f"""你正在为一次偶然邂逅写一个很短的出场片段。
 
@@ -164,7 +194,8 @@ class EncounterService:
         theme = _GENERATED_THEMES[self._stable_index(now, "generated-theme", len(_GENERATED_THEMES))]
         description = (
             f"随机创造一个适合长期相处的新人物。灵感方向：{theme}。"
-            "不要做成模板化客服；给 TA 一个具体职业或日常、2~3 个明确兴趣、一个小怪癖或反差，"
+            "创作有吸引力的二次元原创角色：明确发型发色、服装配饰、表情习惯、可爱的萌点和性格反差。"
+            "不要做成模板化客服或平淡写实履历；给 TA 一个具体职业或日常、2~3 个明确兴趣、一个小怪癖或反差，"
             "同时保留边界、沉默和不同意见。名字、年龄、表达方式自然即可。"
         )
         if preference := self._persona_preference():
@@ -238,7 +269,8 @@ Excerpt:
             override=True,
         ):
             draft = self._persona_builder().generate(
-                seed.inspiration_description + (f"\n本次新人物的创作偏好：{preference}" if (preference := self._persona_preference()) else ""),
+                seed.inspiration_description + '\n将灵感转化为有吸引力的二次元原创人物：明确发型、发色、服装配饰、表情习惯、萌点和性格反差；避免平淡写实履历。'
+                + (f"\n本次新人物的创作偏好：{preference}" if (preference := self._persona_preference()) else ""),
                 name=seed.suggested_name,
                 tags=["互联网邂逅", *seed.tags[:6]],
             )
@@ -255,16 +287,22 @@ Excerpt:
         *,
         now: datetime | None = None,
         source_type: str = "AUTO",
+        encounter_kind: str = 'ORIGINAL',
+        daily_key: str | None = None,
     ) -> dict:
         now = now or datetime.now().astimezone()
         requested = str(source_type or "AUTO").strip().upper()
-        source = self.choose_source(now) if requested == "AUTO" else requested
-        if source not in {"WEB", "GENERATED"}:
-            raise ValueError("encounter source_type must be AUTO, WEB or GENERATED")
+        source = 'CLASSIC' if encounter_kind == 'CLASSIC' else self.choose_source(now) if requested == "AUTO" else requested
+        if source not in {"WEB", "GENERATED", 'CLASSIC'}:
+            raise ValueError("encounter source_type must be AUTO, WEB, GENERATED or CLASSIC")
+        if source == 'CLASSIC':
+            encounter_kind = 'CLASSIC'
 
         details: dict = {"requested_source": requested, "source_type": source}
         try:
-            if source == "WEB":
+            if source == 'CLASSIC':
+                draft, source_details = self._classic_draft(now)
+            elif source == "WEB":
                 draft, source_details = self._web_draft(now)
             else:
                 draft, source_details = self._generated_draft(now)
@@ -288,6 +326,9 @@ Excerpt:
             source_query=str(source_details.get("query") or ""),
             source_urls=list(source_details.get("source_urls") or []),
             source_domains=list(source_details.get("source_domains") or []),
+            encounter_kind=encounter_kind,
+            daily_key=daily_key,
+            classic_key=str(source_details.get('classic_key') or ''),
         )
         if getattr(self.access.settings, "encounter_portraits_enabled", True) and getattr(self.access, "services", None):
             try:
@@ -307,6 +348,32 @@ Excerpt:
             if candidate["status"] == "NEW":
                 return self.repository.set_status(candidate_id, "SEEN", now)
             return candidate
+
+    def request_call(self, candidate_id: int, *, now: datetime | None = None) -> dict:
+        now=now or datetime.now().astimezone()
+        started=time.monotonic()
+        with self.repository.lifecycle_lock(candidate_id):
+            invitation=self.repository.begin_call(candidate_id,now)
+            candidate=self.repository.get_candidate(candidate_id)
+            transcript=self.repository.list_messages(candidate_id,limit=16)
+        try:
+            decision=self.access.require_bundle().model.structured_for_session(
+                '作为下列临时邂逅人物，判断此刻是否愿意接用户的语音电话。可以接听，也可因当前活动、边界或意愿拒绝。'
+                '不要默认迎合、不要按好感分数判断，不凭空声称已经接通过。reason是人物自然说的一句话。\n'
+                +json.dumps({'draft':candidate['draft'],'opening':candidate['opening_message'],'conversation':transcript},ensure_ascii=False),
+                EncounterCallDecision,f'encounter-call:{candidate_id}:{invitation["id"]}')
+            with self.repository.lifecycle_lock(candidate_id):
+                result=self.repository.decide_call(invitation['id'],decision.accept,decision.reason,now+timedelta(seconds=time.monotonic()-started))
+                if result['status']=='CANCELLED':
+                    raise ValueError('this encounter is already closed')
+                if result['status']=='ACCEPTED':
+                    result['session_token']=invitation['session_token']
+                return result
+        except Exception:
+            with self.repository.store._lock:
+                self.repository.store.conn.execute("UPDATE encounter_calls SET status='FAILED' WHERE id=? AND status='RINGING'",(invitation['id'],))
+                self.repository.store._maybe_commit()
+            raise
 
     def post_message(
         self, candidate_id: int, message: str, *, now: datetime | None = None
@@ -373,6 +440,9 @@ Excerpt:
             f"encounter-chat:{candidate_id}",
         )
         with self.repository.lifecycle_lock(candidate_id):
+            latest=self.repository.list_messages(candidate_id,limit=1)
+            if transcript and latest and latest[-1]['id']!=transcript[-1]['id']:
+                return None
             message_row = self.repository.append_open_message(
                 candidate_id, "CHARACTER", reply.message, now
             )
@@ -478,6 +548,9 @@ class EncounterScheduler:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
+        self._discovery_thread: threading.Thread | None = None
+        self._discovery_wake = threading.Event()
+        self._in_flight: set[int] = set()
         self._pending_lock = threading.Lock()
         self._pending_replies: deque[tuple[int, datetime]] = deque()
 
@@ -507,6 +580,9 @@ class EncounterScheduler:
         state = self.repository.ensure_state(now, self.interval_minutes())
         return {
             "enabled": self.enabled(),
+            'daily_enabled': bool(getattr(self.access.settings, 'encounter_daily_enabled', False)),
+            'today': now.date().isoformat(),
+            'daily_slots': self.repository.daily_slots(now),
             "interval_minutes": self.interval_minutes(),
             "poll_seconds": self.poll_seconds(),
             "web_probability": max(
@@ -527,12 +603,15 @@ class EncounterScheduler:
         self.repository.ensure_state(now, self.interval_minutes())
         state = self.repository.set_next_opportunity(now, now)
         self._wake.set()
+        self._discovery_wake.set()
         return state
 
     def run_once(self, now: datetime | None = None) -> list[dict]:
         now = now or datetime.now().astimezone()
         if not self.enabled():
             return []
+        if getattr(self.access.settings, 'encounter_daily_enabled', False):
+            return self._run_daily(now)
         run_id = self.repository.claim_due(now, self.interval_minutes())
         if run_id is None:
             return []
@@ -566,6 +645,25 @@ class EncounterScheduler:
             logger.exception("encounter.opportunity failed run_id=%s error=%s", run_id, exc)
             return [{"run_id": run_id, "status": "FAILED", "error": str(exc)}]
 
+    def _run_daily(self, now: datetime) -> list[dict]:
+        self.repository.expire_unstarted(now)
+        results = []
+        for kind in ('CLASSIC', 'ORIGINAL'):
+            if self.repository.unopened_count() >= max(2, self.max_pending()):
+                continue
+            key = self.repository.claim_daily_slot(now, kind)
+            if key is None:
+                continue
+            try:
+                result = self.service.create_candidate(now=now, encounter_kind=kind, daily_key=key)
+                self.repository.finish_daily_slot(key, now, candidate_id=result['candidate']['id'])
+                results.append({'status': 'CREATED', **result})
+            except Exception as exc:
+                self.repository.finish_daily_slot(key, now, error=str(exc))
+                logger.exception('encounter.daily_failed slot=%s', key)
+                results.append({'status': 'FAILED', 'kind': kind, 'error': str(exc)})
+        return results
+
     def enqueue_reply(self, candidate_id: int, *, now: datetime | None = None) -> bool:
         """Queue one chat reply after its person's message is durable.
 
@@ -575,6 +673,8 @@ class EncounterScheduler:
 
         item = (int(candidate_id), now or datetime.now().astimezone())
         with self._pending_lock:
+            if candidate_id in self._in_flight or any(key==candidate_id for key,_ in self._pending_replies):
+                return True
             if len(self._pending_replies) >= MAX_PENDING_CHAT_REPLIES:
                 return False
             self._pending_replies.append(item)
@@ -596,7 +696,7 @@ class EncounterScheduler:
         )
         recovered = 0
         with self._pending_lock:
-            existing = {candidate_id for candidate_id, _ in self._pending_replies}
+            existing = {candidate_id for candidate_id, _ in self._pending_replies} | self._in_flight
             for candidate_id in waiting:
                 if candidate_id in existing:
                     continue
@@ -618,13 +718,20 @@ class EncounterScheduler:
                 if not self._pending_replies:
                     break
                 candidate_id, queued_at = self._pending_replies.popleft()
+                self._in_flight.add(candidate_id)
             try:
-                result = self.service.reply(candidate_id, now=queued_at)
+                result = self.service.reply(candidate_id)
             except Exception:
                 # The person's message is already durable, so a failed reply must
                 # not travel back to them as an error; the log keeps the reason.
                 logger.exception("encounter.reply_failed candidate=%s", candidate_id)
+                with self.repository.store._lock:
+                    self.repository.store.conn.execute("UPDATE encounter_candidates SET error=? WHERE id=? AND status IN ('NEW','SEEN','CHATTING')",('角色暂时没有回应，可以稍后重试。',candidate_id))
+                    self.repository.store._maybe_commit()
                 continue
+            finally:
+                with self._pending_lock:
+                    self._in_flight.discard(candidate_id)
             if result is not None:
                 answered.append(result)
         return answered
@@ -639,8 +746,8 @@ class EncounterScheduler:
             try:
                 # Queued replies drain first: they answer a message the person
                 # just typed, so they should not wait behind an encounter scan.
+                self.recover_pending_replies()
                 self.drain_pending_replies()
-                self.run_once()
             except Exception:
                 logger.exception("encounter.scheduler loop_error")
             if self.pending_reply_count():
@@ -654,6 +761,15 @@ class EncounterScheduler:
                 self._wake.wait(self.poll_seconds())
         logger.info("encounter.scheduler stop")
 
+    def _discovery_loop(self) -> None:
+        while not self._stop.is_set():
+            self._discovery_wake.clear()
+            try:
+                self.run_once()
+            except Exception:
+                logger.exception('encounter.discovery_loop_error')
+            self._discovery_wake.wait(self.poll_seconds())
+
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
@@ -666,9 +782,14 @@ class EncounterScheduler:
             daemon=True,
         )
         self._thread.start()
+        self._discovery_thread=threading.Thread(target=self._discovery_loop,name='encounter-discovery',daemon=True)
+        self._discovery_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
+        self._discovery_wake.set()
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=1.0)
+        if self._discovery_thread is not None and self._discovery_thread.is_alive():
+            self._discovery_thread.join(timeout=1.0)

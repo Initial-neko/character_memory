@@ -40,6 +40,7 @@
   }
   function routeUrl(mode, original = location.href) {
     const url = new URL(original);
+    if (mode !== 'world') { url.searchParams.delete('encounter'); url.searchParams.delete('world_tab'); }
     url.searchParams.delete('space_post');
     if (mode === 'chat') url.searchParams.delete('view');
     else url.searchParams.set('view', mode === 'people' ? 'profile' : mode === 'notifications' ? 'space' : mode);

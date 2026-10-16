@@ -249,6 +249,8 @@ SETTING_HELP: dict[str, str] = {
     "cost_saving_enabled": "默认关闭。开启后仅降低未点名群成员的反应上限；显式 @ 与单聊不受影响。关闭恢复原群聊配置；不改变媒体、World 或其独立节省模式，不承诺账单节省。重启 Character Runtime 后生效。",
     "cost_saving_group_max_speakers_per_turn": "节省模式开启时，与用户普通群聊上限取较小值；默认3、范围1–12。点名成员仍全部参与，其他成员沿原轮换顺序参与；不开启则不生效，也不覆盖普通上限。需重启。",
     "encounter_enabled": "是否允许 Random Encounter Scheduler 产生新的候选相遇。",
+    "encounter_daily_enabled": "按服务器本地日期每天生成经典与原创各一位；重启补缺不重复。关闭后恢复旧间隔模式。",
+    "encounter_classic_roster": "每行一位经典角色：角色名｜作品名。跳过已接纳或正在认识的同名人物；耗尽会报告失败。需重启。",
     "encounter_persona_preference": "新来客的创作偏好，默认18–25岁、可爱活泼的原创成年女性；应用于随机与互联网灵感，不增加模型调用。只影响新候选，不改现有人物/肖像；留空不额外限制。保存后需重启。",
     "encounter_portraits_enabled": "为新来客生成一次持久化肖像，使用当前生图服务；消耗一次生图，不增加文字模型调用。刷新不生成，失败仅手动重试。关闭后保留已有图片。",
     "encounter_interval_minutes": "两次 Random Encounter Opportunity 的间隔。",
@@ -874,6 +876,8 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "description": "随机邂逅的正式调度配置。这里保存重启后仍生效的值；手动触发和临时验收留在 Dev Console。",
         "fields": [
             {"name": "encounter_enabled", "label": "Random Encounter", "type": "checkbox", "level": "advanced"},
+            {"name": "encounter_daily_enabled", "label": "每日经典 + 原创", "type": "checkbox", "level": "advanced"},
+            {"name": "encounter_classic_roster", "label": "经典角色名单", "type": "textarea", "level": "advanced"},
             {"name": "encounter_persona_preference", "label": "来客创作偏好", "type": "textarea", "level": "advanced"},
             {"name": "encounter_portraits_enabled", "label": "来客肖像生成", "type": "checkbox", "level": "advanced"},
             {
@@ -882,7 +886,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "type": "number",
                 "step": 10,
                 "level": "advanced",
-                "help": "两次正式随机邂逅机会之间的间隔。1440=24H；Dev Console 可手动触发而不修改这里。",
+                "help": "仅关闭每日模式后生效：两次随机邂逅机会之间的分钟数；1440=24H。",
             },
             {
                 "name": "encounter_web_probability",
@@ -890,7 +894,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "type": "number",
                 "step": 0.05,
                 "level": "advanced",
-                "help": "AUTO 模式选择真实互联网资料来源的概率；剩余概率走系统生成。",
+                "help": "原创名额 AUTO 模式选择公开网页灵感的概率；其余走系统生成，不影响经典名额。",
             },
             {
                 "name": "encounter_max_pending",
@@ -898,7 +902,7 @@ SETTINGS_SCHEMA: list[dict[str, Any]] = [
                 "type": "number",
                 "step": 1,
                 "level": "diagnostic",
-                "help": "未处理候选达到上限后，Scheduler 暂停继续堆积新邂逅。",
+                "help": "每日模式只限制未开始聊天的候选，最低保留双名额；过去未认识的卡片次日过期，已开始的聊天保留。",
             },
             {
                 "name": "encounter_poll_seconds",

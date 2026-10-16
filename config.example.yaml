@@ -435,6 +435,15 @@ cost_saving_group_max_speakers_per_turn: 3
 
 # Master switch for scheduled Random Encounter opportunities.
 encounter_enabled: true
+# Generate one classic and one original character per server-local date. Restart-safe.
+# Set false to retain legacy interval scheduling below.
+encounter_daily_enabled: true
+# One character and work per line, separated by a full-width vertical bar.
+# Existing/accepted names are excluded. Exhaustion is reported, not silently replaced.
+encounter_classic_roster: |-
+  芙莉莲｜葬送的芙莉莲
+  赫萝｜狼与香辛料
+  约尔·福杰｜间谍过家家
 # 新来客偏好，适用于随机与互联网灵感。留空不额外限制；只影响新候选，需重启。
 encounter_persona_preference: "18–25 岁的原创成年女性，以可爱、活泼、有活力为主；职业、兴趣、性格和外观各有区别，不预设亲密关系。"
 # 新来客使用当前生图服务生成一次肖像；刷新复用，失败仅手动重试。关闭保留已有图。

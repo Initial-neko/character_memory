@@ -141,7 +141,7 @@ class GitHubIssueHTTPTransport:
     It never retries a POST, follows redirects, or reads local proxy settings.
     """
     def __init__(self, token: str, *, transport=None):
-        if not isinstance(token, str) or not token.strip() or '\n' in token or '\r' in token:
+        if not isinstance(token, str) or not token.strip() or len(token) > 8192 or '\n' in token or '\r' in token:
             raise ValueError('INVALID_GITHUB_TOKEN')
         self._token = token
         self._transport = transport
@@ -151,7 +151,7 @@ class GitHubIssueHTTPTransport:
         import httpx
         import time
         if (not isinstance(repository, str)
-                or re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository) is None
+                or len(repository) > 256 or re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository) is None
                 or not isinstance(title, str) or not title.strip() or len(title) > 240
                 or not isinstance(body, str) or len(body) > 20000
                 or type(timeout_seconds) not in {int, float} or not 1 <= timeout_seconds <= 60
@@ -192,7 +192,7 @@ class GitHubIssueHTTPTransport:
         import subprocess
         import sys
         payload = json.dumps({'token':self._token, 'repository':repository, 'title':title,
-                              'body':body, 'timeout_seconds':timeout_seconds})
+                              'body':body, 'timeout_seconds':timeout_seconds}, ensure_ascii=False)
         try:
             completed = subprocess.run(
                 [sys.executable, '-X', 'utf8', '-m', 'character_memory.application.github_issue_worker'],

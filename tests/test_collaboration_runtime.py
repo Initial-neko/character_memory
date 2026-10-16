@@ -122,3 +122,25 @@ def test_http_worker_failure_does_not_log_credentials():
         creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
     assert completed.returncode==1
     assert completed.stdout==completed.stderr==''
+
+
+def test_worker_accepts_entire_valid_unicode_and_control_character_body(monkeypatch):
+    import io
+    import json
+    import sys
+    from character_memory.application import collaboration_runtime, github_issue_worker
+    for body in ('中'*17000, '😀'*20000, chr(0)*20000):
+        received=[]
+        class Writer:
+            def __init__(self, token, **kwargs):
+                assert token=='test'
+            def __call__(self, **kwargs):
+                received.append(kwargs['body'])
+                return {'html_url':'https://github.com/o/r/issues/1'}
+        monkeypatch.setattr(collaboration_runtime,'GitHubIssueHTTPTransport',Writer)
+        payload=json.dumps({'token':'test','repository':'o/r','title':'T','body':body,'timeout_seconds':1})
+        output=io.StringIO()
+        monkeypatch.setattr(sys,'stdin',io.StringIO(payload))
+        monkeypatch.setattr(sys,'stdout',output)
+        assert github_issue_worker.main()==0
+        assert received==[body]

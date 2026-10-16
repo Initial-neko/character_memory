@@ -6,7 +6,10 @@ def main():
     import httpx
     from character_memory.application.collaboration_runtime import GitHubIssueHTTPTransport
     try:
-        payload = json.loads(sys.stdin.read(100000))
+        raw = sys.stdin.read(1000001)
+        if len(raw) > 1000000:
+            return 1
+        payload = json.loads(raw)
         token = payload.pop('token')
         writer = GitHubIssueHTTPTransport(token, transport=httpx.HTTPTransport(retries=0))
         result = writer(**payload, idempotency_key='reserved-by-parent')

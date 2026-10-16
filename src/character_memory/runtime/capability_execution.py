@@ -164,6 +164,43 @@ class CapabilityExecutor:
             return "BUDGET_EXHAUSTED"
         return ""
 
+    def has_completed_receipt(self, request_id: str, *, character_id: str, opportunity_id: str) -> bool:
+        """Read a scoped cache hint; execute still verifies the complete payload."""
+        return self.store.conn.execute(
+            "SELECT 1 FROM capability_executions WHERE request_id=? AND character_id=? "
+            "AND opportunity_id=? AND result_json IS NOT NULL",
+            (request_id, character_id, opportunity_id),
+        ).fetchone() is not None
+
+    def claude_budget_denial(self, character_id: str, *, now: datetime,
+                             daily_max: int, daily_budget_usd: float | None,
+                             max_budget_usd: float | None, cost_saving: bool) -> str:
+        """Read current durable allowance without reserving it.
+
+        Callers supply trusted server limits. Discovery is only a snapshot;
+        execute repeats this same check inside its reservation transaction.
+        """
+        day = now.astimezone().date().isoformat()
+        entries = self.store.conn.execute(
+            "SELECT execution_metadata_json FROM capability_executions WHERE character_id=? "
+            "AND json_extract(execution_metadata_json,'$.backend')='claude' "
+            "AND json_extract(execution_metadata_json,'$.day')=?", (character_id, day)).fetchall()
+        if len(entries) >= daily_max:
+            return "CLAUDE_DAILY_LIMIT"
+        if cost_saving and daily_budget_usd is not None:
+            # Missing a per-call reservation cannot prove enough budget remains.
+            if max_budget_usd is None:
+                return "INVALID_CONSTRAINTS"
+            spend = 0.0
+            for entry in entries:
+                previous = json.loads(entry[0])
+                actual = previous.get("estimated_cost_usd")
+                reservation = previous.get("reservation_usd") or 0.0
+                spend += actual if previous.get("usage_state") == "COMPLETE" and actual is not None else max(actual or 0.0, reservation)
+            if spend + max_budget_usd > daily_budget_usd:
+                return "CLAUDE_DAILY_BUDGET"
+        return ""
+
     def execute(self, request: CapabilityRequest, *, now: datetime | None = None) -> CapabilityResult:
         denial = self._denial(request)
         if denial:
@@ -195,23 +232,16 @@ class CapabilityExecutor:
                 if self.claude_runner is None:
                     return CapabilityResult(request.request_id, "DENIED", reason="CLAUDE_UNAVAILABLE")
                 day = now.astimezone().date().isoformat()
-                entries = self.store.conn.execute(
-                    "SELECT execution_metadata_json FROM capability_executions WHERE character_id=? "
-                    "AND json_extract(execution_metadata_json,'$.backend')='claude' "
-                    "AND json_extract(execution_metadata_json,'$.day')=?", (request.character_id, day)).fetchall()
-                if len(entries) >= request.constraints["claude_daily_max"]:
-                    return CapabilityResult(request.request_id, "DENIED", reason="CLAUDE_DAILY_LIMIT")
+                denial = self.claude_budget_denial(
+                    request.character_id, now=now,
+                    daily_max=request.constraints["claude_daily_max"],
+                    daily_budget_usd=request.constraints["claude_daily_budget_usd"],
+                    max_budget_usd=request.constraints["claude_max_budget_usd"],
+                    cost_saving=request.constraints["cost_saving"],
+                )
+                if denial:
+                    return CapabilityResult(request.request_id, "DENIED", reason=denial)
                 reserved = request.constraints["claude_max_budget_usd"]
-                budget = request.constraints["claude_daily_budget_usd"]
-                if request.constraints["cost_saving"] and budget is not None:
-                    spend = 0.0
-                    for entry in entries:
-                        previous = json.loads(entry[0])
-                        actual = previous.get("estimated_cost_usd")
-                        reservation = previous.get("reservation_usd") or 0.0
-                        spend += actual if previous.get("usage_state") == "COMPLETE" and actual is not None else max(actual or 0.0, reservation)
-                    if spend + reserved > budget:
-                        return CapabilityResult(request.request_id, "DENIED", reason="CLAUDE_DAILY_BUDGET")
                 metadata = {"backend": "claude", "day": day, "reservation_usd": reserved, "usage_state": "UNKNOWN"}
             self.store.conn.execute(
                 "INSERT INTO capability_executions(request_id,character_id,opportunity_id,request_json,status,started_at,execution_metadata_json) "

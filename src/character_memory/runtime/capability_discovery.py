@@ -69,6 +69,17 @@ def _skills(profile: dict, grant: str) -> tuple[dict, ...] | None:
     return None if selected is None else tuple(selected)
 
 
+def runner_available(runner) -> bool:
+    """Read an existing runner adapter's optional local readiness probe."""
+    if not callable(getattr(runner, "run", None)):
+        return False
+    probe = getattr(runner, "is_available", None)
+    try:
+        return probe() is True if callable(probe) else True
+    except OSError:
+        return False
+
+
 def available_capabilities(
     profile: dict | None, *, channel: str, availability: CapabilityAvailability,
 ) -> tuple[CapabilityDescription, ...]:

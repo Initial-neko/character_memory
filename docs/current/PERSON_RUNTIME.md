@@ -17,9 +17,30 @@ budget and grants are absent from model arguments.
 Discovery reads local grant/Skill files without initializing providers, calling
 a model, reserving budget or persisting an event. Descriptions are not execution
 permissions: dispatch must revalidate current grants and use existing executor
-checks and receipts. This query does not itself change channel prompts, launch
-a continuation loop, register Browser sessions or grant external writes. Prompt
-consumption and the additional capability adapters remain separate integration
+checks and receipts. This query does not launch a continuation loop, register
+Browser sessions or grant external writes.
+
+DirectResearchService.capabilities(event) now builds the trusted snapshot from
+normal Direct USER_MESSAGE eligibility, the configured switch, the named active
+profile, runner readiness and durable daily quota/budget. The existing grant()
+compatibility view and delegation prompt consume the same descriptions, then
+recheck them immediately before dispatch. Missing/closed/uninstalled executors,
+revoked grants and exhausted allowance hide new delegation; a model-forced new
+request is filtered without an executor call or result interpretation. A completed
+receipt for this same character/event/opportunity remains consumable after quota
+exhaustion or runner loss, subject to current role/Skill permission and the
+executor's original full-payload equality check. The cache hint does not return
+a receipt directly, authorize a different task or replay an unknown STARTED job. A fresh budget
+snapshot never reserves quota: CapabilityExecutor repeats the shared daily
+check inside its existing atomic reservation transaction. Unknown prior usage
+continues to consume its conservative reservation. Ordinary chat remains one
+normal reaction call.
+
+ClaudePrintRunner.is_available() checks only local command presence and closed
+state without starting a process or creating output files. It does not establish
+authentication, connectivity, provider compatibility or success; dispatch receipts
+and explicit live validation remain authoritative. World/Browser/collaboration
+snapshot assembly and general Prompt compilation remain separate integration
 work.
 
 ## Optional Direct external-task decision

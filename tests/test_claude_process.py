@@ -235,3 +235,23 @@ def test_step_queries_and_results_use_existing_credential_redaction(tmp_path, mo
     assert 'unit-test"secret' not in detail["task"]
     assert "[REDACTED]" in json.dumps(result.data["tool_steps"])
     runner.close()
+
+
+def test_availability_checks_installed_command_without_spawning_or_creating_output(tmp_path, monkeypatch):
+    from character_memory.runtime import claude_process
+    output = tmp_path / 'not-created'
+    runner = claude_process.ClaudePrintRunner(Observer(), output, command=[sys.executable])
+    monkeypatch.setattr(claude_process.subprocess, 'Popen', lambda *a, **k: pytest.fail('availability spawned CLI'))
+    assert runner.is_available() is True
+    assert not output.exists()
+    runner.close()
+    assert runner.is_available() is False
+
+
+def test_availability_handles_missing_claude_installation(tmp_path, monkeypatch):
+    from character_memory.runtime import claude_process
+    def missing():
+        raise FileNotFoundError('CLI_NOT_FOUND')
+    monkeypatch.setattr(claude_process, 'resolve_claude', missing)
+    runner = claude_process.ClaudePrintRunner(Observer(), tmp_path/'not-created')
+    assert runner.is_available() is False

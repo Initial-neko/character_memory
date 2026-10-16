@@ -880,3 +880,13 @@ another appraisal or enlarging permissions. RSS recovery continues to use its
 existing item/generation contract even when the configured web backend is Claude.
 
 The enabled World scheduler recovers at most two eligible appraisals per tick before new paid opportunities and independent of exhausted browse quotas. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.
+
+### Social prompt compilation
+
+World browsing/Pulse/appraisal and Space post/appraisal prompts are rendered by
+pure `runtime/social_prompts.py` helpers over the existing Person snapshot and
+actual source excerpts. Services retain schemas, permission checks, opportunity
+claims and execution. RSS text never implies reading the linked original. Space
+video descriptions follow the current Persona's style. The shared composition
+contract and ownership audit live in
+[Person Runtime](PERSON_RUNTIME.md#prompt-composition-ownership).

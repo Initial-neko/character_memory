@@ -481,3 +481,47 @@ request the PUBLIC projection; their shared recent conversation facts are not
 mistakenly filtered out by another actor's character ID. World planning reuses
 the same bounded experience rendering. Observation recall never schedules a new
 browse, purchases a second reaction, or automatically writes Memory.
+
+## Prompt composition ownership
+
+`runtime/prompt_parts.py` provides the pure five-part `PromptParts` value:
+Persona, State/Memory, Perception, Capabilities and Runtime Policy. Rendering
+only formats snapshots; it never reads permissions, discovers tools, executes
+providers, mutates Persona or admits Memory. `compile_context_parts` exposes the
+parts for inspection, while `compile_context` remains the text entry point.
+Existing channel headers, schemas, Direct recipient ownership, external-data
+warnings, Visual no-Memory/no-Intent and autonomous silence rules remain.
+
+The shared reaction compiler optionally consumes
+`runtime.research_service.capabilities(event)`. Descriptors use the discovery
+owner's `id/summary/arguments_schema/channel/backend/skills` contract; no local
+registry, sidecar reader or authorization copy is introduced. Only descriptors
+actually supplied for this turn appear, including only their selected Skill
+names and hashes. This is an availability description, never an execution grant
+or evidence of a completed action. An explicit empty tuple disables discovery;
+Direct result interpretation always supplies it, preventing recursive capability
+advertising. Services without the discovery method retain their existing
+operator-granted Direct suffix. The obsolete global claim that no external tools
+exist is replaced by the requirement to describe only actual execution receipts.
+
+The maintained prompt ownership audit is:
+
+| Input builder / fragment | Responsibility and single source | Retention / validation |
+| --- | --- | --- |
+| `runtime/person_context.py` | Read the existing Person's Persona, state, recalled Memory and observed facts | Retained read-only owner; no second memory or persona lookup |
+| `runtime/context.py` | Five-part reaction compilation with existing channel-specific policy | Parts are inspectable; `tests/test_prompt_parts.py` checks capability-only changes and channel boundaries |
+| `runtime/reaction_engine.py` | Assemble the same Person snapshot and optional server capability descriptions before one normal reaction | Retained model/resource pipeline; discovery does not add model calls |
+| `runtime/person_runtime.py` | Direct delivery, server-side effects and legacy granted task suffix | Retained execution owner, unchanged Persona; Direct task regressions in `tests/test_direct_claude.py` |
+| `runtime/direct_research.py` | Restricted external task and one result interpretation | Explicit empty capabilities on interpretation; receipt and no-recursion capture tests |
+| `application/group_conversation_service.py` | Group participants, shared history and channel action schema | Retained group suffix; cannot be replaced by generic Direct policy |
+| `runtime/social_prompts.py` / World planning, Pulse and appraisal | Pure five-part rendering of existing Person snapshots, public topics and actual source excerpts | Services own scheduling, schemas, grants and execution; no tool or business loop in helpers |
+| `runtime/social_prompts.py` / Space post and appraisal | Existing public Person context, actual observations, runtime-derived media limits | Publication remains optional; video style follows current Persona rather than forcing a cute/soft personality |
+| World local RSS appraisal | Only the actual local Feed items, not linked-original reading | Pure helper preserves untrusted-data, reading-scope and optional keep=false policy |
+| `persona_builder.py` | User-requested character draft creation and product content requirements | Retained unchanged: generating a new draft is a separate product operation, not runtime personality rewriting |
+| Visual generation / Live2D presentation | Existing image intent compilation, verified references and per-turn presentation scope | Retained specialized schemas and privacy boundaries; no capability or Persona owner duplication |
+
+Focused prompt capture tests establish deterministic formatting and preservation
+of existing boundaries. They do not establish long-term Persona fidelity with a
+live provider, real browser visits, or the combined autonomous runtime's behavior;
+those require their separate runtime acceptance paths. This backend-only change
+has VISUAL N/A because no user interface is changed.

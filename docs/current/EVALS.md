@@ -450,3 +450,13 @@ boundaries, unknown-title negatives, optional metadata and bounded rendering of
 source title/scope/summary. A successful execution receipt alone is insufficient:
 live follow-up must prove the observation enters context and is not denied or
 confused with the user's own activities.
+
+## Prompt composition regression
+
+`tests/test_prompt_parts.py` checks five-part snapshot stability when capabilities
+change, omission of unavailable tools/Skills, fake-model capture of optional
+service discovery, explicit empty capability snapshots on Direct result
+interpretation, legacy granted-suffix compatibility, channel recipient/privacy
+rules and external/RSS reading scope. Existing World/Space/Direct/Group/Visual
+regressions remain required. Live-provider Persona fidelity and joint autonomous
+acceptance are separate gates; deterministic prompt tests do not mark them PASS.

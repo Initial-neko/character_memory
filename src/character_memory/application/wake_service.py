@@ -65,17 +65,15 @@ class CharacterWakeService:
         reason: str,
         at: datetime,
         conversation_id: str | None = None,
-        force: bool = False,
     ) -> WakeOutcome | None:
         normalized_reason = str(reason or "PERIODIC").strip().upper()
-        if normalized_reason not in {"PERIODIC", "MANUAL"}:
+        if normalized_reason != "PERIODIC":
             raise ValueError(f"unknown wake reason: {reason}")
-        if not force and not self.is_due(character_id, at):
+        if not self.is_due(character_id, at):
             return None
 
         # Mark before the provider call so a transient failure does not create a
-        # retry storm on every 30-second poll. Manual wake intentionally bypasses
-        # the interval via force=True.
+        # retry storm on every 30-second poll.
         self.mark(character_id, at)
         bundle = self.get_bundle()
         result = bundle.chat.dispatch_wake(

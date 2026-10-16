@@ -13,12 +13,7 @@ import uuid
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from character_memory.domain.models import (
-    DailyLifePlan,
-    DiaryResult,
-    PersonReaction,
-    SpacePostPlan,
-)
+from character_memory.domain.models import PersonReaction, SpacePostPlan
 from character_memory.llm.usage import (
     LlmUsageRecorder,
     current_llm_usage_context,
@@ -137,13 +132,6 @@ class PersonModel(ABC):
 
         raise RuntimeError("this PersonModel does not support raw text completion")
 
-    @abstractmethod
-    def plan_day(self, context: str) -> DailyLifePlan:
-        ...
-
-    @abstractmethod
-    def write_diary(self, context: str) -> DiaryResult:
-        ...
 
     def close(self) -> None:
         pass
@@ -523,10 +511,6 @@ class OpenAICompatibleModel(PersonModel):
                 "对外表达必须像这个人物本人自然聊天：不要刻意惜字，标点、停顿、emoji、颜文字、自然追问、表情包、图片和连续两三条消息都按 Persona 使用，但不要机械拆句或刷屏。"
                 "不要把人物写成客服，也不要无条件迎合用户。"
             )
-        if schema is DailyLifePlan:
-            return "根据输入规划人物当天少量自然生活事件。返回 JSON 对象：events 为数组；social_post、image_prompt 可以为空。不要为了填满字段而编造事件。"
-        if schema is DiaryResult:
-            return "根据输入写简短日记并返回 JSON 对象，包含 diary、mental_state_update、memory_candidates。没有值得记忆的内容时 memory_candidates 可以为空数组。"
         return "根据输入返回符合目标对象语义的 JSON 对象，不要添加 JSON 之外的解释。"
 
     @staticmethod
@@ -734,11 +718,6 @@ class OpenAICompatibleModel(PersonModel):
             image_data_urls=image_data_urls,
         )
 
-    def plan_day(self, context: str) -> DailyLifePlan:
-        return self._call(context, DailyLifePlan)
-
-    def write_diary(self, context: str) -> DiaryResult:
-        return self._call(context, DiaryResult)
 
     def check_remote(self) -> dict:
         url = f"{self.base_url}/models"

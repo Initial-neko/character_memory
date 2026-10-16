@@ -4,7 +4,7 @@ from pathlib import Path
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
 from character_memory.config import Settings, discover_character_profiles, resolve_persona_path
-from character_memory.domain.models import ActionDecision, ActionType, DailyLifePlan, DiaryResult, PersonReaction
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -26,12 +26,6 @@ class PersonaAwareFake(PersonModel):
             mental_state_update="平静",
             action=ActionDecision(type=ActionType.REPLY, reason="测试", message=message),
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="平静。", mental_state_update="平静")
 
 
 def test_persona_files_are_discovered_from_personas_directory():

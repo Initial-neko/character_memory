@@ -390,18 +390,6 @@ class RuntimeResult(BaseModel):
     timings: dict[str, float] = Field(default_factory=dict)
 
 
-class LifeEventCandidate(BaseModel):
-    content: str
-    importance: float = Field(default=0.4, ge=0.0, le=1.0)
-    hour: int | None = Field(default=None, ge=0, le=23)
-
-
-class DailyLifePlan(BaseModel):
-    events: list[LifeEventCandidate] = Field(default_factory=list, max_length=3)
-    social_post: str | None = None
-    image_prompt: str | None = None
-
-
 class WorldExplorePlan(BaseModel):
     explore: bool = False
     query: str | None = Field(default=None, max_length=240)
@@ -602,9 +590,3 @@ class SpacePostPlan(BaseModel):
         ):
             raise ValueError("GENERATE_VIDEO requires social_post: a video post needs words beside it")
         return self
-
-
-class DiaryResult(BaseModel):
-    diary: str
-    mental_state_update: str
-    memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=6)

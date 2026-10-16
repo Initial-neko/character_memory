@@ -15,13 +15,7 @@ from character_memory.application.async_conversation import (
 )
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService
-from character_memory.domain.models import (
-    ActionDecision,
-    ActionType,
-    DailyLifePlan,
-    DiaryResult,
-    PersonReaction,
-)
+from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
 from character_memory.memory.recall import VectorRecall
@@ -45,12 +39,6 @@ class SilentSequenceModel(PersonModel):
             raise AssertionError("model consumed more reactions than the test provided")
         self.remaining -= 1
         return PersonReaction(actions=[])
-
-    def plan_day(self, context: str) -> DailyLifePlan:
-        return DailyLifePlan()
-
-    def write_diary(self, context: str) -> DiaryResult:
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def build_service(tmp_path: Path, members: list[str], reactions: int):
@@ -171,12 +159,6 @@ class GroupSequenceModel(PersonModel):
     def react(self, context: str) -> PersonReaction:
         self.contexts.append(context)
         return self.reactions.pop(0)
-
-    def plan_day(self, context: str) -> DailyLifePlan:
-        return DailyLifePlan()
-
-    def write_diary(self, context: str) -> DiaryResult:
-        return DiaryResult(diary="", mental_state_update="")
 
 
 @pytest.mark.parametrize("saving,mentions,expected", [

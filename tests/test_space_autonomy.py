@@ -7,22 +7,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from character_memory.domain.models import (
-    ActionDecision,
-    ActionType,
-    DailyLifePlan,
-    DiaryResult,
-    Event,
-    EventType,
-    MemoryCandidate,
-    PersonReaction,
-    SpacePostPlan,
-    SpaceMediaIntent,
-    WorldExplorePlan,
-    WorldObservation,
-    WorldObservationAppraisal,
-    WorldObservationDisposition,
-)
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, MemoryCandidate, PersonReaction, SpacePostPlan, SpaceMediaIntent, WorldExplorePlan, WorldObservation, WorldObservationAppraisal, WorldObservationDisposition
 from character_memory.llm.client import (
     ModelCallResult,
     ModelCallTrace,
@@ -86,12 +71,6 @@ class SpaceModel(PersonModel):
             social_post="今天想安静一点，晚点再做别的。",
             media_intents=[],
         )
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 class FailingMediaModel(SpaceModel):

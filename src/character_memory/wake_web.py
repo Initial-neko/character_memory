@@ -4,8 +4,6 @@ from datetime import datetime
 import logging
 import threading
 
-from pydantic import BaseModel, Field
-
 from character_memory.web_lifecycle import background_services
 from character_memory.application.async_conversation import direct_channel
 from character_memory.application.wake_service import CharacterWakeService, WakeOutcome
@@ -14,10 +12,6 @@ from character_memory.domain.models import EventType
 
 logger = logging.getLogger("character_memory.wake_web")
 _WAKE_POLL_SECONDS = 30.0
-
-
-class ManualWakeRequest(BaseModel):
-    conversation_id: str = Field(default="", max_length=160)
 
 
 def attach_wake_routes(app):
@@ -76,7 +70,7 @@ def attach_wake_routes(app):
             },
         )
 
-    def run_one(character_id: str, *, reason: str, at: datetime, conversation_id: str | None = None, force: bool = False):
+    def run_one(character_id: str, *, reason: str, at: datetime):
         # Re-check immediately before dispatch so an archive that races with a
         # scheduler snapshot cannot still spend an LLM call or publish output.
         ensure_character(character_id)
@@ -84,8 +78,6 @@ def attach_wake_routes(app):
             character_id,
             reason=reason,
             at=at,
-            conversation_id=conversation_id,
-            force=force,
         )
         if outcome is not None:
             publish(outcome)
@@ -120,37 +112,6 @@ def attach_wake_routes(app):
                 except Exception:
                     logger.exception("wake.periodic_failed character=%s", character_id)
         logger.info("wake.loop_stop")
-
-    @app.post("/v1/characters/{character_id}/wake")
-    def manual_wake(character_id: str, req: ManualWakeRequest):
-        ensure_character(character_id)
-        if not str(getattr(settings, "api_key", "") or "").strip():
-            raise HTTPException(status_code=503, detail="Runtime 未配置 API key，无法唤醒人物")
-        at = datetime.now().astimezone()
-        try:
-            outcome = run_one(
-                character_id,
-                reason="MANUAL",
-                at=at,
-                conversation_id=req.conversation_id.strip() or None,
-                force=True,
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.exception("wake.manual_failed character=%s error=%s", character_id, exc)
-            raise HTTPException(status_code=502, detail=f"唤醒失败：{exc}") from exc
-        if outcome is None:
-            raise HTTPException(status_code=409, detail="人物当前无法唤醒")
-        return {
-            "character_id": character_id,
-            "reason": outcome.reason,
-            "conversation_id": outcome.conversation_id,
-            "source_event_id": outcome.source_event_id,
-            "silent": outcome.silent,
-            "actions": [action.model_dump(mode="json") for action in outcome.result.reaction.actions],
-            "created_intent_ids": list(outcome.result.created_intent_ids),
-        }
 
     def _start_wake_loop():
         nonlocal thread

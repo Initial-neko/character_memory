@@ -234,21 +234,17 @@ class ChatService:
         are all valid outcomes.
         """
 
-        runtime = self._runtime_for(character_id)
         normalized_reason = str(reason or "PERIODIC").strip().upper()
+        if normalized_reason != "PERIODIC":
+            raise ValueError(f"unknown wake reason: {reason}")
+        runtime = self._runtime_for(character_id)
         with self._lock_for(character_id):
             resolved_conversation = str(conversation_id or "").strip() or self._latest_conversation_id(character_id)
             self.store.set_world_time(character_id, at)
-            if normalized_reason == "MANUAL":
-                content = (
-                    "现在进行一次手动唤醒后的主动判断。结合最近聊天、Memory、Mental State 和 Persona，"
-                    "看看此刻是否真的有想表达或想留到未来的念头；这不是要求你必须回复。"
-                )
-            else:
-                content = (
-                    "时间自然过去了一段。结合最近聊天、Memory、Mental State 和 Persona，"
-                    "判断此刻是否真的有想主动表达或想留到未来的念头；不要为了活跃而强行说话。"
-                )
+            content = (
+                "时间自然过去了一段。结合最近聊天、Memory、Mental State 和 Persona，"
+                "判断此刻是否真的有想主动表达或想留到未来的念头；不要为了活跃而强行说话。"
+            )
             logger.info(
                 "chat.wake character=%s reason=%s conversation=%s at=%s",
                 character_id,

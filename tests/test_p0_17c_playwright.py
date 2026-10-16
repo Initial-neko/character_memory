@@ -89,18 +89,22 @@ def wake_server(tmp_path_factory):
         process.wait(timeout=3)
 
 
-def test_manual_wake_uses_time_tick_and_existing_direct_sse(page, wake_server):
+def test_chat_menu_has_no_manual_wake(page, wake_server, tmp_path):
     page.set_default_timeout(10000)
     page.goto(wake_server, wait_until="domcontentloaded")
     expect(page.locator("#characterList .character-item").first).to_be_visible()
     expect(page.locator("#topbarMoreButton")).to_be_visible()
     page.locator("#topbarMoreButton").click()
-    expect(page.locator("#wakeButton")).to_be_visible()
-    page.wait_for_function("() => Boolean(CM.state.directStream && CM.state.directStream.readyState === EventSource.OPEN)")
-
-    page.locator("#wakeButton").click()
-    expect(page.locator(".message-row.assistant .bubble", has_text="E2E wake reply")).to_be_visible()
-    expect(page.locator("#wakeButton")).to_be_enabled()
+    expect(page.locator("#wakeButton")).to_have_count(0)
+    assert page.request.post(f"{wake_server}/v1/characters/rin/wake", data={}).status == 404
+    page.screenshot(path=str(tmp_path / "menu-desktop.png"), full_page=True)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#characterList .character-item").first).to_be_attached()
+    expect(page.locator("#topbarMoreButton")).to_be_visible()
+    page.locator("#topbarMoreButton").click()
+    expect(page.locator("#wakeButton")).to_have_count(0)
+    page.screenshot(path=str(tmp_path / "menu-mobile.png"), full_page=True)
 
 
 def _sidebar_width(page) -> float:

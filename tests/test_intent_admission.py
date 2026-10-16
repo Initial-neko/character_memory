@@ -12,13 +12,7 @@ import pytest
 
 from character_memory.application.chat_service import ChatService
 from character_memory.application.clock import FixedClock
-from character_memory.domain.models import (
-    ActionType,
-    DailyLifePlan,
-    DiaryResult,
-    IntentCandidate,
-    PersonReaction,
-)
+from character_memory.domain.models import ActionType, IntentCandidate, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding, EmbeddingProvider
 from character_memory.memory.recall import VectorRecall
@@ -34,12 +28,6 @@ class CandidateModel(PersonModel):
 
     def react(self, context):
         return PersonReaction(actions=[], intent_candidates=list(self.candidates))
-
-    def plan_day(self, context):
-        return DailyLifePlan()
-
-    def write_diary(self, context):
-        return DiaryResult(diary="", mental_state_update="")
 
 
 class FlatEmbedding(EmbeddingProvider):

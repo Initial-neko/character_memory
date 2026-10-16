@@ -10,15 +10,7 @@ from fastapi.testclient import TestClient
 from character_memory.api import create_api
 from character_memory.application.clock import FixedClock
 from character_memory.application.group_conversation_service import GroupConversationService
-from character_memory.domain.models import (
-    ActionDecision,
-    ActionType,
-    DailyLifePlan,
-    DiaryResult,
-    IntentCandidate,
-    MemoryCandidate,
-    PersonReaction,
-)
+from character_memory.domain.models import ActionDecision, ActionType, IntentCandidate, MemoryCandidate, PersonReaction
 from character_memory.group_web import attach_group_routes
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
@@ -41,12 +33,6 @@ class SequenceModel(PersonModel):
         self.contexts.append(context)
         self.sessions.append(session_id)
         return self.reactions.pop(0)
-
-    def plan_day(self, context: str) -> DailyLifePlan:
-        return DailyLifePlan()
-
-    def write_diary(self, context: str) -> DiaryResult:
-        return DiaryResult(diary="", mental_state_update="")
 
 
 def runtime_for(store, embeddings, model, persona):

@@ -28,11 +28,10 @@
   // call, search, and this overflow trigger. Everything diagnostic or
   // configuration-oriented moves into one predictable menu.
   const settingsLink = document.getElementById("settingsLink");
-  const wakeButton = document.getElementById("wakeButton");
   const intentButton = document.getElementById("intentButton");
   const spaceButton = document.getElementById("characterSpaceButton");
   const archiveButton = document.getElementById("archiveCurrentCharacterButton");
-  const items = [spaceButton, intentButton, wakeButton, runtimeButton, settingsLink, archiveButton].filter(Boolean);
+  const items = [spaceButton, intentButton, runtimeButton, settingsLink, archiveButton].filter(Boolean);
 
   for (const item of items) {
     item.classList.remove("desktop-only-control");
@@ -43,8 +42,6 @@
       item.textContent = "运行状态";
     } else if (item === intentButton) {
       item.textContent = "Intent";
-    } else if (item === wakeButton) {
-      item.textContent = "唤醒人物";
     }
     menu.append(item);
   }
@@ -62,9 +59,7 @@
 
   menu.addEventListener("click", event => {
     const action = event.target.closest("button, a");
-    // Wake keeps its live status label in-place while running. Other actions
-    // either open a drawer or navigate, so the menu can close immediately.
-    if (action && action !== wakeButton) close();
+    if (action) close();
   });
 
   document.addEventListener("click", event => {

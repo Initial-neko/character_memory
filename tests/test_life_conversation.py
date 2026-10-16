@@ -186,7 +186,7 @@ def test_real_group_peer_seen_by_follower_can_read_and_send_reference(isolated_a
     from fastapi.testclient import TestClient
     from character_memory.application.clock import FixedClock
     from character_memory.application.group_conversation_service import GroupConversationService
-    from character_memory.domain.models import ActionDecision, ActionType, PersonReaction, DailyLifePlan, DiaryResult
+    from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
     from character_memory.llm.client import PersonModel
     from character_memory.memory.embedding import DeterministicEmbedding
     from character_memory.memory.recall import VectorRecall
@@ -196,8 +196,6 @@ def test_real_group_peer_seen_by_follower_can_read_and_send_reference(isolated_a
         def react(self,context):
             self.contexts.append(context)
             return PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE,message='星灯已经点亮了' if len(self.contexts)==1 else '我看见你点亮了星灯')])
-        def plan_day(self,context):return DailyLifePlan()
-        def write_diary(self,context):return DiaryResult(diary='',mental_state_update='')
     app=isolated_app;access=app.state.character_memory;store=access.store();profiles=access.character_profiles();a,b=[p['id'] for p in profiles[:2]]
     model=Model();emb=DeterministicEmbedding();now=datetime.now(timezone.utc)-timedelta(seconds=1)
     runtimes={cid:PersonRuntime(store,VectorRecall(store,emb),emb,model,f'id: {cid}') for cid in (a,b)}

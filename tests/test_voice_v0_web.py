@@ -70,10 +70,10 @@ def test_voice_call_can_mute_microphone_without_stopping_visual_or_tts():
     assert "visualSession?.stop" not in stop_mic
     assert "eventSource?.close" not in stop_mic
     assert "currentAudio" not in stop_mic
-    start_call = script.split("async function startCall()", 1)[1].split("async function stopCall()", 1)[0]
+    start_call = script.split("async function startCall(", 1)[1].split("async function stopCall()", 1)[0]
     assert "voice.active = true" in start_call
-    assert "startMicrophone({throwOnError:false})" in start_call
-    assert start_call.index("voice.active = true") < start_call.index("startMicrophone({throwOnError:false})")
+    assert "await startMicrophone(" in start_call
+    assert start_call.index("voice.active = true") < start_call.index("await startMicrophone(")
     assert "sendTextWithVisual" in script
     assert "CM.features.voice?.sendTextWithVisual?.(message)" in app
     assert "CM.features.voice?.sendTextWithVisual?.(message)" in groups

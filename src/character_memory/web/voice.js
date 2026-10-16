@@ -38,6 +38,10 @@
     streamingSegmentStartedAt: 0,
     seenAsrSegments: new Set(),
     eventSource: null,
+    encounterPoll: null,
+    encounterPollBusy: false,
+    encounterSeen: new Set(),
+    encounterLeaseAt: 0,
     visualSession: null,
     periodicVisualTimer: null,
     periodicVisualConfig: {enabled:false, intervalSeconds:30, maxPerHour:0},
@@ -94,6 +98,7 @@
   };
 
   function profileFor(characterId) {
+    if(voice.target?.scope==='encounter'&&voice.target.characterId===characterId)return voice.target.profile;
     return CM.state.characters.find(item => item.id === characterId) || null;
   }
 
@@ -159,6 +164,7 @@
   function isViewingTarget() {
     const target = voice.target;
     if (!target) return false;
+    if(target.scope==='encounter')return String(CM.features.world?.candidateId)===String(target.candidateId);
     if (target.scope === "group") {
       return CM.isGroupConversation() && CM.state.conversation.groupId === target.conversationId;
     }
@@ -190,10 +196,10 @@
       setAvatar(dom.avatar, id, name);
       setAvatar(dom.dockAvatar, id, name);
       if (dom.name) dom.name.textContent = name;
-      if (dom.context) dom.context.textContent = "单聊通话";
+      if (dom.context) dom.context.textContent = target.scope==='encounter'?"临时邂逅 · 语音通话":"单聊通话";
       if (dom.dockTitle) dom.dockTitle.textContent = name;
     }
-    CM.live2d?.setCharacter(target.scope === "group" ? speakingId : target.characterId);
+    if(target.scope!=='encounter')CM.live2d?.setCharacter(target.scope === "group" ? speakingId : target.characterId);
   }
 
   function updateCallButton() {
@@ -383,6 +389,7 @@
   }
 
   async function startCameraVisual() {
+    if(voice.target?.scope==='encounter')throw Error('临时邂逅暂不支持视频或屏幕分享');
     if (!voice.active) throw new Error("请先开始通话");
     stopPeriodicVisualObservation();
     const session = ensureVisualSession();
@@ -392,6 +399,7 @@
   }
 
   async function startScreenVisual() {
+    if(voice.target?.scope==='encounter')throw Error('临时邂逅暂不支持视频或屏幕分享');
     if (!voice.active) throw new Error("请先开始通话");
     const session = ensureVisualSession();
     await session.startDisplay();
@@ -677,6 +685,34 @@
     voice.eventSource?.close?.();
     const target = voice.target;
     if (!target) return;
+    if(target.scope==='encounter'){
+      if(voice.encounterPoll!==null)clearInterval(voice.encounterPoll);
+      const poll=async()=>{
+        if(!voice.active||voice.target!==target||voice.encounterPollBusy)return;
+        voice.encounterPollBusy=true;
+        try{
+          const {candidate}=await CM.api(`/v1/encounters/${target.candidateId}`);
+          if(!voice.active||voice.target!==target)return;
+          const session=(candidate.calls||[]).find(c=>c.id===target.callId);
+          if(!['NEW','SEEN','CHATTING'].includes(candidate.status)||!session||!['ACCEPTED','CONNECTED'].includes(session.status)){await stopCall();return;}
+          if(Date.now()-voice.encounterLeaseAt>20000){
+            await CM.api(`/v1/encounters/${target.candidateId}/calls/${target.callId}/session`,{method:'POST',body:JSON.stringify({session_token:target.sessionToken,action:'CONNECTED'})});
+            voice.encounterLeaseAt=Date.now();
+          }
+          for(const message of candidate.messages||[]){
+            if(voice.encounterSeen.has(message.id))continue;voice.encounterSeen.add(message.id);
+            if(message.role==='CHARACTER')handleCharacterEvent({id:message.id,content:message.content,metadata:{action:'MESSAGE'}},target.characterId);
+          }
+          if(candidate.error){setPhase('error',candidate.error);resumeCapture();}
+          else if(!candidate.reply_pending&&!voice.playing&&!voice.queue.length&&voice.phase==='waiting'){
+            if(voice.pendingTurns.length)flushPendingTurns();else resumeInputState();
+          }
+        }catch(error){if(voice.active&&voice.target===target){setPhase('error',`临时通话中断：${error.message}`);await stopCall();}}
+        finally{voice.encounterPollBusy=false;}
+      };
+      voice.encounterPoll=setInterval(poll,1800);
+      return;
+    }
     const params = new URLSearchParams({scope:target.scope, conversation_id:target.conversationId});
     if (target.scope === "direct") params.set("character_id", target.characterId);
     const source = new EventSource(`/v1/events/stream?${params.toString()}`);
@@ -731,6 +767,11 @@
     const live2d = requestLive2dContext(target.scope, target.conversationId, target.scope === "direct" ? target.characterId : undefined);
     const hasVisual = Array.isArray(visualFrames) && visualFrames.length > 0;
     let response;
+    if(target.scope==='encounter'){
+      response=await fetch(`/v1/encounters/${target.candidateId}/calls/${target.callId}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,session_token:target.sessionToken})});
+      if(!response.ok)throw Error(await response.text());
+      return response.json();
+    }
     if (target.scope === "group") {
       const path = hasVisual
         ? `/v1/visual/groups/${encodeURIComponent(target.conversationId)}/messages`
@@ -912,7 +953,7 @@
     const response = await fetch(`${mediaBase()}/v1/tts`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({text:item.text, voice:item.characterId, speaker_id:speakerId}),
+      body: JSON.stringify({text:item.text, voice:voice.target?.scope==='encounter'?null:item.characterId, speaker_id:speakerId}),
     });
     if (!response.ok) throw new Error(await response.text());
     const blob = await response.blob();
@@ -1192,18 +1233,21 @@
     else await startMicrophone();
   }
 
-  async function startCall() {
+  async function startCall(overrideTarget = null) {
     if (voice.active) {
       expandCall();
       return;
     }
     dom.button.disabled = true;
+    let target;
     try {
-      const target = captureTarget();
+      target = overrideTarget?.scope ? overrideTarget : captureTarget();
       voice.active = true;
       voice.micActive = false;
       voice.minimized = false;
       voice.target = target;
+      voice.encounterSeen=new Set(target.seenMessageIds||[]);
+      voice.encounterLeaseAt=Date.now();
       voice.queue = [];
       voice.pendingTurns = [];
       voice.playing = false;
@@ -1236,6 +1280,7 @@
       }
       resetCallLog();
       renderCallIdentity();
+      [dom.camera,dom.screen,document.getElementById('voiceLive2dButton')].forEach(button=>{if(button){button.disabled=target.scope==='encounter';if(target.scope==='encounter')button.title='临时邂逅通话仅支持语音；视频、屏幕与 Live2D 不在此阶段开放';}});
       formatMetrics();
       updateMicUi();
       updateVisualUi();
@@ -1243,9 +1288,14 @@
       dom.overlay?.classList.remove("hidden");
       updateCallButton();
       setPhase("connecting", "正在准备通话…");
-      await startMicrophone({throwOnError:false});
+      const ready=await startMicrophone({throwOnError:target.scope==='encounter'});
+      if(target.scope==='encounter'){
+        if(!ready||!voice.active)throw Error('麦克风未就绪，临时通话未连接');
+        await CM.api(`/v1/encounters/${target.candidateId}/calls/${target.callId}/session`,{method:'POST',body:JSON.stringify({session_token:target.sessionToken,action:'CONNECTED'})});
+      }
     } catch (error) {
       await stopCall();
+      if(target?.scope==='encounter')throw error;
       alert("无法开始通话：" + error.message);
     } finally {
       dom.button.disabled = false;
@@ -1253,7 +1303,9 @@
   }
 
   async function stopCall() {
+    const endingTarget=voice.target;
     voice.active = false;
+    if(voice.encounterPoll!==null)clearInterval(voice.encounterPoll);voice.encounterPoll=null;
     CM.emit?.("voiceStopped")?.catch?.(console.error);
     CM.live2d?.stop();
     voice.recoveryPending = false;
@@ -1294,6 +1346,9 @@
     dom.overlay?.classList.add("hidden");
     dom.dock?.classList.add("hidden");
     updateCallButton();
+    if(endingTarget?.scope==='encounter'){
+      fetch(`/v1/encounters/${endingTarget.candidateId}/calls/${endingTarget.callId}/session`,{method:'POST',keepalive:true,headers:{'Content-Type':'application/json'},body:JSON.stringify({session_token:endingTarget.sessionToken,action:'ENDED'})}).catch(console.debug);
+    }
   }
 
   document.getElementById("voiceSpeakerButton")?.addEventListener("click", event => {
@@ -1316,6 +1371,14 @@
   window.addEventListener("beforeunload", () => { if (voice.active) stopCall(); });
   CM.on("conversationChanged", () => { if (voice.active) renderCallIdentity(); });
   CM.registerFeature("voice", {
+    startEncounter:async(candidate,call)=>{
+      if(voice.active)throw Error('已有正在进行的通话，请先结束');
+      const characterId=`encounter-${candidate.id}`;
+      return startCall({scope:'encounter',candidateId:candidate.id,callId:call.id,sessionToken:call.session_token,
+        conversationId:characterId,characterId,title:candidate.draft.name,
+        profile:{id:characterId,name:candidate.draft.name,avatar_url:candidate.portrait_url},
+        members:[{id:characterId,name:candidate.draft.name}],seenMessageIds:(candidate.messages||[]).map(m=>m.id)});
+    },
     start:startCall,
     stop:stopCall,
     minimize:minimizeCall,

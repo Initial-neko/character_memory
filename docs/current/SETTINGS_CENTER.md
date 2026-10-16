@@ -176,6 +176,11 @@ Settings Center owns the persisted Random Encounter configuration:
 
 ```yaml
 encounter_enabled: true
+encounter_daily_enabled: true
+encounter_classic_roster: |-
+  芙莉莲｜葬送的芙莉莲
+  赫萝｜狼与香辛料
+  约尔·福杰｜间谍过家家
 encounter_persona_preference: "18–25 岁的原创成年女性，以可爱、活泼、有活力为主；职业、兴趣、性格和外观各有区别，不预设亲密关系。"
 encounter_portraits_enabled: true
 encounter_interval_minutes: 1440
@@ -184,7 +189,7 @@ encounter_max_pending: 3
 encounter_poll_seconds: 60
 ```
 
-The enabled flag, portraits, interval, and web/generated mix are advanced settings; pending and poll limits stay diagnostic. Dev Console exposes only status/manual-trigger diagnostics and never becomes a second persisted editor for these fields.
+Daily mode, classic roster, enabled flag, portraits, legacy interval, and original web/generated mix are advanced settings; pending and poll limits stay diagnostic. Dev Console exposes only status/manual-trigger diagnostics and never becomes a second persisted editor for these fields. Daily mode is enabled by default, fills one classic plus one original per server-local date on startup, and ignores `encounter_interval_minutes`; disabling it restores interval opportunities. Classic entries use one `角色名｜作品名` per line and skip existing/open/accepted same-name people. Exhaustion is visible as a failed classic slot; it never becomes an extra original. In daily mode the pending limit counts only unopened candidates with a minimum of two; ongoing chats are preserved, and untouched past-date cards expire. See SOCIAL_WORLD for the durable lifecycle and retry contract.
 
 `encounter_persona_preference` is an advanced creation preference, defaulting to original adult women aged 18–25 with a cute, lively and energetic tone, while retaining distinct occupations, interests and appearance. It is supplied to both generated and web-inspired drafts (including web seed abstraction), without an extra LLM call or retry. An empty value removes the additional preference. It affects new candidates only, does not rewrite existing people or portraits, and requires restart after saving. This is a generation preference, not a deterministic gender classifier.
 

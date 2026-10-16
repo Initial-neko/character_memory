@@ -428,39 +428,36 @@ def test_encounter_ui_and_server_wiring_exist():
     server = (root / "src" / "character_memory" / "server.py").read_text(encoding="utf-8")
     index = (root / "src" / "character_memory" / "web" / "index.html").read_text(encoding="utf-8")
     script = (root / "src" / "character_memory" / "web" / "encounter.js").read_text(encoding="utf-8")
+    world = (root / 'src/character_memory/web/world_v2.js').read_text(encoding='utf-8')
 
     assert "attach_encounter_routes" in server
     assert '/static/encounter.js' in index
     assert '/static/encounter.css' in index
     for token in [
-        "/v1/encounters?limit=3",
-        "data-encounter-chat",
-        "data-encounter-accept",
-        "data-encounter-dismiss",
+        "/v1/encounters?limit=50",
         "active_character_soft_limit",
     ]:
         assert token in script
+    for token in ('data-encounter-chat','data-encounter-accept','data-encounter-dismiss'):
+        assert token in world
 
 
-def test_the_chat_panel_opens_with_a_transition_and_re_reads_for_the_reply():
-    """The panel used to appear in one frame, and the reply now lands later.
-
-    Opening the chat replaced the panel instantly, so the card jumped to its full
-    height and read as a layout glitch. The reply is also generated after the
-    POST answers, so the panel has to re-read once the worker has stored it.
-    """
-    root = Path(__file__).resolve().parents[1]
-    web = root / "src" / "character_memory" / "web"
-    css = (web / "encounter.css").read_text(encoding="utf-8")
-    script = (web / "encounter.js").read_text(encoding="utf-8")
-
-    assert "@keyframes encounter-panel-open" in css
-    assert "animation:encounter-panel-open" in css
-    assert "from{max-height:0" in css
-
-    # Bounded re-reads, and only while the panel is still open.
-    assert "for (const delay of [2500, 6500])" in script
-    assert "data-encounter-panel]:not(.hidden)" in script
+def test_new_user_line_supersedes_an_inflight_temporary_reply(tmp_path):
+    store=SQLiteStore(str(tmp_path/'superseded.db'))
+    try:
+        repo=EncounterRepository(store)
+        now=datetime.now(timezone.utc)
+        candidate=_chat_candidate(repo,now)
+        repo.append_open_message(candidate['id'],'USER','first',now)
+        def reply(*args):
+            repo.append_open_message(candidate['id'],'USER','newer',datetime.now(timezone.utc))
+            return SimpleNamespace(message='obsolete')
+        service=EncounterService(SimpleNamespace(require_bundle=lambda:SimpleNamespace(model=SimpleNamespace(structured_for_session=reply))),repo)
+        assert service.reply(candidate['id']) is None
+        assert repo.list_messages(candidate['id'])[-1]['content']=='newer'
+        assert repo.candidates_waiting_for_reply()==[candidate['id']]
+    finally:
+        store.close()
 
 
 def test_encounter_lifecycle_locks_do_not_collide_across_candidates(tmp_path):

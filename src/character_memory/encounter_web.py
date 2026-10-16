@@ -21,6 +21,15 @@ class EncounterMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
 
 
+class EncounterCallRequest(BaseModel):
+    session_token: str = Field(min_length=1, max_length=100)
+    action: str = Field(default='CONNECTED', pattern='^(CONNECTED|ENDED|CHECK)$')
+
+
+class EncounterCallMessageRequest(EncounterMessageRequest):
+    session_token: str = Field(min_length=1, max_length=100)
+
+
 def attach_encounter_routes(app):
     """Attach temporary random encounters without creating formal characters yet."""
 
@@ -63,6 +72,9 @@ def attach_encounter_routes(app):
             **candidate,
             "portrait_url": service.portrait_url(candidate["id"]),
             "messages": repository.list_messages(candidate["id"], limit=50),
+            'metrics': repository.metrics(candidate['id']),
+            'calls': repository.list_calls(candidate['id'], now=datetime.now().astimezone()),
+            'reply_pending': candidate['id'] in repository.candidates_waiting_for_reply(),
             "active_character_count": active_count(),
             "active_character_limit": limit,
             "active_character_soft_limit": soft_limit,
@@ -74,19 +86,96 @@ def attach_encounter_routes(app):
         }
 
     @app.get("/v1/encounters")
-    def list_encounters(limit: int = 12, include_closed: bool = False):
+    def list_encounters(limit: int = 12, include_closed: bool = False, view: str = 'all', offset: int = 0):
+        if view not in {'all','today','ongoing','kept'}:
+            raise HTTPException(400,'invalid encounter view')
+        cap=max(1,min(int(limit),50))
+        now=datetime.now().astimezone()
         candidates = repository.list_candidates(
-            limit=max(1, min(int(limit), 50)),
+            limit=cap+1,
             include_closed=bool(include_closed),
+            view=view, offset=max(0,offset), now=now,
         )
         character_limit = int(getattr(access, "max_active_characters", 20))
         return {
-            "encounters": [payload(item) for item in candidates],
+            "encounters": [payload(item) for item in candidates[:cap]],
+            'has_more':len(candidates)>cap,
+            'next_offset':max(0,offset)+cap,
+            'ongoing':[{**item,'portrait_url':service.portrait_url(item['id'])} for item in repository.list_candidates(limit=50,include_closed=False,view='ongoing')],
             "pending_count": repository.pending_count(),
             "active_character_count": active_count(),
             "active_character_limit": character_limit,
             "active_character_soft_limit": int(getattr(access, "soft_active_characters", 10)),
+            'today': datetime.now().astimezone().date().isoformat(),
+            'daily_enabled': bool(getattr(access.settings,'encounter_daily_enabled',False)),
+            'daily_slots': repository.daily_slots(datetime.now().astimezone()),
         }
+
+    @app.get('/v1/encounters/{candidate_id:int}')
+    def encounter_detail(candidate_id: int):
+        candidate=repository.get_candidate(candidate_id)
+        if candidate is None:
+            raise HTTPException(404,'来客不存在')
+        return {'candidate':payload(candidate)}
+
+    @app.get('/v1/encounters/{candidate_id}/messages')
+    def encounter_history(candidate_id: int, before_id: int | None = None, limit: int = 50):
+        if repository.get_candidate(candidate_id) is None:
+            raise HTTPException(404,'来客不存在')
+        cap=max(1,min(limit,100))
+        with repository.store._lock:
+            rows=repository.store.conn.execute('SELECT id,role,content,created_at FROM encounter_messages WHERE candidate_id=? AND (? IS NULL OR id<?) ORDER BY id DESC LIMIT ?',
+                (candidate_id,before_id,before_id,cap+1)).fetchall()
+        messages=[dict(row) for row in rows[:cap]][::-1]
+        return {'messages':messages,'has_more':len(rows)>cap,'next_before_id':messages[0]['id'] if messages else None}
+
+    @app.post('/v1/encounters/{candidate_id}/calls')
+    def request_encounter_call(candidate_id: int):
+        try:
+            return service.request_call(candidate_id)
+        except KeyError as exc:
+            raise HTTPException(404,str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409,str(exc)) from exc
+        except Exception as exc:
+            logger.exception('encounter.call_decision_failed candidate=%s',candidate_id)
+            raise HTTPException(502,'暂时无法获得电话回应，请稍后重试') from exc
+
+    @app.post('/v1/encounters/{candidate_id}/calls/{call_id}/session')
+    def encounter_call_session(candidate_id: int, call_id: str, req: EncounterCallRequest):
+        try:
+            with repository.lifecycle_lock(candidate_id):
+                with repository.store._lock:
+                    row=repository.store.conn.execute('SELECT candidate_id FROM encounter_calls WHERE id=?',(call_id,)).fetchone()
+                if row is None or row['candidate_id']!=candidate_id:
+                    raise KeyError('call not found')
+                return repository.update_call(call_id,req.session_token,req.action,datetime.now().astimezone())
+        except KeyError as exc:
+            raise HTTPException(404,str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409,str(exc)) from exc
+
+    @app.post('/v1/encounters/{candidate_id}/calls/{call_id}/messages')
+    def encounter_call_message(candidate_id: int, call_id: str, req: EncounterCallMessageRequest):
+        with repository.lifecycle_lock(candidate_id):
+            encounter_call_session(candidate_id,call_id,EncounterCallRequest(session_token=req.session_token,action='CHECK'))
+            return chat_encounter(candidate_id,EncounterMessageRequest(message=req.message))
+
+    @app.post('/v1/encounters/{candidate_id}/reply/retry')
+    def retry_encounter_reply(candidate_id: int):
+        with repository.lifecycle_lock(candidate_id):
+            candidate=repository.get_candidate(candidate_id)
+            if candidate is None:
+                raise HTTPException(404,'来客不存在')
+            messages=repository.list_messages(candidate_id,limit=1)
+            if candidate['status'] not in {'NEW','SEEN','CHATTING'} or not messages or messages[-1]['role']!='USER':
+                raise HTTPException(409,'没有可重试的临时回复')
+            with repository.store._lock:
+                repository.store.conn.execute("UPDATE encounter_candidates SET error='' WHERE id=?",(candidate_id,))
+                repository.store._maybe_commit()
+            if not scheduler.enqueue_reply(candidate_id):
+                raise HTTPException(503,'回复队列繁忙，请稍后重试')
+        return {'reply_pending':True}
 
     @app.get("/v1/encounters/status")
     def encounter_status():

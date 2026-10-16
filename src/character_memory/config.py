@@ -304,13 +304,15 @@ class Settings(BaseModel):
     # Random Encounter: a lightweight discovery pool separate from the formal
     # character list. Candidates may be explored even when the active chat list
     # is full; accepting one consumes a formal slot (warn after 10, hard-stop at 20).
-    encounter_enabled: bool = True
+    encounter_enabled: bool = Field(default=True, description='启用后台世界邂逅。关闭不删除已有候选，也不禁止已有临时聊天。')
+    encounter_daily_enabled: bool = Field(default=True, description='按服务器本地日期每天生成经典和原创各一位；启动即可补当天缺失名额，重启不重复。关闭后使用旧的间隔机会模式。')
+    encounter_classic_roster: str = Field(default='芙莉莲｜葬送的芙莉莲\n赫萝｜狼与香辛料\n约尔·福杰｜间谍过家家', max_length=4000, description='经典角色轮换名单，每行使用「角色名｜作品名」。跳过已接纳或正在认识的同名人物；名单耗尽会报告失败，不冒充原创补位。需重启。')
     encounter_persona_preference: str = Field(default="18–25 岁的原创成年女性，以可爱、活泼、有活力为主；职业、兴趣、性格和外观各有区别，不预设亲密关系。", max_length=1200, description="新来客创作偏好，默认18–25岁、可爱活泼的成年女性，适用于随机与互联网灵感；留空不额外限制。只影响新候选，不改现有人物/肖像，不增加模型调用。需重启。")
     encounter_portraits_enabled: bool = Field(default=True, description="新来客生成一次持久化肖像，使用当前生图服务；失败仅手动重试，刷新不生成。不增加文字模型调用。关闭后保留已有图片。")
-    encounter_interval_minutes: float = Field(default=1440.0, ge=10.0, le=10080.0)
-    encounter_web_probability: float = Field(default=0.5, ge=0.0, le=1.0)
-    encounter_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
-    encounter_max_pending: int = Field(default=3, ge=1, le=10)
+    encounter_interval_minutes: float = Field(default=1440.0, ge=10.0, le=10080.0, description='仅旧间隔模式生效：两次候选机会间的分钟数；每日模式不使用此间隔。')
+    encounter_web_probability: float = Field(default=0.5, ge=0.0, le=1.0, description='原创人物 AUTO 路径使用公开网页灵感的概率；不影响经典名额。')
+    encounter_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0, description='后台检查缺失邂逅名额的间隔秒数，不决定每日数量。')
+    encounter_max_pending: int = Field(default=3, ge=1, le=10, description='待认识候选容量。每日模式只计算未开始对话的候选，至少保留双名额；既有聊天不挤占当天名额。旧模式仍统计全部开放候选。')
 
 def load_settings(path: str = "config.yaml") -> Settings:
     p = Path(path)

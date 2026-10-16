@@ -69,7 +69,7 @@ Promotion from RC to stable additionally requires a real local soak on the norma
 
 The 0.5 line is the first **Persistent Person Runtime Baseline**: Direct, Group, Memory/Mental State, Voice, Vision/Image, and Character Space are all channels around the same persistent person model rather than separate personalities.
 
-`0.5.0rc1` is the first release-candidate package version for this baseline.
+`0.5.0rc1` was the first release-candidate package version for this baseline. `0.5.0` is the stable baseline of the line — an immutable tag on `main`, and the rollback point for the character-core architecture work that follows. The `v0.5.0-rc.1` candidate remains available as a historical tag; new work targets the next minor series rather than re-opening this one.
 
 ## 1.0 boundary
 

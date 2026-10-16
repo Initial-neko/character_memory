@@ -43,6 +43,28 @@ and explicit live validation remain authoritative. World/Browser/collaboration
 snapshot assembly and general Prompt compilation remain separate integration
 work.
 
+WorldActivityService.capabilities(character_id, now=..., rss_candidates=...)
+uses the same discovery contract with current active profiles, configured search
+service, local candidates and Claude runner/allowance. Composition prepares the
+execution schema; listing only reads current facts. New plans cannot execute a
+model-selected tool absent from this trusted snapshot. Existing completed World
+opportunities retain their original recovery/cached-result paths.
+
+Browser, role-contact and feedback writes require explicit operator sidecar
+entries `browser_read`, `role_contact` and `github_issue_write`. A trusted
+composition extension descriptor must name its required grant and exact channel;
+registration alone never exposes a tool. Existing readers retain their prior
+policy. Selected Skills still require one of the explicit Claude grants.
+
+The shared CapabilityExecutor supports at most three execution reservations per
+opportunity; existing callers continue requesting one. All begun attempts,
+including provider-side denial, consume allowance. New missing-provider calls
+are rejected before reservation; completed matching receipts remain readable.
+A composition-only CapabilityAdapter can add a bounded tool while retaining
+identity, source/channel checks, semantic validation, shared reservation and
+receipt persistence. Adapters cannot replace built-ins. Their current permission
+validator runs before cache access; provider availability is checked afterward.
+
 ## Optional Direct external-task decision
 
 `direct_claude_tasks_enabled` (default false) and the named person's operator

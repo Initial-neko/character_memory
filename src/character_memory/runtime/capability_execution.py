@@ -5,6 +5,8 @@ No character decision, prompt, scheduler or provider retry loop lives here.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from typing import Callable, Mapping
+from types import MappingProxyType
 from datetime import datetime
 import hashlib
 import json
@@ -14,6 +16,9 @@ import re
 from httpx import TimeoutException
 
 from character_memory.domain.models import WorldObservation
+from character_memory.runtime.capability_discovery import runner_available
+
+MAX_OPPORTUNITY_CALLS = 3
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,22 @@ class CapabilityResult:
     status: str
     data: dict = field(default_factory=dict)
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class CapabilityAdapter:
+    """Trusted composition-only extension of the existing executor."""
+    channels: frozenset[str]
+    validate: Callable[[CapabilityRequest], str]
+    execute: Callable[[CapabilityRequest], CapabilityResult]
+    available: Callable[[], bool] | None = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "channels", frozenset(self.channels))
+        if (not self.channels or not self.channels <= {"WORLD", "DIRECT", "GROUP", "SPACE", "VISUAL"}
+                or not callable(self.validate) or not callable(self.execute)
+                or (self.available is not None and not callable(self.available))):
+            raise ValueError("invalid capability adapter")
 
 
 def adapt_browse_decision(plan, *, character_id: str, opportunity_id: str,
@@ -58,11 +79,18 @@ class CapabilityExecutor:
     """
     MIGRATION = "world/004-capability-executions"
 
-    def __init__(self, store, web_observer, *, rss_reader=None, claude_runner=None):
+    def __init__(self, store, web_observer, *, rss_reader=None, claude_runner=None,
+                 adapters: Mapping[str, CapabilityAdapter] | None = None):
         self.store = store
         self.web_observer = web_observer
         self.rss_reader = rss_reader
         self.claude_runner = claude_runner
+        configured = dict(adapters or {})
+        if any(not isinstance(name, str) or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", name) is None
+               or name in {"WEB_SEARCH", "READ_RSS", "CLAUDE_TASK"}
+               or not isinstance(adapter, CapabilityAdapter) for name, adapter in configured.items()):
+            raise ValueError("invalid or shadowed capability adapter")
+        self.adapters = MappingProxyType(configured)
         self.store.apply_schema_migration(self.MIGRATION, self._create_schema, immediate=True)
         self.store.apply_schema_migration("world/005-execution-metadata", self._add_metadata, immediate=True)
 
@@ -83,7 +111,32 @@ class CapabilityExecutor:
         )
 
     @staticmethod
+    def _adapter_denial(request: CapabilityRequest, adapter: CapabilityAdapter) -> str:
+        if not isinstance(request.channel, str) or request.channel not in adapter.channels:
+            return "CHANNEL_DENIED"
+        if any(not isinstance(value, str) or not value.strip() or len(value) > 256
+               for value in (request.request_id, request.character_id, request.opportunity_id)):
+            return "INVALID_IDENTITY"
+        if request.source_event_id is not None and (type(request.source_event_id) is not int or request.source_event_id < 1):
+            return "INVALID_IDENTITY"
+        if not isinstance(request.arguments, dict):
+            return "INVALID_ARGUMENTS"
+        if (not isinstance(request.constraints, dict) or set(request.constraints) != {"max_calls"}
+                or type(request.constraints["max_calls"]) is not int
+                or not 0 <= request.constraints["max_calls"] <= MAX_OPPORTUNITY_CALLS):
+            return "INVALID_CONSTRAINTS"
+        if request.constraints["max_calls"] == 0:
+            return "BUDGET_EXHAUSTED"
+        try:
+            denial = adapter.validate(request)
+            return denial if isinstance(denial, str) else "INVALID_ADAPTER_VALIDATION"
+        except (TypeError, ValueError):
+            return "INVALID_ARGUMENTS"
+
+    @staticmethod
     def _denial(request: CapabilityRequest) -> str:
+        if not isinstance(request.capability, str):
+            return "CAPABILITY_DENIED"
         task = request.channel == "DIRECT" and request.capability == "CLAUDE_TASK"
         if request.channel != "WORLD" and not task:
             return "CHANNEL_DENIED"
@@ -110,7 +163,7 @@ class CapabilityExecutor:
             if (not isinstance(bounds, dict) or set(bounds) != {"max_items", "max_chars", "max_calls"}
                     or any(type(value) is not int for value in bounds.values())
                     or not 1 <= bounds["max_items"] <= 2 or len(items) > bounds["max_items"]
-                    or not 500 <= bounds["max_chars"] <= 12000 or not 0 <= bounds["max_calls"] <= 1):
+                    or not 500 <= bounds["max_chars"] <= 12000 or not 0 <= bounds["max_calls"] <= MAX_OPPORTUNITY_CALLS):
                 return "INVALID_CONSTRAINTS"
             return "BUDGET_EXHAUSTED" if bounds["max_calls"] == 0 else ""
         query = request.arguments.get("query")
@@ -158,7 +211,7 @@ class CapabilityExecutor:
         if (any(type(bounds[key]) is not int for key in base)
                 or not 1 <= bounds["max_pages"] <= 4
                 or not 500 <= bounds["max_chars_per_page"] <= 16000
-                or not 0 <= bounds["max_calls"] <= 1):
+                or not 0 <= bounds["max_calls"] <= MAX_OPPORTUNITY_CALLS):
             return "INVALID_CONSTRAINTS"
         if bounds["max_calls"] == 0:
             return "BUDGET_EXHAUSTED"
@@ -202,7 +255,8 @@ class CapabilityExecutor:
         return ""
 
     def execute(self, request: CapabilityRequest, *, now: datetime | None = None) -> CapabilityResult:
-        denial = self._denial(request)
+        adapter = self.adapters.get(request.capability) if isinstance(request.capability, str) else None
+        denial = self._adapter_denial(request, adapter) if adapter else self._denial(request)
         if denial:
             return CapabilityResult(request.request_id, "DENIED", reason=denial)
         now = now or datetime.now().astimezone()
@@ -221,9 +275,19 @@ class CapabilityExecutor:
                 if row["result_json"] is not None:
                     return CapabilityResult(**json.loads(row["result_json"]))
                 return CapabilityResult(request.request_id, "SKIPPED", reason="IN_PROGRESS_OR_INTERRUPTED")
+            if adapter is not None and adapter.available is not None and adapter.available() is not True:
+                return CapabilityResult(request.request_id, "DENIED", reason="PROVIDER_UNAVAILABLE")
+            if is_claude and not runner_available(self.claude_runner):
+                return CapabilityResult(request.request_id, "DENIED", reason="CLAUDE_UNAVAILABLE")
+            if request.capability == "READ_RSS" and not callable(getattr(self.rss_reader, "read", None)):
+                return CapabilityResult(request.request_id, "DENIED", reason="RSS_READER_UNAVAILABLE")
+            if not is_claude and request.capability == "WEB_SEARCH" and (
+                not callable(getattr(self.web_observer, "observe", None))
+                or (hasattr(self.web_observer, "search_provider") and self.web_observer.search_provider is None)
+            ):
+                return CapabilityResult(request.request_id, "DENIED", reason="WEB_UNAVAILABLE")
             used = self.store.conn.execute(
-                "SELECT COUNT(*) FROM capability_executions WHERE character_id=? AND opportunity_id=? "
-                "AND status IN ('STARTED','SUCCESS','FAILED','TIMEOUT')",
+                "SELECT COUNT(*) FROM capability_executions WHERE character_id=? AND opportunity_id=?",
                 (request.character_id, request.opportunity_id),
             ).fetchone()[0]
             if used >= request.constraints["max_calls"]:
@@ -250,7 +314,13 @@ class CapabilityExecutor:
                  json.dumps(payload, ensure_ascii=False, sort_keys=True), "STARTED", now.isoformat(), json.dumps(metadata)),
             )
         try:
-            if is_claude:
+            if adapter is not None:
+                result = adapter.execute(request)
+                if (not isinstance(result, CapabilityResult) or result.request_id != request.request_id
+                        or result.status not in {"SUCCESS", "FAILED", "TIMEOUT", "DENIED", "SKIPPED"}
+                        or not isinstance(result.data, dict)):
+                    result = CapabilityResult(request.request_id, "FAILED", reason="INVALID_ADAPTER_RESULT")
+            elif is_claude:
                 result = self.claude_runner.run(request)
                 metadata.update(result.data.get("execution") or {})
             elif request.capability == "READ_RSS":

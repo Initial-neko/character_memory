@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 import yaml
+import re
 
-from character_memory.character_capabilities import select_role_research
+from character_memory.character_capabilities import select_role_research, read_role_capabilities
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class CapabilityDescription:
     channel: str
     backend: str
     skills: tuple[dict, ...] = ()
+    required_grant: str | None = None
 
 
 def _query_schema() -> dict:
@@ -82,6 +84,7 @@ def runner_available(runner) -> bool:
 
 def available_capabilities(
     profile: dict | None, *, channel: str, availability: CapabilityAvailability,
+    extensions: tuple[CapabilityDescription, ...] = (),
 ) -> tuple[CapabilityDescription, ...]:
     """Describe existing tools for one server-selected active person/channel.
 
@@ -92,22 +95,38 @@ def available_capabilities(
     Missing Claude grants preserve World's existing direct-search fallback.
     Neither Browser sessions nor external writes are registered by this API.
     """
-    if (not isinstance(profile, dict) or "archived_at" in profile
+    if (not isinstance(channel, str) or channel not in {"WORLD", "DIRECT", "GROUP", "SPACE", "VISUAL"}
+            or not isinstance(profile, dict) or "archived_at" in profile
             or not isinstance(profile.get("id"), str)
             or not profile["id"].strip() or len(profile["id"]) > 256
             or availability.remaining_calls == 0):
         return ()
+    extra = []
+    if extensions:
+        try:
+            permissions = read_role_capabilities(profile)
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError):
+            permissions = None
+        seen = {"WEB_SEARCH", "READ_RSS", "CLAUDE_TASK"}
+        for item in extensions:
+            if (isinstance(item, CapabilityDescription) and isinstance(item.id, str)
+                    and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", item.id) is not None
+                    and item.id not in seen and item.channel == channel
+                    and item.required_grant is not None and permissions is not None
+                    and item.required_grant in permissions.capabilities):
+                extra.append(item)
+                seen.add(item.id)
     if channel == "DIRECT":
         if not (availability.direct_task and availability.claude):
-            return ()
+            return tuple(extra)
         skills = _skills(profile, "claude_task")
         if skills is None:
-            return ()
+            return tuple(extra)
         return (CapabilityDescription(
             "CLAUDE_TASK", "Ask the isolated executor a self-contained public question; its response is not personal experience.",
-            _query_schema(), channel, "claude", skills),)
+            _query_schema(), channel, "claude", skills), *extra)
     if channel != "WORLD":
-        return ()
+        return tuple(extra)
     tools = []
     if availability.web_search:
         backend = "direct"
@@ -124,4 +143,4 @@ def available_capabilities(
         tools.append(CapabilityDescription(
             "READ_RSS", "Read selected local Feed text; this does not fetch or establish reading of the linked original page.",
             _rss_schema(), channel, "local"))
-    return tuple(tools)
+    return tuple(tools + extra)

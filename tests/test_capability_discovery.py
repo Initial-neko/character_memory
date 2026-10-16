@@ -139,3 +139,17 @@ def test_schema_rejects_blank_query_and_documents_unique_rss_items():
     items = rss.arguments_schema["properties"]["items"]
     assert items["uniqueItems"] is True
     assert "item_id" in items["description"]
+
+
+def test_composition_extensions_still_require_named_role_grant_and_channel(tmp_path):
+    from character_memory.runtime.capability_discovery import CapabilityDescription
+    profile = role(tmp_path)
+    extension = CapabilityDescription('BROWSER_OPEN','Read a public page',{'type':'object'},'WORLD','browser', required_grant='browser_read')
+    state = CapabilityAvailability()
+    assert available_capabilities(profile, channel='WORLD', availability=state, extensions=(extension,)) == ()
+    (tmp_path/'personas/a/capabilities.yaml').write_text('capabilities: [browser_read]\n', encoding='utf-8')
+    assert available_capabilities(profile, channel='WORLD', availability=state, extensions=(extension,)) == (extension,)
+    assert available_capabilities(profile, channel='DIRECT', availability=state, extensions=(extension,)) == ()
+    assert available_capabilities(profile, channel='WORLD', availability=replace(state,remaining_calls=0), extensions=(extension,)) == ()
+    unsafe = replace(extension, id='UNSCOPED', required_grant=None)
+    assert available_capabilities(profile, channel='WORLD', availability=state, extensions=(unsafe,)) == ()

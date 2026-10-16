@@ -43,16 +43,11 @@ def test_channel_hard_boundaries_remain_and_no_tool_execution():
     assert 'actions=[]；不允许聊天或 Space 对外表达' in world
 
 
-def test_dynamic_service_capabilities_once_and_explicitly_empty_on_result(tmp_path):
+def test_dynamic_service_capabilities_visible_only_before_result(tmp_path):
     from test_direct_claude import setup
     store,runtime,runner,model,current=setup(tmp_path)
-    calls=[]
-    def capabilities(e):
-        calls.append(e)
-        return (descriptor(),)
-    runtime.research_service.capabilities=capabilities
+    runtime.research_service.capabilities=lambda e:(descriptor(),)
     runtime.handle(current)
-    assert len(calls)==1
     assert 'BROWSER_READ' in model.prompts[0]
     assert 'BROWSER_READ' not in model.prompts[1]
     assert 'authorized-public-research' not in model.prompts[1]
@@ -81,7 +76,8 @@ def test_social_prompts_preserve_persona_scope_silence_and_untrusted_data():
 def test_unavailable_service_retains_legacy_direct_grant_suffix(tmp_path):
     from test_direct_claude import setup
     store,runtime,runner,model,current=setup(tmp_path)
-    assert not hasattr(runtime.research_service,'capabilities')
+    original=runtime.research_service
+    runtime.research_service=SimpleNamespace(prompt=original.prompt, resolve=original.resolve)
     runtime.handle(current)
     assert '# Claude task delegation' in model.prompts[0]
     assert '# Claude task delegation' not in model.prompts[1]

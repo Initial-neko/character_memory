@@ -2,6 +2,61 @@
 
 This file records user-visible and architecture-significant release changes. Historical P0.x milestone notes remain under `docs/archive/`.
 
+## 0.5.0 - 2026-10-16
+
+First **stable baseline** of the Persistent Person Runtime, promoting the `v0.5.0-rc.1` line after 218 commits of integration work.
+
+The notes below record the delta **since the release candidate**; the `0.5.0-rc.1` entry further down still describes the capabilities that line introduced. No manual data migration is required: every schema addition since the RC is an additive, idempotent `apply_schema_migration` applied at startup, and historical records stay readable.
+
+### World perception: RSS and sourced observation
+
+- RSS external sources V1 subscribe, cancel and restore without losing retained history, with today/title-query feeds, per-subscription scoping, preserved article paragraphs and inline images, and the original link attributed below the content.
+- What a character read is now a **recorded observation** rather than an imagined one: bounded personal RSS reading, sourced historical observations that are recallable, a sourced character-life observation page showing the reading facts and usage behind them, and prompt handling that distinguishes a sourced experience from an imagined history.
+- Chinese reading titles are recalled with their scoped source context.
+- World Activity gained a bounded capability-execution contract: character capability grants now gate whether research or Skill mounting is available at all, a plan executes through one explicit path, and each run records bounded tool-step receipts.
+- Claude world execution runs through a bounded stateless print backend with isolated tool sessions and an owned subprocess lifecycle, so a World run cannot outlive its parent or leave a process group behind.
+- Optional per-character vocation focus narrows personal browsing, and opt-in DeepSeek reference-window pacing bounds how often browse planning repeats.
+
+### Direct and Group
+
+- Opt-in fresh Claude task delegation in Direct lets a character hand work to a fresh isolated run instead of only talking about it.
+- Bounded opt-in Direct call invitations, with storage that stays lazy while the capability is off, and bounded opt-in autonomous Direct images.
+- User-controlled warm fantasy scenes can be previewed, created as drafts with fresh characters, entered and resumed.
+- Group participation is provenance-backed and cost-aware: shared history is retrieved from actual recent input receipts rather than reconstructed, and bounded counterpart relationship review uses explicit group input provenance.
+- A proactive share is grounded in bounded sourced observations, and social intents no longer leak into the Direct proactive dispatch path.
+- Autonomous group conversations stay out of the user's inbox.
+
+### Frontend
+
+- The **approved frontend visual system** is implemented, with generated artwork integrated and media presentation made consistent across surfaces.
+- Settings gained schema-driven category navigation with a mobile strip.
+- Live2D reached the call stage: an immersive stage with a persistent voice session, automatic motion and expression, plus model import, replacement and unbinding.
+- Usage-first mobile flows and Space notifications; the Dev Console prioritizes one-hour LLM usage and marks monetary cost as unknown rather than inventing a number.
+- Sticker pools are isolated per character instead of one global selection, transparent nine-grid PNG import goes through the global catalog, and removal-mode UI plus Windows atomic replace were repaired.
+
+### Media, storage and correctness
+
+- **Security:** RSS and media fetches pin their connection to a validated public IP, so a hostname that passed validation cannot afterwards be redirected to a private address (DNS rebinding / SSRF). RSS XML and URL handling is hardened and its shutdown is fenced.
+- **Storage:** SQLite runs in WAL with bounded writer waits, a blocked event insert rolls back instead of leaking an open transaction, and the Core transaction connection is shared with the lazy runtime.
+- **Memory:** re-embedding is atomic and Unicode deduplication is aligned, so recall cannot observe a half-migrated embedding set; invalid legacy event metadata is tolerated instead of breaking recall.
+- Runtime workers roll back after a startup failure rather than staying half-registered; Direct SSE updates render incrementally instead of redrawing; idle conversation runtime caches are reclaimed safely.
+- Settings: the runtime model is authoritative for validation bounds, typed consumers no longer carry silent defaults, and persistence is serialized against runtime apply.
+- `character-stack` gained `--stop` / `--status` with launcher scripts, so the stack shuts its children down in reverse order and reports state without starting anything.
+- The Android / external client V1 contract is a checked machine-readable route inventory rather than prose.
+- Character Space comment reply rounds are configurable, and its mixed feed projects sourced RSS and topics alongside autonomous posts.
+- Web search gained a keyless local provider for public-web discovery.
+
+### Configuration and dependencies
+
+- `config.example.yaml` grew by 114 lines covering the new settings; every capability added above is off or bounded by default.
+- New hard dependency `webless==0.1.0` for the local public-web discovery provider.
+- `Pillow==12.3.0` added to the `api` extra, and the wheel now ships `web/*.png` assets.
+
+### Known limitations
+
+- This line still carries the deferred debt recorded in [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md), including the unpinned dependency lock — CI re-resolves the declared graph on every run.
+- Acceptance beyond CI (target-machine ASR, screen readability, the real-Chromium visual pass) is recorded with the acceptance Issue rather than restated in this file.
+
 ## 0.5.0-rc.1 - 2026-10-01
 
 First release candidate for the **Persistent Person Runtime Baseline**.

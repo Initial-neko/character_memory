@@ -10,7 +10,7 @@
 
 ## 项目状态
 
-这是一个快速迭代中的实验项目。当前包版本进入 **0.5.0rc1**，作为第一条 Persistent Person Runtime release-candidate 基线；稳定版仍以真实运行验收后的不可变 Git tag / GitHub Release 为准，而不是额外维护一个会漂移的 stable 分支。
+这是一个快速迭代中的实验项目。当前包版本为 **0.5.0**，是 Persistent Person Runtime 的第一条稳定基线（stable baseline）；它把 `v0.5.0-rc.1` 这条 release-candidate 线转正，并以真实运行验收后的不可变 Git tag / GitHub Release 为准，而不是额外维护一个会漂移的 stable 分支。
 
 README 只描述可运行入口和已经落地的主能力；尚未完成端到端闭环的能力会明确标记为 foundation / in progress，而不是用实施计划冒充现状。
 

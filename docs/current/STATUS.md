@@ -129,7 +129,7 @@ Current stable contract does not promise:
 
 ## Release state
 
-The package version remains `0.5.0rc1`, while `main` has moved beyond the original RC snapshot. Version/tag/release-branch work is intentionally separate from normal daytime integration and requires a fresh freeze + real local soak before stable promotion.
+`v0.5.0` is the current stable baseline — an immutable tag on `main` — and the rollback point for the character-core architecture work that follows. The package version reports `0.5.0`, replacing the `0.5.0rc1` candidate that `main` outgrew over 218 commits of integration work. Version/tag/release-branch work stays separate from ordinary daytime integration.
 
 See [RELEASES.md](RELEASES.md) for the release contract.
 

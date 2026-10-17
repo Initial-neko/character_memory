@@ -1,5 +1,4 @@
 """CI must retain failing pytest output without masking its exit status."""
-import json
 import os
 from pathlib import Path
 import shutil

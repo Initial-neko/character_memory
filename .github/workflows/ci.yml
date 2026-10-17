@@ -36,14 +36,22 @@ jobs:
         run: mkdir -p artifacts/core-visual-evidence
 
       - name: Run tests
-        run: uv run pytest -q --junitxml=artifacts/core-visual-evidence/junit-linux.xml
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          set -o pipefail
+          set +e
+          uv run pytest -q --junitxml=artifacts/core-visual-evidence/junit-linux.xml 2>&1 | tee artifacts/core-visual-evidence/pytest-linux.log
+          pytest_status=${PIPESTATUS[0]}
+          printf '%s\n' "$pytest_status" > artifacts/core-visual-evidence/pytest-linux-exit-code.txt
+          exit "$pytest_status"
 
       - name: Upload Linux test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: core-ci-junit-linux
-          path: artifacts/core-visual-evidence/junit-linux.xml
+          path: artifacts/core-visual-evidence/
           if-no-files-found: warn
 
   windows-smoke:

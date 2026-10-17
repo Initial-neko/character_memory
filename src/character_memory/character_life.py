@@ -108,6 +108,30 @@ def continuation_life_projection(row, plan, result):
     return title,status,'\n'.join(lines),decision,details
 
 
+def collaboration_peer_sql(channel, *, match_peer=False):
+    """Correlate a shared fact to this person's durable send/receive receipt.
+
+    The SQL expressions are internal constants, never request input. Matching a
+    channel, owner, fact and actor prevents numeric IDs in other channels/posts
+    from making an unrelated fact visible. ACTION rows themselves stay hidden.
+    """
+    if channel not in ('GROUP', 'SPACE'):
+        raise ValueError('invalid collaboration channel')
+    metadata = "CASE WHEN json_valid(c.metadata_json) THEN c.metadata_json ELSE '{}' END"
+    def field(name):
+        return f"json_extract({metadata},'$.{name}')"
+    actor = 'e.actor_id' if channel == 'GROUP' else 'e.character_id'
+    channel_id = 'e.conversation_id' if channel == 'GROUP' else 'CAST(e.post_id AS TEXT)'
+    peer = f"CASE WHEN {field('actor_id')}=c.character_id THEN {field('recipient_id')} ELSE {field('actor_id')} END"
+    return (f"SELECT {peer} FROM events c WHERE c.character_id=? AND c.event_type='ACTION' "
+        f"AND {field('fact_kind')}='ROLE_COLLABORATION_MESSAGE' AND {field('channel')}='{channel}' "
+        f"AND {field('channel_id')}={channel_id} AND json_type({metadata},'$.shared_fact_id')='integer' "
+        f"AND {field('shared_fact_id')}=e.id AND e.actor_type='CHARACTER' AND {field('actor_id')}={actor} "
+        f"AND (({field('direction')}='SENT' AND {field('actor_id')}=c.character_id) "
+        f"OR ({field('direction')}='RECEIVED' AND {field('recipient_id')}=c.character_id)) "
+        f"AND {field('actor_id')}<>{field('recipient_id')}" + (f" AND ({peer})=?" if match_peer else ''))
+
+
 class CharacterExecutionReader:
     """Read existing execution receipts. Never initializes schemas or models."""
     def __init__(self, store, detail_dir):
@@ -254,11 +278,11 @@ class CharacterLifeReader:
             # Source event identities are namespaced; Group IDs are not Core event IDs.
             sources.append(("events", "e.id", "e.event_time_epoch", "e.event_time", "e.content||CASE WHEN json_valid(e.metadata_json) THEN coalesce(json_extract(e.metadata_json,'$.rss_reading.title'),'') ELSE '' END", "e.character_id=? AND e.event_type NOT IN ('ACTION','TIME_TICK','LIFE_EVENT','DIARY')", [character_id], "SELECT e.* FROM events e"))
             if 'conversation_events' in tables:
-                sources.append(("group", "e.id", "e.event_time_epoch", "e.event_time", "e.content", "(e.actor_type='CHARACTER' AND e.actor_id=? OR EXISTS(SELECT 1 FROM conversation_runtime_traces t WHERE t.character_id=? AND t.source_conversation_event_id=e.id))", [character_id, character_id], "SELECT e.* FROM conversation_events e"))
+                sources.append(("group", "e.id", "e.event_time_epoch", "e.event_time", "e.content", f"(e.actor_type='CHARACTER' AND e.actor_id=? OR EXISTS(SELECT 1 FROM conversation_runtime_traces t WHERE t.character_id=? AND t.source_conversation_event_id=e.id) OR EXISTS({collaboration_peer_sql('GROUP')}))", [character_id, character_id, character_id], "SELECT e.* FROM conversation_events e"))
             if 'space_posts' in tables:
                 sources.append(("post", "e.id", "e.created_at_epoch", "e.created_at", "e.content", "e.character_id=?", [character_id], "SELECT e.* FROM space_posts e"))
             if 'space_comments' in tables:
-                sources.append(("comment", "e.id", "e.created_at_epoch", "e.created_at", "e.content", "e.actor_type='CHARACTER' AND e.character_id=?", [character_id], "SELECT e.*,CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END AS peer_id FROM space_comments e JOIN space_posts p ON p.id=e.post_id LEFT JOIN space_comments parent ON parent.id=e.reply_to_comment_id AND parent.post_id=e.post_id"))
+                sources.append(("comment", "e.id", "e.created_at_epoch", "e.created_at", "e.content", f"(e.actor_type='CHARACTER' AND e.character_id=? OR EXISTS({collaboration_peer_sql('SPACE')}))", [character_id, character_id], "SELECT e.*,CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END AS peer_id FROM space_comments e JOIN space_posts p ON p.id=e.post_id LEFT JOIN space_comments parent ON parent.id=e.reply_to_comment_id AND parent.post_id=e.post_id"))
             if 'world_browse_decisions' in tables:
                 sources.append(("world", "e.opportunity_id", "CAST((julianday(e.started_at)-2440587.5)*86400000000 AS INTEGER)", "e.started_at", "CASE WHEN json_valid(e.result_json) THEN coalesce(json_extract(e.result_json,'$.query'),'')||coalesce(json_extract(e.result_json,'$.summary'),'')||coalesce(json_extract(e.result_json,'$.observations'),'') ELSE '' END||e.error", "e.character_id=?", [character_id], "SELECT e.* FROM world_browse_decisions e"))
             if 'space_opportunity_runs' in tables:
@@ -286,14 +310,14 @@ class CharacterLifeReader:
                     params += [query]
                 if view == 'relationships':
                     if kind=='events': condition += " AND (e.event_type='USER_MESSAGE' OR (e.event_type='SPACE_COMMENT_RECEIVED' AND json_valid(e.metadata_json) AND json_extract(e.metadata_json,'$.commenter_id') IS NOT NULL))"
-                    elif kind=='group': condition += " AND e.actor_type IN ('CHARACTER','USER') AND NOT(e.actor_type='CHARACTER' AND e.actor_id=?)"; params += [character_id]
-                    elif kind=='comment': condition += " AND (CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END)<>?"; params += [character_id]
+                    elif kind=='group': condition += f" AND e.actor_type IN ('CHARACTER','USER') AND (NOT(e.actor_type='CHARACTER' AND e.actor_id=?) OR EXISTS({collaboration_peer_sql('GROUP')}))"; params += [character_id, character_id]
+                    elif kind=='comment': condition += f" AND (EXISTS({collaboration_peer_sql('SPACE')}) OR (CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END)<>?)"; params += [character_id, character_id]
                     else: continue
                     if peer:
                         if kind=='events':
                             condition += " AND ((e.event_type='USER_MESSAGE' AND ?='user') OR (json_valid(e.metadata_json) AND json_extract(e.metadata_json,'$.commenter_id')=?))"; params += [peer,peer]
-                        elif kind=='group': condition += " AND e.actor_id=?"; params += [peer]
-                        elif kind=='comment': condition += " AND (CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END)=?"; params += [peer]
+                        elif kind=='group': condition += f" AND ((e.actor_id=? AND e.actor_id<>?) OR EXISTS({collaboration_peer_sql('GROUP', match_peer=True)}))"; params += [peer, character_id, character_id, peer]
+                        elif kind=='comment': condition += f" AND (EXISTS({collaboration_peer_sql('SPACE', match_peer=True)}) OR (NOT EXISTS({collaboration_peer_sql('SPACE')}) AND (CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END)=?))"; params += [character_id, peer, character_id, peer]
                 if view == 'changes':
                     if kind == 'events':
                         condition += " AND (EXISTS(SELECT 1 FROM mental_state_history s WHERE s.character_id=e.character_id AND s.source_event_id=e.id) OR EXISTS(SELECT 1 FROM memories m WHERE m.character_id=e.character_id AND m.source_event_id=e.id AND CASE WHEN json_valid(m.metadata_json) THEN coalesce(upper(json_extract(m.metadata_json,'$.origin')),'') ELSE '' END<>'GROUP'))"
@@ -356,6 +380,11 @@ class CharacterLifeReader:
                 participants=[{'id':row['actor_id'],'name':'用户' if row['actor_type']=='USER' else row['actor_id']}]
         if kind=='comment' and row.get('peer_id') and row['peer_id']!=character:
             participants=[{'id':row['peer_id'],'name':row['peer_id']}]
+        if kind in ('group', 'comment'):
+            table = 'conversation_events' if kind == 'group' else 'space_comments'
+            receipt = self.store.conn.execute(f"SELECT ({collaboration_peer_sql(channel)}) FROM {table} e WHERE e.id=?", [character, row['id']]).fetchone()
+            if receipt and isinstance(receipt[0], str) and receipt[0]:
+                participants=[{'id':receipt[0], 'name':receipt[0]}]
         state=None
         if event_id:
             history=self.store.conn.execute("SELECT * FROM mental_state_history WHERE character_id=? AND source_event_id=? ORDER BY updated_at_epoch,id",[character,event_id]).fetchall()

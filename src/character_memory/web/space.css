@@ -149,7 +149,7 @@
 .space-layout-v2 .space-feed-wrap { width:min(100%,1500px); box-sizing:border-box; margin:0 auto; padding:8px clamp(14px,2vw,30px) 64px; }
 .space-layout-v2 .space-feed-meta { min-height:0; margin:0 0 12px; color:var(--ui-muted); font-size:11px; }
 .space-layout-v2 .space-feed { display:block; column-count:3; column-gap:16px; column-fill:balance; }
-.space-layout-v2 .space-post { display:inline-block; box-sizing:border-box; width:100%; margin:0 0 16px; padding:0; overflow:hidden; vertical-align:top; break-inside:avoid; border:1px solid var(--ui-line); border-radius:16px; background:var(--ui-surface); box-shadow:0 5px 18px rgba(49,35,107,.055); cursor:pointer; transition:transform 140ms ease,box-shadow 140ms ease; }
+.space-layout-v2 .space-post { display:block; box-sizing:border-box; width:100%; margin:0 0 16px; padding:0; overflow:hidden; vertical-align:top; break-inside:avoid; border:1px solid var(--ui-line); border-radius:16px; background:var(--ui-surface); box-shadow:0 5px 18px rgba(49,35,107,.055); cursor:pointer; transition:transform 140ms ease,box-shadow 140ms ease; }
 .space-layout-v2 .space-post:not(.space-post-detail):hover { transform:translateY(-2px); box-shadow:0 9px 24px rgba(49,35,107,.1); }
 .space-layout-v2 .space-post:focus-visible { outline:3px solid var(--ui-accent); outline-offset:2px; }
 .space-layout-v2 .space-post-body { display:flex; flex-direction:column; min-width:0; }

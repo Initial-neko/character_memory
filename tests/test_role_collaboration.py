@@ -340,3 +340,87 @@ def test_publication_failure_does_not_undo_real_sent_fact_or_trigger_retry(tmp_p
     assert len(groups.list_events(group.id))==len(store.list_events('alice'))==1
     assert service.contact('claude','real fact',context=c)==receipt
     assert len(attempts)==1
+
+
+@pytest.mark.parametrize('channel', ['GROUP', 'SPACE'])
+@pytest.mark.parametrize('reply', ['Actual reply', None])
+def test_life_collaboration_reads_only_actual_participant_receipts(tmp_path, channel, reply):
+    from character_memory.character_life import CharacterLifeReader
+    from character_memory.life_conversation import LifeReference, resolve_life_reference
+    from character_memory.domain.models import Event, EventType
+    store, groups, space, service, now = make_service(tmp_path, lambda *args: reply)
+    service.profiles = lambda: [{'id': p} for p in ('alice', 'claude', 'outsider')]
+    target = groups.create_group('g', ['alice', 'claude', 'outsider'], now).id if channel == 'GROUP' else str(space.create_post('outsider', 'Public post', now).id)
+    receipt = service.contact('claude', 'Actual question', context=CollaborationContext('alice', channel, target, 'life-read', None, now))
+    for cid in ('alice', 'claude'):
+        store.append_event(Event(character_id=cid, event_type=EventType.USER_MESSAGE, event_time=now, content='Existing Direct', metadata={'conversation_id': cid + ':existing'}))
+    kind = 'group' if channel == 'GROUP' else 'comment'
+    expected = {receipt['sent_event_id']}
+    if reply:
+        expected.add(receipt['reply_event_id'])
+    store.close()
+    store = SQLiteStore(tmp_path / 'roles.db')
+    reader = CharacterLifeReader(store)
+    before = store.conn.total_changes
+    for cid, peer in [('alice', 'claude'), ('claude', 'alice')]:
+        records = reader.timeline(cid, channel=channel)['items']
+        actual = [i for i in records if i['kind'] == kind]
+        assert {i['source']['id'] for i in actual} == expected
+        assert len(actual) == len(expected)
+        relationships = reader.timeline(cid, channel=channel, view='relationships', peer=peer)['items']
+        assert relationships
+        assert all(i['participants'] == [{'id': peer, 'name': peer}] for i in relationships)
+        assert reader.timeline(cid, channel=channel, view='relationships', peer='outsider')['items'] == []
+        incoming = receipt['sent_event_id'] if cid == 'claude' else receipt.get('reply_event_id')
+        if incoming:
+            ref = resolve_life_reference(store, LifeReference(character_id=cid, key=f'{kind}:{incoming}'))
+            actor = 'alice' if cid == 'claude' else 'claude'
+            assert f'记录发言者/观察者：{actor}。' in ref['quote']
+            expected_target = {'type': 'GROUP', 'id': target} if channel == 'GROUP' else {'type': 'DIRECT', 'id': cid + ':existing'}
+            assert ref['conversation'] == expected_target
+    assert not reader.timeline('outsider', channel=channel, view='relationships')['items']
+    assert not [i for i in reader.timeline('outsider', channel=channel)['items'] if i['kind'] == kind]
+    assert store.conn.total_changes == before
+    store.close()
+
+
+@pytest.mark.parametrize('channel', ['GROUP', 'SPACE'])
+@pytest.mark.parametrize('field,value', [('channel', 'DIRECT'), ('channel_id', 'wrong'), ('shared_fact_id', 999), ('actor_id', 'outsider'), ('recipient_id', 'outsider'), ('direction', 'SENT'), ('malformed', None)])
+def test_life_rejects_mismatched_collaboration_proof(tmp_path, channel, field, value):
+    import json
+    from fastapi import HTTPException
+    from character_memory.character_life import CharacterLifeReader
+    from character_memory.life_conversation import LifeReference, resolve_life_reference
+    store, groups, space, service, now = make_service(tmp_path, lambda *args: None)
+    target = groups.create_group('g', ['alice', 'claude'], now).id if channel == 'GROUP' else str(space.create_post('alice', 'post', now).id)
+    receipt = service.contact('claude', 'Question', context=CollaborationContext('alice', channel, target, 'proof', None, now))
+    row = store.conn.execute("SELECT id,metadata_json FROM events WHERE character_id='claude' AND event_type='ACTION'").fetchone()
+    metadata = json.loads(row['metadata_json'])
+    metadata[field] = value
+    with store.transaction():
+        store.conn.execute('UPDATE events SET metadata_json=? WHERE id=?', ['{invalid' if field == 'malformed' else json.dumps(metadata), row['id']])
+    assert not CharacterLifeReader(store).timeline('claude', channel=channel)['items']
+    key = ('group:' if channel == 'GROUP' else 'comment:') + str(receipt['sent_event_id'])
+    with pytest.raises(HTTPException) as denied:
+        resolve_life_reference(store, LifeReference(character_id='claude', key=key))
+    assert denied.value.status_code == 404
+    store.close()
+
+
+@pytest.mark.parametrize('channel', ['GROUP', 'SPACE'])
+def test_collaboration_life_reference_retains_current_channel_guards(tmp_path, channel):
+    from fastapi import HTTPException
+    from character_memory.life_conversation import LifeReference, resolve_life_reference
+    store, groups, space, service, now = make_service(tmp_path, lambda *args: None)
+    target = groups.create_group('g', ['alice', 'claude'], now).id if channel == 'GROUP' else str(space.create_post('alice', 'post', now).id)
+    receipt = service.contact('claude', 'Question', context=CollaborationContext('alice', channel, target, 'guarded-ref', None, now))
+    key = ('group:' if channel == 'GROUP' else 'comment:') + str(receipt['sent_event_id'])
+    with store.transaction():
+        if channel == 'GROUP':
+            store.conn.execute("DELETE FROM conversation_members WHERE conversation_id=? AND actor_id='claude'", [target])
+        else:
+            store.conn.execute("UPDATE space_posts SET visibility='PRIVATE' WHERE id=?", [int(target)])
+    with pytest.raises(HTTPException) as denied:
+        resolve_life_reference(store, LifeReference(character_id='claude', key=key))
+    assert denied.value.status_code == (404 if channel == 'GROUP' else 409)
+    store.close()

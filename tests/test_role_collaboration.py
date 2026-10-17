@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from character_memory.application.role_collaboration import CollaborationContext, RoleCollaborationService
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.group_store import GroupRepository
@@ -244,3 +245,98 @@ def test_independent_connections_concurrent_issue_claim_is_unknown(tmp_path):
     assert receipt['status']=='CREATED'
     assert second.create(**args)==receipt
     other.close()
+
+
+@pytest.mark.parametrize('channel',['GROUP','SPACE'])
+def test_collaboration_experience_survives_restart_only_for_participants(tmp_path,channel):
+    from character_memory.runtime.person_context import PersonContextBuilder
+    store,groups,space,service,now=make_service(tmp_path,lambda *args:'Different opinion')
+    target=groups.create_group('g',['alice','claude'],now).id if channel=='GROUP' else str(space.create_post('alice','post',now).id)
+    receipt=service.contact('claude','Public question',context=CollaborationContext('alice',channel,target,'experience',None,now))
+    assert receipt['status']=='COMPLETED'
+    store.close()
+    reopened=SQLiteStore(tmp_path/'roles.db')
+    builder=PersonContextBuilder(reopened,SimpleNamespace(recall=lambda *args,**kwargs:[]),'same persona')
+    for identity in ['alice','claude']:
+        snapshot=builder.build(identity,query='Public question',at=now,observed_projection='PUBLIC')
+        facts=snapshot.recent_events
+        assert len(facts)==2
+        assert {f.content for f in facts}=={'alice → claude: Public question','claude → alice: Different opinion'}
+        assert all(f.metadata['channel']==channel and f.metadata['participants']==['alice','claude'] for f in facts)
+        assert all(f.metadata['opportunity_id']=='experience' for f in facts)
+        assert all(f.event_type.value!='WORLD_OBSERVATION' for f in facts)
+        assert {f.metadata['shared_fact_id'] for f in facts}=={receipt['sent_event_id'],receipt['reply_event_id']}
+        assert not reopened.list_chat_events(identity)
+        assert not reopened.list_memories(identity)
+    assert not builder.build('outsider',query='question',at=now).recent_events
+    reopened.close()
+
+
+def test_group_commit_publication_no_duplicate_on_replay_or_decision_failure(tmp_path):
+    store,groups,space,service,now=make_service(tmp_path,lambda *args:'reply')
+    group=groups.create_group('g',['alice','claude'],now)
+    published=[]
+    def publish(payload):
+        assert not store.conn.in_transaction
+        assert any(e.id==payload['id'] for e in groups.list_events(group.id))
+        published.append(payload)
+    service.publish_group_event=publish
+    c=CollaborationContext('alice','GROUP',group.id,'publication',None,now)
+    first=service.contact('claude','question',context=c)
+    assert [p['actor_id'] for p in published]==['alice','claude']
+    assert all(p['conversation_id']==group.id for p in published)
+    assert service.contact('claude','question',context=c)==first
+    assert len(published)==2
+    def fail(*args):
+        raise RuntimeError('declined')
+    service.reply_decider=fail
+    failed=service.contact('claude','next question',context=CollaborationContext('alice','GROUP',group.id,'failed-publication',None,now))
+    assert failed['status']=='FAILED'
+    assert [p['actor_id'] for p in published]==['alice','claude','alice']
+    assert len(store.list_events('alice'))==3
+
+
+def test_interrupted_recipient_preserves_sender_projection_and_publish_without_replay(tmp_path):
+    def interrupted(*args):
+        raise KeyboardInterrupt()
+    store,groups,space,service,now=make_service(tmp_path,interrupted)
+    group=groups.create_group('g',['alice','claude'],now)
+    published=[]
+    service.publish_group_event=published.append
+    c=CollaborationContext('alice','GROUP',group.id,'interrupted',None,now)
+    with pytest.raises(KeyboardInterrupt):
+        service.contact('claude','already sent',context=c)
+    assert len(groups.list_events(group.id))==len(published)==1
+    assert len(store.list_events('alice'))==len(store.list_events('claude'))==1
+    assert service.contact('claude','already sent',context=c)['status']=='UNKNOWN'
+    assert len(published)==1
+    assert len(store.list_events('alice'))==1
+
+
+def test_shared_projection_never_copies_private_sender_events(tmp_path):
+    from character_memory.domain.models import Event,EventType
+    store,groups,space,service,now=make_service(tmp_path,lambda *args:None)
+    store.append_event(Event(character_id='alice',event_type=EventType.USER_MESSAGE,
+        event_time=now,content='private-user-secret',metadata={'channel':'DIRECT','conversation_id':'alice:default'}))
+    group=groups.create_group('g',['alice','claude'],now)
+    service.contact('claude','public only',context=CollaborationContext('alice','GROUP',group.id,'privacy',None,now))
+    recipient=store.list_events('claude')
+    assert len(recipient)==1 and 'private-user-secret' not in recipient[0].model_dump_json()
+    assert recipient[0].metadata['direction']=='RECEIVED'
+    assert not store.list_chat_events('claude')
+
+
+def test_publication_failure_does_not_undo_real_sent_fact_or_trigger_retry(tmp_path):
+    store,groups,space,service,now=make_service(tmp_path,lambda *args:None)
+    group=groups.create_group('g',['alice','claude'],now)
+    attempts=[]
+    def fail(payload):
+        attempts.append(payload)
+        raise RuntimeError('disconnected')
+    service.publish_group_event=fail
+    c=CollaborationContext('alice','GROUP',group.id,'disconnected',None,now)
+    receipt=service.contact('claude','real fact',context=c)
+    assert receipt['status']=='SILENT'
+    assert len(groups.list_events(group.id))==len(store.list_events('alice'))==1
+    assert service.contact('claude','real fact',context=c)==receipt
+    assert len(attempts)==1

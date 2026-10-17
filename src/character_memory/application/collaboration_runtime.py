@@ -143,8 +143,15 @@ research_query 只可为独立公开查询，禁止私人信息、原始私聊�
         return CollaborationReply(message=choice.message,
             research_query=choice.research_query if research_allowed else None)
 
+    def publish_group_event(payload):
+        from character_memory.application.async_conversation import group_channel
+        hub = getattr(access, 'stream_hub', None)
+        if hub is not None:
+            hub.publish(group_channel(payload['conversation_id']), 'group_character_event', payload)
+
     return RoleCollaborationService(store, groups, space, profiles=access.character_profiles,
-        reply_decider=decide, research=research, research_policy=policy)
+        reply_decider=decide, research=research, research_policy=policy,
+        publish_group_event=publish_group_event)
 
 
 class GitHubIssueHTTPTransport:

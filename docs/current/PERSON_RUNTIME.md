@@ -609,3 +609,6 @@ remain distinct. See [SOCIAL_WORLD.md](SOCIAL_WORLD.md#optional-bounded-world-co
 for configuration, local-only recovery and nested collaboration cost boundaries.
 
 World continuation also renders the existing bounded PersonContextSnapshot.recent_events with original channel, participants and shared-fact provenance. This includes real collaboration ACTION projections after restart, without treating them as webpage observations or automatically admitting Memory. Nonparticipants receive no projection.
+### Provider protocol compatibility boundary
+
+`scripts/validate_capability_provider.py` is an explicit paid, isolated protocol probe, not runtime dispatch. Its pure addition fixture accepts null assistant content and validates each bounded native tool call; malformed JSON, extra/identity arguments and unknown tools fail closed. The production runtime keeps its current typed-JSON decisions and existing executors regardless of probe outcome; no protocol experiment grants a character another capability. The script makes one request per run and does not open the formal database. Live gateway results and cost/latency belong in the PR evidence, not in Persona or fixed activity prompts.

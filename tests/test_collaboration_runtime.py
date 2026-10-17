@@ -161,3 +161,27 @@ def test_factory_prepared_before_space_routes_uses_current_repository(tmp_path):
     assert service.available_channels('alice','bob')==[{'channel':'SPACE','channel_id':str(post.id)}]
     receipt=service.contact('bob','Question',context=CollaborationContext('alice','SPACE',str(post.id),'late',None,now))
     assert receipt['status']=='COMPLETED'
+
+
+def test_production_factory_publishes_group_sse_only_after_commit(tmp_path):
+    store=SQLiteStore(tmp_path/'group-publish.db')
+    groups=GroupRepository(store)
+    now=datetime.now(timezone.utc)
+    group=groups.create_group('shared',['alice','bob'],now)
+    published=[]
+    def publish(channel,event,payload):
+        assert not store.conn.in_transaction
+        published.append((channel,event,payload))
+    builder=SimpleNamespace(build=lambda *args,**kwargs:SimpleNamespace(persona='Bob',mental_state='',memories=[],observed_events=[]))
+    access=SimpleNamespace(store=lambda:store,character_profiles=lambda:[{'id':'alice'},{'id':'bob'}],
+        require_bundle=lambda:SimpleNamespace(runtimes={'bob':SimpleNamespace(context_builder=builder)},
+            model=SimpleNamespace(structured_for_session=lambda p,s,k:s(message='Reply'))),
+        services=SimpleNamespace(claude_runner=None),world_observer=None,settings=SimpleNamespace(),space_repository=None,
+        stream_hub=SimpleNamespace(publish=publish))
+    service=build_role_collaboration(access)
+    c=CollaborationContext('alice','GROUP',group.id,'publish',None,now)
+    receipt=service.contact('bob','Question',context=c)
+    assert receipt['status']=='COMPLETED'
+    assert [(channel,event) for channel,event,payload in published]==[(f'group:{group.id}','group_character_event')]*2
+    assert [payload['actor_id'] for channel,event,payload in published]==['alice','bob']
+    assert service.contact('bob','Question',context=c)==receipt and len(published)==2

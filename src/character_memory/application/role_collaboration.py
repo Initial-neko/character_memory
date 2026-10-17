@@ -3,7 +3,9 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
+import logging
 
+from character_memory.domain.models import Event, EventType
 from character_memory.group_store import GroupEvent
 from character_memory.runtime.capability_execution import CapabilityRequest
 
@@ -26,10 +28,11 @@ class RoleCollaborationService:
     No model-generated argument can change execution grants or server identity.
     """
     def __init__(self, store, groups, space, *, profiles, reply_decider,
-                 research=None, research_policy=None):
+                 research=None, research_policy=None, publish_group_event=None):
         self.store, self.groups, self.space = store, groups, space
         self.profiles, self.reply_decider = profiles, reply_decider
         self.research, self.research_policy = research, research_policy
+        self.publish_group_event = publish_group_event
         store.apply_schema_migration('collaboration/001-contact-receipts', self._create_schema, immediate=True)
 
     def _create_schema(self):
@@ -103,14 +106,50 @@ class RoleCollaborationService:
             group = self.groups.get_group(c.channel_id)
             if group is None or not {actor, recipient} <= set(group.member_ids):
                 raise PermissionError('PERMISSION_CHANGED')
-            return self.groups.append_event(GroupEvent(conversation_id=c.channel_id,
+            fact = self.groups.append_event(GroupEvent(conversation_id=c.channel_id,
                 turn_id=key, actor_type='CHARACTER', actor_id=actor,
                 event_type='CHARACTER_MESSAGE', event_time=c.now, content=content,
                 metadata={'action':'MESSAGE', 'collaboration_request_id':key,
                     'recipient_id':recipient, 'source_event_id':c.source_event_id,
-                    'opportunity_id':c.opportunity_id, 'reply_to_event_id':reply_to})).id
-        return self.space.add_comment(int(c.channel_id), actor, content, c.now,
-            reply_to_comment_id=reply_to, client_request_id=hashlib.sha256((key+actor).encode()).hexdigest()).id
+                    'opportunity_id':c.opportunity_id, 'reply_to_event_id':reply_to}))
+        else:
+            fact = self.space.add_comment(int(c.channel_id), actor, content, c.now,
+                reply_to_comment_id=reply_to, client_request_id=hashlib.sha256((key+actor).encode()).hexdigest())
+        self._project_participants(actor, recipient, content, c, key, fact.id, reply_to)
+        return fact.id
+
+    def _project_participants(self, actor, recipient, content, c, key, fact_id, reply_to):
+        # A channel fact is stored once by its owner. These local ACTION facts
+        # record only each participant's real sending/receiving experience; they
+        # are neither Direct chat messages nor inferred Memory/Web observations.
+        metadata = {'channel':c.channel, 'channel_id':c.channel_id,
+            'fact_kind':'ROLE_COLLABORATION_MESSAGE', 'shared_fact_id':fact_id,
+            'actor_id':actor, 'recipient_id':recipient,
+            'participants':sorted([actor, recipient]), 'collaboration_request_id':key,
+            'opportunity_id':c.opportunity_id, 'source_event_id':c.source_event_id,
+            'reply_to_shared_fact_id':reply_to}
+        if c.channel == 'GROUP':
+            metadata.update(conversation_id=c.channel_id, group_event_id=fact_id,
+                            source_conversation_event_id=fact_id)
+        else:
+            metadata.update(conversation_id=f'space:{c.channel_id}',
+                            post_id=int(c.channel_id), comment_id=fact_id, commenter_id=actor)
+        for person_id, direction in ((actor,'SENT'), (recipient,'RECEIVED')):
+            self.store.append_event(Event(character_id=person_id, event_type=EventType.ACTION,
+                event_time=c.now, content=f'{actor} → {recipient}: {content}',
+                metadata={**metadata, 'direction':direction}))
+
+    def _publish_group(self, c, key, fact_id):
+        # Invoke only after the fact/projections/claim transaction has committed.
+        # SSE is ephemeral; failed delivery is reconciled by shared history, never
+        # by replaying a durable send or a completed contact on cache hits.
+        if c.channel != 'GROUP' or self.publish_group_event is None:
+            return
+        try:
+            fact = next(f for f in self.groups.list_turn_events(c.channel_id, key) if f.id == fact_id)
+            self.publish_group_event(fact.model_dump(mode='json'))
+        except Exception:
+            logging.getLogger(__name__).warning('collaboration.group_publication_failed request=%s event=%s', key, fact_id)
 
     def contact(self, recipient_id, topic, *, context):
         c = context
@@ -133,6 +172,7 @@ class RoleCollaborationService:
                 source_event_id=c.source_event_id, opportunity_id=c.opportunity_id,
                 sent_event_id=self._emit(c.sender_id,recipient_id,topic,c,key,c.source_event_id))
             self._save(key,payload,receipt)
+        self._publish_group(c, key, receipt['sent_event_id'])
         try:
             result = None
             choice = self.reply_decider(recipient_id, topic, None, c)
@@ -156,6 +196,8 @@ class RoleCollaborationService:
                     receipt['reply_event_id'] = self._emit(recipient_id,c.sender_id,reply,c,key,receipt['sent_event_id'])
                 receipt['status'] = 'COMPLETED' if reply and reply.strip() else 'SILENT'
                 self._save(key,payload,receipt)
+            if receipt.get('reply_event_id') is not None:
+                self._publish_group(c, key, receipt['reply_event_id'])
         except Exception as exc:
             receipt.update(status='FAILED',reason='PERMISSION_CHANGED' if isinstance(exc, PermissionError) else type(exc).__name__)
             with self.store.transaction(immediate=True):

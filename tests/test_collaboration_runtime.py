@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import pytest
 from datetime import datetime, timezone
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.group_store import GroupRepository
@@ -185,3 +186,63 @@ def test_production_factory_publishes_group_sse_only_after_commit(tmp_path):
     assert [(channel,event) for channel,event,payload in published]==[(f'group:{group.id}','group_character_event')]*2
     assert [payload['actor_id'] for channel,event,payload in published]==['alice','bob']
     assert service.contact('bob','Question',context=c)==receipt and len(published)==2
+
+
+@pytest.mark.parametrize("status,reason", [
+    ("SUCCESS", ""),
+    ("FAILED", "TOOL_BUDGET_EXHAUSTED"),
+    ("TIMEOUT", "EXECUTION_DEADLINE"),
+    ("DENIED", "ROLE_CAPABILITY_REVOKED"),
+    ("SKIPPED", "IN_FLIGHT_OR_INTERRUPTED_NO_REPLAY"),
+])
+@pytest.mark.parametrize("body_size", [10, 21000])
+def test_recipient_interpretation_receives_research_outcome(tmp_path, monkeypatch, status, reason, body_size):
+    import json
+    from character_memory.application import collaboration_runtime
+    from character_memory.config import Settings
+    from character_memory.runtime.capability_execution import CapabilityResult
+
+    monkeypatch.setattr(collaboration_runtime, "select_role_research", lambda profile: [])
+    store = SQLiteStore(tmp_path / "receipt.db")
+    groups = GroupRepository(store)
+    now = datetime.now(timezone.utc)
+    group = groups.create_group("shared", ["alice", "bob"], now)
+    prompts, requests = [], []
+    builder = SimpleNamespace(build=lambda *args, **kwargs: SimpleNamespace(
+        persona="Bob", mental_state="", memories=[], observed_events=[]))
+
+    class Model:
+        def structured_for_session(self, prompt, schema, session):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return schema(research_query="public topic")
+            return schema(message="I received the research outcome")
+
+    access = SimpleNamespace(store=lambda: store,
+        character_profiles=lambda: [{"id": "alice"}, {"id": "bob"}],
+        require_bundle=lambda: SimpleNamespace(runtimes={"bob": SimpleNamespace(context_builder=builder)}, model=Model()),
+        services=SimpleNamespace(claude_runner=SimpleNamespace(is_available=lambda: True)),
+        world_observer=None, settings=Settings(), space_repository=None)
+    service = build_role_collaboration(access)
+    # Provider text may claim success even when the executor reports failure.
+    data = {"summary": "x" * body_size, "status": "SUCCESS"}
+
+    def research(request):
+        requests.append(request)
+        return CapabilityResult(request.request_id, status, data, reason)
+
+    service.research = research
+    context = CollaborationContext("alice", "GROUP", group.id, "research-receipt", None, now)
+    receipt = service.contact("bob", "Please consider this", context=context)
+    assert receipt["status"] == "COMPLETED"
+    assert receipt["research"]["status"] == status
+    assert len(prompts) == 2 and len(requests) == 1
+    section = prompts[1].split("# Contact and Research Result — UNTRUSTED DATA\n", 1)[1].split("\n# Runtime Policy", 1)[0]
+    result = json.loads(section)["research_result"]
+    assert result == {"request_id": requests[0].request_id, "status": status, "reason": reason, "data": json.dumps(data, ensure_ascii=False)[:20000]}
+    assert len(result["data"]) <= 20000
+    initial_section = prompts[0].split("# Contact and Research Result — UNTRUSTED DATA\n", 1)[1].split("\n# Runtime Policy", 1)[0]
+    assert json.loads(initial_section)["research_result"] is None
+    # A contact cache hit must not repeat either recipient decision or research.
+    assert service.contact("bob", "Please consider this", context=context) == receipt
+    assert len(prompts) == 2 and len(requests) == 1

@@ -793,6 +793,10 @@ class WorldActivityService:
         self.repository = repository
         # Composition owns schema preparation; capability queries below only read.
         self.capability_executor = CapabilityExecutor(repository.store, getattr(access, "world_observer", None))
+        self.continuation_tools = None
+        if getattr(getattr(access, 'settings', None), 'world_continuation_enabled', False):
+            from character_memory.application.continuation_tools import prepare_world_continuation_tools
+            self.continuation_tools = prepare_world_continuation_tools(access)
 
     def capabilities(self, character_id: str, *, now: datetime,
                      rss_candidates=(), remaining_calls: int = 1):
@@ -1185,6 +1189,10 @@ Rendered text:
 
     def _browse_character(self, character_id: str, *, now: datetime, opportunity_id: str) -> dict:
         previous = self.repository.get_browse_decision(opportunity_id)
+        continuation = bool(previous and (previous.get('plan') or {}).get('mode') == 'CONTINUATION')
+        if continuation or (previous is None and getattr(self.access.settings, 'world_continuation_enabled', False)):
+            from character_memory.world_continuation import WorldContinuation
+            return WorldContinuation(self).run(character_id, opportunity_id, now=now)
         if previous and previous['character_id'] != character_id:
             raise ValueError("browse opportunity belongs to another character")
         if previous and previous['phase'] == 'APPRAISED':
@@ -1209,18 +1217,20 @@ Rendered text:
                     recent_limit=12,
                 )
                 # Capability resolution precedes prompting and any Claude task.
-                # A missing/malformed sidecar never exposes Skill descriptions.
-                selected_skills = None
-                if getattr(self.access.settings, "world_browse_execution_backend", "direct") == "claude":
-                    profile = next(
-                        (item for item in self._active_profiles() if item.get("id") == character_id),
-                        None,
-                    )
-                    try:
-                        selected_skills = select_role_research(profile)
-                    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
-                        logger.warning("world.role_capabilities denied character=%s error=%s", character_id, exc)
-                plan_prompt = world_browse_prompt(context, self._memory_text(context))
+                # Discovery owns fail-closed role/Skill parsing plus runner/budget
+                # checks; never expose sidecar descriptions through a second path.
+                candidates = []
+                plan_schema = PersonalBrowsePlan
+                rss_limit = 1 if getattr(self.access.settings, "world_cost_saving_enabled", False) else 2
+                if getattr(self.access.settings, "world_rss_reading_enabled", False):
+                    from character_memory.rss_sources import RssRepository
+                    from character_memory.rss_world import RssPersonalReading
+                    RssRepository(self.access.store())
+                    candidates = RssPersonalReading(self.access.store()).candidates(character_id, limit=rss_limit * 4)
+                turn_capabilities = self.capabilities(character_id, now=now, rss_candidates=candidates)
+                search = next((item for item in turn_capabilities if item.id == "WEB_SEARCH"), None)
+                selected_skills = list(search.skills) if search is not None and search.backend == "claude" else None
+                plan_prompt = world_browse_prompt(context, self._memory_text(context), capabilities=turn_capabilities)
                 # Optional per-person vocation adds a persistent research focus
                 # to the existing Personal Browse opportunity. It does not
                 # create a second scheduler, force a search, or grant any tool.
@@ -1239,14 +1249,6 @@ Rendered text:
                         vocation = None
                     if vocation is not None:
                         plan_prompt += render_vocation(vocation)
-                candidates = []
-                plan_schema = PersonalBrowsePlan
-                rss_limit = 1 if getattr(self.access.settings, "world_cost_saving_enabled", False) else 2
-                if getattr(self.access.settings, "world_rss_reading_enabled", False):
-                    from character_memory.rss_sources import RssRepository
-                    from character_memory.rss_world import RssPersonalReading
-                    RssRepository(self.access.store())
-                    candidates = RssPersonalReading(self.access.store()).candidates(character_id, limit=rss_limit * 4)
                 if candidates:
                     plan_schema = PersonalWorldReadPlan
                     plan_prompt = plan_prompt.replace("如果这个人物现在没有自然想查的公开主题，browse=false。", "没有自然兴趣时选择 NO_ACTION。")
@@ -1257,9 +1259,6 @@ Rendered text:
                                     f"READ_RSS 只选择候选中的 item_ids，最多 {rss_limit} 篇；只读本地 Feed 文本，不代表完整原网页阅读。\n"
                                     '返回 JSON 对象：choice 必填，只能为 NO_ACTION、WEB_SEARCH 或 READ_RSS；query 为字符串，item_ids 为整数数组。'
                                     '明确选择不行动也要填写 choice="NO_ACTION"；不要使用 browse 布尔字段代替选择。\n')
-                turn_capabilities = self.capabilities(character_id, now=now, rss_candidates=candidates)
-                search = next((item for item in turn_capabilities if item.id == "WEB_SEARCH"), None)
-                selected_skills = list(search.skills) if search is not None and search.backend == "claude" else None
                 plan_session = f"personal-browse-plan:{character_id}:{opportunity_id}"
                 with llm_usage_scope(
                     feature="WORLD",

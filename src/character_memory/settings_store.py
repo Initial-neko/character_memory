@@ -37,6 +37,7 @@ class SecretSpec:
 
 
 SECRET_SPECS: tuple[SecretSpec, ...] = (
+    SecretSpec("GITHUB_ISSUE_TOKEN", "GitHub Issue Token", "github_issue_token", level="advanced", help="Token for explicitly authorized exact-repository issue writes; empty grants no write capability. Stored in .env only."),
     SecretSpec(
         "OPENCODE_GO_API_KEY",
         "LLM / OpenCode API Key",
@@ -223,6 +224,11 @@ SETTING_HELP: dict[str, str] = {
     "world_pulse_detail_max_pages": "每轮热点采集最多额外打开几篇榜单实际链接的页面；0 不跟进。复用浏览器防护，不新增摘要模型调用；需要重启。原文可访问不代表其内容已独立核实。",
     "world_pulse_max_topics": "一次 Pulse 刷新最多保留/暴露的主题数量。",
     "world_pulse_commenter_count": "一个 Pulse Topic 最多邀请多少角色独立判断是否评论。",
+    "github_issue_write_repositories": "Exact operator-approved owner/repository targets; empty disables issue creation. Role sidecar must also grant github_issue_write; restart required.",
+    "github_issue_write_operator_id": "Operator identity on issue write grants. Empty disables writes; this is never a model parameter. Restart required.",
+    "github_issue_write_max_issues": "Persistent total issue-create allowance per character across all approved repositories; 0 disables writes. Not a daily reset; failures/unknown results consume an attempt. Restart required.",
+    "world_continuation_enabled": "Optional World continuation inside the existing Browse cadence; at most three decisions/tools, no new scheduler or posting grant. Default off; restart required.",
+    "world_continuation_max_seconds": "Overall World continuation deadline including model/tool waits. Timed-out outcomes are unknown and cannot be replayed; restart required.",
     "world_browse_enabled": "是否允许每个角色独立进行 Personal Browse。",
     "world_browse_execution_backend": "World WEB_SEARCH 后端；direct 保留现有服务，claude 使用每次独立且不继承历史的本地 claude -p。需重启 Character Runtime。",
     "direct_claude_tasks_enabled": "允许单聊人物在本轮主动选择委托一项问题给 fresh claude -p；还需人物独立 claude_task 授权。不开启 World 后端，不授权文件/命令；每次最多一次委托，结果不递归。需重启。",

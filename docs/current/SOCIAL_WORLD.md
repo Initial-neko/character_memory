@@ -127,6 +127,14 @@ The user-facing Space feed uses a responsive masonry layout for existing image a
 
 World discovery displays the existing Encounter candidates in a separate user page, with an explicit RSS reading entry. Its greeting/admission actions still use the original Encounter contracts: a candidate is not evidence of a public visit, and this visual change does not add a visitor lifecycle or generate a Space introduction. Candidate cards show persistent, explicitly labelled AI portraits when available, with a manual generation entry when absent; image ownership and costs follow [VISUAL.md](VISUAL.md) and [SETTINGS_CENTER.md](SETTINGS_CENTER.md). They do not invent reactions or public-visit status.
 
+Life projects continuation opportunities from their persisted steps and outcomes,
+separately from legacy single-choice plans. A completed zero-step stop is not a
+successful tool action; denied, failed, pending and unknown results remain distinct.
+The existing record body includes bounded request IDs and successful source scopes
+without exposing raw model prompts or tool arguments. The read-only continuation
+field preserves up to three step receipts; pending requests are not read sources.
+Opening a record never replays a tool or creates an observation.
+
 #### World memory boundary
 
 World Observation 的网页 `summary` 默认只属于当前机会的 Working Context，不自动进入长期 Memory。Appraisal 只有在明确给出第一人称 `personal_memory`（人物持续兴趣/经历/反思）时，才会创建 WORLD_OBSERVATION Event 并进入现有 PersonRuntime admission；价格、新闻标题、参数等动态世界事实默认以后重新查询。
@@ -359,6 +367,71 @@ navigation), 60 seconds including idle time, 15 seconds per operation, 80 total
 requests including rejected requests, 4 MiB aggregate response bytes, 12,000 text
 characters, 40 links, and 2 MiB per screenshot. `close` is outside the operation
 budget. Public batch fetcher lifecycle limitations remain separate.
+
+### Optional bounded World continuation
+
+`world_continuation_enabled` defaults to false. When enabled, a **new** existing
+Personal Browse opportunity may use `world_continuation.WorldContinuation` instead
+of the legacy one-plan/one-read path. Existing legacy receipts keep their original
+path, even after settings change. Cadence, per-day opportunity reservation and
+scheduler ownership remain unchanged; no new wake event or scheduler is created.
+
+The World-specific decision is `STOP` or `CALL` with one current catalog tool and
+its arguments. Each opportunity has at most three outer decisions and three tool
+attempts, sharing `CapabilityExecutor.MAX_OPPORTUNITY_CALLS`. Persona, Mental
+State, recall and observed experiences come from the existing Person context.
+No interest, silence, failed tools and observing without keeping anything are
+valid outcomes. It does not mandate Claude or a tool chain, publish Space posts,
+or send Direct attention requests. Successful WEB_SEARCH, eligible local READ_RSS
+and explicitly granted Browser tools use existing providers and guards. Browser
+identity, grant, scopes and budgets remain server-owned; internal scopes default
+to empty. Raw screenshots stay transient and out of durable receipts; screenshot
+metadata is labelled generated, not seen. Only an actual image-input model call
+is recorded as receiving screenshot pixels.
+
+The existing `world_browse_decisions` row owns CAS phases `CONT_MODEL:n`,
+`CONT_EXECUTING:n`, `CONT_RECEIVED:n`, `CONT_APPRAISED`, then `APPLIED` or `FAILED`.
+Before paid decisions or tools, the row records step identity, inputs, current
+approved scope and UTC time. Actual executor receipts reach only that same
+character's next decision as **untrusted data**. Interrupted model/tool phases
+remain unknown and never restart providers; a duplicate opportunity returns its
+durable result or unknown state. `CONT_APPRAISED` may retry only local atomic
+application. A meaningful STOP note may be retained through the existing
+WORLD_OBSERVATION lifecycle only when matching successful executor receipts
+establish actual reading. RSS text retains RSS_FEED_TEXT scope and its existing
+reading receipt finishes atomically. Screenshot metadata, tool plans, failed
+results and another person's private context cannot establish a read experience.
+There is no automatic long-term Memory admission or outward action.
+
+`world_continuation_max_seconds` defaults to 60 (5–300) and bounds context recall,
+model waits and tool waits. At most two outer loops, model/recall workers and
+non-Browser tool workers are admitted per process. A timed-out provider may still
+be unwinding under its existing contract; its worker slot stays occupied until
+it actually exits, the durable result remains unknown, and no retry is allowed.
+Browser uses its own cancellable process and always closes in `finally`.
+The three outer decisions are logical structured calls; existing provider retry
+policy is separate. ROLE_CONTACT can independently use at most two recipient
+model decisions plus one authorized recipient research request, with its own
+usage and receipts; these are not falsely counted as part of the three outer
+calls.
+
+Production extension preparation happens once at World service composition,
+including the shared-channel/Issue ledgers. Discovery thereafter reads current
+sidecars and facts only. ROLE_CONTACT requires `role_contact` and exposes stable
+server-mapped shared channel references; World event IDs never become Group reply
+IDs. A real shared reply or silence returns through its actual receipt. Optional
+`access.services.world_continuation_tools(character_id)` may supply trusted
+catalog/adapter extensions through the same grant and execution contracts.
+
+`github_issue_write` authorizes a local GITHUB_ISSUE_DRAFT, not a remote write.
+GITHUB_ISSUE_CREATE is available only with the current role grant **and** exact
+operator `github_issue_write_repositories`, nonempty
+`github_issue_write_operator_id`, positive `github_issue_write_max_issues` and
+`.env` `GITHUB_ISSUE_TOKEN`. Defaults disable all external creation. The allowance
+is a persistent per-character total across all approved repositories, including
+unknown attempts; it never resets daily. Dispatch rechecks current grants and
+operator scope. The existing Issue adapter reserves before POST and never retries
+an unknown external write. Drafting, declining and stopping remain valid.
 
 ### Interval autonomy
 

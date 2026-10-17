@@ -113,3 +113,167 @@ def test_supersession_after_cli_keeps_receipt_without_interpretation(tmp_path):
     assert store.conn.execute("SELECT status FROM capability_executions").fetchone()[0]=='SUCCESS'
     assert store.conn.execute("SELECT count(*) FROM events WHERE event_type='CHARACTER_MESSAGE'").fetchone()[0]==0
     store.close()
+
+
+def test_discovery_uses_real_direct_boundary_without_writes_or_model_calls(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    service = runtime.research_service
+    before = store.conn.total_changes
+    capabilities = service.capabilities(event)
+    assert [item.id for item in capabilities] == ['CLAUDE_TASK']
+    assert service.grant(event) == []
+    assert store.conn.total_changes == before
+    assert model.prompts == [] and runner.calls == []
+    for metadata in ({'channel':'GROUP'}, {'conversation_id':'group:1'},
+                     {'source_conversation_event_id':1}, {'group_event_id':1}):
+        assert service.capabilities(event.model_copy(update={'metadata':metadata})) == ()
+    assert service.capabilities(event.model_copy(update={'event_type':EventType.TIME_TICK})) == ()
+    store.close()
+
+
+def test_unavailable_runner_is_hidden_and_model_cannot_force_delegation(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    runtime.research_service.executor.claude_runner = None
+    runtime.handle(event)
+    assert '# Claude task delegation' not in model.prompts[0]
+    assert len(model.prompts) == 1 and not runner.calls
+    assert store.conn.execute('SELECT count(*) FROM capability_executions').fetchone()[0] == 0
+    store.close()
+
+
+def test_exhausted_claude_daily_quota_is_hidden_in_next_turn(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    runtime.research_service.settings.claude_execution_daily_max = 1
+    runtime.handle(event)
+    assert len(runner.calls) == 1
+    before = store.conn.total_changes
+    assert runtime.research_service.capabilities(event) == ()
+    assert store.conn.total_changes == before
+    assert len(runner.calls) == 1
+    store.close()
+
+
+def test_revocation_after_prompt_discovery_blocks_execution(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    original = model.react_call_for_session
+    def revoke(context, session):
+        assert '# Claude task delegation' in context
+        (tmp_path/'personas/echo/capabilities.yaml').write_text('capabilities: []\n', encoding='utf-8')
+        return original(context, session)
+    model.react_call_for_session = revoke
+    result = runtime.handle(event)
+    assert not runner.calls and len(model.prompts) == 1
+    assert not any(a.type == ActionType.DELEGATE_TASK for a in result.reaction.actions)
+    store.close()
+
+
+def test_invalid_utf8_grant_fails_closed_in_real_direct_path(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    (tmp_path/'personas/echo/capabilities.yaml').write_bytes(b'\xff\xfe')
+    runtime.handle(event)
+    assert not runner.calls and len(model.prompts) == 1
+    assert '# Claude task delegation' not in model.prompts[0]
+    store.close()
+
+
+def test_runner_readiness_is_rechecked_after_model_decides(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    ready = [True]
+    runner.is_available = lambda: ready[0]
+    original = model.react_call_for_session
+    def stop_executor(context, session):
+        assert '# Claude task delegation' in context
+        ready[0] = False
+        return original(context, session)
+    model.react_call_for_session = stop_executor
+    result = runtime.handle(event)
+    assert not runner.calls and len(model.prompts) == 1
+    assert not any(a.type == ActionType.DELEGATE_TASK for a in result.reaction.actions)
+    assert store.conn.execute('SELECT count(*) FROM capability_executions').fetchone()[0] == 0
+    store.close()
+
+
+def test_hidden_daily_budget_still_allows_an_ordinary_next_turn(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    settings = runtime.research_service.settings
+    settings.world_cost_saving_enabled = True
+    settings.claude_execution_daily_budget_usd = .5
+    settings.claude_execution_max_budget_usd = .3
+    runtime.handle(event)
+    assert len(runner.calls) == 1
+    # The runner returned UNKNOWN usage; the .3 reservation remains chargeable.
+    before = store.conn.total_changes
+    assert runtime.research_service.capabilities(event) == ()
+    assert store.conn.total_changes == before
+    model.prompts.clear()
+    result = runtime.handle(event.model_copy(update={'id':None, 'content':'继续普通聊天'}))
+    assert len(model.prompts) == 1 and len(runner.calls) == 1
+    assert '# Claude task delegation' not in model.prompts[0]
+    assert not any(a.type == ActionType.DELEGATE_TASK for a in result.reaction.actions)
+    assert store.conn.execute('SELECT count(*) FROM capability_executions').fetchone()[0] == 1
+    store.close()
+
+
+def test_discovery_quota_hint_does_not_replace_atomic_dispatch_check(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    service = runtime.research_service
+    service.settings.claude_execution_daily_max = 1
+    before = store.conn.total_changes
+    assert service.capabilities(event)
+    assert service.capabilities(event)
+    assert store.conn.total_changes == before
+    # A competing real reservation occurs after discovery but before execution.
+    original = model.react_call_for_session
+    def exhaust(context, session):
+        store.conn.execute("INSERT INTO capability_executions (request_id,character_id,opportunity_id,request_json,status,started_at,completed_at,result_json) VALUES (?,?,?,?,?,?,?,?)",
+            ('competitor','echo','other','{}','STARTED',event.event_time.isoformat(),None,None))
+        store.conn.execute("UPDATE capability_executions SET execution_metadata_json=? WHERE request_id='competitor'",
+            ('{"backend":"claude","day":"'+event.event_time.astimezone().date().isoformat()+'"}',))
+        store.conn.commit()
+        return original(context, session)
+    model.react_call_for_session = exhaust
+    result = runtime.handle(event)
+    assert not runner.calls and len(model.prompts) == 1
+    assert not any(a.type == ActionType.DELEGATE_TASK for a in result.reaction.actions)
+    store.close()
+
+
+@pytest.mark.parametrize('unavailable', [False, True])
+def test_completed_same_event_receipt_remains_readable_after_quota_or_runner_loss(tmp_path, unavailable):
+    store, runtime, runner, model, event = setup(tmp_path)
+    runtime.research_service.settings.claude_execution_daily_max = 1
+    result = runtime.handle(event)
+    assert len(runner.calls) == 1
+    if unavailable:
+        runtime.research_service.executor.claude_runner = None
+    before = store.conn.total_changes
+    assert runtime.research_service.capabilities(result.event)
+    assert store.conn.total_changes == before
+    model.prompts.clear()
+    repeated = runtime.handle(result.event, persist_event=False)
+    assert len(runner.calls) == 1 and len(model.prompts) == 2
+    assert repeated.reaction.actions[0].type == ActionType.MESSAGE
+    assert store.conn.execute('SELECT count(*) FROM capability_executions').fetchone()[0] == 1
+    assert store.conn.execute("SELECT count(*) FROM events WHERE json_extract(metadata_json,'$.fact_kind')='CLAUDE_TASK_RESULT'").fetchone()[0] == 1
+    store.close()
+
+
+def test_cached_execution_still_requires_current_role_and_identical_payload(tmp_path):
+    store, runtime, runner, model, event = setup(tmp_path)
+    runtime.research_service.settings.claude_execution_daily_max = 1
+    result = runtime.handle(event)
+    model.prompts.clear()
+    original = model.react_call_for_session
+    # Keep the normal result interpreter, but change only the first task query.
+    def changed(context, session):
+        response = original(context, session)
+        if len(model.prompts) == 1:
+            return ModelCallResult(PersonReaction(actions=[ActionDecision(type='DELEGATE_TASK', task='另一个公开问题')]), response.trace)
+        return response
+    model.react_call_for_session = changed
+    runtime.handle(result.event, persist_event=False)
+    assert len(runner.calls) == 1
+    assert 'REQUEST_ID_CONFLICT' in model.prompts[1]
+    (tmp_path/'personas/echo/capabilities.yaml').write_text('capabilities: []\n', encoding='utf-8')
+    assert runtime.research_service.capabilities(result.event) == ()
+    store.close()

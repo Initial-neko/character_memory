@@ -1,6 +1,6 @@
 # Current Status & Roadmap
 
-> Character / World implementation status reviewed: 2026-10-12. Media and real-device acceptance remain subject to their existing validation gates.
+> Character / World implementation status reviewed: 2026-10-17. Media and real-device acceptance remain subject to their existing validation gates.
 >
 > This file owns **implementation status only**. Source/tests remain authoritative; the other topic documents define current behavior contracts.
 
@@ -15,7 +15,7 @@
 | **NON-GOAL** | Explicitly outside the current contract. |
 | **RESEARCH** | Exploratory direction without delivery commitment. |
 
-An open PR never upgrades a capability to SHIPPED.
+An open PR never upgrades a capability to SHIPPED. Implementation on main does not complete the separate real-runtime or human visual acceptance gates; current evidence and remaining sign-off belong to the owning Issues.
 
 ## Current capability map
 
@@ -28,9 +28,14 @@ An open PR never upgrades a capability to SHIPPED.
 | Character onboarding | SHIPPED | Provenance, persisted Persona, guaranteed first avatar and best-effort voice selection. |
 | Character Space | SHIPPED | Feed, comments/replies, likes/views, up to 9 media, autonomous posting and bounded audience propagation. |
 | World Activity | SHIPPED | World Pulse plus independent per-character Personal Browse clocks, bounded web/RSS choices and local recovery of complete saved appraisals. Observation is not automatic publishing or Memory admission. |
+| Capability discovery | SHIPPED | Per-turn trusted descriptions reflect channel, role/Skill grants, provider readiness and durable budgets; descriptions never grant execution or change the typed-JSON provider protocol. |
+| Continuous public Browser | SHIPPED opt-in | Opportunity-local Playwright open/observe/follow/close sessions retain actual source scope; public-network, redirect and same-origin boundaries remain enforced. |
+| Bounded World continuation | SHIPPED opt-in | At most three outer decisions consume actual tool receipts before continuing or stopping; no new scheduler, automatic posting, Memory admission or unknown-result replay. |
+| Role collaboration | SHIPPED opt-in | Granted contact uses existing Group/Space shared facts and recipient reasoning, with bilateral durable receipts and channel-correct delivery. External Issue writes require a separate operator grant; without it no POST occurs. |
+| Prompt composition | SHIPPED | Pure Persona, State/Memory, Perception, Capabilities and Runtime Policy parts preserve channel-specific schemas, privacy and server execution ownership. |
 | RSS collection / personal reading | SHIPPED opt-in | Shared source/feed inventory is separate from character-local selected Feed-text readings. Unread inventory is not personal experience. Settings defaults and scope belong to RSS_SOURCES and SOCIAL_WORLD. |
 | Stateless Claude World backend | SHIPPED opt-in foundation | Optional WEB_SEARCH backend uses fresh `claude -p` tasks and a single controlled World tool. Default remains direct. CLI/tool fixture validation passed; live Persona/public-source quality and deployment activation are separate. See ARCHITECTURE. |
-| Character life / execution inspection | SHIPPED | Read-only real event/state/Memory/Intent timeline and per-character external task/reply/source/tool/usage details. No model calls during inspection; complete intermediate tool transcripts are not implemented. |
+| Character life / execution inspection | SHIPPED | Read-only real event/state/Memory/Intent timeline and per-character external task/reply/source/tool/usage details. Continuation step/source results and bilateral collaboration facts are projected without model calls. Indexed receipt lookups keep relationship reads from scanning all ACTION rows under the store lock; complete intermediate tool transcripts are not implemented. |
 | Random Encounter | SHIPPED | Temporary WEB/GENERATED candidates, trial chat, accept/dismiss lifecycle and scheduler. |
 | Memory governance | SHIPPED | Inspect, pin/unpin, forget/restore and provenance-preserving correction. |
 | Voice Message | SHIPPED | Direct/Group durable voice-message lifecycle through formal TTS. |
@@ -91,14 +96,16 @@ samples must not be generalized to post-reading quality or long-term continuity.
 
 ### Explicit external-assistance decisions and richer execution records
 
-Status: **BACKLOG**
+Status: **SHIPPED opt-in foundation / BACKLOG richer records**
 
-Claude currently serves an existing World WEB_SEARCH choice; it is not a general
-question delegation entry and does not automatically receive Direct/Group chat.
-A future explicit assistance request should reuse Person decisions, permission
-checks, budgets and the existing receipt ledger. Step-by-step tool arguments and
-results, plus a dedicated Memory-page execution link, are still missing. No second
-intent-recognition model, Character state or unbounded AgentLoop is required.
+Granted Direct tasks and bounded role-contact research reuse the existing Person
+context, isolated Claude runner, permission checks, budgets and receipt ledger.
+Current capability descriptions control what can be requested; no private Direct
+or Group history is automatically forwarded to an external assistant. The actual
+result is interpreted separately from the Person's own observations. Native tool
+calling remains a compatibility research/probe path; production uses typed-JSON.
+Complete tool transcripts and a dedicated Memory-page execution link remain
+backlog, not evidence of another agent runtime or unbounded autonomous loop.
 
 ### Social layer expansion
 

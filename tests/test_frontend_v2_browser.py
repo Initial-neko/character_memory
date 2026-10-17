@@ -191,3 +191,35 @@ def test_space_experience_rail_fetches_only_after_expansion(page, live_life):
     assert store.conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]==count
     assert page.evaluate('window.FORGED') is None
     assert page.request.get(base+'/health').json()['runtime_loaded'] is False
+
+
+@pytest.mark.parametrize('width',[390,1440])
+def test_character_menu_survives_summary_refresh_without_changing_identity(page,live_life,width):
+    from playwright.sync_api import expect
+    base,character,_,_,_=live_life
+    page.set_viewport_size({'width':width,'height':844 if width==390 else 960})
+    page.goto(base+'/')
+    page.wait_for_function("document.body.dataset.cmReady==='true'")
+    page.evaluate('async()=>{await CM.features.unread.refresh()}')
+    if width==390:
+        page.locator('#sidebarMobileButton').click()
+    row=page.locator('[data-character-row="'+character+'"]')
+    row.locator('[data-character-more]').click()
+    menu=page.locator('[data-character-menu="'+character+'"]')
+    action=menu.locator('[data-character-archive]')
+    expect(menu).to_be_visible()
+    action.focus()
+    page.evaluate('async()=>{await CM.features.unread.refresh()}')
+    expect(menu).to_be_visible()
+    expect(action).to_be_focused()
+    assert action.get_attribute('data-character-archive')==character
+    from test_mobile_views_playwright import _record_visual
+    _record_visual(page,f'character-menu-after-refresh-{width}',('src/character_memory/web/app.js','src/character_memory/web/character_archive.js'))
+    page.keyboard.press('Escape')
+    expect(menu).to_be_hidden()
+    if width==390:
+        page.locator('#sidebarMobileButton').click()
+    row.locator('[data-character-more]').click()
+    page.evaluate('(id)=>{CM.state.characters=CM.state.characters.filter(p=>p.id!==id);CM.renderCharacterList()}',character)
+    expect(menu).to_have_count(0)
+    expect(page.locator('[data-character-menu]:not(.hidden)')).to_have_count(0)

@@ -259,6 +259,11 @@
   };
 
   CM.renderCharacterList = () => {
+    const openMenuId = CM.dom.characterList.querySelector('[data-character-menu]:not(.hidden)')?.dataset.characterMenu;
+    const focused = CM.dom.characterList.contains(document.activeElement) ? document.activeElement : null;
+    const focusAttribute = ["data-character-more", "data-character-persona", "data-character-live2d", "data-character-archive"]
+      .find(attribute => focused?.hasAttribute(attribute));
+    const focusId = focusAttribute ? focused.getAttribute(focusAttribute) : null;
     const unread = CM.features.unread;
     const all = CM.state.characters || [];
     let visible = all.slice(0, 10);
@@ -279,6 +284,17 @@
       ? `<button class="character-overflow-entry" type="button" data-character-overflow>查看更多人物（${hiddenCount}）</button>`
       : "";
     CM.dom.characterList.innerHTML = rows + overflow;
+    // Refresh summaries without dismissing the operator's current action menu.
+    // A removed/hidden character has no replacement menu and stays closed.
+    if (openMenuId) {
+      const menu = CM.dom.characterList.querySelector(`[data-character-menu="${CSS.escape(openMenuId)}"]`);
+      if (menu) {
+        menu.classList.remove("hidden");
+        if (focusAttribute && focusId === openMenuId) {
+          CM.dom.characterList.querySelector(`[${focusAttribute}="${CSS.escape(focusId)}"]`)?.focus({preventScroll:true});
+        }
+      }
+    }
   };
 
   CM.showCharacterOverflow = () => {

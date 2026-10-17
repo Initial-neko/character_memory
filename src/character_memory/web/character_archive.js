@@ -371,6 +371,10 @@
     if (!event.target.closest(".character-item-wrap")) closeMenus();
   });
 
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closeMenus();
+  });
+
   CM.on("charactersLoaded", syncCurrentAction);
   CM.on("conversationChanged", syncCurrentAction);
   refreshArchiveCount().catch(() => {});

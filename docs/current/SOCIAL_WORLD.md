@@ -120,6 +120,14 @@ The user-facing Space feed uses a responsive masonry layout for existing image a
 
 World discovery displays the existing Encounter candidates in a separate user page, with an explicit RSS reading entry. Its greeting/admission actions still use the original Encounter contracts: a candidate is not evidence of a public visit, and this visual change does not add a visitor lifecycle or generate a Space introduction. Candidate cards show persistent, explicitly labelled AI portraits when available, with a manual generation entry when absent; image ownership and costs follow [VISUAL.md](VISUAL.md) and [SETTINGS_CENTER.md](SETTINGS_CENTER.md). They do not invent reactions or public-visit status.
 
+Life projects continuation opportunities from their persisted steps and outcomes,
+separately from legacy single-choice plans. A completed zero-step stop is not a
+successful tool action; denied, failed, pending and unknown results remain distinct.
+The existing record body includes bounded request IDs and successful source scopes
+without exposing raw model prompts or tool arguments. The read-only continuation
+field preserves up to three step receipts; pending requests are not read sources.
+Opening a record never replays a tool or creates an observation.
+
 #### World memory boundary
 
 World Observation 的网页 `summary` 默认只属于当前机会的 Working Context，不自动进入长期 Memory。Appraisal 只有在明确给出第一人称 `personal_memory`（人物持续兴趣/经历/反思）时，才会创建 WORLD_OBSERVATION Event 并进入现有 PersonRuntime admission；价格、新闻标题、参数等动态世界事实默认以后重新查询。

@@ -22,6 +22,92 @@ def text(value, maximum=2000):
     return value[:maximum] if isinstance(value, str) else ""
 
 
+def continuation_life_projection(row, plan, result):
+    """Bounded public facts for the existing Life body, never raw model context."""
+    labels={'SUCCESS':'成功返回', 'FAILED':'失败', 'DENIED':'未获许可',
+            'UNKNOWN':'结果未知', 'SKIPPED':'未执行或结果未知', 'STARTED':'尚无结果',
+            'TIMEOUT':'超时', 'NO_ACTION':'未行动', 'PENDING':'尚未完成'}
+    raw=result.get('steps', plan.get('steps', []))
+    unverified=not isinstance(raw,list)
+    if isinstance(raw,list) and any(not isinstance(step,dict) for step in raw[:3]):
+        unverified=True
+    raw=[step for step in raw[:3] if isinstance(step, dict)] if isinstance(raw, list) else []
+    pending=obj(plan.get('pending_step'))
+    if pending and not any(step.get('request_id')==pending.get('request_id') for step in raw):
+        raw.append({**pending, 'status':'UNKNOWN'})
+    steps, sources=[], []
+    for entry in raw[:3]:
+        if entry.get('character_id')!=row['character_id'] or entry.get('opportunity_id')!=row['opportunity_id']:
+            unverified=True
+            continue
+        capability=text(entry.get('capability'),64)
+        step={'request_id':text(entry.get('request_id'),160), 'capability':capability,
+              'status':text(entry.get('status'),32) or 'UNKNOWN', 'reason':text(entry.get('reason'),240)}
+        step_sources=[]
+        data=obj(entry.get('data'))
+        if step['status']=='SUCCESS':
+            if capability in ('BROWSER_OPEN','BROWSER_INSPECT','BROWSER_FOLLOW_LINK'):
+                observation=obj(data.get('observation'))
+                rows=[{'url':observation.get('final_url'),'content':observation.get('text')}]
+                scope='BROWSER_RENDERED_TEXT'
+            elif capability in ('WEB_SEARCH','READ_RSS'):
+                rows=data.get('observations' if capability=='WEB_SEARCH' else 'items', [])
+                scope='WEB_RENDERED_TEXT' if capability=='WEB_SEARCH' else 'RSS_FEED_TEXT'
+            else:
+                rows=[]; scope=''
+            for source in rows[:6] if isinstance(rows,list) else []:
+                if not isinstance(source,dict) or not isinstance(source.get('content'),str) or not source['content'].strip():
+                    continue
+                url=text(source.get('url'),4096)
+                if not url.startswith(('https://','http://')):
+                    continue
+                step_sources.append({'url':url,'content_scope':scope,'read_characters':len(source['content'])})
+        step['sources']=step_sources
+        sources.extend(step_sources)
+        steps.append(step)
+    phase=row['phase']
+    envelope=text(result.get('execution_status'),32)
+    if envelope in ('FAILED','UNKNOWN','TIMEOUT'):
+        status=envelope
+    elif unverified or any(step['status'] in ('UNKNOWN','SKIPPED','STARTED') for step in steps):
+        status='UNKNOWN'
+    elif phase!='APPLIED':
+        status='PENDING'
+    elif not steps:
+        status='NO_ACTION'
+    elif any(step['status'] in ('FAILED','TIMEOUT') for step in steps):
+        status='FAILED'
+    elif any(step['status']=='DENIED' for step in steps):
+        status='DENIED'
+    else:
+        status='SUCCESS' if all(step['status']=='SUCCESS' for step in steps) else 'UNKNOWN'
+    stop_reason=text(result.get('stop_reason') or plan.get('stop_reason'),120)
+    title={'NO_ACTION':'本次 World 机会未行动','UNKNOWN':'World 自主行动结果未知',
+           'PENDING':'World 自主机会尚未完成','SUCCESS':'World 自主行动已结束'}.get(status,'World 自主行动未全部成功')
+    lines=[f'已记录工具请求 {len(steps)} 步；结果：{labels.get(status,status)}。']
+    for index, step in enumerate(steps,1):
+        lines.append(f"步骤 {index}：{step['capability']} · {labels.get(step['status'],'结果未知')}；请求 {step['request_id']}")
+        if step['reason']: lines.append('回执说明：'+step['reason'])
+        if step['capability']=='BROWSER_SCREENSHOT':
+            lines.append('截图生成不代表已经作为视觉输入提供给人物。')
+        for source in step['sources']:
+            lines.append(f"来源：{source['url']} · {source['content_scope']} · 实际提供 {source['read_characters']} 字符")
+    if status=='PENDING':
+        lines.append('没有机会完成记录；不能据此判断仍在运行或已经中断。')
+    if status=='UNKNOWN':
+        lines.append('未知结果不能当作执行成功，也不会由查看记录触发重试。')
+    kept=result.get('kept') is True and bool(sources)
+    lines.append('保留个人观察：'+('是' if kept else '否'))
+    if sources and text(result.get('summary'),1400):
+        lines.append('人物评估摘要（非原文）：'+text(result.get('summary'),1400))
+    details={'steps':steps,'sources':sources,'stop_reason':stop_reason,'kept':kept,
+             'phase':phase,'execution_status':envelope or None}
+    decision={'basis':('停止原因：'+stop_reason) if stop_reason else None,
+              'result':labels.get(status,status),'error':text(row.get('error'),500) or None,
+              'execution_request_id':None}
+    return title,status,'\n'.join(lines),decision,details
+
+
 class CharacterExecutionReader:
     """Read existing execution receipts. Never initializes schemas or models."""
     def __init__(self, store, detail_dir):
@@ -174,7 +260,7 @@ class CharacterLifeReader:
             if 'space_comments' in tables:
                 sources.append(("comment", "e.id", "e.created_at_epoch", "e.created_at", "e.content", "e.actor_type='CHARACTER' AND e.character_id=?", [character_id], "SELECT e.*,CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END AS peer_id FROM space_comments e JOIN space_posts p ON p.id=e.post_id LEFT JOIN space_comments parent ON parent.id=e.reply_to_comment_id AND parent.post_id=e.post_id"))
             if 'world_browse_decisions' in tables:
-                sources.append(("world", "e.opportunity_id", "CAST((julianday(e.started_at)-2440587.5)*86400000000 AS INTEGER)", "e.started_at", "CASE WHEN json_valid(e.result_json) THEN coalesce(json_extract(e.result_json,'$.query'),'') ELSE '' END||e.error", "e.character_id=?", [character_id], "SELECT e.* FROM world_browse_decisions e"))
+                sources.append(("world", "e.opportunity_id", "CAST((julianday(e.started_at)-2440587.5)*86400000000 AS INTEGER)", "e.started_at", "CASE WHEN json_valid(e.result_json) THEN coalesce(json_extract(e.result_json,'$.query'),'')||coalesce(json_extract(e.result_json,'$.summary'),'')||coalesce(json_extract(e.result_json,'$.observations'),'') ELSE '' END||e.error", "e.character_id=?", [character_id], "SELECT e.* FROM world_browse_decisions e"))
             if 'space_opportunity_runs' in tables:
                 sources.append(("space_run", "e.id", "e.started_at_epoch", "e.started_at", "e.status||e.error", "e.character_id=?", [character_id], "SELECT e.* FROM space_opportunity_runs e"))
             if 'intent_deferral_audit' in tables:
@@ -294,6 +380,7 @@ class CharacterLifeReader:
                 if not types or all(t in ('NO_REPLY','NO_ACTION') for t in types): status='NO_ACTION'
         reading=obj(metadata.get('rss_reading'))
         decision['execution_request_id']=metadata.get('capability_request_id') or obj(trace.get('direct_delegation')).get('request_id')
+        continuation=None
         if kind=='world':
             plan=obj(row.get('plan_json')); result=obj(row.get('result_json'))
             choice=obj(plan.get('decision')).get('choice')
@@ -303,6 +390,9 @@ class CharacterLifeReader:
             decision={'basis':None,'result':text(status,80),'error':text(row.get('error')) or None}
             decision['execution_request_id']=result.get('capability_request_id')
             event_id=row.get('source_event_id')
+            if plan.get('mode')=='CONTINUATION' or result.get('continuation') is True:
+                title,status,content,decision,continuation=continuation_life_projection(row,plan,result)
+                event_id=result.get('source_event_id')
         if kind=='space_run':
             status=row['status']
             title='本次 Space 机会未发动态' if status=='NO_POST' else 'Space 自主机会'
@@ -332,4 +422,4 @@ class CharacterLifeReader:
                 status='CALL_INVITATION_PROPOSED'
                 title='提出了通话邀请（不代表已经通话）'
                 decision['result']='仅邀请已提出；是否接通以独立邀请和实际语音消息为准'
-        return {'key':kind+':'+str(row.get('opportunity_id',row.get('id'))),'kind':kind,'time':row.get('event_time',row.get('created_at',row.get('started_at',row.get('decided_at')))),'title':title,'channel':channel,'status':status,'content':content,'source':{'kind':kind,'id':row.get('opportunity_id',row.get('id')),'event_id':event_id,'conversation_id':row.get('conversation_id'),'post_id':row.get('post_id') or metadata.get('post_id')},'decision':decision,'state_change':state,'memories':memories,'participants':participants,'reading':{'scope':text(reading.get('content_scope'),80),'url':text(reading.get('url'),1000),'summary':text(metadata.get('world_summary')),'truncated':reading.get('truncated') if type(reading.get('truncated')) is bool else None,'read_characters':reading.get('read_characters') if type(reading.get('read_characters')) is int else None,'available_characters':reading.get('available_characters') if type(reading.get('available_characters')) is int else None} if reading else None,'intent':{'stored_status':row.get('status'),'earliest_at':row.get('earliest_at'),'expires_at':row.get('expires_at'),'audit':audit,'due':due,'past_expiry':past_expiry,'defer_count':row.get('deferral_count',0),'time_status':time_status} if kind=='intent' else None}
+        return {'key':kind+':'+str(row.get('opportunity_id',row.get('id'))),'kind':kind,'time':row.get('event_time',row.get('created_at',row.get('started_at',row.get('decided_at')))),'title':title,'channel':channel,'status':status,'content':content,'source':{'kind':kind,'id':row.get('opportunity_id',row.get('id')),'event_id':event_id,'conversation_id':row.get('conversation_id'),'post_id':row.get('post_id') or metadata.get('post_id')},'decision':decision,'continuation':continuation,'state_change':state,'memories':memories,'participants':participants,'reading':{'scope':text(reading.get('content_scope'),80),'url':text(reading.get('url'),1000),'summary':text(metadata.get('world_summary')),'truncated':reading.get('truncated') if type(reading.get('truncated')) is bool else None,'read_characters':reading.get('read_characters') if type(reading.get('read_characters')) is int else None,'available_characters':reading.get('available_characters') if type(reading.get('available_characters')) is int else None} if reading else None,'intent':{'stored_status':row.get('status'),'earliest_at':row.get('earliest_at'),'expires_at':row.get('expires_at'),'audit':audit,'due':due,'past_expiry':past_expiry,'defer_count':row.get('deferral_count',0),'time_status':time_status} if kind=='intent' else None}

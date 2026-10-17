@@ -125,6 +125,12 @@ validate complete Settings model
 
 GSV runtime fields are updated in `.env` as one atomic multi-key edit. Unrelated variables are preserved. If the second persistence surface fails, Settings rolls the first surface back so one logical save does not leave `config.yaml` and `.env` describing different states.
 
+When an edited top-level key occurs more than once, every occurrence is
+replaced with the validated new value. YAML loading uses the last occurrence,
+so updating only the first would falsely report success while retaining the
+old effective setting. Unedited duplicate keys retain their existing loading
+semantics; saves do not globally normalize user configuration.
+
 Replacing an indented or indentless block list removes the old value's items;
 empty-list updates remain real lists. Trailing comments for the next setting and
 unrelated quoted/nested extension keys are preserved. An update that would break

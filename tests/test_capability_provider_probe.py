@@ -1,5 +1,15 @@
 import pytest
-from scripts.validate_capability_provider import inspect_native_response
+import importlib.util
+from pathlib import Path
+
+
+SPEC = importlib.util.spec_from_file_location(
+    "validate_capability_provider", Path(__file__).resolve().parents[1] / "scripts/validate_capability_provider.py"
+)
+probe = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(probe)
+inspect_native_response = probe.inspect_native_response
 
 
 def completion(*calls, content=None):

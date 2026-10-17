@@ -607,3 +607,5 @@ does not automatically admit long-term Memory. Interrupted model/provider phases
 are never replayed. The source receipt and the character's later interpretation
 remain distinct. See [SOCIAL_WORLD.md](SOCIAL_WORLD.md#optional-bounded-world-continuation)
 for configuration, local-only recovery and nested collaboration cost boundaries.
+
+World continuation also renders the existing bounded PersonContextSnapshot.recent_events with original channel, participants and shared-fact provenance. This includes real collaboration ACTION projections after restart, without treating them as webpage observations or automatically admitting Memory. Nonparticipants receive no projection.

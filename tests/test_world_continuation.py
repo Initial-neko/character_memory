@@ -398,3 +398,40 @@ def test_appraised_local_recovery_preserves_original_time_without_paid_replay(tm
     assert store.list_events('c00')[0].event_time == NOW
     assert store.conn.execute('SELECT count(*) FROM capability_executions').fetchone()[0] == 1
     store.close()
+
+
+def test_next_world_prompt_reads_real_collaboration_after_store_restart(tmp_path):
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from character_memory.storage.sqlite import SQLiteStore
+    from character_memory.group_store import GroupRepository
+    from character_memory.application.role_collaboration import RoleCollaborationService, CollaborationContext
+    from character_memory.runtime.person_context import PersonContextBuilder
+    store, access, model = make_access(tmp_path, count=3)
+    group=GroupRepository(store).create_group('Shared',['c00','c01'],NOW)
+    contact=RoleCollaborationService(store,GroupRepository(store),None,profiles=access.character_profiles,
+        reply_decider=lambda *args:'We actually discussed this exact boundary')
+    receipt=contact.contact('c01','Discuss the observed boundary',context=CollaborationContext('c00','GROUP',group.id,'prior-contact',None,NOW))
+    assert receipt['status']=='COMPLETED'
+    store.close()
+    reopened=SQLiteStore(tmp_path/'world.db')
+    access.store=lambda:reopened
+    access.read_store=reopened
+    access.settings.world_continuation_enabled=True
+    recall=SimpleNamespace(recall=lambda *args,**kwargs:[])
+    for cid,runtime in access.require_bundle().runtimes.items():
+        runtime.context_builder=PersonContextBuilder(reopened,recall,runtime.persona)
+    prompts=[]
+    def stop(prompt,schema,session):
+        prompts.append(prompt)
+        return schema(action='STOP')
+    model.structured_for_session=stop
+    service=WorldActivityService(access,WorldPulseRepository(reopened))
+    for cid in ('c00','c01','c02'):
+        service.browse_character(cid,now=NOW+timedelta(minutes=1),opportunity_id=f'next:{cid}')
+    for prompt in prompts[:2]:
+        assert 'We actually discussed this exact boundary' in prompt
+        assert 'prior-contact' in prompt and 'shared_fact_id' in prompt and 'GROUP' in prompt
+    assert 'We actually discussed this exact boundary' not in prompts[2]
+    assert not reopened.list_memories('c00')
+    reopened.close()

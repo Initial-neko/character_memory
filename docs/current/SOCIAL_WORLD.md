@@ -9,6 +9,13 @@ experience entry lists the current group's members rather than using the last
 Direct selection. On narrow screens, selecting a life record moves to its detail
 with a return-to-record control; chat identity and actions occupy separate rows.
 
+Life and relationship views also recognize the existing per-person collaboration
+ACTION receipts for sent and received Group messages or Space comments. They
+show each original shared fact once, use its explicit counterpart rather than
+the Space post owner, and leave unrelated members/history hidden. Source-chat
+references use the same receipt proof while retaining current Group membership
+and Space visibility checks; reading never replays a contact or creates a trace.
+
 World distinguishes pending encounter candidates from accepted characters. Its
 accepted section reads the latest 50 encounter records and links to existing
 profiles and their real Space posts; acceptance alone is not public interaction.

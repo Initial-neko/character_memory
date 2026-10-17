@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi import HTTPException
-from character_memory.character_life import obj, text
+from character_memory.character_life import obj, text, collaboration_peer_sql
 from character_memory.time_utils import epoch_us, parse_datetime
 
 class LifeReference(BaseModel):
@@ -11,7 +11,7 @@ class LifeReference(BaseModel):
     key: str = Field(min_length=1, max_length=150)
 
 def _group_participated(store, row, character):
-    """Only owned output or actual bounded model-input receipts prove participation."""
+    """Owned output, explicit collaboration receipt or bounded model input proves participation."""
     now = epoch_us(datetime.now(timezone.utc))
     member = store.conn.execute("SELECT joined_at,joined_at_epoch FROM conversation_members WHERE conversation_id=? AND actor_type='CHARACTER' AND actor_id=?", [row['conversation_id'], character]).fetchone()
     if member is None or member['joined_at_epoch'] is None or row['event_time_epoch'] is None:
@@ -23,6 +23,8 @@ def _group_participated(store, row, character):
         return False
     if member['joined_at_epoch'] > row['event_time_epoch'] or row['event_time_epoch'] > now:
         return False
+    if store.conn.execute(f"SELECT 1 FROM conversation_events e WHERE e.id=? AND EXISTS({collaboration_peer_sql('GROUP')})", [row['id'], character]).fetchone():
+        return True
     if row['actor_type'] == 'CHARACTER' and row['actor_id'] == character:
         return True
     return bool(store.conn.execute("""
@@ -88,7 +90,8 @@ def resolve_life_reference(store, ref):
                 fail(409, '用户或所选人物已不在来源群聊中')
             target = {'type': 'GROUP', 'id': row['conversation_id']}
         else:
-            if row.get('character_id') != ref.character_id or (kind == 'comment' and row['actor_type'] != 'CHARACTER'):
+            received = kind == 'comment' and store.conn.execute(f"SELECT 1 FROM space_comments e WHERE e.id=? AND EXISTS({collaboration_peer_sql('SPACE')})", [row['id'], ref.character_id]).fetchone()
+            if (row.get('character_id') != ref.character_id and not received) or (kind == 'comment' and row['actor_type'] != 'CHARACTER'):
                 fail(404, '来源不属于所选人物的可见经历')
             if kind in ('post', 'comment'):
                 post = row if kind == 'post' else store.conn.execute('SELECT * FROM space_posts WHERE id=?', [row['post_id']]).fetchone()
@@ -120,7 +123,7 @@ def resolve_life_reference(store, ref):
         body = text(row.get('content'), 2000)
         if not body.strip():
             fail(422, '来源没有可引用的正文')
-        actor = row.get('actor_id') if kind == 'group' else ('user' if row.get('event_type') == 'USER_MESSAGE' else ref.character_id)
+        actor = row.get('actor_id') if kind == 'group' else (row['character_id'] if kind == 'comment' else ('user' if row.get('event_type') == 'USER_MESSAGE' else ref.character_id))
         record_type = row.get('event_type', kind)
         truncated = len(row.get('content') or '') > 2000
         quote = (f'【生活记录引用：{ref.character_id} / {ref.key} / {stamp}】\n'

@@ -1010,3 +1010,55 @@ Sticker 与 ImageGen 是不同资源路径：
 
 
 Opaque 3×3 RGBA sticker sheets have an explicit `normalize_background` import option (Web checkbox or CLI `--normalize-background`), default off. It removes only exact solid-color pixels connected to a uniform outer border before the unchanged transparent-gutter/all-nine-cell validation. Enclosed same-color details remain; gradients/nonuniform borders and ambiguous layouts are rejected. Same-color artwork touching the background can also be removed, so the UI explains the effect and complex backgrounds still require an already-transparent source. Normalization is local and introduces no model calls/dependencies. Source bytes remain unchanged; normalized pack IDs are distinct from ordinary imports.
+
+## Scoped role collaboration
+
+`RoleCollaborationService.contact(recipient_id, topic, context=...)` accepts only
+server-owned sender/opportunity/source/channel context. Eligible recipients are
+active real profiles; channels are existing groups containing both people or
+Space posts visible to active characters. It never creates or joins a room.
+Every fact insertion rechecks both participants as active (the presence of an
+`archived_at` field means archived, even when its value is null). Group membership
+and Space ACTIVE_CHARACTERS visibility are rechecked in the write transaction;
+permission revocation during a recipient decision preserves the already-sent fact
+and records a FAILED/PERMISSION_CHANGED receipt without writing a reply.
+A Group contact is a real CHARACTER_MESSAGE with recipient/source metadata;
+Space contact and reply are real character comments linked in the same post. Each shared
+message atomically writes a source-linked ACTION fact for its actual sender and
+recipient in the existing Person events store. Metadata preserves the channel,
+shared fact ID, participants, original source and opportunity; direction records
+SENT or RECEIVED. This makes the real exchange available to later Person context
+and after restart without inventing Web observations, copying private chat, or
+automatically admitting Memory. Nonparticipants receive no local projection.
+
+Production injects an after-commit publisher for each newly persisted Group
+message, using the existing Group channel and `group_character_event` payload.
+It never publishes Direct SSE or push. The sender fact is published before the
+recipient decision, so silence, failure or interruption cannot erase a real send.
+Cached receipts do not emit events or publish again. SSE remains ephemeral: a
+process crash between commit and publication, or a disconnected publisher, is
+reconciled through durable Group history rather than replaying the send.
+Character contact cannot reply to a User comment, mention User, publish Direct
+SSE, or create a User notification. Receipt IDs identify the real sent/reply facts.
+
+The recipient decides first: silence, a reply (including disagreement), or one
+public research query. Only an operator-provided research policy and the shared
+CapabilityExecutor/ClaudePrintRunner can run that query. A second bounded normal
+recipient decision interprets the actual result. CLI output remains research
+material rather than automatically admitted Memory. Composition owns recipient
+Person context, model calls, grants, quotas and scheduler integration.
+
+The durable collaboration receipt claims before dispatch with BEGIN IMMEDIATE,
+serializing claims across independent SQLite connections. Both receipt tables
+register atomic schema migrations in the shared migration ledger. Identical completed
+requests replay only their stored receipt; changed content conflicts. A RUNNING
+claim after interruption reports UNKNOWN and is never executed again. Failures
+retain the real sent fact and do not imply a reply. No automatic retry occurs.
+
+`GitHubIssueAdapter` is separately granted by operator identity, exact repository,
+character and total write quota. Missing grants return a draft without a URL.
+The injected HTTP transport receives a bounded timeout and deterministic request
+key; it must never execute a shell. Only a returned matching GitHub Issue URL is
+accepted as created. Exceptions, timeout, invalid remote response and interrupted
+RUNNING writes are UNKNOWN, consume quota and cannot be blindly resubmitted.
+Backend-only boundary: VISUAL N/A; no user interface is changed.

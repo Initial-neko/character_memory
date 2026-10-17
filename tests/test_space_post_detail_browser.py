@@ -94,20 +94,46 @@ def space_server_with_image(tmp_path_factory, monkeypatch):
         fixture.close()
 
 
-def test_space_feed_lays_out_real_posts_in_multiple_columns(page, space_server):
-    post_ids = [_create_post(page, space_server, f"瀑布流真实动态 {index}") for index in range(4)]
-    page.set_viewport_size({"width": 1586, "height": 992})
-    page.goto(space_server, wait_until="domcontentloaded")
-    page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
-
-    feed = page.locator(".space-feed")
+@pytest.mark.parametrize('width', [390, 1440, 1586])
+@pytest.mark.parametrize('kind,count', [('text', 2), ('mixed', 8)])
+def test_space_feed_lays_out_real_posts_in_multiple_columns(page, space_server_with_image, width, kind, count):
+    base, media_id, _ = space_server_with_image
+    post_ids = []
+    for index in range(count):
+        content = f'Masonry acceptance {index}'
+        if index == 1:
+            content += '\n' + 'Unequal height content should wrap inside its own card. ' * 8
+        payload = {'character_id': 'rin', 'content': content}
+        if kind == 'mixed' and index % 3 == 0:
+            payload['media_ids'] = [media_id]
+        response = page.request.post(base + '/v1/space/posts', data=payload)
+        assert response.ok
+        post_ids.append(str(response.json()['post']['id']))
+    page.set_viewport_size({'width': width, 'height': 844 if width == 390 else 992})
+    page.goto(base + '/?view=space')
+    feed = page.locator('.space-feed')
     expect(feed).to_be_visible()
-    expect(page.get_by_role("heading", name="Space", exact=True)).to_be_visible()
-    for post_id in post_ids:
-        expect(feed.locator(f'[data-space-post="{post_id}"]')).to_be_visible()
-        assert feed.locator(f'[data-space-post="{post_id}"]').bounding_box()['width'] >= 200
-    columns = int(feed.evaluate("element => getComputedStyle(element).columnCount"))
-    assert columns == 3
+    cards = [feed.locator(f'[data-space-post="{post_id}"]') for post_id in post_ids]
+    for card in cards:
+        expect(card).to_be_visible()
+    feed.locator('img').evaluate_all("images => Promise.all(images.map(image => image.decode().catch(() => {})))")
+    columns = int(feed.evaluate('element => getComputedStyle(element).columnCount'))
+    assert columns == (1 if width == 390 else 3)
+    boxes = [card.bounding_box() for card in cards]
+    positions = {round(box['x']) for box in boxes}
+    if width == 390:
+        assert len(positions) == 1
+    else:
+        assert len(positions) >= 2
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    for card, box in zip(cards, boxes):
+        assert box['width'] >= 200
+        assert box['x'] >= 0 and box['x'] + box['width'] <= width + 1
+        assert card.evaluate('element => element.getClientRects().length') == 1
+    output = os.getenv('SPACE_MASONRY_SCREENSHOTS')
+    if output:
+        Path(output).mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(Path(output) / f'{kind}-{width}.png'), full_page=False)
 
 
 def test_space_local_navigation_uses_existing_feed_and_world_routes(page, space_server):

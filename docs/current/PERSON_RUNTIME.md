@@ -2,6 +2,69 @@
 
 本文描述一个 Character 收到 Event 后，如何形成内部变化与对外行为。
 
+## Read-only capability discovery
+
+`runtime.capability_discovery.available_capabilities(profile, channel=...,
+availability=...)` describes the existing WEB_SEARCH / READ_RSS World tools
+and eligible Direct CLAUDE_TASK. The caller supplies a trusted per-turn
+`CapabilityAvailability` snapshot of configuration, dependency availability,
+Direct event eligibility and remaining opportunity allowance. Existing readers
+do not acquire a new sidecar permission; Claude and selected Skills still use
+the named person's operator-owned `select_role_research` grant. Archived or
+invalid people and exhausted opportunities expose no tools. Identity, channel,
+budget and grants are absent from model arguments.
+
+Discovery reads local grant/Skill files without initializing providers, calling
+a model, reserving budget or persisting an event. Descriptions are not execution
+permissions: dispatch must revalidate current grants and use existing executor
+checks and receipts. This query does not launch a continuation loop, register
+Browser sessions or grant external writes.
+
+DirectResearchService.capabilities(event) now builds the trusted snapshot from
+normal Direct USER_MESSAGE eligibility, the configured switch, the named active
+profile, runner readiness and durable daily quota/budget. The existing grant()
+compatibility view and delegation prompt consume the same descriptions, then
+recheck them immediately before dispatch. Missing/closed/uninstalled executors,
+revoked grants and exhausted allowance hide new delegation; a model-forced new
+request is filtered without an executor call or result interpretation. A completed
+receipt for this same character/event/opportunity remains consumable after quota
+exhaustion or runner loss, subject to current role/Skill permission and the
+executor's original full-payload equality check. The cache hint does not return
+a receipt directly, authorize a different task or replay an unknown STARTED job. A fresh budget
+snapshot never reserves quota: CapabilityExecutor repeats the shared daily
+check inside its existing atomic reservation transaction. Unknown prior usage
+continues to consume its conservative reservation. Ordinary chat remains one
+normal reaction call.
+
+ClaudePrintRunner.is_available() checks only local command presence and closed
+state without starting a process or creating output files. It does not establish
+authentication, connectivity, provider compatibility or success; dispatch receipts
+and explicit live validation remain authoritative. World/Browser/collaboration
+snapshot assembly and general Prompt compilation remain separate integration
+work.
+
+WorldActivityService.capabilities(character_id, now=..., rss_candidates=...)
+uses the same discovery contract with current active profiles, configured search
+service, local candidates and Claude runner/allowance. Composition prepares the
+execution schema; listing only reads current facts. New plans cannot execute a
+model-selected tool absent from this trusted snapshot. Existing completed World
+opportunities retain their original recovery/cached-result paths.
+
+Browser, role-contact and feedback writes require explicit operator sidecar
+entries `browser_read`, `role_contact` and `github_issue_write`. A trusted
+composition extension descriptor must name its required grant and exact channel;
+registration alone never exposes a tool. Existing readers retain their prior
+policy. Selected Skills still require one of the explicit Claude grants.
+
+The shared CapabilityExecutor supports at most three execution reservations per
+opportunity; existing callers continue requesting one. All begun attempts,
+including provider-side denial, consume allowance. New missing-provider calls
+are rejected before reservation; completed matching receipts remain readable.
+A composition-only CapabilityAdapter can add a bounded tool while retaining
+identity, source/channel checks, semantic validation, shared reservation and
+receipt persistence. Adapters cannot replace built-ins. Their current permission
+validator runs before cache access; provider availability is checked afterward.
+
 ## Optional Direct external-task decision
 
 `direct_claude_tasks_enabled` (default false) and the named person's operator
@@ -487,3 +550,51 @@ browse, purchases a second reaction, or automatically writes Memory.
 `build_role_collaboration(access)` binds the recipient's existing PersonContextBuilder, current model, current role/Skill permissions and shared CapabilityExecutor. It supplies the actual shared Group messages or visible Space post and comments, while private memories remain private reasoning context. Contact permits silence or disagreement and at most two recipient decisions plus one separately authorized public research call; these internal calls are attributed to `role_collaboration`, separately from the initiating World's step count. The World continuation composition owns exposing and authorizing the initiating contact tool.
 
 `GitHubIssueHTTPTransport` is an optional operator-owned transport for the separately scoped IssueWriteGrant, not a grant itself. Production POST runs in a disposable HTTP-only child with credentials through stdin, fixed GitHub HTTPS origin, no redirects/retries, a bounded response and a parent-enforced wall timeout including DNS and EOF. Timeout kills/reaps the worker; the durable adapter records UNKNOWN and does not retry an irreversible request. Without a grant the existing adapter returns a draft and never starts HTTP. No UI changes (VISUAL N/A).
+
+## Prompt composition ownership
+
+`runtime/prompt_parts.py` provides the pure five-part `PromptParts` value:
+Persona, State/Memory, Perception, Capabilities and Runtime Policy. Rendering
+only formats snapshots; it never reads permissions, discovers tools, executes
+providers, mutates Persona or admits Memory. `compile_context_parts` exposes the
+parts for inspection, while `compile_context` remains the text entry point.
+Existing channel headers, schemas, Direct recipient ownership, external-data
+warnings, Visual no-Memory/no-Intent and autonomous silence rules remain.
+
+The shared reaction compiler optionally consumes
+`runtime.research_service.capabilities(event)`. Descriptors use the discovery
+owner's `id/summary/arguments_schema/channel/backend/skills` contract; no local
+registry, sidecar reader or authorization copy is introduced. Only descriptors
+actually supplied for this turn appear, including only their selected Skill
+names and hashes. This is an availability description, never an execution grant
+or evidence of a completed action. An explicit empty tuple disables discovery;
+Direct result interpretation always supplies it, preventing recursive capability
+advertising. Services without the discovery method retain their existing
+operator-granted Direct suffix. The obsolete global claim that no external tools
+exist is replaced by the requirement to describe only actual execution receipts.
+
+The maintained prompt ownership audit is:
+
+| Input builder / fragment | Responsibility and single source | Retention / validation |
+| --- | --- | --- |
+| `runtime/person_context.py` | Read the existing Person's Persona, state, recalled Memory and observed facts | Retained read-only owner; no second memory or persona lookup |
+| `runtime/context.py` | Five-part reaction compilation with existing channel-specific policy | Parts are inspectable; `tests/test_prompt_parts.py` checks capability-only changes and channel boundaries |
+| `runtime/reaction_engine.py` | Assemble the same Person snapshot and optional server capability descriptions before one normal reaction | Retained model/resource pipeline; discovery does not add model calls |
+| `runtime/person_runtime.py` | Direct delivery, server-side effects and legacy granted task suffix | Retained execution owner, unchanged Persona; Direct task regressions in `tests/test_direct_claude.py` |
+| `runtime/direct_research.py` | Restricted external task and one result interpretation | Explicit empty capabilities on interpretation; receipt and no-recursion capture tests |
+| `application/group_conversation_service.py` | Group participants, shared history and channel action schema | Retained group suffix; cannot be replaced by generic Direct policy |
+| `runtime/social_prompts.py` / World planning, Pulse and appraisal | Pure five-part rendering of existing Person snapshots, public topics and actual source excerpts | Services own scheduling, schemas, grants and execution; no tool or business loop in helpers |
+| `runtime/social_prompts.py` / Space post and appraisal | Existing public Person context, actual observations, runtime-derived media limits | Publication remains optional; video style follows current Persona rather than forcing a cute/soft personality |
+| World local RSS appraisal | Only the actual local Feed items, not linked-original reading | Pure helper preserves untrusted-data, reading-scope and optional keep=false policy |
+| `persona_builder.py` | User-requested character draft creation and product content requirements | Retained unchanged: generating a new draft is a separate product operation, not runtime personality rewriting |
+| Visual generation / Live2D presentation | Existing image intent compilation, verified references and per-turn presentation scope | Retained specialized schemas and privacy boundaries; no capability or Persona owner duplication |
+
+Focused prompt capture tests establish deterministic formatting and preservation
+of existing boundaries. They do not establish long-term Persona fidelity with a
+live provider, real browser visits, or the combined autonomous runtime's behavior;
+those require their separate runtime acceptance paths. This backend-only change
+has VISUAL N/A because no user interface is changed.
+
+### Provider protocol compatibility boundary
+
+`scripts/validate_capability_provider.py` is an explicit paid, isolated protocol probe, not runtime dispatch. Its pure addition fixture accepts null assistant content and validates each bounded native tool call; malformed JSON, extra/identity arguments and unknown tools fail closed. The production runtime keeps its current typed-JSON decisions and existing executors regardless of probe outcome; no protocol experiment grants a character another capability. The script makes one request per run and does not open the formal database. Live gateway results and cost/latency belong in the PR evidence, not in Persona or fixed activity prompts.

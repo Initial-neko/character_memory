@@ -87,6 +87,18 @@ class ClaudePrintRunner:
         self._processes = set()
         self._lock = threading.Lock()
 
+    def is_available(self) -> bool:
+        """Check local command presence/lifecycle without starting or authenticating it."""
+        if self.closed.is_set():
+            return False
+        try:
+            command = self.command or resolve_claude()
+            return bool(command) and (
+                shutil.which(command[0]) is not None or Path(command[0]).is_file()
+            )
+        except OSError:
+            return False
+
     @staticmethod
     def _stop(process):
         tree = getattr(process, "_owned_tree", None)

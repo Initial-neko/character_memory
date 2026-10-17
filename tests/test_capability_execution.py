@@ -173,3 +173,30 @@ def test_receipt_write_failure_leaves_unknown_and_never_replays_provider(tmp_pat
     assert result.status == "SKIPPED" and result.reason == "IN_PROGRESS_OR_INTERRUPTED"
     assert len(observer.calls) == 1
     store.close()
+
+
+def test_one_opportunity_shares_a_three_call_ceiling_across_requests(tmp_path):
+    store = SQLiteStore(tmp_path/'bounded.sqlite')
+    observer = Observer()
+    executor = CapabilityExecutor(store, observer)
+    base = request()
+    for step in range(1, 4):
+        current = replace(base, request_id=f'bounded:{step}', constraints={**base.constraints, 'max_calls':3})
+        assert executor.execute(current).status == 'SUCCESS'
+        assert executor.execute(current).status == 'SUCCESS'
+    fourth = replace(base, request_id='bounded:4', constraints={**base.constraints, 'max_calls':3})
+    assert executor.execute(fourth).reason == 'BUDGET_EXHAUSTED'
+    assert len(observer.calls) == 3
+    excessive = replace(base, request_id='bad-budget', constraints={**base.constraints, 'max_calls':4})
+    assert executor.execute(excessive).reason == 'INVALID_CONSTRAINTS'
+    store.close()
+
+
+def test_missing_provider_is_rejected_before_creating_an_execution(tmp_path):
+    store = SQLiteStore(tmp_path/'missing.sqlite')
+    executor = CapabilityExecutor(store, None)
+    before = store.conn.total_changes
+    result = executor.execute(request())
+    assert result.status == 'DENIED' and result.reason == 'WEB_UNAVAILABLE'
+    assert store.conn.total_changes == before
+    store.close()

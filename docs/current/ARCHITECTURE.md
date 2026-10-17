@@ -378,6 +378,8 @@ Space Opportunity
   -> sparse Audience reactions through PersonRuntime
 ```
 
+连续只读 Browser 使用 `browser_session.BrowserSession`：调用方持有授权 scope 与预算，单个创建线程持有会话，独立进程持有 Chromium。父进程在操作超时、空闲到期或取消时回收整个进程树；失败后只能创建新会话。链接引用绑定会话与最新观测，真实内容与来源保持 untrusted，截图只在内存短暂返回。内部页面必须使用精确 origin/path 的低权限只读视图授权，不能复用用户 Cookie 或打开全部内网。批量 `HeadlessBrowserWebFetcher` 契约不变；具体会话预算、传输与生命周期见 [`SOCIAL_WORLD.md`](SOCIAL_WORLD.md#bounded-continuous-browser-session)。
+
 World Search、Browser Render、Memory、Public Expression 是四个不同边界。搜索到页面不等于相信、记住或公开表达；原始网页文本是 untrusted data，不直接写进 Memory 或最终发帖 prompt。
 
 Space/World planning 已通过 `PersonContextBuilder` 读取同一人物的身份、状态、记忆和经历。不同渠道仍保留专用 decision/appraisal Schema 与 Prompt；这是当前明确的边界，不是第二套人格状态。是否进一步收敛决策层，应由跨渠道、长期人物验收决定，不提前引入巨大统一 Schema。
@@ -678,3 +680,8 @@ There is no native interactive window manager or arbitrary specialist toolchain.
 The backend defaults to direct; code availability does not establish that a
 running deployment has restarted, enabled Claude or passed live Persona quality
 acceptance. Character life/source display semantics belong to [Memory](MEMORY.md).
+
+Prompt assembly uses the pure five-part `PromptParts` contract; source ownership,
+capability snapshot injection and the retained per-channel policies are recorded
+in [Person Runtime](PERSON_RUNTIME.md#prompt-composition-ownership). Tool discovery
+and execution remain outside the compiler.

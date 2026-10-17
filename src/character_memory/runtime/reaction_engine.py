@@ -48,6 +48,7 @@ def evaluate_reaction(
     image_data_urls: list[str] | None = None,
     allow_generate_image: bool = False,
     allow_call_invite: bool = False,
+    capabilities=None,
 ) -> ReactionEvaluation:
     """Run the shared Recall -> Context -> Model -> resource-sanitize pipeline."""
 
@@ -84,6 +85,10 @@ def evaluate_reaction(
     timings["sticker_retrieval_ms"] = _ms(stage)
 
     stage = time.perf_counter()
+    if capabilities is None:
+        service = getattr(runtime, "research_service", None)
+        discover = getattr(service, "capabilities", None)
+        capabilities = discover(event) if callable(discover) else ()
     context = compile_context(
         runtime.persona,
         state_before,
@@ -96,6 +101,7 @@ def evaluate_reaction(
         allow_generate_image=allow_generate_image,
         allow_call_invite=allow_call_invite,
         observed_events=person_context.observed_events,
+        capabilities=capabilities,
     )
     if context_suffix:
         context += context_suffix

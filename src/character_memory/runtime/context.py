@@ -4,6 +4,7 @@ from datetime import timezone
 import json
 
 from character_memory.domain.models import Event, EventType
+from character_memory.runtime.prompt_parts import PromptParts, render_capabilities
 
 
 def _event_channel(event) -> str:
@@ -96,7 +97,7 @@ def render_observed_experiences(events, budget: int = 4000) -> str:
     return "\n".join(chunks)
 
 
-def compile_context(
+def compile_context_parts(
     persona: str,
     mental_state: str,
     memories,
@@ -108,7 +109,8 @@ def compile_context(
     allow_generate_image: bool = False,
     allow_call_invite: bool = False,
     observed_events=None,
-) -> str:
+    capabilities=(),
+) -> PromptParts:
     relationship = [m for m in memories if m.memory_type.upper() in {"USER", "SHARED"}]
     other = [m for m in memories if m not in relationship]
     relationship_text = "\n".join(f"- [{m.memory_type}] {m.content}" for m in relationship) or "- 无"
@@ -254,10 +256,10 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
             "可以自愿向用户分享相关经历，但必须重新面向用户表达并保留实际参与者归属。"
             "本轮新建的未来 intent_candidates 也只能是面向该用户的私聊意图。"
         )
-    return f"""# Identity / Persona
-{persona}
-
-# Current Mental State
+    return PromptParts(
+        persona=f"""# Identity / Persona
+{persona}""",
+        state_memory=f"""# Current Mental State
 {mental_state or '暂无持续心理状态。'}
 
 # Relationship Time
@@ -267,26 +269,25 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
 {relationship_text}
 
 # Other Relevant Memories
-{recalled}
-
-# Recent Events
+{recalled}""",
+        perception=f"""# Recent Events
 {recent}
 
 # Observed Experiences
 {observed}
 {sharing}
 
-# Available Stickers
+# Current Event
+时间：{event.event_time.isoformat()}
+{event.event_type.value}: {event.content}""",
+        capabilities=f"""# Available Stickers
 {stickers}
 
 # Available Images
 {images}
 
-# Current Event
-时间：{event.event_time.isoformat()}
-{event.event_type.value}: {event.content}
-
-# Delivery Context
+{render_capabilities(capabilities)}""",
+        runtime_policy=f"""# Delivery Context
 {delivery_contract}
 
 # Behavioral Contract
@@ -310,5 +311,10 @@ perception / reaction 是给开发者和可选 UI 使用的安全摘要，不是
 mental_state_update 只在本轮确实产生了值得延续的心理变化时填写；否则留空，系统会沿用上一状态。
 只把未来确实值得想起的内容放进 memory_candidates；普通寒暄、一次性琐事、重复事实不要写。没有值得记忆的内容就保持空数组。
 {intent_contract}
-当前版本没有外部信息工具；不知道实时事实时可以承认不知道或自然询问，不要假装已经查询过。
-"""
+不知道实时事实时可以承认不知道或自然询问；仅依据实际返回的工具 receipt 描述查询和结果，不要假装已经查询过。""",
+    )
+
+
+def compile_context(*args, **kwargs) -> str:
+    """Compatibility entry point; compile_context_parts exposes the pure layers."""
+    return compile_context_parts(*args, **kwargs).render()

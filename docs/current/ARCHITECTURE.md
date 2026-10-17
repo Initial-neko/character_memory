@@ -631,6 +631,9 @@ means an empty recorded list, not tool success. Timeout snapshots may retain
 Existing credential redaction is applied before persisting steps. Commands,
 environment values and hidden model thinking are not added to step records.
 
+The World MCP child writes UTF-8 bytes on stdio independently of the host
+console encoding, so multilingual page content does not terminate its connection.
+
 Only tool receipts supply readable observations; Claude prose is not proof of a
 visit. Failed or interrupted tasks do not enter appraisal.
 

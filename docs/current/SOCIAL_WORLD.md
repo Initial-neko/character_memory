@@ -312,6 +312,47 @@ web_browser_channel=auto first tries Playwright-managed Chromium and falls back 
 
     uv run playwright install chromium
 
+### Bounded continuous Browser Session
+
+`browser_session.BrowserSession` is the read-only continuous navigation primitive,
+separate from the existing batch `HeadlessBrowserWebFetcher` contract. Its owner
+supplies `BrowserScope` and `BrowserSessionBudget`; model input never supplies
+identity, authorization, paths or budgets. The owner must admit the capability
+before constructing a session. The module itself neither admits a character nor
+sends messages, posts or Memory writes.
+
+`open(url)`, `inspect()` and `follow_link(ref)` return a real rendered observation:
+session/observation IDs, requested and final URLs, UTC observation time, title,
+bounded visible text, explicit truncation and visible anchor references. Page
+content is always untrusted. References are valid only for the latest observation
+in the owning session; caller-supplied CSS/JavaScript and arbitrary link targets
+are not accepted. `screenshot()` returns a bounded 1280×720 viewport PNG and its
+source observation metadata in memory; metadata serialization excludes the bytes.
+The caller owns transient consumption and must not persist screenshots by default.
+
+Public HTTP destinations are resolved and validated per request, then connected
+using the validated numeric IP with the original HTTP Host/TLS identity. HTTP
+redirects and subresources pass the same route guard. Chromium's own DNS and
+native proxy path fail closed, WebSockets and service workers are blocked, and
+only fixed GET fetches are fulfilled; browser cookies are never forwarded and
+Set-Cookie is discarded. Internal origins require a server-controlled exact
+origin plus exact canonical read-only path allowlist. Internal query strings,
+unlisted routes and cross-scope resources/redirects are denied. An anonymous
+context is not sufficient authorization for an application API: callers must
+expose and authorize only the intended low-privilege read-only views.
+
+One creating thread owns operations. `close()`/`cancel()` may run from another
+thread and are idempotent. A spawned worker owns Playwright and all its children;
+Windows Job isolation (or a POSIX process group) allows cancellation even while
+OS DNS is stalled. Error, deadline, budget exhaustion or cancellation permanently
+closes the session; restart means a fresh object and fresh anonymous context.
+There are at most two admitted sessions per process. Defaults bound each session
+to 12 operations, four main-document requests (including redirects/script
+navigation), 60 seconds including idle time, 15 seconds per operation, 80 total
+requests including rejected requests, 4 MiB aggregate response bytes, 12,000 text
+characters, 40 links, and 2 MiB per screenshot. `close` is outside the operation
+budget. Public batch fetcher lifecycle limitations remain separate.
+
 ### Interval autonomy
 
 When Character Runtime has an API key, Space autonomy is enabled by default.

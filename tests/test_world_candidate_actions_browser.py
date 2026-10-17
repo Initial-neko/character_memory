@@ -301,8 +301,12 @@ def test_encounter_call_reuses_media_capture_and_tts_without_formal_person(brows
         page.locator('[data-world-composer] textarea').fill('电话里继续认识。')
         with page.expect_response(lambda r:r.request.method=='POST' and r.url.endswith(f'/v1/encounters/{ids["chat"]}/messages')):
             page.locator('[data-world-composer] [type=submit]').click()
-        access.encounter_scheduler.drain_pending_replies()
-        page.wait_for_function('document.querySelector("#voiceCallTranscript").textContent.includes("电话里也听到了你的话")')
+        # Transcript rendering precedes the queued synthesis request. Wait for
+        # the actual response so Playwright also dispatches its route callback.
+        with page.expect_response(lambda r:r.request.method=='POST' and r.url.endswith('/v1/tts')) as spoken:
+            access.encounter_scheduler.drain_pending_replies()
+            page.wait_for_function('document.querySelector("#voiceCallTranscript").textContent.includes("电话里也听到了你的话")')
+        assert spoken.value.ok
         assert tts and tts[-1]['voice'] is None
         page.locator('#voiceDockHangupButton').click()
         page.wait_for_function('!window.CM.features.voice.state.active')

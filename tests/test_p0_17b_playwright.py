@@ -38,32 +38,36 @@ def realtime_server(tmp_path_factory):
     env = os.environ.copy()
     env["CHARACTER_MEMORY_E2E_DB"] = str(root / "browser.db")
     env["CHARACTER_MEMORY_E2E_MEDIA"] = str(root / "media")
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "e2e_realtime_app:app",
-            "--app-dir",
-            str(ROOT / "tests"),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--log-level",
-            "warning",
-        ],
-        cwd=ROOT,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    log_path = root / "server.log"
+    # A pipe that nobody drains can fill on Windows and block an HTTP worker
+    # while it flushes a normal log record. Keep full diagnostics in a file.
+    with log_path.open("wb") as log_handle:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "e2e_realtime_app:app",
+                "--app-dir",
+                str(ROOT / "tests"),
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--log-level",
+                "warning",
+            ],
+            cwd=ROOT,
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
     base = f"http://127.0.0.1:{port}"
     deadline = time.time() + 20
     while time.time() < deadline:
         if process.poll() is not None:
-            output = process.stdout.read() if process.stdout else ""
+            output = log_path.read_text(encoding="utf-8", errors="replace")
             raise RuntimeError(f"E2E server exited early:\n{output}")
         try:
             with urlopen(f"{base}/health", timeout=0.5) as response:
@@ -73,7 +77,7 @@ def realtime_server(tmp_path_factory):
             time.sleep(0.1)
     else:
         process.terminate()
-        output = process.stdout.read() if process.stdout else ""
+        output = log_path.read_text(encoding="utf-8", errors="replace")
         raise RuntimeError(f"E2E server did not become ready:\n{output}")
 
     yield base

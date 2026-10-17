@@ -5,11 +5,17 @@ from test_world_activity import FakeModel, FakeObserver, NOW
 
 
 def test_lazy_runtime_reuses_route_store_and_world_commit(tmp_path, monkeypatch):
+    from pathlib import Path
+    import shutil
     import character_memory.app as app_module
     model=FakeModel();model.close=lambda: None
     monkeypatch.setattr(app_module, 'build_model', lambda settings: model)
+    # The operator's archive/grant sidecars must not change this runtime fixture.
+    persona = tmp_path / 'personas/rin/persona.yaml'
+    persona.parent.mkdir(parents=True)
+    shutil.copyfile(Path(__file__).parents[1] / 'personas/rin/persona.yaml', persona)
     config=tmp_path/'config.yaml'
-    config.write_text("api_key: isolated-mock\nembedding_provider: deterministic\nembedding_model: deterministic\n"+f"db_path: '{(tmp_path/'isolated.db').as_posix()}'\n"+"persona_path: personas/rin/persona.yaml\n",encoding='utf-8')
+    config.write_text("api_key: isolated-mock\nembedding_provider: deterministic\nembedding_model: deterministic\n"+f"db_path: '{(tmp_path/'isolated.db').as_posix()}'\n"+f"persona_path: '{persona.as_posix()}'\n",encoding='utf-8')
     app=create_api(str(config));access=app.state.character_memory
     from character_memory.world_web import attach_world_routes
     if access.world_activity_scheduler is None:attach_world_routes(app)

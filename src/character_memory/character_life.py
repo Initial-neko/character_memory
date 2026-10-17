@@ -119,13 +119,22 @@ def collaboration_peer_sql(channel, *, match_peer=False):
         raise ValueError('invalid collaboration channel')
     metadata = "CASE WHEN json_valid(c.metadata_json) THEN c.metadata_json ELSE '{}' END"
     def field(name):
-        return f"json_extract({metadata},'$.{name}')"
+        value = f"json_extract({metadata},'$.{name}')"
+        # Match the typed receipt index. JSON expressions otherwise have no
+        # affinity, so SQLite cannot seek against the shared table's TEXT/INTEGER
+        # columns using the remaining index keys. Keep the integer type proof below.
+        if name == 'channel_id':
+            return f"CAST({value} AS TEXT)"
+        if name == 'shared_fact_id':
+            return f"CAST({value} AS INTEGER)"
+        return value
     actor = 'e.actor_id' if channel == 'GROUP' else 'e.character_id'
     channel_id = 'e.conversation_id' if channel == 'GROUP' else 'CAST(e.post_id AS TEXT)'
     peer = f"CASE WHEN {field('actor_id')}=c.character_id THEN {field('recipient_id')} ELSE {field('actor_id')} END"
     return (f"SELECT {peer} FROM events c WHERE c.character_id=? AND c.event_type='ACTION' "
         f"AND {field('fact_kind')}='ROLE_COLLABORATION_MESSAGE' AND {field('channel')}='{channel}' "
         f"AND {field('channel_id')}={channel_id} AND json_type({metadata},'$.shared_fact_id')='integer' "
+        f"AND typeof(json_extract({metadata},'$.shared_fact_id'))='integer' "
         f"AND {field('shared_fact_id')}=e.id AND e.actor_type='CHARACTER' AND {field('actor_id')}={actor} "
         f"AND (({field('direction')}='SENT' AND {field('actor_id')}=c.character_id) "
         f"OR ({field('direction')}='RECEIVED' AND {field('recipient_id')}=c.character_id)) "

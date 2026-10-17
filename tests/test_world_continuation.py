@@ -435,3 +435,26 @@ def test_next_world_prompt_reads_real_collaboration_after_store_restart(tmp_path
     assert 'We actually discussed this exact boundary' not in prompts[2]
     assert not reopened.list_memories('c00')
     reopened.close()
+
+
+def test_continuation_sends_explicit_output_schema_to_real_client(tmp_path):
+    import httpx
+    from character_memory.llm.client import OpenAICompatibleModel
+    store, access, old_model, prompts, service=setup(tmp_path,[])
+    client=OpenAICompatibleModel('fake','test-model','https://example.test/v1',attempts=1)
+    seen=[]
+    def reply(request):
+        payload=json.loads(request.content)
+        prompt=payload['messages'][-1]['content']
+        schema=json.loads(prompt.split('# Output JSON Schema\n',1)[1].strip())
+        assert schema['properties']['action']['enum']==['STOP','CALL']
+        assert schema['additionalProperties'] is False
+        seen.append(schema)
+        return httpx.Response(200,json={'choices':[{'message':{'content':'{"action":"STOP"}'}}]})
+    client.client.close()
+    client.client=httpx.Client(transport=httpx.MockTransport(reply))
+    access.require_bundle().model=client
+    result=service.browse_character('c00',now=NOW,opportunity_id='actual-client-schema')
+    assert result['execution_status']=='SUCCESS' and seen
+    client.close()
+    store.close()

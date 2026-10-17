@@ -544,3 +544,7 @@ request the PUBLIC projection; their shared recent conversation facts are not
 mistakenly filtered out by another actor's character ID. World planning reuses
 the same bounded experience rendering. Observation recall never schedules a new
 browse, purchases a second reaction, or automatically writes Memory.
+
+### Provider protocol compatibility boundary
+
+`scripts/validate_capability_provider.py` is an explicit paid, isolated protocol probe, not runtime dispatch. Its pure addition fixture accepts null assistant content and validates each bounded native tool call; malformed JSON, extra/identity arguments and unknown tools fail closed. The production runtime keeps its current typed-JSON decisions and existing executors regardless of probe outcome; no protocol experiment grants a character another capability. The script makes one request per run and does not open the formal database. Live gateway results and cost/latency belong in the PR evidence, not in Persona or fixed activity prompts.

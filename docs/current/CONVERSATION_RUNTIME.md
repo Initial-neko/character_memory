@@ -18,6 +18,23 @@
 
 聊天使用紧凑的侧栏、头像、气泡与输入区。底部消息留白通过 ResizeObserver 跟随输入区实际高度，包括多行草稿和来电状态提示；图片迟到解码后仅在用户没有离开最新位置时跟随到底部，不抢回正在阅读历史的滚动位置。聊天隐藏时，历史初始化与后台消息不会把其他栏目滚到底部；离开 Space 详情进入其他栏目时，也不会带入原列表的滚动位置。
 
+### Known Direct history paging limitation
+
+[Issue #331](https://github.com/Initial-neko/character_memory/issues/331) tracks a
+confirmed browser race: after starting an older-history request for person A
+and switching to person B, the old request's `loadOlderDirectHistory` cleanup
+can render A's cached messages under B's current identity. The inner history
+response checks character identity, but the outer `finally` redraw does not.
+Current state and API ownership remain B; subsequent SSE reconciliation may
+restore the correct display. This is a presentation race, not evidence that
+messages were persisted to the wrong person.
+
+The real Chromium regression records every actual render, since an assertion
+that only waits for B's text can miss the transient wrong display. Its strict
+expected-failure marker names #331 and applies only to that confirmed repaint;
+setup or unrelated failures remain failures. The frontend repair and its
+approved reference/desktop-mobile/human visual gates remain pending.
+
 ## 1. User message first, reaction later
 
 正式 WebUI 发送用户消息时使用异步 accept path：

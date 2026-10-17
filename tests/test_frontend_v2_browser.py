@@ -223,3 +223,86 @@ def test_character_menu_survives_summary_refresh_without_changing_identity(page,
     page.evaluate('(id)=>{CM.state.characters=CM.state.characters.filter(p=>p.id!==id);CM.renderCharacterList()}',character)
     expect(menu).to_have_count(0)
     expect(page.locator('[data-character-menu]:not(.hidden)')).to_have_count(0)
+
+
+class StaleHistoryRender(AssertionError):
+    """Only the confirmed cross-person repaint is an expected failure."""
+
+
+@pytest.mark.xfail(strict=True, raises=StaleHistoryRender, reason="Issue #331: late older-history cleanup repaints the previous person; frontend reference pending")
+@pytest.mark.parametrize("width", [1440, 390])
+def test_older_direct_history_cannot_repaint_after_character_switch(page, live_life, width):
+    from datetime import datetime, timedelta, timezone
+    import json
+    from pathlib import Path
+    import subprocess
+    from urllib.parse import parse_qs, urlsplit
+    from playwright.sync_api import expect
+    from character_memory.domain.models import Event, EventType
+
+    base, first, _, store, access = live_life
+    second = next(p["id"] for p in access.character_profiles() if p["id"] != first)
+    now = datetime.now(timezone.utc)
+    for index in range(60):
+        store.append_event(Event(character_id=first, event_type=EventType.USER_MESSAGE,
+            event_time=now + timedelta(seconds=index), content=f"History-A-{index:02d}"))
+    store.append_event(Event(character_id=second, event_type=EventType.USER_MESSAGE,
+        event_time=now, content="History-B-current"))
+    page.set_viewport_size({"width": width, "height": 960 if width > 500 else 844})
+    page.goto(base + "/")
+    page.wait_for_function("document.body.dataset.cmReady === 'true'")
+    page.evaluate("async id => { await CM.switchCharacter(id); }", first)
+    expect(page.locator("#chat")).to_contain_text("History-A-59")
+    assert page.evaluate("CM.state.directHistory.hasMore") is True
+    page.evaluate("""() => {
+      window.historyRenderEvents = [];
+      const original = CM.renderHistory;
+      CM.renderHistory = (...args) => {
+        const result = original(...args);
+        window.historyRenderEvents.push({character: CM.state.characterId,
+          contents: args[0].map(message => message.content),
+          rendered_text: document.querySelector('#chat').innerText});
+        return result;
+      };
+    }""")
+    held = []
+
+    def hold_older(route):
+        query = parse_qs(urlsplit(route.request.url).query)
+        if query.get("character_id") == [first] and "before_id" in query:
+            held.append(route)
+            page.evaluate("window.olderHistoryHeld = true")
+        else:
+            route.continue_()
+
+    page.route("**/v1/chat/history-page?*", hold_older)
+    with page.expect_request(lambda request: "before_id=" in request.url):
+        page.evaluate("() => { window.pendingOlderHistory = CM.loadOlderDirectHistory(); }")
+    page.wait_for_function("window.olderHistoryHeld === true")
+    assert len(held) == 1
+    page.evaluate("async id => { await CM.switchCharacter(id); }", second)
+    expect(page.locator("#chat")).to_contain_text("History-B-current")
+    held.pop().continue_()
+    page.evaluate("async () => { await window.pendingOlderHistory; }")
+    assert page.evaluate("CM.state.characterId") == second
+    assert page.evaluate("CM.state.directHistory.messages.some(m => m.content === 'History-B-current')") is True
+
+    # Only synthetic messages from this test-owned database enter the evidence.
+    root = Path(__file__).resolve().parents[1]
+    evidence = Path(os.getenv("CORE_VISUAL_EVIDENCE_DIR", root / "artifacts/core-visual-evidence"))
+    evidence.mkdir(parents=True, exist_ok=True)
+    stem = f"history-switch-race-{width}"
+    page.screenshot(path=str(evidence / f"{stem}.png"), full_page=True)
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    (evidence / f"{stem}.json").write_text(json.dumps({
+        "commit": commit, "viewport": page.viewport_size,
+        "timestamp": datetime.now(timezone.utc).isoformat(), "scenario": "late older page after switch",
+        "state_character": second, "state_messages": [m["content"] for m in page.evaluate("CM.state.directHistory.messages")],
+        "rendered_text": page.locator("#chat").inner_text(), "render_events": page.evaluate("window.historyRenderEvents"), "test_fixture_only": True,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    wrong_renders = [event for event in page.evaluate("window.historyRenderEvents")
+        if event["character"] == second and any(content.startswith("History-A-") for content in event["contents"])]
+    if wrong_renders:
+        raise StaleHistoryRender("Late older-history cleanup rendered the previous person under the current identity")
+    expect(page.locator("#chat")).to_contain_text("History-B-current", timeout=1000)
+    expect(page.locator("#chat")).not_to_contain_text("History-A-")

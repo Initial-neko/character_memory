@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-import yaml
 
-from character_memory.character_capabilities import select_role_research
+from character_memory.runtime.capability_discovery import CapabilityAvailability, available_capabilities, runner_available
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType
 from character_memory.runtime.capability_execution import CapabilityExecutor, CapabilityRequest
 from character_memory.runtime.reaction_engine import evaluate_reaction
@@ -16,17 +15,35 @@ class DirectResearchService:
         self.settings, self.store, self.profiles = settings, store, profiles
         self.executor = CapabilityExecutor(store, observer, claude_runner=runner)
 
-    def grant(self, event):
+    def capabilities(self, event):
+        """Read capabilities for the real Direct event without executing work."""
         if (not self.settings.direct_claude_tasks_enabled or event.event_type != EventType.USER_MESSAGE
                 or str(event.metadata.get('channel', 'DIRECT')).upper() != 'DIRECT'
                 or str(event.metadata.get('conversation_id', '')).startswith('group:')
                 or event.metadata.get('group_event_id') or event.metadata.get('source_conversation_event_id')):
-            return None
+            return ()
+        cached = event.id is not None and self.executor.has_completed_receipt(
+            f'direct:{event.id}:CLAUDE_TASK:1', character_id=event.character_id,
+            opportunity_id=f'direct:{event.id}',
+        )
+        if not cached and not runner_available(self.executor.claude_runner):
+            return ()
         profile = next((p for p in self.profiles() if p['id'] == event.character_id), None)
-        try:
-            return select_role_research(profile, capability='claude_task')
-        except (OSError, ValueError, yaml.YAMLError):
-            return None
+        settings = self.settings
+        denial = self.executor.claude_budget_denial(
+            event.character_id, now=event.event_time,
+            daily_max=settings.claude_execution_daily_max,
+            daily_budget_usd=settings.claude_execution_daily_budget_usd,
+            max_budget_usd=settings.claude_execution_max_budget_usd,
+            cost_saving=settings.world_cost_saving_enabled,
+        )
+        return available_capabilities(profile, channel='DIRECT', availability=CapabilityAvailability(
+            claude=True, direct_task=True, remaining_calls=0 if denial and not cached else 1,
+        ))
+
+    def grant(self, event):
+        capabilities = self.capabilities(event)
+        return [dict(skill) for skill in capabilities[0].skills] if capabilities else None
 
     def prompt(self, event):
         if self.grant(event) is None:

@@ -16,16 +16,17 @@ import yaml
 SKILL_ID = re.compile(r"^(shared|personal)/([a-z][a-z0-9-]{0,47})$")
 MAX_SKILL_BYTES = 8192
 MAX_CONFIG_BYTES = 4096
+KNOWN_CAPABILITIES = frozenset({"claude_research", "claude_task", "browser_read", "role_contact", "github_issue_write"})
 
 
 class CharacterCapabilities(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    capabilities: list[str] = Field(default_factory=list, max_length=2)
+    capabilities: list[str] = Field(default_factory=list, max_length=len(KNOWN_CAPABILITIES))
     skills: list[str] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
     def check_allowlist(self):
-        if len(set(self.capabilities)) != len(self.capabilities) or set(self.capabilities) - {"claude_research", "claude_task"}:
+        if len(set(self.capabilities)) != len(self.capabilities) or set(self.capabilities) - KNOWN_CAPABILITIES:
             raise ValueError("unknown or duplicate character capability")
         if len(set(self.skills)) != len(self.skills):
             raise ValueError("duplicate selected Skills")
@@ -48,12 +49,8 @@ def _regular_bounded_file(path: Path, maximum: int) -> bytes:
     return raw
 
 
-def select_role_research(profile: dict | None, *, capability: str = "claude_research") -> list[dict] | None:
-    """Return selected immutable Skill snapshots; None means no Claude grant.
-
-    Missing or invalid sidecars fail closed. An authorized role with no Skills
-    returns [], so research still works with the original World MCP tool.
-    """
+def read_role_capabilities(profile: dict | None) -> CharacterCapabilities | None:
+    """Read the active named person's operator sidecar; never infer grants from Persona."""
     if not profile or not profile.get("persona_path"):
         return None
     persona = Path(profile["persona_path"])
@@ -65,9 +62,15 @@ def select_role_research(profile: dict | None, *, capability: str = "claude_rese
     payload = yaml.safe_load(_regular_bounded_file(settings_path, MAX_CONFIG_BYTES))
     if not isinstance(payload, dict):
         raise ValueError("capabilities.yaml must be a mapping")
-    permissions = CharacterCapabilities.model_validate(payload)
-    if capability not in {"claude_research", "claude_task"} or capability not in permissions.capabilities:
+    return CharacterCapabilities.model_validate(payload)
+
+
+def select_role_research(profile: dict | None, *, capability: str = "claude_research") -> list[dict] | None:
+    """Return selected Skill snapshots; None means no current Claude grant."""
+    permissions = read_role_capabilities(profile)
+    if permissions is None or capability not in {"claude_research", "claude_task"} or capability not in permissions.capabilities:
         return None
+    persona = Path(profile["persona_path"])
     picked: list[dict] = []
     for identity in permissions.skills:
         kind, slug = SKILL_ID.fullmatch(identity).groups()

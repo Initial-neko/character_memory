@@ -2,6 +2,69 @@
 
 本文描述一个 Character 收到 Event 后，如何形成内部变化与对外行为。
 
+## Read-only capability discovery
+
+`runtime.capability_discovery.available_capabilities(profile, channel=...,
+availability=...)` describes the existing WEB_SEARCH / READ_RSS World tools
+and eligible Direct CLAUDE_TASK. The caller supplies a trusted per-turn
+`CapabilityAvailability` snapshot of configuration, dependency availability,
+Direct event eligibility and remaining opportunity allowance. Existing readers
+do not acquire a new sidecar permission; Claude and selected Skills still use
+the named person's operator-owned `select_role_research` grant. Archived or
+invalid people and exhausted opportunities expose no tools. Identity, channel,
+budget and grants are absent from model arguments.
+
+Discovery reads local grant/Skill files without initializing providers, calling
+a model, reserving budget or persisting an event. Descriptions are not execution
+permissions: dispatch must revalidate current grants and use existing executor
+checks and receipts. This query does not launch a continuation loop, register
+Browser sessions or grant external writes.
+
+DirectResearchService.capabilities(event) now builds the trusted snapshot from
+normal Direct USER_MESSAGE eligibility, the configured switch, the named active
+profile, runner readiness and durable daily quota/budget. The existing grant()
+compatibility view and delegation prompt consume the same descriptions, then
+recheck them immediately before dispatch. Missing/closed/uninstalled executors,
+revoked grants and exhausted allowance hide new delegation; a model-forced new
+request is filtered without an executor call or result interpretation. A completed
+receipt for this same character/event/opportunity remains consumable after quota
+exhaustion or runner loss, subject to current role/Skill permission and the
+executor's original full-payload equality check. The cache hint does not return
+a receipt directly, authorize a different task or replay an unknown STARTED job. A fresh budget
+snapshot never reserves quota: CapabilityExecutor repeats the shared daily
+check inside its existing atomic reservation transaction. Unknown prior usage
+continues to consume its conservative reservation. Ordinary chat remains one
+normal reaction call.
+
+ClaudePrintRunner.is_available() checks only local command presence and closed
+state without starting a process or creating output files. It does not establish
+authentication, connectivity, provider compatibility or success; dispatch receipts
+and explicit live validation remain authoritative. World/Browser/collaboration
+snapshot assembly and general Prompt compilation remain separate integration
+work.
+
+WorldActivityService.capabilities(character_id, now=..., rss_candidates=...)
+uses the same discovery contract with current active profiles, configured search
+service, local candidates and Claude runner/allowance. Composition prepares the
+execution schema; listing only reads current facts. New plans cannot execute a
+model-selected tool absent from this trusted snapshot. Existing completed World
+opportunities retain their original recovery/cached-result paths.
+
+Browser, role-contact and feedback writes require explicit operator sidecar
+entries `browser_read`, `role_contact` and `github_issue_write`. A trusted
+composition extension descriptor must name its required grant and exact channel;
+registration alone never exposes a tool. Existing readers retain their prior
+policy. Selected Skills still require one of the explicit Claude grants.
+
+The shared CapabilityExecutor supports at most three execution reservations per
+opportunity; existing callers continue requesting one. All begun attempts,
+including provider-side denial, consume allowance. New missing-provider calls
+are rejected before reservation; completed matching receipts remain readable.
+A composition-only CapabilityAdapter can add a bounded tool while retaining
+identity, source/channel checks, semantic validation, shared reservation and
+receipt persistence. Adapters cannot replace built-ins. Their current permission
+validator runs before cache access; provider availability is checked afterward.
+
 ## Optional Direct external-task decision
 
 `direct_claude_tasks_enabled` (default false) and the named person's operator
@@ -525,3 +588,7 @@ of existing boundaries. They do not establish long-term Persona fidelity with a
 live provider, real browser visits, or the combined autonomous runtime's behavior;
 those require their separate runtime acceptance paths. This backend-only change
 has VISUAL N/A because no user interface is changed.
+
+### Provider protocol compatibility boundary
+
+`scripts/validate_capability_provider.py` is an explicit paid, isolated protocol probe, not runtime dispatch. Its pure addition fixture accepts null assistant content and validates each bounded native tool call; malformed JSON, extra/identity arguments and unknown tools fail closed. The production runtime keeps its current typed-JSON decisions and existing executors regardless of probe outcome; no protocol experiment grants a character another capability. The script makes one request per run and does not open the formal database. Live gateway results and cost/latency belong in the PR evidence, not in Persona or fixed activity prompts.

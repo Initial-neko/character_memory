@@ -239,6 +239,21 @@ class SQLiteStore:
             """
         )
 
+    def _create_collaboration_fact_index_locked(self) -> None:
+        # Life correlates each shared fact with its owner's ACTION receipt.
+        # Match its guarded JSON expressions exactly so each lookup seeks by
+        # owner/channel/fact instead of scanning every ACTION under the store lock.
+        metadata = "CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END"
+        fields = (
+            f"json_extract({metadata},'$.channel'),"
+            f"CAST(json_extract({metadata},'$.channel_id') AS TEXT),"
+            f"CAST(json_extract({metadata},'$.shared_fact_id') AS INTEGER)"
+        )
+        self.conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_events_collaboration_fact ON events(character_id,{fields}) "
+            f"WHERE event_type='ACTION' AND json_extract({metadata},'$.fact_kind')='ROLE_COLLABORATION_MESSAGE'"
+        )
+
     def _migrate_memory_governance_locked(self) -> None:
         self._ensure_column_locked("memories", "pinned", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column_locked("memories", "superseded_by", "INTEGER")
@@ -331,6 +346,7 @@ class SQLiteStore:
             embedding_added = self._run_migration_locked("core/008-intent-embedding", self._migrate_intent_embedding_locked)
             self._run_migration_locked("core/009-proactive-dispatch-state", self._migrate_proactive_dispatch_state_locked)
             self._run_migration_locked("core/010-intent-deferral", self._migrate_intent_deferral_locked)
+            self._run_migration_locked("core/011-collaboration-fact-index", self._create_collaboration_fact_index_locked)
             compat_migrated = self._migrate_legacy_action_traces_incremental_locked()
             self.conn.commit()
             if intent_added:

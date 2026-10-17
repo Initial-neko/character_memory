@@ -15,6 +15,11 @@ show each original shared fact once, use its explicit counterpart rather than
 the Space post owner, and leave unrelated members/history hidden. Source-chat
 references use the same receipt proof while retaining current Group membership
 and Space visibility checks; reading never replays a contact or creates a trace.
+Core schema migration `core/011-collaboration-fact-index` indexes the guarded
+receipt owner/channel/shared-fact expressions used by these lookups. Relationship
+reads must seek matching receipts rather than rescan every ACTION for each shared
+fact while holding the common store lock. Malformed legacy JSON remains readable;
+the migration adds an index without rewriting event records.
 
 World distinguishes pending encounter candidates from accepted characters. Its
 accepted section reads the latest 50 encounter records and links to existing

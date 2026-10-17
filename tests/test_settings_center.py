@@ -1351,3 +1351,54 @@ def test_switching_the_provider_moves_its_key_up_without_any_secret_being_lost(t
     assert after["SEARCHAPI_API_KEY"] == "diagnostic"
     assert after["AGNES_API_KEY"] == "diagnostic"
     assert set(after) == set(before), "no key may disappear from the page"
+
+
+@pytest.mark.parametrize(
+    ("field", "original", "requested"),
+    [
+        ("recall_limit", "recall_limit: 12\nrecall_limit: 20\n", 30),
+        ("recall_limit", '\"recall_limit\": 12\nrecall_limit: 20\n', 30),
+        (
+            "world_pulse_sources",
+            "world_pulse_sources:\n  - https://old.example/\n"
+            "world_pulse_sources:\n  - https://last.example/\n",
+            ["https://new.example/"],
+        ),
+    ],
+)
+def test_settings_save_duplicate_keys_survives_reload(tmp_path, field, original, requested):
+    """A successful save must replace every occurrence, not only the first."""
+    config = tmp_path / "config.yaml"
+    original += "# Keep unrelated settings\nchat_temperature: 0.5\n"
+    config.write_text(original, encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+
+    result = store.save_values({field: requested})
+
+    assert result["changed"] is True
+    assert getattr(load_settings(str(config)), field) == requested
+    assert store.snapshot()["values"][field] == requested
+    assert yaml.safe_load(config.read_text(encoding="utf-8"))[field] == requested
+    assert load_settings(str(config)).chat_temperature == 0.5
+    assert "# Keep unrelated settings" in config.read_text(encoding="utf-8")
+    assert Path(result["backup"]).read_text(encoding="utf-8") == original
+
+
+def test_settings_api_duplicate_keys_return_persisted_value(tmp_path, monkeypatch):
+    _clear_secret_env(monkeypatch)
+    config = tmp_path / "config.yaml"
+    config.write_text("world_browse_daily_max: 10\nworld_browse_daily_max: 20\n", encoding="utf-8")
+    store = SettingsStore(str(config), str(tmp_path / ".env"))
+    app = create_settings_app(str(config), store=store, runtime_http_client=_SettingsRuntimeClient())
+
+    with TestClient(app) as client:
+        response = client.patch("/v1/settings", json={"values": {"world_browse_daily_max": 30}})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["result"]["persisted"] is True
+        assert payload["result"]["restart_required"] == ["world_browse_daily_max"]
+        assert payload["settings"]["values"]["world_browse_daily_max"] == 30
+        assert client.get("/v1/settings").json()["values"]["world_browse_daily_max"] == 30
+
+    # A new store reloads the same durable value; this does not hot-apply it.
+    assert SettingsStore(str(config), str(tmp_path / ".env")).snapshot()["values"]["world_browse_daily_max"] == 30

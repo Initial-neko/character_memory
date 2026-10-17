@@ -150,3 +150,38 @@ def test_step_credential_redaction_happens_before_excerpt_cutoff():
     assert step['arguments']['query']=='[REDACTED]'
     assert step['result']['observations'][0]['content'].endswith('[REDA')
     assert 'test-' not in step['result']['observations'][0]['content']
+
+
+def test_mcp_stdio_returns_utf8_sources_under_legacy_console_encoding():
+    """The real child must survive source characters absent from Windows GBK."""
+    import os
+    import subprocess
+    import sys
+    from character_memory.runtime.claude_tools import LocalWorldToolBridge
+
+    source = 'dataclasses \u2014 \u0395\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac \u65e5\u672c\u8a9e \U0001f4da'
+
+    class UnicodeObserver(Observer):
+        def observe(self, query, **limits):
+            data = super().observe(query, **limits)
+            data['observations'][0]['content'] = source
+            return data
+
+    messages = [
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+         'params': {'name': 'world_lookup', 'arguments': {'query': 'documentation'}}},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'ping'},
+    ]
+    with LocalWorldToolBridge(UnicodeObserver()) as bridge:
+        env = {**os.environ, 'CM_CLAUDE_CALLBACK': bridge.url,
+               'CM_CLAUDE_TOKEN': bridge.token, 'PYTHONIOENCODING': 'gbk', 'PYTHONUTF8': '0'}
+        child = subprocess.run([sys.executable, '-m', 'character_memory.runtime.claude_tools'],
+            input=('\n'.join(json.dumps(m) for m in messages)+'\n').encode('utf-8'),
+            capture_output=True, env=env, timeout=15)
+    assert child.returncode == 0, child.stderr.decode('ascii', errors='replace')
+    replies = [json.loads(line) for line in child.stdout.decode('utf-8').splitlines()]
+    assert [r['id'] for r in replies] == [1, 2]
+    assert replies[0]['result']['isError'] is False
+    lookup = json.loads(replies[0]['result']['content'][0]['text'])
+    assert lookup['observations'][0]['content'] == source
+    assert replies[1]['result'] == {}

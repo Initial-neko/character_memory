@@ -221,8 +221,9 @@ def main():
         except Exception:
             response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
         if response is not None:
-            sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
-            sys.stdout.flush()
+            # MCP stdio is UTF-8 regardless of the Windows console code page.
+            sys.stdout.buffer.write((json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8"))
+            sys.stdout.buffer.flush()
 
 
 if __name__ == "__main__":

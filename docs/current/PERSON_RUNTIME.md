@@ -545,6 +545,12 @@ mistakenly filtered out by another actor's character ID. World planning reuses
 the same bounded experience rendering. Observation recall never schedules a new
 browse, purchases a second reaction, or automatically writes Memory.
 
+### Role contact production composition
+
+`build_role_collaboration(access)` binds the recipient's existing PersonContextBuilder, current model, current role/Skill permissions and shared CapabilityExecutor. It supplies the actual shared Group messages or visible Space post and comments, while private memories remain private reasoning context. Contact permits silence or disagreement and at most two recipient decisions plus one separately authorized public research call; these internal calls are attributed to `role_collaboration`, separately from the initiating World's step count. The World continuation composition owns exposing and authorizing the initiating contact tool.
+
+`GitHubIssueHTTPTransport` is an optional operator-owned transport for the separately scoped IssueWriteGrant, not a grant itself. Production POST runs in a disposable HTTP-only child with credentials through stdin, fixed GitHub HTTPS origin, no redirects/retries, a bounded response and a parent-enforced wall timeout including DNS and EOF. Timeout kills/reaps the worker; the durable adapter records UNKNOWN and does not retry an irreversible request. Without a grant the existing adapter returns a draft and never starts HTTP. No UI changes (VISUAL N/A).
+
 ## Prompt composition ownership
 
 `runtime/prompt_parts.py` provides the pure five-part `PromptParts` value:
@@ -588,12 +594,10 @@ of existing boundaries. They do not establish long-term Persona fidelity with a
 live provider, real browser visits, or the combined autonomous runtime's behavior;
 those require their separate runtime acceptance paths. This backend-only change
 has VISUAL N/A because no user interface is changed.
-### Role contact production composition
 
-`build_role_collaboration(access)` binds the recipient's existing PersonContextBuilder, current model, current role/Skill permissions and shared CapabilityExecutor. It supplies the actual shared Group messages or visible Space post and comments, while private memories remain private reasoning context. Contact permits silence or disagreement and at most two recipient decisions plus one separately authorized public research call; these internal calls are attributed to `role_collaboration`, separately from the initiating World's step count. The World continuation composition owns exposing and authorizing the initiating contact tool.
+### Provider protocol compatibility boundary
 
-`GitHubIssueHTTPTransport` is an optional operator-owned transport for the separately scoped IssueWriteGrant, not a grant itself. Production POST runs in a disposable HTTP-only child with credentials through stdin, fixed GitHub HTTPS origin, no redirects/retries, a bounded response and a parent-enforced wall timeout including DNS and EOF. Timeout kills/reaps the worker; the durable adapter records UNKNOWN and does not retry an irreversible request. Without a grant the existing adapter returns a draft and never starts HTTP. No UI changes (VISUAL N/A).
-
+`scripts/validate_capability_provider.py` is an explicit paid, isolated protocol probe, not runtime dispatch. Its pure addition fixture accepts null assistant content and validates each bounded native tool call; malformed JSON, extra/identity arguments and unknown tools fail closed. The production runtime keeps its current typed-JSON decisions and existing executors regardless of probe outcome; no protocol experiment grants a character another capability. The script makes one request per run and does not open the formal database. Live gateway results and cost/latency belong in the PR evidence, not in Persona or fixed activity prompts.
 
 ## Bounded World reconsideration
 
@@ -609,6 +613,3 @@ remain distinct. See [SOCIAL_WORLD.md](SOCIAL_WORLD.md#optional-bounded-world-co
 for configuration, local-only recovery and nested collaboration cost boundaries.
 
 World continuation also renders the existing bounded PersonContextSnapshot.recent_events with original channel, participants and shared-fact provenance. This includes real collaboration ACTION projections after restart, without treating them as webpage observations or automatically admitting Memory. Nonparticipants receive no projection.
-### Provider protocol compatibility boundary
-
-`scripts/validate_capability_provider.py` is an explicit paid, isolated protocol probe, not runtime dispatch. Its pure addition fixture accepts null assistant content and validates each bounded native tool call; malformed JSON, extra/identity arguments and unknown tools fail closed. The production runtime keeps its current typed-JSON decisions and existing executors regardless of probe outcome; no protocol experiment grants a character another capability. The script makes one request per run and does not open the formal database. Live gateway results and cost/latency belong in the PR evidence, not in Persona or fixed activity prompts.

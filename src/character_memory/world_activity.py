@@ -1216,6 +1216,9 @@ Rendered text:
                     at=now,
                     recent_limit=12,
                 )
+                # Capability resolution precedes prompting and any Claude task.
+                # Discovery owns fail-closed role/Skill parsing plus runner/budget
+                # checks; never expose sidecar descriptions through a second path.
                 candidates = []
                 plan_schema = PersonalBrowsePlan
                 rss_limit = 1 if getattr(self.access.settings, "world_cost_saving_enabled", False) else 2

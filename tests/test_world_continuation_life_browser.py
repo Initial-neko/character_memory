@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from test_life_conversation import isolated_app
 from test_life_conversation_browser import live_life
+from test_mobile_views_playwright import _record_visual
 from character_memory.world_activity import WorldPulseRepository
 
 pytestmark=[pytest.mark.browser,pytest.mark.skipif(os.getenv('RUN_PLAYWRIGHT')!='1',reason='explicit browser run')]
@@ -33,6 +34,7 @@ def test_continuation_receipts_render_readonly_in_existing_life_detail(page,live
     expect(page.locator('#details')).to_contain_text('ui-read:CONT:1')
     expect(page.locator('#details')).to_contain_text('https://example.com/actually-read')
     expect(page.locator('#details')).to_contain_text('BROWSER_RENDERED_TEXT')
+    _record_visual(page, f'world-continuation-receipt-{width}', ('src/character_memory/web/life.js', 'src/character_memory/web/life.css'))
     assert page.evaluate('window.FORGED') is None
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
     output=os.getenv('WORLD_LIFE_SCREENSHOTS')
@@ -43,8 +45,12 @@ def test_continuation_receipts_render_readonly_in_existing_life_detail(page,live
     page.locator('[data-key="world:ui-stop"]').click()
     expect(page.locator('#details')).to_contain_text('未行动')
     if width==390:page.locator('[data-life-back]').click()
-    page.locator('[data-key="world:ui-unknown"]').click()
+    unknown = page.locator('[data-key="world:ui-unknown"]')
+    expect(unknown.locator('.badge')).to_have_text('World · 结果未知')
+    _record_visual(page, f'world-continuation-unknown-list-{width}', ('src/character_memory/web/life.js', 'src/character_memory/web/life.css'))
+    unknown.click()
     expect(page.locator('#details')).to_contain_text('结果未知')
+    _record_visual(page, f'world-continuation-unknown-detail-{width}', ('src/character_memory/web/life.js', 'src/character_memory/web/life.css'))
     assert store.conn.total_changes==before
     assert not [r for r in requests if r[0]=='POST']
     page.goto('about:blank')

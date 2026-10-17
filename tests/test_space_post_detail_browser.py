@@ -130,6 +130,8 @@ def test_space_feed_lays_out_real_posts_in_multiple_columns(page, space_server_w
         assert box['width'] >= 200
         assert box['x'] >= 0 and box['x'] + box['width'] <= width + 1
         assert card.evaluate('element => element.getClientRects().length') == 1
+    from test_mobile_views_playwright import _record_visual
+    _record_visual(page, f'space-masonry-{kind}-{width}', ('src/character_memory/web/space.css', 'src/character_memory/web/space.js'))
     output = os.getenv('SPACE_MASONRY_SCREENSHOTS')
     if output:
         Path(output).mkdir(parents=True, exist_ok=True)

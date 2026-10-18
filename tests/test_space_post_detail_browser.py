@@ -270,7 +270,11 @@ def test_space_lightbox_moves_between_real_post_images(page, space_server_with_i
 
     detail = page.locator(".space-detail-view")
     expect(detail).to_be_visible()
-    triggers = detail.locator(f'[data-space-post="{post_id}"] [data-space-image-open]')
+    # Desktop detail adds a main-image button for the selected thumbnail; the
+    # thumbnail sequence is still the lightbox's two-image set.
+    triggers = detail.locator(
+        f'[data-space-post="{post_id}"] [data-space-image-open]:not([data-space-gallery-main])'
+    )
     expect(triggers).to_have_count(2)
     triggers.nth(0).click()
     dialog = page.get_by_role("dialog", name="动态图片预览")
@@ -463,6 +467,25 @@ def test_space_detail_visual_evidence(page, space_server_with_image, width, heig
     capture("initial")
     capture("full", full=True)
     if kind == "image":
+        if width > 820:
+            # Desktop uses the approved main-image + thumbnail hierarchy.
+            expect(detail.locator(".space-media-gallery")).to_have_count(1)
+            expect(detail.locator(".space-media-main")).to_have_count(1)
+            expect(detail.locator(".space-media-thumb")).to_have_count(2)
+            main_image = detail.locator(".space-media-main img")
+            first_src = main_image.get_attribute("src")
+            second_thumb = detail.locator(".space-media-thumb").nth(1)
+            second_thumb.click()
+            dialog = page.get_by_role("dialog", name="动态图片预览")
+            expect(dialog).to_be_visible()
+            page.keyboard.press("Escape")
+            expect(dialog).to_be_hidden()
+            expect(second_thumb).to_have_class("space-media-thumb is-selected")
+            assert main_image.get_attribute("src") != first_src
+        else:
+            # Mobile keeps the existing equal grid until its reference is approved.
+            expect(detail.locator(".space-media-gallery")).to_have_count(0)
+            expect(detail.locator(".space-media-cell")).to_have_count(2)
         trigger = detail.locator('[data-space-image-open]').first
         trigger.click()
         dialog = page.get_by_role("dialog", name="动态图片预览")
@@ -472,7 +495,7 @@ def test_space_detail_visual_evidence(page, space_server_with_image, width, heig
         page.keyboard.press("Escape")
         expect(dialog).to_be_hidden()
     rendered_media_count = detail.locator('[data-space-image-open]').count()
-    assert rendered_media_count == (2 if kind == "image" else 0)
+    assert rendered_media_count == ((3 if width > 820 else 2) if kind == "image" else 0)
     assets = {}
     for path in ["src/character_memory/web/index.html", "src/character_memory/web/space.js",
                  "src/character_memory/web/space.css", "src/character_memory/web/frontend_v2.css",

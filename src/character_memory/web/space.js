@@ -298,7 +298,7 @@
     </div>`;
   }
 
-  function mediaHtml(post) {
+  function mediaHtml(post, {detail = false} = {}) {
     const items = mediaItemsFor(post).filter(item => item?.available !== false && item?.url);
     if (!items.length) return "";
 
@@ -318,11 +318,28 @@
     let imageHtml = "";
     if (images.length) {
       const layout = images.length === 1 ? "single" : images.length <= 4 ? "quad" : "nine";
-      const cells = images.map((item, index) => {
-        const label = item.label || `动态图片 ${index + 1}`;
-        return `<button class="space-media-cell" type="button" data-space-image-open data-image-url="${CM.escapeHtml(item.url)}" data-image-label="${CM.escapeHtml(label)}" aria-label="放大查看 ${CM.escapeHtml(label)}"><img src="${CM.escapeHtml(item.url)}" alt="${CM.escapeHtml(label)}" loading="lazy"></button>`;
-      }).join("");
-      imageHtml = `<div class="space-media-grid space-media-${layout}" data-space-media-count="${images.length}">${cells}</div>`;
+      const desktopGallery = detail && images.length > 1
+        && window.matchMedia("(min-width: 821px)").matches;
+      if (desktopGallery) {
+        // Desktop detail keeps the approved hierarchy: one readable main image
+        // and an ordered thumbnail strip. Mobile keeps the existing grid until
+        // its own reference is approved.
+        const imageButton = (item, index, extraClass = "", extraAttrs = "") => {
+          const label = item.label || `动态图片 ${index + 1}`;
+          return `<button class="${extraClass}" type="button" data-space-image-open${extraAttrs} data-image-url="${CM.escapeHtml(item.url)}" data-image-label="${CM.escapeHtml(label)}" aria-label="查看 ${CM.escapeHtml(label)}"><img src="${CM.escapeHtml(item.url)}" alt="${CM.escapeHtml(label)}" loading="lazy"></button>`;
+        };
+        const main = imageButton(images[0], 0, "space-media-main", " data-space-gallery-main");
+        const thumbs = images.map((item, index) =>
+          imageButton(item, index, `space-media-thumb${index === 0 ? " is-selected" : ""}`, ` data-space-gallery-select="${index}"`)
+        ).join("");
+        imageHtml = `<div class="space-media-grid space-media-gallery space-media-${layout}" data-space-media-count="${images.length}">${main}<div class="space-media-thumbs">${thumbs}</div></div>`;
+      } else {
+        const cells = images.map((item, index) => {
+          const label = item.label || `动态图片 ${index + 1}`;
+          return `<button class="space-media-cell" type="button" data-space-image-open data-image-url="${CM.escapeHtml(item.url)}" data-image-label="${CM.escapeHtml(label)}" aria-label="放大查看 ${CM.escapeHtml(label)}"><img src="${CM.escapeHtml(item.url)}" alt="${CM.escapeHtml(label)}" loading="lazy"></button>`;
+        }).join("");
+        imageHtml = `<div class="space-media-grid space-media-${layout}" data-space-media-count="${images.length}">${cells}</div>`;
+      }
     }
 
     const voiceMediaHtml = voices.map(voiceHtml).join("");
@@ -356,9 +373,16 @@
 
   function openLightbox(button) {
     const grid = button.closest(".space-media-grid");
-    const buttons = [...(grid?.querySelectorAll("[data-space-image-open]") || [])];
+    // The desktop gallery's main image mirrors the selected thumbnail; the
+    // thumbnails themselves are the lightbox sequence, so the main is excluded.
+    const buttons = [...(grid?.querySelectorAll("[data-space-image-open]") || [])]
+      .filter(node => !node.hasAttribute("data-space-gallery-main"));
     lightboxItems = buttons.map(node => ({url:String(node.dataset.imageUrl || ""),label:String(node.dataset.imageLabel || "动态图片")})).filter(item => item.url);
-    lightboxIndex = Math.max(0, buttons.indexOf(button));
+    let index = buttons.indexOf(button);
+    if (index < 0 && button.hasAttribute("data-space-gallery-main")) {
+      index = buttons.indexOf(grid?.querySelector(".space-media-thumb.is-selected"));
+    }
+    lightboxIndex = Math.max(0, index);
     if (!lightboxItems.length) return;
     lightboxReturnFocus = button;
     lightboxBackgroundInert.clear();
@@ -578,7 +602,7 @@
   function postHtml(post, {detail = false} = {}) {
     const author = post.author || profileFor(post.character_id);
     const archived = author.archived ? '<span class="space-archived-badge">已归档</span>' : "";
-    const media = mediaHtml(post);
+    const media = mediaHtml(post, {detail});
     const detailClass = detail ? " space-post-detail" : "";
     const textOnlyClass = detail && !media ? " space-post-detail-text-only" : "";
     return `
@@ -1049,6 +1073,21 @@
     const imageButton = event.target.closest("[data-space-image-open]");
     if (imageButton) {
       event.preventDefault();
+      const gallery = imageButton.closest(".space-media-gallery");
+      const thumbIndex = imageButton.dataset.spaceGallerySelect;
+      if (gallery && thumbIndex != null) {
+        const main = gallery.querySelector(".space-media-main");
+        const mainImage = main?.querySelector("img");
+        const thumbImage = imageButton.querySelector("img");
+        if (main && mainImage && thumbImage) {
+          mainImage.src = thumbImage.src;
+          mainImage.alt = thumbImage.alt;
+          main.dataset.imageUrl = imageButton.dataset.imageUrl;
+          main.dataset.imageLabel = imageButton.dataset.imageLabel;
+        }
+        gallery.querySelectorAll(".space-media-thumb").forEach(node =>
+          node.classList.toggle("is-selected", node === imageButton));
+      }
       openLightbox(imageButton);
       return;
     }

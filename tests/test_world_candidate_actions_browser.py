@@ -332,3 +332,80 @@ def test_hidden_chat_poll_resumes_and_older_active_guest_remains_findable(page,l
     repo.append_open_message(old,'CHARACTER','回到页面后仍能收到回答。',datetime.now(timezone.utc))
     page.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>false})")
     expect(page.locator('[data-world-messages]')).to_contain_text('回到页面后仍能收到回答。')
+
+
+@pytest.mark.parametrize("width,height", [(1440, 900), (390, 844)])
+def test_world_long_personality_records_visual_evidence(page, live_world_candidates, monkeypatch, width, height):
+    """Record actual long-content layout; functional success is not visual PASS."""
+    import hashlib
+    import json
+    from playwright.sync_api import expect
+    from character_memory.persona_builder import PersonaDraft
+    from test_mobile_views_playwright import ROOT, _git_commit, _record_visual, _visual_run_dir
+
+    base, ids, repository, access, created_profiles = live_world_candidates
+    candidate_id = ids["dismiss"]
+    traits = [
+        "她习惯先听完别人描述遇到的困难，再把零散线索写在随身的小本子上。面对陌生人时语速不快，熟悉以后会认真解释自己的想法，也愿意承认记忆不完整的地方。她喜欢把复杂的事情拆成几个能实际尝试的小步骤，偶尔会因为研究一个不起眼的细节而忘记时间。",
+        "谈到修理旧物时，她会从物件留下的磨损与使用痕迹讲起，而不是急着给出标准答案。遇到没有把握的问题会先查清楚，也会直接说明哪些判断只是暂时的推测。她珍惜别人认真投入的兴趣，愿意陪对方把一个尚未成形的想法慢慢讲明白，但不会为了活跃气氛而强行接话。",
+        "面对分歧，她倾向于说明具体理由，确认双方是否在讨论同一个问题，再决定哪些地方可以继续合作。她不把沉默当作疏远，也不要求刚认识的人立即分享私人经历。关系变熟以后，她会记住对方提过的小事，在合适的时候自然提起，同时保留各自独处与改变主意的空间。",
+    ]
+    candidate = repository.get_candidate(candidate_id)
+    draft = PersonaDraft.model_validate({**candidate["draft"], "personality": traits}).model_dump(mode="json")
+    # This is the fixture-owned temporary DB. Its last-created candidate is
+    # already first in the production created_at/id ordering; no HTTP is mocked.
+    with repository.store.transaction():
+        repository.store.conn.execute("UPDATE encounter_candidates SET draft_json=? WHERE id=?", (json.dumps(draft, ensure_ascii=False), candidate_id))
+    assert repository.list_candidates(view="today")[0]["id"] == candidate_id
+    model_calls = []
+    def forbid_model():
+        model_calls.append("require_bundle")
+        raise AssertionError("Visual evidence must not invoke a model")
+    monkeypatch.setattr(access, "require_bundle", forbid_model)
+    requests = []
+    page.on("request", lambda request: requests.append((request.method, request.url)))
+    page.set_viewport_size({"width": width, "height": height})
+    page.goto(base + "/?view=world", wait_until="domcontentloaded")
+    page.wait_for_function("document.body.dataset.cmReady === 'true'")
+    card = page.locator(f'[data-world-cards] [data-encounter-id="{candidate_id}"]')
+    expect(card).to_be_visible()
+    expect(card.locator(".world-traits span")).to_have_text(traits)
+    response = page.request.get(base + "/v1/encounters?limit=50")
+    assert response.ok
+    returned = next(item for item in response.json()["encounters"] if item["id"] == candidate_id)
+    assert returned["draft"]["personality"] == traits
+    page.evaluate("async () => {await document.fonts.ready; await new Promise(requestAnimationFrame);}")
+    metrics = card.evaluate("""card => {
+      const rect = node => {const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,top:r.top,bottom:r.bottom};};
+      const traits=card.querySelector('.world-traits');
+      const cta=card.querySelector('[data-encounter-chat]');
+      const ctaRect=cta.getBoundingClientRect();
+      return {
+        viewport:{width:innerWidth,height:innerHeight,scrollY},
+        card:rect(card),trait_block:rect(traits),
+        traits:[...traits.children].map(node=>({text:node.textContent,characters:[...node.textContent].length,fontSize:getComputedStyle(node).fontSize,lineHeight:getComputedStyle(node).lineHeight,rect:rect(node)})),
+        primary_cta:{text:cta.textContent,rect:rect(cta),fully_in_viewport:ctaRect.top>=0&&ctaRect.bottom<=innerHeight&&ctaRect.left>=0&&ctaRect.right<=innerWidth,intersects_viewport:ctaRect.bottom>0&&ctaRect.top<innerHeight},
+        document_scroll_width:document.documentElement.scrollWidth
+      };
+    }""")
+    assert metrics["document_scroll_width"] <= width
+    assert not model_calls
+    assert created_profiles == []
+    assert repository.list_messages(candidate_id) == []
+    assert not [url for method, url in requests if method == "POST" and "/v1/encounters" in url]
+    assert page.request.get(base + "/health").json()["runtime_loaded"] is False
+    sources = ("src/character_memory/web/world_v2.js", "src/character_memory/web/world_v2.css", "src/character_memory/web/frontend_v2.css")
+    scene = f"world-long-personality-{width}x{height}"
+    _record_visual(page, scene, sources)
+    run_dir = _visual_run_dir()
+    full_screenshot = run_dir / f"{scene}-full.png"
+    page.screenshot(path=str(full_screenshot), full_page=True, animations="disabled")
+    metrics.update({
+        "schema_version": 1, "git_commit": _git_commit(), "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "source_files_sha256": {path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in sources},
+        "fixture": "live_world_candidates / isolated_app; generated test prose only; temporary SQLite; no formal user text or portrait/model/message/accept execution",
+        "model_calls": model_calls, "runtime_loaded": False, "visual_acceptance": "NOT_ASSESSED; evidence only; human design approval remains separate",
+        "screenshot": f"{scene}.png", "full_screenshot": full_screenshot.name,
+        "measurement_policy": "Record actual values only. No minimum font size or first-viewport CTA requirement is asserted."
+    })
+    (run_dir / f"{scene}.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

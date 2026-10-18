@@ -424,7 +424,25 @@ def attach_space_routes(app):
             asset = access.read_store.get_media_asset(media_id)
             if asset is None or access.media_storage.asset_path(asset) is None:
                 raise HTTPException(status_code=400, detail=f"media not found: {media_id}")
+            # A public post's media are read as the author's expression. Borrowing
+            # another character's asset would publish their material under this
+            # character's name, so ownership is part of the post contract.
+            if asset.character_id != req.character_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"media {media_id} belongs to another character",
+                )
             relations.append(relation_for_asset(asset))
+
+        # ``source_event_id`` is rendered as auditable provenance. An arbitrary
+        # or foreign event id would make the post claim a history it never had.
+        if req.source_event_id is not None:
+            source_event = access.read_store.get_event(int(req.source_event_id))
+            if source_event is None or source_event.character_id != req.character_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="source_event_id must reference one of the character's events",
+                )
 
         repository = repo()
         now = datetime.now().astimezone()

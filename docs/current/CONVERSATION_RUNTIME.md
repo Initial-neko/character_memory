@@ -205,7 +205,7 @@ Research 负责群体事实及初始关系；新角色随后复用 `PersonaBuild
 
 READY build 是可跨请求保留的 research 快照，不是提交时的角色注册表快照。再次打开 AI 建群会恢复最近一条 READY / FAILED build；服务重启时遗留的 BUILDING 会转成可重试的 FAILED，而不是永久卡在整理中。confirm 会重新按当前 active Character 匹配每位成员；research 后被删除/归档的旧 ID 不会写进新群，期间新建的同名 active Character 可以直接复用。同一 build 的重复/并发 confirm 只提交一次；成功 re-key 到真实 group id 后，原 build id 仍作为幂等别名接受响应重试。批量容量先用于确认页预测，真正创建每个 Character 时仍在共享 registry lock 下重查硬上限，防止头像/声音 onboarding 释放锁期间有其它创建插入。新角色的 `creation.json.group_id` 在真实 GroupConversation 创建后改写为最终 group id，不保留已经被 re-key 掉的临时 build id。
 
-已完成激活的 build 会通过 durable alias 识别重复确认，同进程并发确认由 per-build lock 串行化。当前仍有一个未覆盖的进程中断窗口：确认先逐位保存人物并创建真实群，最后才激活 build；若在真实群提交后、build 激活前进程突然退出，build 仍为 READY，启动时只恢复 BUILDING research 的逻辑不会认领该群。已通过离线进程终止实测，`reuse_existing=false` 的温暖异世界模板再次确认会创建另一套新人物和群。该限制不能视为已满足跨重启确认恢复验收；Recall、人物及群的既有事实不应以清理重复产物为由自动删除。
+已完成激活的 build 会通过 durable alias 识别重复确认，同进程并发确认由 per-build lock 串行化。确认过程中创建的真实群在激活前就写入 build 的 durable alias，`reuse_existing=false` 的人物使用由 build id 与成员 index 推导的稳定身份；若进程在群提交后、build 激活前退出，重启后的再次确认会复用该群和已写入的人物，然后完成激活，而不是创建第二套人物与群。中途只写入部分人物时，重试补齐缺失成员。既有 Recall、人物和群的事实不会因恢复而被自动删除。
 
 可选 `use_voice_design=true` 只在用户显式勾选后生效。它要求用户已经手动启动 Qwen3 VoiceDesign sidecar；群聊和 Character 核心 commit 完成后，后台才按角色 identity/personality/speech style 逐个尝试 VoiceDesign + freeze。VoiceDesign 未启动、不可用或单个角色生成失败都只记日志并保留现有默认/回退 voice，绝不回滚 Character 或 Group。
 

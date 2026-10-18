@@ -58,8 +58,6 @@ def test_uninterrupted_confirm_is_idempotent_across_recomposition(tmp_path):
     (evidence_path() / "normal-control.json").write_text(json.dumps({"status": "PASS", "characters_including_seed": 5, "groups": 1}), encoding="utf-8")
 
 
-@pytest.mark.xfail(strict=True, raises=KnownConfirmRecoveryDuplication,
-    reason="Known crash gap before durable ensemble activate duplicates fresh people/groups")
 def test_interrupted_confirm_preserves_one_people_set_and_one_group(tmp_path):
     seed = tmp_path / "personas" / "seed" / "persona.yaml"
     seed.parent.mkdir(parents=True)

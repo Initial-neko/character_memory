@@ -305,3 +305,48 @@ def test_older_direct_history_cannot_repaint_after_character_switch(page, live_l
         raise StaleHistoryRender("Late older-history cleanup rendered the previous person under the current identity")
     expect(page.locator("#chat")).to_contain_text("History-B-current", timeout=1000)
     expect(page.locator("#chat")).not_to_contain_text("History-A-")
+
+
+def test_late_direct_history_cannot_announce_a_previous_switch(page, live_life):
+    """A switch whose history was overtaken must not connect or emit for its id."""
+
+    from urllib.parse import parse_qs, urlsplit
+    from playwright.sync_api import expect
+
+    base, first, _, _, access = live_life
+    second = next(p["id"] for p in access.character_profiles() if p["id"] != first)
+    page.goto(base + "/")
+    page.wait_for_function("document.body.dataset.cmReady === 'true'")
+    page.evaluate("async id => { await CM.switchCharacter(id); }", first)
+    expect(page.locator("#chat")).to_contain_text("浏览器原始事实")
+    page.evaluate("""() => {
+      window.switchEvents = [];
+      CM.on("conversationChanged", payload => window.switchEvents.push(payload));
+    }""")
+
+    held = []
+
+    def hold(route):
+        query = parse_qs(urlsplit(route.request.url).query)
+        if query.get("character_id") == [second] and "before_id" not in query and not held:
+            held.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/v1/chat/history-page?*", hold)
+    page.evaluate("id => { window.pendingStaleSwitch = CM.switchCharacter(id); }", second)
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(10)
+    assert held
+
+    page.evaluate("async id => { await CM.switchCharacter(id); }", first)
+    expect(page.locator("#chat")).to_contain_text("浏览器原始事实")
+    held.pop().continue_()
+    page.evaluate("async () => { await window.pendingStaleSwitch; }")
+
+    assert page.evaluate("CM.state.characterId") == first
+    assert page.evaluate("window.switchEvents") == [{"type": "DIRECT", "characterId": first}]
+    stream_url = page.evaluate("CM.state.directStream?.url || ''")
+    assert first in stream_url and second not in stream_url

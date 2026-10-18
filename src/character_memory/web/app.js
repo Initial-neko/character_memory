@@ -510,6 +510,9 @@
     CM.renderCharacterList();
     CM.dom.chat.innerHTML = '<div class="empty">正在加载聊天记录…</div>';
     await CM.loadDirectHistory();
+    // The user may have switched again while this history page was in flight.
+    // Only the view that owns the current identity may connect and announce it.
+    if (CM.isGroupConversation() || nextId !== CM.state.characterId) return;
     CM.connectDirectStream();
     CM.updateComposerState();
     await CM.emit("conversationChanged", {type:"DIRECT", characterId:nextId});

@@ -29,6 +29,8 @@ class RejectedSaveLeftRuntimeChanged(AssertionError):
     ("invalid_voice", False),
     ("unhealthy_provider", False),
     ("invalid_voice", True),
+    ("configure_response_lost", False),
+    ("configure_response_lost", True),
 ])
 def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, rejection, fail_restore):
     for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL", "GSV_TTS_VOICE"):
@@ -60,8 +62,9 @@ def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, r
     engine._tts = warm_sentinel
     assert engine.status()["ready"] is True
     assert engine.status()["loaded"] is True
-    requested_gpt = new_gpt if rejection == "invalid_voice" else tmp_path / "missing.ckpt"
-    requested = {"GSV_TTS_GPT_MODEL": str(requested_gpt), "tts_voice": "missing-voice"}
+    requested_gpt = tmp_path / "missing.ckpt" if rejection == "unhealthy_provider" else new_gpt
+    requested = {"GSV_TTS_GPT_MODEL": str(requested_gpt),
+                 "tts_voice": "murasame" if rejection == "configure_response_lost" else "missing-voice"}
     calls = []
 
     with TestClient(create_gsv_tts_app(runtime=engine)) as sidecar:
@@ -78,6 +81,11 @@ def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, r
                     raise httpx.ConnectError("restore unavailable",
                                              request=httpx.Request("POST", url))
                 reply = sidecar.post(urlsplit(url).path, json=kwargs.get("json"))
+                if rejection == "configure_response_lost" and len(calls) == 1:
+                    assert reply.status_code == 200
+                    assert engine.gpt_model == str(new_gpt)
+                    raise httpx.ReadTimeout("configure applied; response lost",
+                                            request=httpx.Request("POST", url))
                 return httpx.Response(reply.status_code, content=reply.content,
                                       request=httpx.Request("POST", url))
 
@@ -91,6 +99,12 @@ def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, r
         assert response.status_code == 500, response.text
         assert "恢复 GSV 运行态失败" in response.json()["detail"]
         assert "restore unavailable" in response.json()["detail"]
+    elif rejection == "configure_response_lost":
+        assert response.status_code == 500, response.text
+        assert "configure applied; response lost" in response.json()["detail"]
+        assert len(calls) == 2
+        assert calls[1]["json"]["gpt_model"] == str(old_gpt)
+        assert calls[1]["json"]["preload"] is False
     else:
         assert response.status_code == 400, response.text
         if rejection == "invalid_voice":
@@ -121,4 +135,4 @@ def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, r
         json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
     if not fail_restore and engine.gpt_model != str(old_gpt):
         raise RejectedSaveLeftRuntimeChanged(
-            f"PATCH 400 left disk=A but sidecar=B ({rejection}); configure calls={len(calls)}")
+            f"Rejected save left disk=A but sidecar=B ({rejection}); configure calls={len(calls)}")

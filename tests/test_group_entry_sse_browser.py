@@ -163,3 +163,65 @@ def test_late_group_entry_preserves_current_room_subscription(page, live_life, t
     (out / f"group-entry-sse-{width}.json").write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
     if stale:
         raise StaleGroupSubscription("Late group entry replaced the current room's native SSE subscription")
+
+
+@pytest.mark.parametrize("width", [1440, 390])
+def test_group_reentry_rejects_stale_initial_history(page, live_life, width):
+    """A -> B -> A keeps the group id; the old A page must not replace the new one."""
+    from playwright.sync_api import expect
+    from character_memory.group_store import GroupEvent, GroupRepository
+
+    base, character, _, store, access = live_life
+    repo = GroupRepository(store)
+    members = [p["id"] for p in access.character_profiles()]
+    group_a = repo.create_group("AUDIT A reentry", members, datetime.now(timezone.utc))
+    group_b = repo.create_group("AUDIT B reentry", members, datetime.now(timezone.utc))
+
+    def append(group, content):
+        return repo.append_event(GroupEvent(
+            conversation_id=group.id, turn_id=content, actor_type="CHARACTER", actor_id=character,
+            event_type="CHARACTER_MESSAGE", event_time=datetime.now(timezone.utc), content=content,
+            metadata={"action": "MESSAGE"}))
+
+    append(group_a, "AUDIT A old line")
+    page.set_viewport_size({"width": width, "height": 960 if width == 1440 else 844})
+    page.goto(base + "/")
+    page.wait_for_function("document.body.dataset.cmReady === 'true'")
+    stale = page.request.get(base + f"/v1/groups/{group_a.id}/history?limit=50").json()
+    assert any(m["content"] == "AUDIT A old line" for m in stale["messages"])
+    # Committed after the captured page, so the second A entry must display it.
+    append(group_a, "AUDIT A new line")
+    page.evaluate("""() => {
+      window.__groupEntryRenders=[];
+      const chat=document.querySelector('.chat');
+      new MutationObserver(() => window.__groupEntryRenders.push(chat.innerText))
+        .observe(chat,{childList:true,subtree:true,characterData:true});
+    }""")
+    held = []
+
+    def route_history(route):
+        if not held:
+            held.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/v1/groups/" + group_a.id + "/history?*", route_history)
+    page.evaluate("id => { CM.features.groups.enter(id); }", group_a.id)
+    deadline = time.monotonic() + 5
+    while not held and time.monotonic() < deadline:
+        page.wait_for_timeout(10)
+    assert held
+    if width == 390:
+        page.locator("#sidebarMobileButton").click()
+    page.locator(f'[data-group="{group_b.id}"]').click()
+    expect(page.locator("#characterName")).to_have_text(group_b.name)
+    # Re-enter A: this second history request is served normally.
+    page.evaluate("id => { CM.features.groups.enter(id); }", group_a.id)
+    expect(page.locator(".chat")).to_contain_text("AUDIT A new line")
+    # Release the first, now-stale A page.
+    held.pop().fulfill(status=200, content_type="application/json", body=json.dumps(stale))
+    page.wait_for_timeout(400)
+    renders = page.evaluate("window.__groupEntryRenders")
+    bad = [text for text in renders if "AUDIT A old line" in text and "AUDIT A new line" not in text]
+    expect(page.locator(".chat")).to_contain_text("AUDIT A new line")
+    assert not bad, bad[:2]

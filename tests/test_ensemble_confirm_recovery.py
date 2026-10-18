@@ -14,6 +14,8 @@ from character_memory.config import discover_character_profiles
 from character_memory.ensemble_builder import EnsembleBuilderService, EnsembleRepository
 from character_memory.storage.sqlite import SQLiteStore
 
+ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "pyproject.toml").is_file())
+
 
 def compose(root):
     settings = SimpleNamespace(persona_path=str(root / "personas" / "seed" / "persona.yaml"), db_path=str(root / "evidence.db"))
@@ -107,11 +109,51 @@ def test_interrupted_confirm_preserves_one_people_set_and_one_group(tmp_path):
     assert len(after["groups"]) == 1
 
 
+def test_interrupted_confirm_does_not_recount_created_members(tmp_path):
+    """A retry must not charge already-created members against capacity twice."""
+
+    personas = tmp_path / "personas"
+    seed = personas / "seed" / "persona.yaml"
+    seed.parent.mkdir(parents=True)
+    seed.write_text("id: seed\nname: Seed\nidentity: Observer\n", encoding="utf-8")
+    for index in range(13):
+        folder = personas / f"extra{index:02d}"
+        folder.mkdir(parents=True)
+        (folder / "persona.yaml").write_text(
+            f"id: extra{index:02d}\nname: Extra {index}\nidentity: Extra observer\n",
+            encoding="utf-8",
+        )
+
+    store, settings, repository, service = compose(tmp_path)
+    build = service.prepare_template("warm-isekai")
+    build_id = build["group_id"]
+    # 14 active characters (seed + 13 extras); four more stay under the hard
+    # 20 cap. The retry must not count those same four again and exceed it.
+    assert len(discover_character_profiles(settings)) == 14
+    store.close()
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src")
+    child = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--crash", str(tmp_path), build_id],
+        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    assert child.returncode == 77, (child.returncode, child.stdout, child.stderr)
+
+    store, settings, repository, service = compose(tmp_path)
+    repository.recover_interrupted()
+    result = service.confirm(build_id, [0, 1, 2, 3], confirm_over_soft_limit=True)
+    assert result["status"] == "ACTIVE"
+    assert len(discover_character_profiles(settings)) == 18
+    assert len(service.groups.list_groups()) == 1
+    store.close()
+
+
 if __name__ == "__main__":
     root, build_id = Path(sys.argv[2]), sys.argv[3]
     store, settings, repository, service = compose(root)
     # Crash after actual four persona writes and group commit, immediately before
     # the production activation/alias commit. os._exit skips exception rollback.
     repository.activate = lambda *args, **kwargs: os._exit(77)
-    service.confirm(build_id, [0, 1, 2, 3])
+    service.confirm(build_id, [0, 1, 2, 3], confirm_over_soft_limit=True)
 

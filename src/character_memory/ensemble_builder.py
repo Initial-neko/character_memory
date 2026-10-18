@@ -1043,7 +1043,26 @@ Content:
         if len(selected) > MAX_GROUP_CHARACTERS:
             raise ValueError(f"群聊最多选择 {MAX_GROUP_CHARACTERS} 位角色")
 
-        new_items = [item for item in selected if not item.get("existing_character_id")]
+        profiles_reader = getattr(self.access, "character_profiles", None)
+        known_ids = {
+            str(profile.get("id"))
+            for profile in profiles_reader()
+        } if callable(profiles_reader) else set()
+
+        def requested_character_id(item: dict[str, Any]) -> str:
+            # A retry after an interrupted confirmation reuses the identity the
+            # first attempt wrote for this durable build. Those members already
+            # exist, so they must not be charged against capacity a second time.
+            if item.get("reuse_existing") is not False:
+                return ""
+            return f"character-{group_id.rsplit('-', 1)[-1]}-{int(item.get('index', -1))}"
+
+        new_items = [
+            item
+            for item in selected
+            if not item.get("existing_character_id")
+            and requested_character_id(item) not in known_ids
+        ]
         checker = getattr(self.access, "check_character_capacity", None)
         if not callable(checker):
             raise RuntimeError("character capacity checker is unavailable")
@@ -1063,11 +1082,6 @@ Content:
         voice_design_items: list[tuple[str, PersonaDraft]] = []
         legacy_group = self.groups.get_group(group_id, include_archived=True)
         recorded_group_id = self.repository.recorded_group(group_id)
-        profiles_reader = getattr(self.access, "character_profiles", None)
-        known_ids = {
-            str(profile.get("id"))
-            for profile in profiles_reader()
-        } if callable(profiles_reader) else set()
         created_group_id: str | None = None
         active_group_id = group_id
         try:
@@ -1080,10 +1094,7 @@ Content:
                 # A retry after an interrupted confirmation must reuse the
                 # identity the first attempt wrote for this durable build,
                 # rather than inventing a second set of people.
-                requested_id = (
-                    f"character-{group_id.rsplit('-', 1)[-1]}-{int(item.get('index', -1))}"
-                    if item.get("reuse_existing") is False else ""
-                )
+                requested_id = requested_character_id(item)
                 if requested_id and requested_id in known_ids:
                     member_ids.append(requested_id)
                     build_character_ids.append(requested_id)

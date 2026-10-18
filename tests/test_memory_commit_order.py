@@ -1,7 +1,7 @@
-"""Offline evidence for source-time-filtered Memory commit deduplication.
+"""Offline regressions for Memory commit deduplication.
 
-Two strict XFAILs describe an unfixed defect. An XPASS requires review and
-removal of the marker; it does not silently count as accepted behavior.
+Exact and near-duplicate candidates committed from different source event
+times must still resolve to one active memory at the durable write boundary.
 """
 from __future__ import annotations
 

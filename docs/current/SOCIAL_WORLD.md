@@ -590,7 +590,7 @@ Archiving means "stop participating in new world activity", not "erase this pers
 - restoring the character makes it eligible for new Space activity from that point forward;
 - posts missed while archived are not replayed automatically.
 
-Known implementation gap: the two queued Space comment-reply paths check active status before PersonRuntime evaluation, but do not yet enforce this invariant again when publishing the result. If archiving completes while that evaluation is in flight, an ordinary reply or explicitly mentioned reply can still add a public comment and its user notification. Targets archived before the queue is drained are skipped. This publication race remains a correctness issue.
+Both queued Space comment-reply paths re-check active status at the final publish boundary under the same character write lock that archive/restore takes. A decision whose PersonRuntime evaluation finishes after archiving therefore cannot add a public comment or its user notification; the pending decision is dropped and the existing comment history is unchanged. Targets archived before the queue is drained are skipped at the earlier check.
 
 ### Interaction limits
 

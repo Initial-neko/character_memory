@@ -4,6 +4,7 @@ from character_memory.runtime.social_prompts import space_post_prompt, space_app
 
 from collections import deque
 from datetime import datetime, timedelta
+import contextlib
 import hashlib
 import json
 import logging
@@ -190,6 +191,16 @@ class SpaceAutonomyService:
         if "archived_at" in profile:
             raise ValueError("archived characters cannot participate in autonomous Space")
         return profile
+
+    def _archive_guard(self):
+        """Serialize the final public write with character archive/restore.
+
+        The model call runs outside this lock. The guard exists so the active
+        re-check and the comment/notification write cannot straddle an archive
+        that completed while the decision was in flight.
+        """
+        lock = getattr(self.access, "character_write_lock", None)
+        return lock if lock is not None else contextlib.nullcontext()
 
     @staticmethod
     def _name(profile: dict) -> str:
@@ -811,16 +822,21 @@ Sources:
                 continue
 
             try:
-                reply = self.repository.add_comment(
-                    post.id,
-                    target_id,
-                    text_action.message if text_action is not None else "",
-                    now,
-                    reply_to_comment_id=source.id,
-                    sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
-                    mentions_user=text_action.mentions_user if text_action is not None else False,
-                )
-            except ValueError:
+                with self._archive_guard():
+                    # The decision ran outside the lock. Re-check the lifecycle
+                    # under the same lock archive/restore takes so the pending
+                    # comment and its notification cannot land after archive.
+                    self._require_active(target_id)
+                    reply = self.repository.add_comment(
+                        post.id,
+                        target_id,
+                        text_action.message if text_action is not None else "",
+                        now,
+                        reply_to_comment_id=source.id,
+                        sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
+                        mentions_user=text_action.mentions_user if text_action is not None else False,
+                    )
+            except (KeyError, ValueError):
                 logger.info(
                     "space.user_comment_reply_skipped post=%s target=%s",
                     post.id,
@@ -924,16 +940,18 @@ Sources:
                 break
 
             try:
-                reply = self.repository.add_comment(
-                    post.id,
-                    target_id,
-                    text_action.message if text_action is not None else "",
-                    now,
-                    reply_to_comment_id=source.id,
-                    sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
-                    mentions_user=text_action.mentions_user if text_action is not None else False,
-                )
-            except ValueError:
+                with self._archive_guard():
+                    self._require_active(target_id)
+                    reply = self.repository.add_comment(
+                        post.id,
+                        target_id,
+                        text_action.message if text_action is not None else "",
+                        now,
+                        reply_to_comment_id=source.id,
+                        sticker_id=sticker_action.sticker_id if sticker_action is not None else None,
+                        mentions_user=text_action.mentions_user if text_action is not None else False,
+                    )
+            except (KeyError, ValueError):
                 logger.info(
                     "space.thread_reply skipped post=%s target=%s round=%s",
                     post.id,

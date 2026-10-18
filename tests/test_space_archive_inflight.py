@@ -49,7 +49,7 @@ class LateArchivedSpaceReply(AssertionError):
 
 
 @pytest.mark.parametrize("path", ["normal", "explicit_mention"])
-@pytest.mark.parametrize("phase", ["active", "archive_before", pytest.param("archive_during", marks=pytest.mark.xfail(strict=True, raises=LateArchivedSpaceReply, reason="Space queued replies publish after archive succeeds; Refs #350; remove mark after repair"))])
+@pytest.mark.parametrize("phase", ["active", "archive_before", "archive_during"])
 def test_archived_role_cannot_publish_late_space_reply(tmp_path, monkeypatch, path, phase):
     network_attempts = []
     def deny_network(sock, address):

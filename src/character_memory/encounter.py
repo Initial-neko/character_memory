@@ -719,9 +719,13 @@ class EncounterScheduler:
                     break
                 candidate_id, queued_at = self._pending_replies.popleft()
                 self._in_flight.add(candidate_id)
-            latest = self.repository.list_messages(candidate_id, limit=1)
-            reply_line_id = latest[-1]["id"] if latest else None
+            reply_line_id = None
             try:
+                # Keep the ownership snapshot inside the try: a transient read
+                # failure must still reach the finally that clears in-flight,
+                # or the candidate would never be enqueued again.
+                latest = self.repository.list_messages(candidate_id, limit=1)
+                reply_line_id = latest[-1]["id"] if latest else None
                 result = self.service.reply(candidate_id)
             except Exception:
                 # The person's message is already durable, so a failed reply must

@@ -149,3 +149,37 @@ def test_stale_failure_does_not_poison_newer_line(tmp_path):
         raise ConfirmedStaleFailure('stale U1 failure blocks U2 recovery')
     assert observed['error'] == ''
     assert observed['recovered'] == 1
+
+
+def test_transient_read_failure_clears_in_flight(tmp_path):
+    """A read failure before the model call must not strand the candidate."""
+    store = SQLiteStore(str(tmp_path / 'in-flight.db'))
+    access = SimpleNamespace(read_store=store, settings=SimpleNamespace(api_key=''),
+        character_profiles=lambda: [],
+        require_bundle=lambda: SimpleNamespace(model=SimpleNamespace()))
+    app = FastAPI()
+    app.state.background_services = BackgroundServices()
+    app.state.character_memory = access
+    attach_encounter_routes(app)
+    repo, scheduler = access.encounter_repository, access.encounter_scheduler
+    candidate = repo.create_candidate(source_type='GENERATED', draft={'name': 'Audit'},
+        encounter_hook='fixture', opening_message='hello', now=datetime.now(timezone.utc))
+    try:
+        scheduler.enqueue_reply(candidate['id'])
+        original = repo.list_messages
+        calls = []
+
+        def flaky(candidate_id, limit=1):
+            calls.append(candidate_id)
+            if len(calls) == 1:
+                raise RuntimeError('transient read failure')
+            return original(candidate_id, limit=limit)
+
+        repo.list_messages = flaky
+        assert scheduler.drain_pending_replies(limit=1) == []
+        assert candidate['id'] not in scheduler._in_flight
+        assert scheduler.pending_reply_count() == 0
+        # The durable line is still recoverable rather than stuck forever.
+        assert scheduler.enqueue_reply(candidate['id']) is True
+    finally:
+        store.close()

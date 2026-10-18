@@ -149,11 +149,47 @@ def test_interrupted_confirm_does_not_recount_created_members(tmp_path):
     store.close()
 
 
+def test_crash_inside_group_creation_leaves_no_orphan_group(tmp_path):
+    """The group and its build alias must commit together or not at all."""
+
+    seed = tmp_path / "personas" / "seed" / "persona.yaml"
+    seed.parent.mkdir(parents=True)
+    seed.write_text("id: seed\nname: Seed\nidentity: Observer\n", encoding="utf-8")
+    store, settings, repository, service = compose(tmp_path)
+    build = service.prepare_template("warm-isekai")
+    build_id = build["group_id"]
+    store.close()
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src")
+    child = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--crash-record-group", str(tmp_path), build_id],
+        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    assert child.returncode == 77, (child.returncode, child.stdout, child.stderr)
+
+    store, settings, repository, service = compose(tmp_path)
+    # The crash happened before the transaction committed, so there must be no
+    # visible group and no alias; a retry creates exactly one of each.
+    assert service.groups.list_groups() == []
+    repository.recover_interrupted()
+    result = service.confirm(build_id, [0, 1, 2, 3], confirm_over_soft_limit=True)
+    assert result["status"] == "ACTIVE"
+    assert len(discover_character_profiles(settings)) == 5
+    assert len(service.groups.list_groups()) == 1
+    store.close()
+
+
 if __name__ == "__main__":
-    root, build_id = Path(sys.argv[2]), sys.argv[3]
+    mode, root, build_id = sys.argv[1], Path(sys.argv[2]), sys.argv[3]
     store, settings, repository, service = compose(root)
-    # Crash after actual four persona writes and group commit, immediately before
-    # the production activation/alias commit. os._exit skips exception rollback.
-    repository.activate = lambda *args, **kwargs: os._exit(77)
+    if mode == "--crash-record-group":
+        # Crash inside create_group's transaction, after the group rows are
+        # written but before the alias is persisted.
+        repository.record_group = lambda *args, **kwargs: os._exit(77)
+    else:
+        # Crash after the group+alias commit, immediately before activation.
+        # os._exit skips exception rollback.
+        repository.activate = lambda *args, **kwargs: os._exit(77)
     service.confirm(build_id, [0, 1, 2, 3], confirm_over_soft_limit=True)
 

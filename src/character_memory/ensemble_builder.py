@@ -1139,10 +1139,14 @@ Content:
                 self.groups.rename_group(group_id, build["group_name"], now)
                 self.groups.replace_members(group_id, member_ids, now)
             else:
-                group = self.groups.create_group(build["group_name"], member_ids, now)
+                group = self.groups.create_group(
+                    build["group_name"],
+                    member_ids,
+                    now,
+                    on_created=lambda created_id: self.repository.record_group(group_id, created_id),
+                )
                 active_group_id = group.id
                 created_group_id = group.id
-                self.repository.record_group(group_id, active_group_id)
             self._bind_created_characters_to_group(build_character_ids, active_group_id)
             public_participants = [
                 {

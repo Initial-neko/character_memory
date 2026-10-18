@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -244,7 +244,14 @@ class GroupRepository:
             archived_at=parse_datetime(archived_at) if archived_at else None,
         )
 
-    def create_group(self, name: str, member_ids: list[str], now: datetime) -> GroupConversation:
+    def create_group(
+        self,
+        name: str,
+        member_ids: list[str],
+        now: datetime,
+        *,
+        on_created: Callable[[str], None] | None = None,
+    ) -> GroupConversation:
         conversation_id = f"group-{uuid4().hex[:12]}"
         cleaned_name = name.strip() or "新群聊"
         stamp = epoch_us(now)
@@ -262,6 +269,10 @@ class GroupRepository:
                     "INSERT INTO conversation_members(conversation_id,actor_type,actor_id,position,joined_at,joined_at_epoch) VALUES(?,?,?,?,?,?)",
                     (conversation_id, "CHARACTER", character_id, position, now.isoformat(), stamp),
                 )
+            if on_created is not None:
+                # The caller may persist its own recovery pointer in the same
+                # transaction, so a crash can never leave a group without one.
+                on_created(conversation_id)
         return GroupConversation(
             id=conversation_id,
             name=cleaned_name,

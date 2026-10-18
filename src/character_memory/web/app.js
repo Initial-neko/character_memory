@@ -452,31 +452,43 @@
 
   CM.loadDirectHistory = async ({beforeId = null, appendOlder = false} = {}) => {
     const requested = CM.state.characterId;
+    // Capture the view instance, not just the id: A -> B -> A creates a new
+    // history object, so an id comparison alone would accept A's stale page.
+    const history = CM.state.directHistory;
     const params = new URLSearchParams({character_id:requested, limit:"50"});
     if (beforeId != null) params.set("before_id", String(beforeId));
     const data = await CM.api(`/v1/chat/history-page?${params.toString()}`);
-    if (CM.isGroupConversation() || requested !== CM.state.characterId) return;
+    if (CM.isGroupConversation() || requested !== CM.state.characterId || history !== CM.state.directHistory) return;
     const incoming = data.messages || [];
     if (appendOlder) {
-      const existing = new Set(CM.state.directHistory.messages.map(item => item.id));
-      CM.state.directHistory.messages = [...incoming.filter(item => !existing.has(item.id)), ...CM.state.directHistory.messages];
-    } else CM.state.directHistory.messages = incoming;
-    CM.state.directHistory.hasMore = Boolean(data.has_more);
-    CM.state.directHistory.nextBeforeId = data.next_before_id ?? null;
-    CM.renderHistory(CM.state.directHistory.messages, {preserveScroll:appendOlder});
+      const existing = new Set(history.messages.map(item => item.id));
+      history.messages = [...incoming.filter(item => !existing.has(item.id)), ...history.messages];
+    } else history.messages = incoming;
+    history.hasMore = Boolean(data.has_more);
+    history.nextBeforeId = data.next_before_id ?? null;
+    CM.renderHistory(history.messages, {preserveScroll:appendOlder});
     CM.features.unread?.markRead?.(requested);
     CM.renderCharacterList();
-    await CM.emit("historyLoaded", {type:"DIRECT", characterId:requested, messages:CM.state.directHistory.messages});
+    await CM.emit("historyLoaded", {type:"DIRECT", characterId:requested, messages:history.messages});
   };
 
   CM.loadOlderDirectHistory = async () => {
     const history = CM.state.directHistory;
+    const requested = CM.state.characterId;
     if (CM.isGroupConversation() || history.loadingOlder || !history.hasMore || history.nextBeforeId == null) return;
     history.loadingOlder = true;
     CM.state.lastRenderedSignature = "";
     CM.renderHistory(history.messages, {preserveScroll:true});
     try { await CM.loadDirectHistory({beforeId:history.nextBeforeId, appendOlder:true}); }
-    finally { history.loadingOlder = false; CM.state.lastRenderedSignature = ""; CM.renderHistory(history.messages, {preserveScroll:true}); }
+    finally {
+      // Only the view that started this request may clear the render signature
+      // and repaint. A stale request must not touch the current person's DOM.
+      history.loadingOlder = false;
+      if (history === CM.state.directHistory && requested === CM.state.characterId && !CM.isGroupConversation()) {
+        CM.state.lastRenderedSignature = "";
+        CM.renderHistory(history.messages, {preserveScroll:true});
+      }
+    }
   };
 
   CM.loadHistory = async () => CM.isGroupConversation() ? CM.features.groups?.loadHistory?.() : CM.loadDirectHistory();

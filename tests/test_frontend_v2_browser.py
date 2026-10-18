@@ -229,7 +229,6 @@ class StaleHistoryRender(AssertionError):
     """Only the confirmed cross-person repaint is an expected failure."""
 
 
-@pytest.mark.xfail(strict=True, raises=StaleHistoryRender, reason="Issue #331: late older-history cleanup repaints the previous person; frontend reference pending")
 @pytest.mark.parametrize("width", [1440, 390])
 def test_older_direct_history_cannot_repaint_after_character_switch(page, live_life, width):
     from datetime import datetime, timedelta, timezone

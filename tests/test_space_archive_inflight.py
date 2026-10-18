@@ -137,3 +137,14 @@ def test_archived_role_cannot_publish_late_space_reply(tmp_path, monkeypatch, pa
         assert len(role_comments) == (1 if phase == "active" else 0)
         assert model.calls == (0 if phase == "archive_before" else 1)
 
+
+def test_space_publish_guard_uses_the_production_character_lock(tmp_path, monkeypatch):
+    """The publish re-check must share archive/restore's real lock."""
+    monkeypatch.setenv("CHARACTER_MEMORY_EAGER_WARMUP", "0")
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+    access = app.state.character_memory
+    assert hasattr(access, "character_write_lock")
+    assert access.space_autonomy._archive_guard() is access.character_write_lock
+

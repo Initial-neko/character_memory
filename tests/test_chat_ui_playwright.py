@@ -462,3 +462,49 @@ def test_desktop_call_controls_fit_without_page_overflow(chat, mode, height):
     assert report['actions']['bottom'] <= report['card']['bottom'] <= height, report
     assert report['identityScroll'] <= report['identityClient'] + 1, report
     assert report['track'] == 'none', report
+
+
+def test_composer_enter_waits_for_ime_composition(chat):
+    """An IME-confirming Enter must not send the half-composed message."""
+
+    page = chat
+    requests = []
+    page.on(
+        "request",
+        lambda request: requests.append(request)
+        if "/v1/chat/messages" in request.url
+        else None,
+    )
+
+    input_box = page.locator("#messageInput")
+    draft = "输入法候选确认后再发送"
+    input_box.fill(draft)
+
+    composing = input_box.evaluate(
+        """input => {
+          const event = new KeyboardEvent("keydown", {
+            key: "Enter", bubbles: true, cancelable: true, isComposing: true,
+          });
+          input.dispatchEvent(event);
+          return {prevented: event.defaultPrevented, value: input.value};
+        }"""
+    )
+    legacy_composing = input_box.evaluate(
+        """input => {
+          const event = new KeyboardEvent("keydown", {
+            key: "Enter", keyCode: 229, charCode: 13, bubbles: true, cancelable: true,
+          });
+          input.dispatchEvent(event);
+          return {prevented: event.defaultPrevented, keyCode: event.keyCode, value: input.value};
+        }"""
+    )
+
+    page.wait_for_timeout(300)
+    assert composing == {"prevented": False, "value": draft}
+    assert legacy_composing == {"prevented": False, "keyCode": 229, "value": draft}
+    assert requests == [], "a composing Enter submitted the message"
+
+    input_box.focus()
+    page.keyboard.press("Enter")
+    expect(page.locator(".chat")).to_contain_text("E2E reply: " + draft, timeout=20000)
+    assert len(requests) == 1, "a normal Enter has to submit exactly once"

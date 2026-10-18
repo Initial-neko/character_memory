@@ -833,7 +833,14 @@
       if (trace) CM.showTrace(trace.dataset.trace);
     });
     d.input.addEventListener("input", () => { d.input.style.height = "auto"; d.input.style.height = `${Math.min(d.input.scrollHeight, 150)}px`; });
-    d.input.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); d.composer.requestSubmit(); } });
+    // A composing IME reports the Enter that confirms a candidate as well.
+    // Sending there cuts a Chinese/Japanese word in half, so match the Space
+    // comment composer and ignore both the standard flag and legacy keyCode 229.
+    d.input.addEventListener("keydown", event => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      d.composer.requestSubmit();
+    });
     d.composer.addEventListener("submit", event => { event.preventDefault(); CM.submitCurrentText().catch(error => console.error("submit failed", error)); });
     const updateNow = () => { d.nowText.textContent = new Date().toLocaleString([], {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}); };
     updateNow();

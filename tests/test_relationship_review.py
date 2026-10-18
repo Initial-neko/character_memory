@@ -159,11 +159,11 @@ def test_real_group_turns_retain_peer_messages_actually_seen_by_follower(tmp_pat
     traces = service.repo.list_turn_traces(group.id, first["turn_id"])
     assert all(trace["source_conversation_event_id"] != peer_event.id for trace in traces)
     review = CharacterRelationshipReader(store).review("a", "b", day=NOW.date().isoformat(), offset=0, now=NOW)
-    if not any("recent_group_event_ids" in trace for trace in traces):
-        # This stack is based on #283; #282 supplies real input receipts.
-        assert review["interactions"] == []
-        store.close()
-        pytest.skip("full real Group provenance requires #282 + #283 + #286 integration")
+    # The producer now always records real input receipts. Skipping when the
+    # field is absent would hide a provenance regression behind a green run.
+    assert any("recent_group_event_ids" in trace for trace in traces), (
+        "group traces must record which peer messages the follower actually saw"
+    )
     assert [item["key"] for item in review["interactions"]] == [f"group:{peer_event.id}"]
     for index in range(20):
         service.persist_user_event(group.id, f"无关闲聊 {index}", at=NOW - timedelta(minutes=29 - index))

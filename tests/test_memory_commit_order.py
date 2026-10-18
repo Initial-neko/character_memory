@@ -89,9 +89,7 @@ def _source_identity():
 @pytest.mark.parametrize("near", [False, True], ids=["exact", "near"])
 @pytest.mark.parametrize("delta", [
     pytest.param(0, id="same-event-time"),
-    pytest.param(1, id="different-event-time", marks=pytest.mark.xfail(
-        strict=True, raises=MissingCommitDuplicate,
-        reason="Issue #342: older source time hides an already committed active duplicate")),
+    pytest.param(1, id="different-event-time"),
 ])
 def test_memory_commit_order_current_active_duplicate(tmp_path, monkeypatch, near, delta):
     factory_calls = []

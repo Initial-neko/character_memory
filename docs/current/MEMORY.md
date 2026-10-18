@@ -110,6 +110,8 @@ WRITE
 
 Embedding 与第一轮 exact/near-duplicate 判断在事务外执行，避免远端或本地模型计算占住 SQLite 写锁。真正写入前会在 derived-state 事务内用当前 active Memory 再检查一次；Direct、Group、Space/World 等渠道即使并发形成相同或近似候选，也只有一个可以写入。输掉竞态的候选在 Trace 中记录为 `SKIP_DUPLICATE_AT_COMMIT`，并保留命中的 Memory ID 与 similarity。
 
+当前限制（[Issue #342](https://github.com/Initial-neko/character_memory/issues/342)）：事务内 duplicate 重查仍以来源事件时间为上限。若同一人物的两个渠道来源时间不同，较新来源先提交、较旧来源迟到提交，相同或近似候选可能都写成 active Memory，并在后续 Context 中同时召回。相同来源时间的既有并发用例不触发这个缺口。这是当前未修复的提交去重问题；Context / Recall 的 `event_time <= now` 未来屏障仍然适用。
+
 这些是 Eval baseline，不是永久产品定律。
 
 Trace 记录：

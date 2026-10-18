@@ -138,12 +138,10 @@ def test_current_failure_is_retryable(tmp_path):
     assert result['before_retry']['roles'] == ['USER']
 
 
-@pytest.mark.xfail(strict=True, raises=ConfirmedStaleFailure,
-    reason='confirmed: stale U1 failure owns candidate.error and blocks U2 recovery')
 def test_stale_failure_does_not_poison_newer_line(tmp_path):
     result = exercise(tmp_path,fail=True,newer=True)
     observed = result['before_retry']
-    # XFAIL only this confirmed signature; all harness/control errors fail normally.
+    # A failure that belongs to a superseded line must not rewrite its retry state.
     if (observed['roles'] == ['USER','USER'] and observed['contents'] == ['U1','U2']
         and observed['error'] == '角色暂时没有回应，可以稍后重试。'
         and observed['recovered'] == 0 and observed['pending_count'] == 0

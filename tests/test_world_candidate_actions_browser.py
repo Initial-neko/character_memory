@@ -409,3 +409,78 @@ def test_world_long_personality_records_visual_evidence(page, live_world_candida
         "measurement_policy": "Record actual values only. No minimum font size or first-viewport CTA requirement is asserted."
     })
     (run_dir / f"{scene}.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+
+@pytest.mark.parametrize("width,height", [(1440, 900), (390, 844)])
+def test_world_normal_and_pending_visual_evidence(page, live_world_candidates, monkeypatch, width, height):
+    """Short-trait control for #336 and real pending-chat evidence, not a signoff."""
+    import hashlib
+    import json
+    from pathlib import Path
+    import subprocess
+    from playwright.sync_api import expect
+
+    root = next(parent for parent in Path(__file__).resolve().parents if (parent / "pyproject.toml").is_file())
+    output = Path(os.environ.get("CORE_VISUAL_EVIDENCE_DIR", str(root / "artifacts/core-visual-evidence"))) / "world-normal-control"
+    output.mkdir(parents=True, exist_ok=True)
+    base, ids, repository, access, created_profiles = live_world_candidates
+    model_calls = []
+    def forbid_model():
+        model_calls.append("require_bundle")
+        raise AssertionError("Capture must not initialize a real model")
+    monkeypatch.setattr(access, "require_bundle", forbid_model)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.set_viewport_size({"width": width, "height": height})
+    page.goto(base + "/?view=world", wait_until="domcontentloaded")
+    page.wait_for_function("document.body.dataset.cmReady === 'true'")
+    world = page.locator(".cm-world-page")
+    expect(world).to_be_visible()
+    expect(world.locator("[data-world-cards] [data-encounter-id]")).to_have_count(3)
+    captures = []
+    def capture(state, full=False):
+        page.locator("img").evaluate_all("imgs=>Promise.all(imgs.map(i=>i.decode().catch(()=>{})))")
+        page.evaluate("() => document.fonts.ready")
+        name = f"world-{width}x{height}-{state}.png"
+        image = output / name
+        page.screenshot(path=str(image), full_page=full, animations="disabled")
+        captures.append({"state": state, "path": name, "sha256": hashlib.sha256(image.read_bytes()).hexdigest(), "full_page": full,
+            "at": datetime.now(timezone.utc).isoformat(), "scroll_y": page.evaluate("scrollY"),
+            "horizontal_overflow": page.evaluate("document.documentElement.scrollWidth>innerWidth")})
+    capture("list")
+    capture("list-full", True)
+    card = world.locator(f'[data-encounter-id="{ids["chat"]}"]')
+    card.get_by_role("button", name="打个招呼").click()
+    expect(page.locator("[data-world-detail]")).to_be_visible()
+    form = page.locator("[data-world-composer]")
+    message = "我想听你讲讲修理旧电器的小发现。"
+    form.locator("textarea").fill(message)
+    with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith(f'/v1/encounters/{ids["chat"]}/messages')) as sent:
+        form.get_by_role("button", name="发送").click()
+    assert sent.value.ok and sent.value.json()["reply_pending"] is True
+    expect(page.locator("[data-world-messages]").get_by_text(message, exact=True)).to_be_visible()
+    stored = repository.list_messages(ids["chat"])
+    assert [item["role"] for item in stored] == ["USER"]
+    assert stored[0]["content"] == message
+    page.evaluate("scrollTo(0,0)")
+    capture("pending")
+    capture("pending-full", True)
+    served = {}
+    for name in ("index.html", "world_v2.js", "world_v2.css", "frontend_v2.css", "encounter.js"):
+        response = page.request.get(base + ("/" if name == "index.html" else "/static/" + name))
+        assert response.ok
+        payload = response.body().replace(b"\r\n", b"\n")
+        committed = subprocess.check_output(["git", "show", f"HEAD:src/character_memory/web/{name}"], cwd=root).replace(b"\r\n", b"\n")
+        assert payload == committed, name
+        served[name] = hashlib.sha256(payload).hexdigest()
+    assert errors == [] and model_calls == [] and created_profiles == []
+    assert access.settings.api_key == ""
+    assert page.request.get(base + "/health").json()["runtime_loaded"] is False
+    data = {"checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
+        "runtime_identity": "Existing live_world_candidates/isolated_app: real uvicorn and HTTP/SQLite, temporary personas/config; source bytes verified", "formal_runtime_sha": None,
+        "browser": page.context.browser.version, "viewport": {"width": width, "height": height}, "captures": captures,
+        "served_sha256": served, "model_calls": model_calls, "runtime_loaded": False, "created_profiles": created_profiles, "stored_message_roles": [item["role"] for item in stored],
+        "boundary": "Short-trait fixture candidates with intentionally absent portraits; only real user message accepted/pending. No model response, formal character, image/voice Provider or paid probe.",
+        "reference": "#294 world-visitors.png fixed9b100df8 desktop discovery only; mobile and temporary-chat/pending states not approved", "human_visual_signoff": "PENDING"}
+    (output / f"world-{width}x{height}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

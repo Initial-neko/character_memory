@@ -189,6 +189,8 @@ member C -> ...
 
 `group_character_event` 在每个成员提交后立刻 SSE 推送，不需要等整个群组结束才展示第一条回复。
 
+当前群入口仍有一个未修复的异步所有权限制：进入群 A 的初始历史请求未完成时切换到 B，A 的迟到入口可能关闭 B 的实时订阅并重新订阅 A，而页面身份仍为 B。B 的新消息仍被持久化和发布，但当前页面可能不再实时显示，重新进入 B 或发送消息触发重连后恢复。历史响应自身的过期检查不能保护入口 await 之后的订阅和 conversationChanged 副作用；修复必须覆盖同群重新进入的视图实例。此限制不代表消息丢失，隔离浏览器证据由 Issue #334 跟踪。
+
 ### Ensemble groups（一键建群）
 
 `POST /v1/ensembles` 只创建一个不可见的 `BUILDING` build record，不提前创建真实 GroupConversation；`POST /v1/ensembles/prepare` 是一键入口，会创建 build record 后执行联网 research。失败时 build 保留为可重试状态，不再因为一次 Provider / structured-output 错误把整次输入和进度删掉。兼容的 `/{build_id}/research` 可继续对已有 build 重试资料整理；单个失败成员还可以通过 `/{build_id}/members/{index}/retry` 局部恢复。

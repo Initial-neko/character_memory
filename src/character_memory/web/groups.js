@@ -10,6 +10,9 @@
   let groupStream = null;
   let groupStreamId = null;
   let historyState = {groupId:null, messages:[], hasMore:false, nextBeforeId:null, loadingOlder:false};
+  // Every enter/leave starts a new view instance. An older entry may finish its
+  // history fetch later, but it must not reconnect the stream or emit events.
+  let entryGeneration = 0;
   const sceneAdvanceRequests = new Map();
   const section = document.getElementById("sidebarGroups");
   if (!section) throw new Error("sidebar group slot is missing");
@@ -464,6 +467,7 @@
   async function enter(groupId) {
     const group = groups.find(item => item.id === groupId);
     if (!group) return;
+    const generation = ++entryGeneration;
     CM.closeDirectStream?.();
     closeStream();
     CM.state.conversation = {type:"GROUP", groupId};
@@ -478,6 +482,9 @@
     CM.updateHeader();
     CM.dom.chat.innerHTML = '<div class="empty">正在加载群聊记录…</div>';
     await loadHistory();
+    // A newer enter/leave owns the view now. Do not reconnect its stream,
+    // overwrite composer state or emit a stale conversationChanged.
+    if (generation !== entryGeneration) return;
     connectStream(groupId);
     CM.updateComposerState();
     await CM.emit("conversationChanged", {type:"GROUP", groupId});
@@ -485,6 +492,7 @@
 
   function leave() {
     if (!CM.isGroupConversation()) return;
+    entryGeneration += 1;
     closeStream();
     pending.delete(activeId());
     CM.state.conversation = {type:"DIRECT", groupId:null};

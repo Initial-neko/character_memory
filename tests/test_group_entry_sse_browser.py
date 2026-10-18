@@ -31,8 +31,6 @@ class StaleGroupSubscription(AssertionError):
 
 
 @pytest.mark.parametrize("width", [1440, 390])
-@pytest.mark.xfail(strict=True, raises=StaleGroupSubscription,
-                   reason="Known late group entry replaces the current room SSE subscription")
 def test_late_group_entry_preserves_current_room_subscription(page, live_life, tmp_path, width):
     from playwright.sync_api import expect
     from character_memory.application.async_conversation import group_channel

@@ -590,6 +590,8 @@ Archiving means "stop participating in new world activity", not "erase this pers
 - restoring the character makes it eligible for new Space activity from that point forward;
 - posts missed while archived are not replayed automatically.
 
+Known implementation gap: the two queued Space comment-reply paths check active status before PersonRuntime evaluation, but do not yet enforce this invariant again when publishing the result. If archiving completes while that evaluation is in flight, an ordinary reply or explicitly mentioned reply can still add a public comment and its user notification. Targets archived before the queue is drained are skipped. This publication race remains a correctness issue.
+
 ### Interaction limits
 
 The product should stay small-scale and legible even if many personas exist.
@@ -1016,3 +1018,4 @@ claims and execution. RSS text never implies reading the linked original. Space
 video descriptions follow the current Persona's style. The shared composition
 contract and ownership audit live in
 [Person Runtime](PERSON_RUNTIME.md#prompt-composition-ownership).
+

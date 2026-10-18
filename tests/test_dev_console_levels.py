@@ -57,7 +57,7 @@ FIRST_SCREEN = {
     # The two video checks. They were reachable only after opening "detailed"
     # mode *and* a collapsed diagnostic group, which meant a paid capability
     # whose check nobody could find. The exception is deliberate and narrow:
-    # two checks, eight controls, and no other card gets to join them.
+    # two checks, seven controls, and no other card gets to join them.
     "videoSmokePrompt",
     "videoSmokeResolution",
     "videoSmokeDryRun",

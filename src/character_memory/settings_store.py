@@ -1011,8 +1011,11 @@ def _patch_flat_yaml(text: str, updates: dict[str, Any], *, remove: set[str] | N
         if key in remove:
             skip_until = end
             continue
-        if key in remaining:
-            output.append(f"{key}: {_yaml_scalar(remaining.pop(key))}")
+        if key in updates:
+            # YAML loaders use the last duplicate key. Patch every occurrence
+            # so a later stale value cannot undo a reported successful save.
+            output.append(f"{key}: {_yaml_scalar(updates[key])}")
+            remaining.pop(key, None)
             skip_until = end
             continue
         output.append(line)

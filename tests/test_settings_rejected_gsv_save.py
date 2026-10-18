@@ -25,10 +25,12 @@ class RejectedSaveLeftRuntimeChanged(AssertionError):
     """Only this verified product invariant may count as expected failure."""
 
 
-@pytest.mark.xfail(strict=True, raises=RejectedSaveLeftRuntimeChanged,
-                   reason="Issue #338: GSV provisional configure survives later TTS validation rejection")
-@pytest.mark.parametrize("rejection", ["invalid_voice", "unhealthy_provider"])
-def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, rejection):
+@pytest.mark.parametrize(("rejection", "fail_restore"), [
+    ("invalid_voice", False),
+    ("unhealthy_provider", False),
+    ("invalid_voice", True),
+])
+def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, rejection, fail_restore):
     for name in ("GSV_TTS_GPT_MODEL", "GSV_TTS_SOVITS_MODEL", "GSV_TTS_VOICE"):
         monkeypatch.delenv(name, raising=False)
     old_gpt, new_gpt, sovits, ref = [tmp_path / name for name in
@@ -72,6 +74,9 @@ def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, r
 
             def post(self, url, **kwargs):
                 calls.append({"path": urlsplit(url).path, "json": kwargs.get("json")})
+                if fail_restore and len(calls) == 2:
+                    raise httpx.ConnectError("restore unavailable",
+                                             request=httpx.Request("POST", url))
                 reply = sidecar.post(urlsplit(url).path, json=kwargs.get("json"))
                 return httpx.Response(reply.status_code, content=reply.content,
                                       request=httpx.Request("POST", url))
@@ -82,11 +87,16 @@ def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, r
             response = client.patch("/v1/settings", json={"values": requested})
             durable = client.get("/v1/settings").json()["values"]
 
-    assert response.status_code == 400, response.text
-    if rejection == "invalid_voice":
-        assert "missing-voice" in response.json()["detail"]
+    if fail_restore:
+        assert response.status_code == 500, response.text
+        assert "恢复 GSV 运行态失败" in response.json()["detail"]
+        assert "restore unavailable" in response.json()["detail"]
     else:
-        assert "health check did not pass" in response.json()["detail"]
+        assert response.status_code == 400, response.text
+        if rejection == "invalid_voice":
+            assert "missing-voice" in response.json()["detail"]
+        else:
+            assert "health check did not pass" in response.json()["detail"]
     assert all(path.read_bytes() == original for path, original in originals.items())
     assert durable["GSV_TTS_GPT_MODEL"] == str(old_gpt)
     assert factory_calls == []
@@ -106,8 +116,9 @@ def test_rejected_save_restores_provisional_gsv_runtime(tmp_path, monkeypatch, r
     evidence_dir = Path(os.getenv("SETTINGS_AUDIT_EVIDENCE_DIR",
                                  "artifacts/core-visual-evidence/settings-gsv-rejection"))
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    (evidence_dir / f"gsv-rejection-{rejection}.json").write_text(
+    name = f"gsv-rejection-{rejection}{'-restore-failure' if fail_restore else ''}.json"
+    (evidence_dir / name).write_text(
         json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
-    if engine.gpt_model != str(old_gpt):
+    if not fail_restore and engine.gpt_model != str(old_gpt):
         raise RejectedSaveLeftRuntimeChanged(
             f"PATCH 400 left disk=A but sidecar=B ({rejection}); configure calls={len(calls)}")

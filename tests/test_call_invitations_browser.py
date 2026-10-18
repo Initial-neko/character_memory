@@ -199,12 +199,7 @@ class MutedInvitationLeaseExpired(AssertionError):
     """Only the fully observed muted-active lease failure is expected."""
 
 
-@pytest.mark.parametrize("muted", [
-    False,
-    pytest.param(True, marks=pytest.mark.xfail(
-        strict=True, raises=MutedInvitationLeaseExpired,
-        reason="Known defect: muted foreground invitation stops renewing its lease")),
-], ids=["live-mic-control", "muted-active-call"])
+@pytest.mark.parametrize("muted", [False, True], ids=["live-mic-control", "muted-active-call"])
 def test_call_invitation_muted_lease_continuity(page, call_server, monkeypatch, muted):
     import hashlib
     import json

@@ -90,7 +90,7 @@
   });
   document.addEventListener("visibilitychange",()=>{if(!document.hidden)refresh();});
   setInterval(()=>{
-    if(session && CM.features.voice.state.active && CM.features.voice.state.micActive){
+    if(session && CM.features.voice.state.active){
       const current=session;
       post(current.id,"lease",{session_token:current.token}).catch(async()=>{
         if(session===current){await CM.features.voice.stop();message("通话连接已失效，已关闭麦克风；不会自动重拨。");}

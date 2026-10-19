@@ -14,15 +14,24 @@ from uuid import uuid4
 import zipfile
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
+# SVG assets are served with a sandbox CSP by core_resource_web; never serve
+# them without those response headers.
 _ALLOWED_EXTENSIONS = {".png", ".webp", ".gif", ".svg", ".jpg", ".jpeg"}
 _MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 _MAX_UNCOMPRESSED_BYTES = 160 * 1024 * 1024
 _MAX_ARCHIVE_FILES = 500
 _IMPORT_LOCKS_GUARD = threading.Lock()
 _IMPORT_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _single_line(value: str) -> str:
+    """Catalog text is untrusted data; newlines could forge a new prompt line."""
+    if "\r" in value or "\n" in value or any(ord(char) < 32 for char in value):
+        raise ValueError("catalog text must be a single line without control characters")
+    return value
 
 
 class Sticker(BaseModel):
@@ -34,10 +43,30 @@ class Sticker(BaseModel):
     pack_id: str = Field(default="default", min_length=1, max_length=64)
     pack_name: str = Field(default="内置", min_length=1, max_length=80)
 
+    @field_validator("label", "description")
+    @classmethod
+    def _validate_single_line(cls, value: str) -> str:
+        return _single_line(value)
+
+    @field_validator("tags")
+    @classmethod
+    def _validate_tags(cls, values: list[str]) -> list[str]:
+        return [_single_line(value) for value in values]
+
 
 class StickerTagSuggestion(BaseModel):
     label: str = Field(min_length=1, max_length=80)
     tags: list[str] = Field(default_factory=list, max_length=12)
+
+    @field_validator("label")
+    @classmethod
+    def _validate_single_line(cls, value: str) -> str:
+        return _single_line(value)
+
+    @field_validator("tags")
+    @classmethod
+    def _validate_tags(cls, values: list[str]) -> list[str]:
+        return [_single_line(value) for value in values]
     description: str = Field(default="", max_length=240)
 
 

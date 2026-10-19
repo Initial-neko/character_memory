@@ -18,6 +18,17 @@ def _ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
+def sticker_asset_response(path: Path):
+    """Serve imported sticker bytes without letting an SVG run same-origin."""
+    from fastapi.responses import FileResponse
+
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if path.suffix.lower() == ".svg":
+        headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        headers["Content-Disposition"] = f'inline; filename="{path.name}"'
+    return FileResponse(path, headers=headers)
+
+
 def attach_core_resource_routes(app, access: CoreApiRouteAccess):
     from fastapi import Body, HTTPException, Query
     from fastapi.responses import FileResponse
@@ -144,7 +155,7 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
         path = catalog.asset_path(sticker_id)
         if path is None:
             raise HTTPException(status_code=404, detail="sticker not found")
-        return FileResponse(path)
+        return sticker_asset_response(path)
 
     @app.get("/v1/stickers/{character_id}/{sticker_id}/asset")
     def legacy_sticker_asset(character_id: str, sticker_id: str):
@@ -153,7 +164,7 @@ def attach_core_resource_routes(app, access: CoreApiRouteAccess):
         path = catalog.asset_path(sticker_id)
         if path is None:
             raise HTTPException(status_code=404, detail="sticker not found")
-        return FileResponse(path)
+        return sticker_asset_response(path)
 
     @app.get("/v1/images")
     def images(character_id: str = "rin"):

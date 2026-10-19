@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import yaml
 
@@ -629,6 +630,52 @@ def test_space_post_rejects_foreign_media_and_source_event(tmp_path: Path):
         )
         assert accepted.status_code == 200
         assert accepted.json()["post"]["source_event_id"] == own_event.id
+
+        too_large = client.post(
+            "/v1/space/posts",
+            json={
+                "character_id": "c00",
+                "content": "越界来源",
+                "source_event_id": 2**70,
+            },
+        )
+        assert too_large.status_code == 422
+
+
+def test_space_feed_survives_a_deleted_sticker_author(tmp_path: Path, monkeypatch):
+    config = _config(tmp_path, count=2)
+    app = create_api(str(config))
+    attach_space_routes(app)
+
+    with TestClient(app) as client:
+        post_id = client.post(
+            "/v1/space/posts",
+            json={"character_id": "c00", "content": "帖子还在。"},
+        ).json()["post"]["id"]
+        store = app.state.character_memory.read_store
+        SpaceRepository(store).add_comment(
+            post_id,
+            "c01",
+            "这张表情送给你。",
+            datetime(2026, 9, 22, 8, 2, tzinfo=timezone.utc),
+            sticker_id="sticker-from-deleted-author",
+        )
+
+        access = app.state.character_memory
+
+        def missing_character(character_id: str):
+            raise HTTPException(status_code=404, detail="Unknown character")
+
+        monkeypatch.setattr(access, "sticker_catalog_for", missing_character)
+
+        feed = client.get("/v1/space/posts")
+        assert feed.status_code == 200
+        comments = feed.json()["posts"][0]["comments"]
+        deleted_author_comment = next(
+            item for item in comments if item["content"] == "这张表情送给你。"
+        )
+        # The private pool is gone with the persona; the rest of the feed stays.
+        assert deleted_author_comment["sticker"] is None
 
 
 def test_space_api_projects_audio_assets_as_voice_media(tmp_path: Path):

@@ -1651,6 +1651,29 @@ def test_status_payload_does_not_grow_with_raw_model_output(tmp_path):
     assert abs(len(long_payload) - len(short_payload)) < 200
 
 
+def test_character_archived_during_planning_cannot_publish_autonomous_post(tmp_path):
+    access, store, _ = _access(tmp_path, ids=("c00",))
+    now = datetime(2026, 10, 19, 8, 0, tzinfo=timezone.utc)
+    profiles = access.character_profiles()
+
+    class ArchiveDuringPlanning(SpaceModel):
+        def structured_for_session(self, prompt, schema, session_id):
+            profiles[0]["archived_at"] = now.isoformat()
+            return super().structured_for_session(prompt, schema, session_id)
+
+    access.require_bundle().model = ArchiveDuringPlanning()
+    service = SpaceAutonomyService(access, SpaceRepository(store))
+
+    with pytest.raises(ValueError, match="archived"):
+        service.run_opportunity("c00", now=now, cascade=False, source="DEV")
+
+    assert store.conn.execute("SELECT COUNT(*) FROM space_posts").fetchone()[0] == 0
+    assert not any(
+        item.event_type == EventType.SOCIAL_POST for item in store.list_events("c00")
+    )
+    store.close()
+
+
 def test_the_comment_thread_queue_refuses_to_grow_without_limit(tmp_path):
     """One comment already fans out to several model calls, so the backlog is capped.
 

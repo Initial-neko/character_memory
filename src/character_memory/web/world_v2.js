@@ -83,7 +83,7 @@
   }catch(err){if(selected)chatError(err.message);else error(err.message);b.disabled=false;}}
   page.addEventListener('click',click);side.addEventListener('click',click);
   page.addEventListener('submit',async e=>{if(!e.target.matches('[data-world-composer]'))return;e.preventDefault();const input=e.target.querySelector('textarea'),message=input.value.trim(),id=selected,epoch=generation;if(!message||sending||!id)return;sending=true;e.target.querySelector('[type=submit]').disabled=true;chatError('');try{await api.send(id,message);if(epoch!==generation)return;input.value='';renderDetail(await api.detail(id));}catch(err){if(epoch===generation)chatError(err.message);}finally{sending=false;if(epoch===generation&&detail)renderDetail(detail);}});
-  page.addEventListener('keydown',e=>{if(e.target.matches('textarea')&&e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();e.target.form.requestSubmit();}});
+  page.addEventListener('keydown',e=>{if(e.target.matches('textarea')&&e.key==='Enter'&&!e.shiftKey&&!CM.isImeConfirming(e)){e.preventDefault();e.target.form.requestSubmit();}});
   const sources=document.createElement('a');sources.href='/sources';sources.className='world-sources-entry';sources.textContent='订阅阅读';sources.title='查看已有 RSS 订阅与阅读来源';page.querySelector('.cm-world-heading').append(sources);
   CM.on('encountersChanged',renderList);CM.on('conversationChanged',close);CM.registerFeature('world',{open,close,get candidateId(){return selected;}});
   CM.on('ready',()=>{if(new URLSearchParams(location.search).get('view')==='world')open();});

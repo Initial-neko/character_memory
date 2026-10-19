@@ -255,7 +255,7 @@
     if (button) select(button.dataset.avatarSelect).catch(console.error);
   });
   CM.dom.drawerBody.addEventListener("keydown", event => {
-    if (!event.target.closest("[data-avatar-hint]") || event.key !== "Enter" || event.isComposing) return;
+    if (!event.target.closest("[data-avatar-hint]") || event.key !== "Enter" || CM.isImeConfirming(event)) return;
     event.preventDefault();
     search().catch(console.error);
   });

@@ -497,6 +497,24 @@ def test_unavailable_reply_and_mention_targets_do_not_suppress_deferred_active_t
     store.close()
 
 
+def test_deferred_group_only_character_never_publishes_space_posts(tmp_path):
+    access, store, model = _access(tmp_path, ids=("c00", "c01"))
+    access.settings.space_opportunity_interval_minutes = 60
+    access.character_profiles()[1]["direct_pending"] = "2026-09-21T20:00:00+00:00"
+    repository = SpaceRepository(store)
+    scheduler = SpaceAutonomyScheduler(access, repository, poll_seconds=10)
+    start = datetime(2026, 9, 21, 20, 0, tzinfo=timezone.utc)
+
+    status = scheduler.status(start)
+    assert [item["character_id"] for item in status["characters"]] == ["c00"]
+    outcomes = scheduler.run_once(datetime(2026, 9, 21, 21, 0, tzinfo=timezone.utc))
+    assert [item["character_id"] for item in outcomes] == ["c00"]
+    assert model.opportunities == 1
+    # No schedule was ever armed for the deferred role.
+    assert repository.get_opportunity_state("c01") is None
+    store.close()
+
+
 def test_space_comment_can_structurally_mention_the_user_but_chat_message_cannot(tmp_path):
     access, store, model = _access(tmp_path, ids=("c00", "c01"), model=MentionAwareSpaceModel())
     repository = SpaceRepository(store)

@@ -8,7 +8,11 @@ from fastapi.testclient import TestClient
 import yaml
 
 from character_memory.api import create_api
-from character_memory.config import load_settings, set_character_archived
+from character_memory.config import (
+    load_settings,
+    set_character_archived,
+    set_character_direct_pending,
+)
 from character_memory.domain.models import Event, EventType
 from character_memory.space_autonomy import (
     MAX_PENDING_COMMENT_THREADS,
@@ -712,6 +716,32 @@ def test_mixed_space_feed_route_keeps_existing_post_contract(tmp_path: Path):
         assert client.get('/v1/space/feed?kind=WRONG').status_code == 400
         assert client.get('/v1/space/feed?source_id=-1').status_code == 422
         assert client.get('/v1/space/posts').json()['posts'] == [post]
+
+
+def test_deferred_group_only_author_disappears_from_both_feed_routes(tmp_path: Path):
+    config = _config(tmp_path, count=3)
+    settings = load_settings(str(config))
+    app = create_api(str(config))
+    attach_space_routes(app)
+    with TestClient(app) as client:
+        visible = client.post(
+            '/v1/space/posts', json={'character_id': 'c00', 'content': '公开动态'}
+        ).json()['post']
+        hidden = client.post(
+            '/v1/space/posts', json={'character_id': 'c01', 'content': '群聊角色的动态'}
+        ).json()['post']
+        set_character_direct_pending(settings, 'c01', True)
+
+        feed = client.get('/v1/space/feed').json()
+        post_ids = [item['post']['id'] for item in feed['items'] if item['kind'] == 'POST']
+        assert post_ids == [visible['id']]
+        assert hidden['id'] not in post_ids
+        assert feed['active_character_count'] == 2
+
+        listing = client.get('/v1/space/posts').json()
+        assert [item['id'] for item in listing['posts']] == [visible['id']]
+        assert listing['total'] == 1
+        assert listing['active_character_count'] == 2
 
 
 def test_browser_user_can_comment_and_reload_the_same_space_fact(tmp_path: Path):

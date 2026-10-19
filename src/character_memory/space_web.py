@@ -166,6 +166,20 @@ def attach_space_routes(app):
     def profiles_by_id() -> dict[str, dict]:
         return {item["id"]: item for item in access.character_profiles()}
 
+    def space_author_ids() -> list[str]:
+        """Profiles the sidebar lists; deferred group-only roles stay out.
+
+        A batch/group build defers its members so a new group does not flood
+        the sidebar. They remain full participants inside that group, but a
+        deferred role has no place on the public Space feed until the user
+        opens a direct chat.
+        """
+        return [
+            str(item["id"])
+            for item in access.character_profiles()
+            if "archived_at" not in item and "direct_pending" not in item
+        ]
+
     def require_known(character_id: str, *, active: bool = False) -> dict:
         profile = profiles_by_id().get(character_id)
         if profile is None:
@@ -391,9 +405,11 @@ def attach_space_routes(app):
     ):
         if character_id:
             require_known(character_id)
+        author_ids = space_author_ids()
         try:
             page = SpaceFeed(access.read_store).page(
-                kind=kind, limit=limit, cursor=cursor, source_id=source_id, character_id=character_id,
+                kind=kind, limit=limit, cursor=cursor, source_id=source_id,
+                character_id=character_id, character_ids=author_ids,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -404,7 +420,7 @@ def attach_space_routes(app):
             elif item["kind"] == "TOPIC":
                 for comment in item["comments"]:
                     comment["author"] = profile_payload(comment["character_id"])
-        return {**page, "active_character_count": sum(1 for p in access.character_profiles() if "archived_at" not in p),
+        return {**page, "active_character_count": len(author_ids),
                 "collection_status": {"pulse_enabled": bool(getattr(access.settings, "world_pulse_enabled", False)),
                                       "rss_enabled": bool(getattr(access.settings, "rss_enabled", True))},
                 "query": {"kind": kind, "source_id": source_id, "character_id": character_id}}
@@ -414,15 +430,17 @@ def attach_space_routes(app):
         if character_id:
             require_known(character_id)
         repository = repo()
+        author_ids = space_author_ids()
         posts, has_more, next_before_id = repository.list_posts(
             character_id=character_id,
             limit=max(1, min(int(limit), 10)),
             before_id=before_id,
+            character_ids=author_ids,
         )
-        active_count = sum(1 for item in access.character_profiles() if "archived_at" not in item)
+        active_count = len(author_ids)
         return {
             "posts": [post_payload(repository, item) for item in posts],
-            "total": repository.count_posts(character_id=character_id),
+            "total": repository.count_posts(character_id=character_id, character_ids=author_ids),
             "has_more": has_more,
             "next_before_id": next_before_id,
             "character_id": character_id,

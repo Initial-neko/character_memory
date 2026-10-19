@@ -21,7 +21,8 @@ class SpaceFeed:
     def __init__(self, store):
         self.store = store
 
-    def page(self, *, kind='ALL', limit=10, cursor=None, source_id=None, character_id=None):
+    def page(self, *, kind='ALL', limit=10, cursor=None, source_id=None, character_id=None,
+             character_ids=None):
         if kind not in {'ALL', 'POST', 'RSS', 'TOPIC'}:
             raise ValueError('invalid Space content kind')
         limit = max(1, min(30, int(limit)))
@@ -42,11 +43,16 @@ class SpaceFeed:
             tables = {r[0] for r in self.store.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             selects, args = [], []
             if 'space_posts' in tables and kind in {'ALL', 'POST'} and source_id is None:
-                clause = "visibility='ACTIVE_CHARACTERS'"
-                if character_id:
-                    clause += ' AND character_id=?'
-                    args.append(character_id)
-                selects.append(f"SELECT created_at_epoch AS stamp,'POST' AS kind,id FROM space_posts WHERE {clause}")
+                authors = None if character_ids is None else [str(value) for value in character_ids]
+                if authors != []:
+                    clause = "visibility='ACTIVE_CHARACTERS'"
+                    if authors:
+                        clause += ' AND character_id IN (' + ','.join('?' * len(authors)) + ')'
+                        args.extend(authors)
+                    if character_id:
+                        clause += ' AND character_id=?'
+                        args.append(character_id)
+                    selects.append(f"SELECT created_at_epoch AS stamp,'POST' AS kind,id FROM space_posts WHERE {clause}")
             if not character_id and kind in {'ALL', 'RSS'} and {'rss_items', 'rss_sources'} <= tables:
                 clause = 's.cancelled_at IS NULL'
                 if source_id is not None:

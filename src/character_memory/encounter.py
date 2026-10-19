@@ -27,6 +27,10 @@ logger = logging.getLogger("character_memory.encounter")
 # so dropping the newest request keeps the backlog inside the useful window.
 MAX_PENDING_CHAT_REPLIES = 50
 REPLIES_PER_DRAIN = 4
+# Covers the LLM client's default 120s timeout with two attempts. The RINGING
+# row stays reclaimable, but detail reads cannot treat a decision the server is
+# still awaiting as an abandoned ring.
+CALL_DECISION_LEASE_SECONDS = 300
 
 
 _GENERATED_THEMES = (
@@ -362,6 +366,9 @@ Excerpt:
         started=time.monotonic()
         with self.repository.lifecycle_lock(candidate_id):
             invitation=self.repository.begin_call(candidate_id,now)
+            self.repository.extend_call_lease(
+                invitation['id'],now,CALL_DECISION_LEASE_SECONDS
+            )
             candidate=self.repository.get_candidate(candidate_id)
             transcript=self.repository.list_messages(candidate_id,limit=16)
         try:

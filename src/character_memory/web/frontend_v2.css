@@ -105,7 +105,7 @@ body.cm-user-page {
 .cm-user-page .composer-wrap { padding:6px 16px 8px; }
 .cm-user-page .composer { display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:5px 9px; border-radius:14px; }
 .cm-user-page .composer textarea { order:-1; flex:1 0 100%; width:100%; min-height:24px; padding:2px 3px; font-size:14px; }
-.cm-user-page .composer button { height:30px; min-height:30px; }
+.cm-user-page .composer button { height:32px; min-height:32px; }
 .cm-user-page .topbar { min-height:54px; padding:6px 16px; }
 .cm-user-page .header-avatar { width:34px; height:34px; flex-basis:34px; }
 .cm-user-page .topbar h1 { font-size:16px; }

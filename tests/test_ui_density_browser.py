@@ -124,6 +124,31 @@ def test_desktop_sidebar_has_one_scroll_owner_and_the_content_column_grew(page, 
         page.locator(".sidebar").screenshot(path=str(target / "density-desktop-sidebar.png"))
 
 
+def test_composer_controls_share_one_size_and_weight(page, density_server):
+    page.set_viewport_size({"width": 1440, "height": 900})
+    _ready(page, density_server)
+    metrics = page.evaluate("""() => {
+      const mic = document.getElementById('voiceInputButton');
+      const send = document.getElementById('sendButton');
+      const icon = mic.querySelector('svg');
+      const box = el => { const r = el.getBoundingClientRect(); return {w:r.width, h:r.height}; };
+      return {
+        mic: box(mic), micBg: getComputedStyle(mic).backgroundColor,
+        icon: icon ? box(icon) : null,
+        send: box(send), sendFont: getComputedStyle(send).fontSize,
+      };
+    }""")
+    # The mic must read as a peer of the sticker/tools glyphs, not a filled
+    # purple button of its own weight.
+    assert metrics["mic"] == {"w": 32, "h": 32}
+    assert metrics["micBg"] == "rgba(0, 0, 0, 0)"
+    assert 16 <= metrics["icon"]["w"] <= 20
+    assert metrics["icon"]["w"] == metrics["icon"]["h"]
+    assert metrics["send"]["h"] == 32
+    assert 56 <= metrics["send"]["w"] <= 72
+    assert metrics["sendFont"] == "13px"
+
+
 def test_mobile_drawer_keeps_every_group_row_reachable(page, density_server):
     page.set_viewport_size({"width": 400, "height": 844})
     _ready(page, density_server)

@@ -461,10 +461,10 @@ body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-compact); }
 .composer .sticker-trigger,
 .composer .composer-tools-trigger,
 .composer .voice-input-button {
-  width: 38px;
-  min-width: 38px;
-  height: 38px;
-  min-height: 38px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -472,15 +472,18 @@ body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-compact); }
   color: var(--ui-muted);
   display: inline-grid;
   place-items: center;
-  font-size: 18px;
+  font-size: 17px;
 }
+.composer .sticker-trigger svg,
+.composer .composer-tools-trigger svg,
+.composer .voice-input-button svg { width: 18px; height: 18px; }
 .composer .sticker-trigger:hover:not(:disabled),
 .composer .composer-tools-trigger:hover:not(:disabled),
 .composer .voice-input-button:hover:not(:disabled) {
   background: var(--ui-hover);
   color: var(--ui-text);
 }
-.composer #sendButton { min-width: 64px; height: 38px; border-radius: 12px; }
+.composer #sendButton { min-width: 60px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 13px; font-weight: 650; }
 .composer-hint { display: none; }
 
 .composer-tools-menu {

@@ -83,9 +83,14 @@ class CallInvitationRepository:
 
     def transition(self, identifier, operation, *, now=None, client_id='', session_token=''):
         now = now or datetime.now(timezone.utc)
-        self.get(identifier, now=now)
         with self.store.transaction(immediate=True):
+            # Expire inside the same write transaction. A separate read before
+            # it let an invite that expired while waiting for the lock be
+            # accepted with a session token that was already invalid.
+            self._expire(now)
             row = self.store.conn.execute('SELECT * FROM call_invitations WHERE id=?', [identifier]).fetchone()
+            if row is None:
+                raise HTTPException(404, '来电邀请不存在')
             target = {'accept': 'ACCEPTED', 'decline': 'DECLINED', 'cancel': 'CANCELLED'}[operation]
             if row['status'] == target:
                 if target == 'ACCEPTED' and row['client_id'] != client_id:

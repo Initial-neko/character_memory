@@ -561,8 +561,11 @@ Sources:
         else:
             event_content = "[媒体动态]"
         try:
-            # Both records must commit through the same SQLite connection.
-            with self.repository.store.transaction():
+            # Serialize with archive/restore and re-check under the same lock:
+            # the plan and media work above ran outside it.
+            with self._archive_guard(), self.repository.store.transaction():
+                self._require_active(character_id)
+                # Both records must commit through the same SQLite connection.
                 source_event = self.repository.store.append_event(
                     Event(
                         character_id=character_id,

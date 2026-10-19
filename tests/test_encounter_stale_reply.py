@@ -183,3 +183,72 @@ def test_transient_read_failure_clears_in_flight(tmp_path):
         assert scheduler.enqueue_reply(candidate['id']) is True
     finally:
         store.close()
+
+@pytest.mark.parametrize("superseded_during_generation", [False, True])
+def test_failure_owns_actual_model_transcript_after_scheduler_snapshot(
+    tmp_path, superseded_during_generation
+):
+    """A line arriving before generation belongs to that attempt, not its queue snapshot."""
+    store = SQLiteStore(str(tmp_path / "reply-owner.db"))
+    prompts = []
+    access = SimpleNamespace(
+        read_store=store, settings=SimpleNamespace(api_key=""),
+        character_profiles=lambda: [],
+    )
+    app = FastAPI()
+    app.state.background_services = BackgroundServices()
+    app.state.character_memory = access
+    attach_encounter_routes(app)
+    repo, scheduler = access.encounter_repository, access.encounter_scheduler
+    candidate = repo.create_candidate(
+        source_type="GENERATED", draft={"name": "Audit"},
+        encounter_hook="fixture", opening_message="hello",
+        now=datetime.now(timezone.utc),
+    )
+    candidate_id = candidate["id"]
+    service = scheduler.service
+    calls = []
+
+    def generate(prompt, schema, session):
+        prompts.append(prompt)
+        assert "用户: U2" in prompt
+        if superseded_during_generation:
+            service.post_message(candidate_id, "U3")
+        raise RuntimeError("current U2 provider failure")
+
+    access.require_bundle = lambda: SimpleNamespace(
+        model=SimpleNamespace(structured_for_session=generate)
+    )
+    original_list = repo.list_messages
+
+    def insert_between_snapshots(key, *, limit=30):
+        snapshot = original_list(key, limit=limit)
+        if key == candidate_id and limit == 1 and not calls:
+            calls.append("scheduler-read-U1")
+            assert snapshot[-1]["content"] == "U1"
+            # Deterministically interleave a real durable post between the
+            # scheduler ownership read and the service's model transcript.
+            service.post_message(candidate_id, "U2")
+        return snapshot
+
+    try:
+        service.post_message(candidate_id, "U1")
+        repo.list_messages = insert_between_snapshots
+        assert scheduler.enqueue_reply(candidate_id)
+        assert scheduler.drain_pending_replies(limit=1) == []
+        assert len(prompts) == 1
+        assert calls == ["scheduler-read-U1"]
+        assert candidate_id not in scheduler._in_flight
+        current = repo.get_candidate(candidate_id)
+        messages = repo.list_messages(candidate_id)
+        assert [m["content"] for m in messages] == (
+            ["U1", "U2", "U3"] if superseded_during_generation else ["U1", "U2"]
+        )
+        if superseded_during_generation:
+            assert current["error"] == ""
+            assert scheduler.recover_pending_replies() == 1
+        else:
+            assert current["error"], "The actual U2 failure must require explicit retry"
+            assert scheduler.recover_pending_replies() == 0
+    finally:
+        store.close()

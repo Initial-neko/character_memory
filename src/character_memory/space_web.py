@@ -23,7 +23,9 @@ class CreateSpacePostRequest(BaseModel):
     # ordered media_ids contract.
     media_id: str | None = Field(default=None, max_length=120)
     media_ids: list[str] = Field(default_factory=list, max_length=MAX_SPACE_MEDIA_PER_POST)
-    source_event_id: int | None = None
+    # SQLite binds integers as signed 64-bit; an out-of-range id must be a
+    # validation error, not an OverflowError from the bind below.
+    source_event_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
 
     @model_validator(mode="after")
     def require_content_or_media(self):
@@ -204,7 +206,18 @@ def attach_space_routes(app):
         if character_id and callable(getattr(access, "sticker_catalog_for", None)):
             # A character's comment may use its private pool; the global catalog
             # would resolve that id to None on every reload.
-            catalog = access.sticker_catalog_for(character_id)
+            try:
+                catalog = access.sticker_catalog_for(character_id)
+            except HTTPException:
+                # A deleted character's comments stay in the feed after its
+                # persona and private pool are gone. Losing the sticker is
+                # acceptable; taking the whole feed down with a 404 is not.
+                catalog = None
+            if catalog is None:
+                catalog_factory = getattr(access, "global_sticker_catalog", None)
+                if not callable(catalog_factory):
+                    return None
+                catalog = catalog_factory()
         else:
             catalog_factory = getattr(access, "global_sticker_catalog", None)
             if not callable(catalog_factory):

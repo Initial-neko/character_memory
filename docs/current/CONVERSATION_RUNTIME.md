@@ -18,6 +18,17 @@
 
 聊天使用紧凑的侧栏、头像、气泡与输入区。底部消息留白通过 ResizeObserver 跟随输入区实际高度，包括多行草稿和来电状态提示；图片迟到解码后仅在用户没有离开最新位置时跟随到底部，不抢回正在阅读历史的滚动位置。聊天隐藏时，历史初始化与后台消息不会把其他栏目滚到底部；离开 Space 详情进入其他栏目时，也不会带入原列表的滚动位置。
 
+### Direct history paging ownership
+
+A Direct history request captures the history view instance that started it.
+Before applying the response and in the older-page `finally`, the client
+requires the same Direct mode, the same character id and the same history
+object; an A → B → A switch creates a new history object, so an id-only check
+cannot accept an older request. A stale request may clear its own loading flag
+but must not change the current render signature, cursor, loading state or DOM.
+The real Chromium regression records every actual render, because an assertion
+that only waits for B's text can miss a transient wrong display.
+
 ## 1. User message first, reaction later
 
 正式 WebUI 发送用户消息时使用异步 accept path：

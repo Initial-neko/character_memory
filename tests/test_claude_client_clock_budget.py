@@ -81,6 +81,18 @@ def test_http_at_selects_paid_bucket_but_world_cursor_never_rewinds(tmp_path, mo
     scheduler.max_burst_seconds = .002
     started = datetime.now().astimezone()
     today = started.replace(hour=12, minute=0, second=0, microsecond=0)
+    import character_memory.runtime.capability_execution as capability_execution_module
+    import character_memory.runtime.direct_research as direct_research_module
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return today
+
+    # The production budget clock is what this test verifies; freezing it makes
+    # the assertion independent of a CI run that crosses local midnight.
+    monkeypatch.setattr(direct_research_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(capability_execution_module, "datetime", FrozenDateTime)
     rows = []
     try:
         with TestClient(app) as client:
@@ -118,7 +130,6 @@ def test_http_at_selects_paid_bucket_but_world_cursor_never_rewinds(tmp_path, mo
             assert client.post('/v1/conversations/example/messages',json={'message':'test'}).status_code == 404
             assert runtime.research_service.capabilities(event.model_copy(update={'metadata':{'channel':'GROUP'}})) == ()
         finished = datetime.now().astimezone()
-        assert started.date() == finished.date(), 're-run if crossing midnight'
         if output := os.environ.get('CLOCK_EVIDENCE_DIR'):
             out = Path(output)
             out.mkdir(parents=True, exist_ok=True)

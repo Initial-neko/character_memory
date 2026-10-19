@@ -209,8 +209,8 @@ class DirectVisualRuntime:
             created_at=source_event.event_time,
             source=f"GENERATED_{purpose.value}",
         )
-        runtime.store.add_media_asset(asset)
         try:
+            runtime.store.add_media_asset(asset)
             with runtime.store.transaction():
                 event = runtime.store.append_event(
                 Event(

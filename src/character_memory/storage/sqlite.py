@@ -386,7 +386,9 @@ class SQLiteStore:
                 continue
             try:
                 source_event = int(source_event_id)
-            except (TypeError, ValueError):
+                if not -(2**63) <= source_event < 2**63:
+                    raise ValueError("source_event_id is outside SQLite INTEGER range")
+            except (TypeError, ValueError, OverflowError):
                 # One malformed historical row must not brick every startup.
                 logger.warning(
                     "storage.legacy_trace skipped_invalid_source_event_id event_id=%s value=%r",
@@ -444,7 +446,9 @@ class SQLiteStore:
                 continue
             try:
                 source_event = int(source_event_id)
-            except (TypeError, ValueError):
+                if not -(2**63) <= source_event < 2**63:
+                    raise ValueError("source_event_id is outside SQLite INTEGER range")
+            except (TypeError, ValueError, OverflowError):
                 # The compatibility cursor still advances past this row, so a
                 # damaged trace cannot block every later startup.
                 logger.warning(

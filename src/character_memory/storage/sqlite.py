@@ -536,6 +536,13 @@ class SQLiteStore:
     @classmethod
     def _memory_from_row(cls, r, *, include_embedding: bool = True) -> Memory:
         keys = set(r.keys())
+        try:
+            metadata = json.loads(r["metadata_json"])
+        except (ValueError, TypeError):
+            metadata = None
+        if not isinstance(metadata, dict):
+            logger.warning("storage.memory invalid_metadata memory_id=%s", r["id"])
+            metadata = {"metadata_status": "INVALID"}
         return Memory(
             id=r["id"],
             character_id=r["character_id"],
@@ -547,7 +554,7 @@ class SQLiteStore:
             active=bool(r["active"]),
             pinned=bool(r["pinned"]) if "pinned" in keys else False,
             superseded_by=r["superseded_by"] if "superseded_by" in keys else None,
-            metadata=json.loads(r["metadata_json"]),
+            metadata=metadata,
             embedding=cls._unpack(r["embedding"]) if include_embedding else None,
         )
 

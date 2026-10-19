@@ -203,7 +203,7 @@
   });
   CM.dom.drawerBody.addEventListener("keydown", event => {
     if (!event.target.closest("[data-group-rename-name]")) return;
-    if (event.key !== "Enter" || event.isComposing) return;
+    if (event.key !== "Enter" || CM.isImeConfirming(event)) return;
     event.preventDefault();
     saveRename().catch(console.error);
   });

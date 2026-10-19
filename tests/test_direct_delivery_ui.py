@@ -75,6 +75,15 @@ def run_js(script):
     assert result.returncode == 0, result.stderr
 
 
+def test_ime_candidate_confirmation_is_not_a_submit():
+    run_js(r'''
+assert(CM.isImeConfirming({isComposing:true, key:'Enter'}) === true);
+assert(CM.isImeConfirming({isComposing:false, keyCode:229, key:'Enter'}) === true);
+assert(CM.isImeConfirming({isComposing:false, keyCode:13, key:'Enter'}) === false);
+assert(CM.isImeConfirming(undefined) === false);
+''')
+
+
 def test_reaction_failure_survives_idle_redraw_and_clears_on_newer_turn():
     run_js(r'''
 source.emit('reaction_error', {watermark:10, message:'provider unavailable'});

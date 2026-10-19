@@ -20,6 +20,10 @@
     listeners: new Map(),
   };
 
+  // Some IMEs confirm a candidate with Enter while reporting isComposing=false
+  // (keyCode 229). Never treat that keystroke as a submit.
+  CM.isImeConfirming = event => Boolean(event?.isComposing || event?.keyCode === 229);
+
   CM.dom = {
     chat: document.getElementById("chat"),
     composer: document.getElementById("composer"),

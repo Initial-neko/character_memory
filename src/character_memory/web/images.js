@@ -190,7 +190,7 @@
   });
   panel.addEventListener("keydown", event => {
     if (!event.target.closest("#imageCaption")) return;
-    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    if (event.key !== "Enter" || event.shiftKey || CM.isImeConfirming(event)) return;
     event.preventDefault();
     sendCurrentDraft().catch(console.error);
   });

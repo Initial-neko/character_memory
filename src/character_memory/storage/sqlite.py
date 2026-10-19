@@ -384,9 +384,18 @@ class SQLiteStore:
             source_event_id = trace.get("source_event_id") or metadata.get("source_event_id")
             if source_event_id is None:
                 continue
+            try:
+                source_event = int(source_event_id)
+            except (TypeError, ValueError):
+                # One malformed historical row must not brick every startup.
+                logger.warning(
+                    "storage.legacy_trace skipped_invalid_source_event_id event_id=%s value=%r",
+                    row["id"], source_event_id,
+                )
+                continue
             self.conn.execute(
                 "INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO NOTHING",
-                (row["character_id"], int(source_event_id), row["event_time"], row["event_time_epoch"], json.dumps(trace, ensure_ascii=False)),
+                (row["character_id"], source_event, row["event_time"], row["event_time_epoch"], json.dumps(trace, ensure_ascii=False)),
             )
             self.conn.execute(
                 "UPDATE events SET metadata_json=? WHERE id=?",
@@ -433,12 +442,22 @@ class SQLiteStore:
             source_event_id = trace.get("source_event_id") or metadata.get("source_event_id")
             if source_event_id is None:
                 continue
+            try:
+                source_event = int(source_event_id)
+            except (TypeError, ValueError):
+                # The compatibility cursor still advances past this row, so a
+                # damaged trace cannot block every later startup.
+                logger.warning(
+                    "storage.legacy_trace skipped_invalid_source_event_id event_id=%s value=%r",
+                    event_row["id"], source_event_id,
+                )
+                continue
             self.conn.execute(
                 "INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) "
                 "VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO NOTHING",
                 (
                     event_row["character_id"],
-                    int(source_event_id),
+                    source_event,
                     event_row["event_time"],
                     event_row["event_time_epoch"],
                     json.dumps(trace, ensure_ascii=False),

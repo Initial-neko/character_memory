@@ -20,3 +20,30 @@ def test_legacy_action_trace_is_moved_out_of_event_metadata(tmp_path):
         assert action.metadata["reason"] == "test"
     finally:
         reopened.close()
+
+
+def test_malformed_legacy_trace_source_id_does_not_block_startup(tmp_path):
+    path = tmp_path / "invalid-trace.db"
+    store = SQLiteStore(path)
+    store.append_event(Event(
+        character_id="rin",
+        event_type=EventType.ACTION,
+        event_time=datetime.now(timezone.utc),
+        content="REPLY",
+        metadata={"trace": {"source_event_id": "not-an-int"}},
+    ))
+    store.close()
+
+    # Both the one-time core migration and the incremental compatibility scan
+    # must skip the damaged row instead of aborting every store construction.
+    for _ in range(2):
+        reopened = SQLiteStore(path)
+        try:
+            actions = [
+                event for event in reopened.list_events("rin")
+                if event.event_type == EventType.ACTION
+            ]
+            assert len(actions) == 1
+            assert actions[0].metadata["trace"]["source_event_id"] == "not-an-int"
+        finally:
+            reopened.close()

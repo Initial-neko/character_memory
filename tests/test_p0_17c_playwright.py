@@ -119,7 +119,7 @@ def test_sidebar_shell_compact_rail_persists_and_header_stays_clear(page, wake_s
     page.goto(wake_server, wait_until="domcontentloaded")
     expect(page.locator("#characterList .character-item").first).to_be_visible()
 
-    assert 262 <= _sidebar_width(page) <= 282
+    assert 226 <= _sidebar_width(page) <= 246
     assert page.locator("#topbarMenu #characterSpaceButton").count() == 1
     assert page.locator("#topbarMenu #intentButton").count() == 1
 
@@ -134,7 +134,7 @@ def test_sidebar_shell_compact_rail_persists_and_header_stays_clear(page, wake_s
 
     page.locator("#sidebarCollapseButton").click()
     page.wait_for_timeout(250)
-    assert 66 <= _sidebar_width(page) <= 70
+    assert 58 <= _sidebar_width(page) <= 62
     expect(page.locator(".space-nav-copy")).not_to_be_visible()
     visible_characters = page.locator("#characterList .character-item:visible").count()
     assert 1 <= visible_characters <= 6
@@ -143,11 +143,11 @@ def test_sidebar_shell_compact_rail_persists_and_header_stays_clear(page, wake_s
     page.reload(wait_until="domcontentloaded")
     expect(page.locator("#characterList .character-item").first).to_be_visible()
     page.wait_for_timeout(250)
-    assert 66 <= _sidebar_width(page) <= 70
+    assert 58 <= _sidebar_width(page) <= 62
 
     page.locator("#sidebarCollapseButton").click()
     page.wait_for_timeout(250)
-    assert 262 <= _sidebar_width(page) <= 282
+    assert 226 <= _sidebar_width(page) <= 246
 
     page.set_viewport_size({"width": 1366, "height": 768})
     identity_right, actions_left, scroll_width, client_width = page.evaluate(

@@ -55,6 +55,14 @@ _WEB_QUERIES = (
 )
 
 
+class _ReplyGenerationFailure(RuntimeError):
+    """Carry the transcript owner of a failed model call back to its worker."""
+
+    def __init__(self, line_id: int | None):
+        super().__init__("encounter reply generation failed")
+        self.line_id = line_id
+
+
 class EncounterWebSeed(BaseModel):
     inspiration_description: str = Field(min_length=20, max_length=1800)
     suggested_name: str = Field(default="", max_length=48)
@@ -434,11 +442,18 @@ Excerpt:
 请作为这个人物自然回复最后一句。保持人物自主性，不要为了让用户留下你而推销自己。
 只输出结构化 message。
 """
-        reply = self.access.require_bundle().model.structured_for_session(
-            prompt,
-            EncounterReply,
-            f"encounter-chat:{candidate_id}",
-        )
+        try:
+            reply = self.access.require_bundle().model.structured_for_session(
+                prompt,
+                EncounterReply,
+                f"encounter-chat:{candidate_id}",
+            )
+        except Exception as exc:
+            # The scheduler may have observed an older line before this
+            # transcript was read. Failure and success must use the same owner.
+            raise _ReplyGenerationFailure(
+                transcript[-1]["id"] if transcript else None
+            ) from exc
         with self.repository.lifecycle_lock(candidate_id):
             latest=self.repository.list_messages(candidate_id,limit=1)
             if transcript and latest and latest[-1]['id']!=transcript[-1]['id']:
@@ -727,7 +742,9 @@ class EncounterScheduler:
                 latest = self.repository.list_messages(candidate_id, limit=1)
                 reply_line_id = latest[-1]["id"] if latest else None
                 result = self.service.reply(candidate_id)
-            except Exception:
+            except Exception as exc:
+                if isinstance(exc, _ReplyGenerationFailure):
+                    reply_line_id = exc.line_id
                 # The person's message is already durable, so a failed reply must
                 # not travel back to them as an error; the log keeps the reason.
                 logger.exception("encounter.reply_failed candidate=%s", candidate_id)

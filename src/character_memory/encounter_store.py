@@ -595,8 +595,15 @@ class EncounterRepository:
     def _public_call(row) -> dict:
         return {key: value for key, value in dict(row).items() if key not in {'token', 'lease_epoch'}}
 
-    def _expire_calls(self, now: datetime) -> None:
-        self.store.conn.execute("UPDATE encounter_calls SET status='EXPIRED',updated_at=? WHERE status IN ('RINGING','ACCEPTED','CONNECTED') AND lease_epoch<=?", (now.isoformat(),epoch_us(now)))
+    def _expire_calls(self, now: datetime, *, keep_id: str | None = None) -> None:
+        sql="UPDATE encounter_calls SET status='EXPIRED',updated_at=? WHERE status IN ('RINGING','ACCEPTED','CONNECTED') AND lease_epoch<=?"
+        args: list=[now.isoformat(),epoch_us(now)]
+        if keep_id:
+            # The caller is actively deciding this invitation. Its own model
+            # latency must not expire the row it is about to decide.
+            sql+=" AND id<>?"
+            args.append(keep_id)
+        self.store.conn.execute(sql,args)
 
     def begin_call(self, candidate_id: int, now: datetime) -> dict:
         token = secrets.token_urlsafe(32)
@@ -616,7 +623,7 @@ class EncounterRepository:
 
     def decide_call(self, identifier: str, accept: bool, reason: str, now: datetime) -> dict:
         with self.store.transaction():
-            self._expire_calls(now)
+            self._expire_calls(now, keep_id=identifier)
             row=self.store.conn.execute('SELECT * FROM encounter_calls WHERE id=?',(identifier,)).fetchone()
             if row is None:
                 raise KeyError('call not found')

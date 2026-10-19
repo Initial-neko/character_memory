@@ -11,6 +11,8 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from character_memory.api import create_api
+from character_memory.history_web import attach_history_routes
+from character_memory.space_web import attach_space_routes
 from character_memory.domain.models import Event, EventType
 from character_memory.stickers import private_sticker_dir
 from test_p0_10_web_sticker_manager import FakeStickerTagModel, _bundle, _tagged_zip
@@ -121,5 +123,47 @@ def test_identical_named_private_packs_do_not_collide_and_reimports_preserve_his
         message = next(item for item in history if item["id"] == event.id)
         assert message["sticker"]["url"] == first["url"]
         assert client.get(message["sticker"]["url"]).content == b"tagged-png"
+    finally:
+        store.close()
+
+
+def test_private_sticker_survives_history_page_and_space_comment_payload(tmp_path):
+    bundle, _, store = _bundle(tmp_path, FakeStickerTagModel())
+    try:
+        app = create_api(bundle=bundle)
+        attach_history_routes(app)
+        attach_space_routes(app)
+        client = TestClient(app)
+        assert _import(client).status_code == 200
+        sticker = next(item for item in client.get("/v1/stickers?character_id=neko").json()["stickers"]
+                       if item["scope"] == "character")
+
+        now = datetime(2026, 10, 19, tzinfo=timezone.utc)
+        event = store.append_event(Event(
+            character_id="neko", event_type=EventType.CHARACTER_MESSAGE,
+            event_time=now, content="[表情包]",
+            metadata={"action": "STICKER", "sticker_id": sticker["id"],
+                      "sticker_label": sticker["label"], "conversation_id": "example"},
+        ))
+        # The paged history used by Android/Web must resolve the character's
+        # private pool, not only the global catalog.
+        history = client.get("/v1/chat/history-page?character_id=neko").json()["messages"]
+        message = next(item for item in history if item["id"] == event.id)
+        assert message["sticker"]["url"] == sticker["url"]
+        assert client.get(message["sticker"]["url"]).content == b"tagged-png"
+        assert client.get(f'/v1/stickers/{sticker["id"]}/asset').status_code == 404
+
+        post = client.post("/v1/space/posts", json={
+            "character_id": "neko", "content": "带私有表情的评论",
+        }).json()["post"]
+        created = client.post(f'/v1/space/posts/{post["id"]}/comments', json={
+            "character_id": "neko", "content": "看这个", "sticker_id": sticker["id"],
+        })
+        assert created.status_code == 200, created.text
+        stored = client.get(f'/v1/space/posts/{post["id"]}').json()["post"]
+        comment = next(item for item in stored["comments"]
+                       if item["id"] == created.json()["comment"]["id"])
+        assert comment["sticker"]["url"] == sticker["url"]
+        assert client.get(comment["sticker"]["url"]).content == b"tagged-png"
     finally:
         store.close()

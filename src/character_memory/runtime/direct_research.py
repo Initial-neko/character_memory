@@ -31,7 +31,7 @@ class DirectResearchService:
         profile = next((p for p in self.profiles() if p['id'] == event.character_id), None)
         settings = self.settings
         denial = self.executor.claude_budget_denial(
-            event.character_id, now=event.event_time,
+            event.character_id, now=datetime.now().astimezone(),
             daily_max=settings.claude_execution_daily_max,
             daily_budget_usd=settings.claude_execution_daily_budget_usd,
             max_budget_usd=settings.claude_execution_max_budget_usd,
@@ -87,7 +87,9 @@ class DirectResearchService:
              'claude_max_tool_calls':settings.claude_execution_max_tool_calls,
              'claude_model':settings.claude_execution_model},
         )
-        result = self.executor.execute(request, now=event.event_time)
+        # Budget buckets follow the trusted server clock. event.event_time is
+        # the conversation's semantic time and can be supplied by the client.
+        result = self.executor.execute(request)
         info = {'request_id':request.request_id, 'status':result.status, 'reason':result.reason,
                 'decision':actions[0].model_dump(mode='json')}
         # The durable execution receipt remains even if a newer user message

@@ -719,15 +719,29 @@ class EncounterScheduler:
                     break
                 candidate_id, queued_at = self._pending_replies.popleft()
                 self._in_flight.add(candidate_id)
+            reply_line_id = None
             try:
+                # Keep the ownership snapshot inside the try: a transient read
+                # failure must still reach the finally that clears in-flight,
+                # or the candidate would never be enqueued again.
+                latest = self.repository.list_messages(candidate_id, limit=1)
+                reply_line_id = latest[-1]["id"] if latest else None
                 result = self.service.reply(candidate_id)
             except Exception:
                 # The person's message is already durable, so a failed reply must
                 # not travel back to them as an error; the log keeps the reason.
                 logger.exception("encounter.reply_failed candidate=%s", candidate_id)
-                with self.repository.store._lock:
-                    self.repository.store.conn.execute("UPDATE encounter_candidates SET error=? WHERE id=? AND status IN ('NEW','SEEN','CHATTING')",('角色暂时没有回应，可以稍后重试。',candidate_id))
-                    self.repository.store._maybe_commit()
+                with self.repository.lifecycle_lock(candidate_id):
+                    latest = self.repository.list_messages(candidate_id, limit=1)
+                    current_line_id = latest[-1]["id"] if latest else None
+                    if current_line_id != reply_line_id:
+                        # A newer line arrived while this reply was running. That
+                        # line owns the retry state; a stale failure must not
+                        # overwrite the error it already cleared.
+                        continue
+                    with self.repository.store._lock:
+                        self.repository.store.conn.execute("UPDATE encounter_candidates SET error=? WHERE id=? AND status IN ('NEW','SEEN','CHATTING')",('角色暂时没有回应，可以稍后重试。',candidate_id))
+                        self.repository.store._maybe_commit()
                 continue
             finally:
                 with self._pending_lock:

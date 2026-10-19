@@ -62,6 +62,23 @@ def test_enabled_generation_is_idempotent_and_marks_synthetic_provenance(tmp_pat
     store.close()
 
 
+def test_media_registration_failure_deletes_generated_bytes(tmp_path, monkeypatch):
+    service, runtime, provider, compiled, store = setup_image(tmp_path)
+    event = source(store, kind=EventType.PROACTIVE_INTENT, at=NOW + timedelta(days=30))
+
+    def fail_registration(asset):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(store, "add_media_asset", fail_registration)
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.generate(runtime, event, ACTION, action_index=1)
+
+    media_files = [path for path in (tmp_path / "media").rglob("*") if path.is_file()]
+    assert media_files == []
+    assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
+    store.close()
+
+
 def test_daily_application_limit_and_character_cooldown_before_any_paid_call(tmp_path):
     service, runtime, provider, compiled, store = setup_image(tmp_path, limit=1)
     assert service.generate(runtime, source(store), ACTION)

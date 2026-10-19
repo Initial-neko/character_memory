@@ -59,6 +59,15 @@ def _visual_runtime():
     return getattr(_access, "visual_runtime", None) if _access is not None else None
 
 
+def _register_generated_media(store, media_storage, asset) -> None:
+    """Register bytes with the DB, or delete them so a failed write leaves no orphan."""
+    try:
+        store.add_media_asset(asset)
+    except Exception:
+        media_storage.delete(asset)
+        raise
+
+
 def _generate_group_image(
     service: GroupConversationService,
     *,
@@ -130,7 +139,7 @@ def _generate_group_image(
         created_at=source_event.event_time,
         source=f"GENERATED_{purpose.value}",
     )
-    service.store.add_media_asset(asset)
+    _register_generated_media(service.store, _access.media_storage, asset)
 
     repository = GroupRepository(service.store)
     try:

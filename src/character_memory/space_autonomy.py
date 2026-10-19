@@ -184,6 +184,21 @@ class SpaceAutonomyService:
     def _active_profiles(self) -> list[dict]:
         return [item for item in self._profiles() if "archived_at" not in item]
 
+    def _publishing_profiles(self) -> list[dict]:
+        """Characters the sidebar lists, and therefore the only Space authors.
+
+        Deferred (``direct_pending``) characters are group-only: the user asked
+        for them to join a group without also appearing in the sidebar. They may
+        still answer when the group or a Space mention addresses them, but they
+        must not seed the public feed with posts or unprompted reactions before
+        the user opens a direct chat.
+        """
+        return [
+            item
+            for item in self._active_profiles()
+            if "direct_pending" not in item
+        ]
+
     def _require_active(self, character_id: str) -> dict:
         profile = next((item for item in self._profiles() if item["id"] == character_id), None)
         if profile is None:
@@ -661,7 +676,7 @@ Sources:
         full PersonRuntime / LLM reaction on every configured candidate.
         """
         candidates = [
-            item["id"] for item in self._active_profiles()
+            item["id"] for item in self._publishing_profiles()
             if item["id"] != author_id
         ]
         configured = int(getattr(self.access.settings, "space_audience_size", 5))
@@ -1143,7 +1158,7 @@ class SpaceAutonomyScheduler:
     def status(self, now: datetime | None = None) -> dict:
         now = now or datetime.now().astimezone()
         items = []
-        for profile in self.service._active_profiles():
+        for profile in self.service._publishing_profiles():
             character_id = profile["id"]
             state = self._state_for(character_id, now)
             items.append(
@@ -1302,7 +1317,7 @@ class SpaceAutonomyScheduler:
         if rearm:
             interval = self.interval_minutes(now)
             next_at = now + timedelta(minutes=interval)
-            for profile in self.service._active_profiles():
+            for profile in self.service._publishing_profiles():
                 self.repository.set_next_opportunity(
                     profile["id"],
                     next_at,
@@ -1376,7 +1391,7 @@ class SpaceAutonomyScheduler:
             return []
         outcomes = []
         interval = self.interval_minutes(now)
-        for profile in self.service._active_profiles():
+        for profile in self.service._publishing_profiles():
             character_id = profile["id"]
             state = self._state_for(character_id, now)
             if epoch_us(now) < int(state["next_opportunity_at_epoch"]):

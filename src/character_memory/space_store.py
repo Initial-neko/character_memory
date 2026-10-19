@@ -375,10 +375,17 @@ class SpaceRepository:
         character_id: str | None = None,
         limit: int = 10,
         before_id: int | None = None,
+        character_ids: list[str] | None = None,
     ) -> tuple[list[SpacePost], bool, int | None]:
         page_size = max(1, min(int(limit), 50))
+        authors = None if character_ids is None else [str(value) for value in character_ids]
+        if authors == []:
+            return [], False, None
         sql = "SELECT * FROM space_posts WHERE visibility='ACTIVE_CHARACTERS'"
         args: list[Any] = []
+        if authors:
+            sql += " AND character_id IN (" + ",".join("?" * len(authors)) + ")"
+            args.extend(authors)
         if character_id:
             sql += " AND character_id=?"
             args.append(character_id)
@@ -399,9 +406,20 @@ class SpaceRepository:
         next_before_id = posts[-1].id if has_more and posts else None
         return posts, has_more, next_before_id
 
-    def count_posts(self, *, character_id: str | None = None) -> int:
+    def count_posts(
+        self,
+        *,
+        character_id: str | None = None,
+        character_ids: list[str] | None = None,
+    ) -> int:
+        authors = None if character_ids is None else [str(value) for value in character_ids]
+        if authors == []:
+            return 0
         sql = "SELECT COUNT(*) AS total FROM space_posts WHERE visibility='ACTIVE_CHARACTERS'"
         args: list[Any] = []
+        if authors:
+            sql += " AND character_id IN (" + ",".join("?" * len(authors)) + ")"
+            args.extend(authors)
         if character_id:
             sql += " AND character_id=?"
             args.append(character_id)

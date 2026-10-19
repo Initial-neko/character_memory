@@ -68,6 +68,18 @@ def test_cursor_ties_filters_and_new_arrivals(mixed):
         feed.page(cursor=oversized)
 
 
+def test_author_filter_keeps_deferred_roles_out_of_the_post_stream(mixed):
+    _, feed, posts, _, _, now, visible = mixed
+    hidden = posts.create_post('hidden', '群聊里的临时角色', now + timedelta(minutes=1))
+    page = feed.page(character_ids=['alice'])
+    post_ids = [row['id'] for row in page['items'] if row['kind'] == 'POST']
+    assert post_ids == [visible.id]
+    assert hidden.id not in post_ids
+    assert feed.page(kind='POST', character_ids=[])['items'] == []
+    # RSS and topics have no character author, so the filter leaves them alone.
+    assert {row['kind'] for row in page['items']} == {'POST', 'RSS', 'TOPIC'}
+
+
 def test_cancelled_subscriptions_leave_space_but_keep_rss_history(mixed):
     _, feed, _, rss, source, _, _ = mixed
     rss.cancel_source(source['id'])

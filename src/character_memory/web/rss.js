@@ -179,14 +179,16 @@
       feedback("feed", `已显示 ${state.items.length} 篇${data.has_more ? "" : " · 已全部加载"}`);
       if (state.articleOpen && state.articleId && !preserveEntry && !state.items.some(item=>String(item.id)===state.articleId)) {
         const first=state.items[0];
-        if (first && !isMobileReader()) openArticle(first.id, document.querySelector(`[data-item-id="${first.id}"]`));
-        else closeArticle();
+        // Automatic follow-up keeps the user's focus; only explicit activation
+        // moves focus into the reader.
+        if (first && !isMobileReader()) openArticle(first.id, document.querySelector(`[data-item-id="${first.id}"]`), {focus:false});
+        else closeArticle({focus:false});
       }
       if (!state.initialReaderReady) {
         state.initialReaderReady = true;
         if (state.items.length && !isMobileReader()) {
           const first = state.items[0];
-          openArticle(first.id, document.querySelector(`[data-item-id="${first.id}"]`));
+          openArticle(first.id, document.querySelector(`[data-item-id="${first.id}"]`), {focus:false});
         }
       }
     } catch (error) { if (request === state.feedRequest) feedback("feed", `加载失败：${error.message}`, true); }
@@ -239,21 +241,24 @@
     if (changed && mobile && state.articleOpen) $("#closeArticleButton").focus({preventScroll:true});
     if (changed && !mobile && state.articleOpen && state.articleOrigin?.isConnected) state.articleOrigin.focus({preventScroll:true});
   };
-  const closeArticle = () => {
+  const closeArticle = ({focus = true} = {}) => {
     ++state.articleRequest; state.articleOpen=false; state.articleId="";
     document.querySelectorAll("[data-item-id]").forEach(card=>{card.setAttribute("aria-pressed","false");card.classList.remove("selected");});
     if (!isMobileReader()) readerPlaceholder("选择一篇文章，查看 Feed 中实际提供的内容。");
     syncReaderMode();
     const origin=state.articleOrigin; state.articleOrigin=null;
+    if (!focus) return;
     if (origin?.isConnected) origin.focus({preventScroll:true});
     else if (!isMobileReader()) $("#feedSearch").focus({preventScroll:true});
   };
-  const openArticle = async (itemId, origin) => {
+  const openArticle = async (itemId, origin, {focus = true} = {}) => {
     const request = ++state.articleRequest; state.articleOrigin = origin; state.articleId=String(itemId); state.articleOpen=true;
     document.querySelectorAll("[data-item-id]").forEach(card=>{const selected=card.dataset.itemId===state.articleId;card.setAttribute("aria-pressed",String(selected));card.classList.toggle("selected",selected);});
     syncReaderMode();
-    if (isMobileReader()) $("#closeArticleButton").focus({preventScroll:true});
-    else origin?.focus({preventScroll:true});
+    if (focus) {
+      if (isMobileReader()) $("#closeArticleButton").focus({preventScroll:true});
+      else origin?.focus({preventScroll:true});
+    }
     $("#closeArticleButton").hidden=false;
     $("#articleBody").textContent = "加载文章中…"; $("#articleExternalLink").classList.add("hidden"); $("#articlePanel").scrollTop = 0;
     try {

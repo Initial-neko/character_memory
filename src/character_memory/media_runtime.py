@@ -206,6 +206,9 @@ class SherpaParaformerStreamingProvider(SpeechRecognitionProvider):
         self.endpoint_short_silence_ms = max(200, int(endpoint_short_silence_ms))
         self._recognizer = None
         self._lock = threading.RLock()
+        # One recognizer is shared by every session; decode on a worker thread
+        # so the media event loop stays free for TTS and /health.
+        self._decode_lock = threading.RLock()
 
     def _ensure(self):
         if self._recognizer is not None:
@@ -306,22 +309,25 @@ class SherpaParaformerStreamingSession:
             return self._last_text
         if int(sample_rate) != 16000:
             raise ValueError("Paraformer streaming requires 16 kHz PCM audio")
-        self.stream.accept_waveform(16000, values)
-        self.audio_samples += int(values.size)
-        self._decode_ready()
-        self._last_text = str(self.recognizer.get_result(self.stream) or "").strip()
-        return self._last_text
+        with self.provider._decode_lock:
+            self.stream.accept_waveform(16000, values)
+            self.audio_samples += int(values.size)
+            self._decode_ready()
+            self._last_text = str(self.recognizer.get_result(self.stream) or "").strip()
+            return self._last_text
 
     def is_endpoint(self) -> bool:
         if self.closed:
             return True
-        return bool(self.recognizer.is_endpoint(self.stream))
+        with self.provider._decode_lock:
+            return bool(self.recognizer.is_endpoint(self.stream))
 
     def reset_endpoint(self) -> None:
         if self.closed:
             return
-        self.recognizer.reset(self.stream)
-        self._last_text = ""
+        with self.provider._decode_lock:
+            self.recognizer.reset(self.stream)
+            self._last_text = ""
 
     def finish(self):
         if self.closed:
@@ -329,14 +335,15 @@ class SherpaParaformerStreamingSession:
         # Paraformer streaming needs tail audio to flush the last look-ahead
         # window. Keep this server-side so browser endpoint timing cannot drop
         # the final syllables of an utterance.
-        self.stream.accept_waveform(
-            16000,
-            np.zeros(int(0.6 * 16000), dtype=np.float32),
-        )
-        self.stream.input_finished()
-        self._decode_ready(force=True)
-        text = str(self.recognizer.get_result(self.stream) or "").strip()
-        self.closed = True
+        with self.provider._decode_lock:
+            self.stream.accept_waveform(
+                16000,
+                np.zeros(int(0.6 * 16000), dtype=np.float32),
+            )
+            self.stream.input_finished()
+            self._decode_ready(force=True)
+            text = str(self.recognizer.get_result(self.stream) or "").strip()
+            self.closed = True
         return type("Result", (), {"text": text})()
 
     def _decode_ready(self, *, force: bool = False) -> None:

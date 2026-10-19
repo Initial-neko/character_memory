@@ -70,22 +70,34 @@ class _FakeStreamingAsr(SpeechRecognitionProvider):
         return session
 
 
+def _send_batch(ws, frames=10, samples_per_frame=160):
+    for _ in range(frames):
+        ws.send_bytes(b"\x00\x00" * samples_per_frame)
+
+
 def test_streaming_asr_websocket_emits_partial_then_one_final():
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    runtime = MediaRuntime(_FakeStreamingAsr(), _UnusedTts())
+    asr = _FakeStreamingAsr()
+    runtime = MediaRuntime(asr, _UnusedTts())
     with TestClient(create_media_app(runtime)).websocket_connect("/v1/asr/stream") as ws:
         ws.send_json({"op": "start", "source": "call"})
         ready = ws.receive_json()
         assert ready["kind"] == "ready"
 
-        ws.send_bytes(b"\\x00\\x00" * 160)
+        # Nine 10 ms frames are below the 100 ms batch threshold and must not
+        # reach the recognizer yet.
+        _send_batch(ws, frames=9)
+        assert asr.sessions[0].calls == 0
+
+        _send_batch(ws, frames=1)
         partial = ws.receive_json()
         assert partial["kind"] == "partial"
         assert partial["segment_id"] == 1
+        assert asr.sessions[0].calls == 1
 
-        ws.send_bytes(b"\\x00\\x00" * 160)
+        _send_batch(ws, frames=10)
         final = ws.receive_json()
         assert final["kind"] == "final"
         assert final["text"] == "你好世界"
@@ -102,7 +114,7 @@ def test_streaming_asr_flush_acknowledges_every_consumed_frame():
         ws.send_json({"op": "start", "source": "dictation"})
         assert ws.receive_json()["kind"] == "ready"
 
-        ws.send_bytes(b"\x00\x00" * 160)
+        _send_batch(ws, frames=10)
         assert ws.receive_json()["kind"] == "partial"
 
         ws.send_json({"op": "flush", "reason": "user_stop"})
@@ -114,3 +126,33 @@ def test_streaming_asr_flush_acknowledges_every_consumed_frame():
         assert flushed["kind"] == "flushed"
         assert flushed["segment_id"] == final["segment_id"]
         assert flushed["endpoint_reason"] == "user_stop"
+
+
+def test_streaming_asr_decodes_and_finishes_through_the_worker_threadpool(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    import character_memory.media_server as media_server
+
+    dispatched = []
+    real = media_server.run_in_threadpool
+
+    async def spy(func, *args, **kwargs):
+        dispatched.append(getattr(func, "__name__", type(func).__name__))
+        return await real(func, *args, **kwargs)
+
+    monkeypatch.setattr(media_server, "run_in_threadpool", spy)
+    runtime = MediaRuntime(_FakeStreamingAsr(), _UnusedTts())
+    with TestClient(create_media_app(runtime)).websocket_connect("/v1/asr/stream") as ws:
+        ws.send_json({"op": "start", "source": "call"})
+        assert ws.receive_json()["kind"] == "ready"
+        assert "create_session" in dispatched
+        _send_batch(ws, frames=10)
+        assert ws.receive_json()["kind"] == "partial"
+        assert "push_audio" in dispatched
+        assert "is_endpoint" in dispatched
+        ws.send_json({"op": "flush", "reason": "user_stop"})
+        assert ws.receive_json()["kind"] == "final"
+        assert ws.receive_json()["kind"] == "flushed"
+        assert "finish" in dispatched
+

@@ -28,10 +28,14 @@ _IMPORT_LOCKS: dict[str, threading.RLock] = {}
 
 
 def _single_line(value: str) -> str:
-    """Catalog text is untrusted data; newlines could forge a new prompt line."""
-    if "\r" in value or "\n" in value or any(ord(char) < 32 for char in value):
-        raise ValueError("catalog text must be a single line without control characters")
-    return value
+    """Catalog text is untrusted data; newlines could forge a new prompt line.
+
+    Sanitize on read instead of raising: an existing manifest written with a
+    YAML block scalar must not make the whole runtime fail to boot.
+    """
+    return "".join(
+        " " if char in "\r\n" or ord(char) < 32 else char for char in value
+    )
 
 
 class Sticker(BaseModel):

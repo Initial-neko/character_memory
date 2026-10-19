@@ -59,8 +59,8 @@ def test_sidebar_css_defines_expanded_compact_and_mobile_modes():
     css = (root / "src" / "character_memory" / "web" / "chat_refine.css").read_text(encoding="utf-8")
 
     for token in [
-        "--cm-sidebar-expanded: 280px",
-        "--cm-sidebar-compact: 68px",
+        "--cm-sidebar-expanded: 236px",
+        "--cm-sidebar-compact: 60px",
         '.sidebar[data-mode="compact"]',
         ".character-item-wrap:not(.rail-visible)",
         "@media (max-width: 820px)",

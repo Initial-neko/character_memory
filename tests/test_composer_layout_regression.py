@@ -16,7 +16,8 @@ def test_base_composer_remains_fixed_to_chat_viewport():
     rules = _rule_bodies(base, ".composer-wrap")
     assert rules, "base composer-wrap rule missing"
     assert any(re.search(r"position\s*:\s*fixed", body) for body in rules)
-    assert any(re.search(r"left\s*:\s*280px", body) for body in rules)
+    # The composer must follow the sidebar instead of hard-coding its width.
+    assert any(re.search(r"left\s*:\s*var\(--cm-sidebar-width", body) for body in rules)
     assert any(re.search(r"right\s*:\s*0", body) for body in rules)
     assert any(re.search(r"bottom\s*:\s*0", body) for body in rules)
 

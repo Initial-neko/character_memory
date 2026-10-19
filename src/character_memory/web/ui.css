@@ -24,6 +24,10 @@ html, body, * { scrollbar-width: none; }
 :root {
   color-scheme: light;
 
+  /* Shared chrome height. Page offsets derive from this so shrinking the
+   * header cannot leave a stale 72px gap on one surface. */
+  --cm-global-header-h: 56px;
+
   --ui-font: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
   --ui-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 

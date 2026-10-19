@@ -13,7 +13,7 @@ body.reading-page {
 .article-image { height:auto; max-height:560px; object-fit:contain; background:var(--ui-bg); }
 .life-nav {
   position: fixed;
-  inset: 72px auto 0 0;
+  inset: var(--cm-global-header-h) auto 0 0;
   z-index: 10;
   display: flex;
   flex-direction: column;
@@ -149,12 +149,12 @@ body.reading-page {
   grid-template-columns: 220px minmax(0, .92fr) minmax(0, 1.08fr);
   align-items: start;
   min-height: 100vh;
-  padding-top: 72px;
+  padding-top: var(--cm-global-header-h);
   background: var(--ui-bg);
   color: var(--ui-text);
 }
 .rss-sidebar {
-  top: 72px;
+  top: var(--cm-global-header-h);
   bottom: 0;
   width: 220px;
   padding: 18px 13px;
@@ -239,9 +239,9 @@ body.reading-page {
   inset: auto;
   z-index: auto;
   grid-column: 3;
-  top: 72px;
+  top: var(--cm-global-header-h);
   align-self: start;
-  height: calc(100vh - 72px);
+  height: calc(100vh - var(--cm-global-header-h));
   min-height: 500px;
   overflow: auto;
   border-left: 1px solid var(--ui-line);

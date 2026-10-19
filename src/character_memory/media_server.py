@@ -9,17 +9,27 @@ import httpx
 from pydantic import BaseModel, Field
 
 try:
+    from starlette.concurrency import run_in_threadpool
     from starlette.websockets import WebSocket, WebSocketDisconnect
 except ImportError:  # create_media_app will raise the API-extra error first
     WebSocket = object
     class WebSocketDisconnect(Exception):
         pass
 
+    async def run_in_threadpool(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
 from character_memory.web_lifecycle import on_app_event
 from character_memory.asr_capture import AsrCaptureStore
 from character_memory.config import DEFAULT_VOICE_SILENCE_MS, load_settings, runtime_setting
 from character_memory.media_runtime import MediaRuntime, build_media_runtime_from_env
 from character_memory.tts_registry import FORMAL_TTS_PROVIDER_SET, provider_spec
+
+
+# 100 ms of 16 kHz mono PCM. Decoding every browser render quantum kept the
+# media event loop busy enough to starve TTS and /health; decode in batches on
+# a worker thread instead.
+STREAM_ASR_BATCH_SAMPLES = 1600
 
 
 class TtsRequest(BaseModel):
@@ -210,11 +220,13 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         session = None
         session_id = None
         segment_id = 1
+        pending_frames = []
+        pending_samples = 0
         try:
             first = await websocket.receive_json()
             if first.get("op") != "start":
                 raise ValueError("first frame must be start")
-            session = create_session()
+            session = await run_in_threadpool(create_session)
             session_id = f"media-{id(session)}"
             await websocket.send_json({
                 "kind": "ready",
@@ -232,13 +244,20 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                     if len(payload) % 2:
                         raise ValueError("PCM16 frame has odd byte length")
                     samples = np.frombuffer(payload, dtype="<i2").astype(np.float32) / 32768.0
-                    text = session.push_audio(samples, sample_rate=16000)
-                    if session.is_endpoint():
+                    pending_frames.append(samples)
+                    pending_samples += int(samples.size)
+                    if pending_samples < STREAM_ASR_BATCH_SAMPLES:
+                        continue
+                    batch = np.concatenate(pending_frames) if len(pending_frames) > 1 else pending_frames[0]
+                    pending_frames.clear()
+                    pending_samples = 0
+                    text = await run_in_threadpool(session.push_audio, batch, sample_rate=16000)
+                    if await run_in_threadpool(session.is_endpoint):
                         # Do not emit a redundant PARTIAL immediately before the
                         # FINAL for the same audio frame. Clients replace partial
                         # text by segment_id, but one terminal event per endpoint
                         # keeps ordering deterministic and avoids a visible flash.
-                        result = session.finish()
+                        result = await run_in_threadpool(session.finish)
                         if result.text:
                             await websocket.send_json({
                                 "kind": "final",
@@ -249,7 +268,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                                 "endpoint_reason": "model_endpoint",
                             })
                         segment_id += 1
-                        session = create_session()
+                        session = await run_in_threadpool(create_session)
                     elif text:
                         await websocket.send_json({
                             "kind": "partial",
@@ -267,7 +286,12 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                 op = command.get("op")
                 if op in {"flush", "finish", "stop"}:
                     reason = str(command.get("reason") or "user_stop")
-                    result = session.finish()
+                    if pending_frames:
+                        batch = np.concatenate(pending_frames) if len(pending_frames) > 1 else pending_frames[0]
+                        pending_frames.clear()
+                        pending_samples = 0
+                        await run_in_threadpool(session.push_audio, batch, sample_rate=16000)
+                    result = await run_in_threadpool(session.finish)
                     if result.text:
                         await websocket.send_json({
                             "kind": "final",
@@ -288,7 +312,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
                         "endpoint_reason": reason,
                     })
                     segment_id += 1
-                    session = create_session()
+                    session = await run_in_threadpool(create_session)
                     continue
                 if op == "cancel":
                     break
@@ -305,7 +329,7 @@ def create_media_app(runtime: MediaRuntime | None = None, *, provider_http_clien
         finally:
             if session is not None:
                 try:
-                    session.finish()
+                    await run_in_threadpool(session.finish)
                 except Exception:
                     pass
 

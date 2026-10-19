@@ -37,13 +37,26 @@ jobs:
 
       - name: Run tests
         env:
+          # faulthandler dumps every Python thread's stack on SIGSEGV/SIGABRT.
           PYTHONFAULTHANDLER: "1"
+          # Keep pre-crash output in the archived log ordered with that dump.
+          PYTHONUNBUFFERED: "1"
         run: |
           set -o pipefail
           set +e
           uv run pytest -q --junitxml=artifacts/core-visual-evidence/junit-linux.xml 2>&1 | tee artifacts/core-visual-evidence/pytest-linux.log
           pytest_status=${PIPESTATUS[0]}
           printf '%s\n' "$pytest_status" > artifacts/core-visual-evidence/pytest-linux-exit-code.txt
+          if [ "$pytest_status" -ge 128 ]; then
+            # A signal exit (139 = SIGSEGV) leaves a kernel record naming the
+            # faulting address and native module, which faulthandler cannot show.
+            {
+              printf 'pytest exited via signal, status: %s\n' "$pytest_status"
+              ulimit -a
+              cat /proc/sys/kernel/core_pattern
+              dmesg 2>&1 | tail -n 50
+            } 2>&1 | tee -a artifacts/core-visual-evidence/pytest-linux.log
+          fi
           exit "$pytest_status"
 
       - name: Upload Linux test results

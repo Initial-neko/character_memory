@@ -9,8 +9,9 @@
 
 .voice-call-button { min-width: 42px; }
 .voice-call-button.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-danger) 25%, transparent); }
-.voice-input-button { min-width: 38px !important; width: 38px; padding: 0 !important; border-radius: 50% !important; background: var(--ui-surface-sunken) !important; color: var(--ui-text) !important; flex: 0 0 38px; }
-.voice-input-button:hover { background: var(--ui-line) !important; }
+.voice-input-button { min-width: 32px !important; width: 32px; height: 32px; padding: 0 !important; border-radius: 50% !important; background: transparent !important; color: var(--ui-muted) !important; flex: 0 0 32px; }
+.voice-input-button svg { width: 18px; height: 18px; }
+.voice-input-button:hover { background: var(--ui-hover) !important; color: var(--ui-text) !important; }
 .voice-input-button.recording { background: var(--ui-danger) !important; color: var(--ui-accent-text) !important; animation: voice-record-pulse 1.2s ease-in-out infinite; }
 .voice-input-button.transcribing { background: var(--ui-line-strong) !important; color: var(--ui-muted) !important; }
 @keyframes voice-record-pulse {

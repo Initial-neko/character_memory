@@ -404,8 +404,10 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
             # are its missing assets. Apply them without preloading first so the
             # normal health gate can validate the prospective provider.
             if gsv_updates or gsv_device_update:
-                _configure_gsv(raw_values, preload=False)
+                # The sidecar may apply the change before its response is lost.
+                # Record the attempt first so any failure restores the old values.
                 gsv_preconfigured = True
+                _configure_gsv(raw_values, preload=False)
 
             values = validated_tts_values(raw_values)
             result = settings_store.save_values(values)

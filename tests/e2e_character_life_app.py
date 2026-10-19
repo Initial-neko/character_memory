@@ -28,11 +28,15 @@ def build(db_path):
     for n in range(35):
         store.append_event(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=now-timedelta(minutes=n+1),content=f'真实分页测试 {n}'))
     store.append_event(Event(character_id='b',event_type=EventType.USER_MESSAGE,event_time=now,content='另一个人物独立经历'))
+    store.append_event(Event(character_id='c',event_type=EventType.USER_MESSAGE,event_time=now,content='归档人物的独立经历'))
     app=FastAPI();web=Path(__file__).parents[1]/'src/character_memory/web'
     def ensure(cid):
-        if cid not in {'a','b'}:raise HTTPException(404,'unknown')
+        if cid not in {'a','b','c'}:raise HTTPException(404,'unknown')
     attach_character_life_routes(app,SimpleNamespace(read_store=store,ensure_character=ensure,web_dir=web))
     app.mount('/static',StaticFiles(directory=web),name='static')
     @app.get('/v1/characters')
-    def profiles():return {'characters':[{'id':'a','name':'林绘 · 隔离验收'},{'id':'b','name':'另一位角色'}]}
+    def profiles(archived: bool = False):
+        if archived:
+            return {'characters':[{'id':'c','name':'归档人物','archived_at':'2026-10-01T00:00:00+00:00'}]}
+        return {'characters':[{'id':'a','name':'林绘 · 隔离验收'},{'id':'b','name':'另一位角色'}]}
     return app,store

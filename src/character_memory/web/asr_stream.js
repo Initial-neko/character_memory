@@ -29,6 +29,7 @@
     let silentGain = null;
     let readyPromise = null;
     let flushWaiter = null;
+    let failed = false;
 
     function snapshot() {
       return {
@@ -54,6 +55,8 @@
 
     function fail(error) {
       const value = error instanceof Error ? error : new Error(String(error || "ASR stream failed"));
+      if (failed) return value;
+      failed = true;
       settleFlush(value);
       onError(value);
       return value;
@@ -119,11 +122,20 @@
           }
         });
         socket.addEventListener("close", () => {
+          const wasReady = ready;
           ready = false;
           notify();
-          if (!closed && !settled) {
+          if (closed) return;
+          // A clean close after ready used to leave the session "listening"
+          // forever. Surface it so voice.js can switch to batch capture.
+          const error = fail(new Error(
+            wasReady
+              ? "ASR streaming connection closed"
+              : "ASR streaming connection closed before ready"
+          ));
+          if (!settled) {
             settled = true;
-            reject(fail(new Error("ASR streaming connection closed before ready")));
+            reject(error);
           }
         });
       });

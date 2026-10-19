@@ -76,6 +76,94 @@ process.stdout.write(JSON.stringify({
 """
 
 
+STREAM_CLOSE_HARNESS = r"""
+const fs = require("fs");
+const vm = require("vm");
+
+let lastSocket = null;
+class FakeWebSocket {
+  static OPEN = 1;
+  constructor(url) {
+    this.url = url;
+    this.readyState = 0;
+    this.handlers = {};
+    lastSocket = this;
+  }
+  addEventListener(type, fn) {
+    (this.handlers[type] ||= []).push(fn);
+  }
+  emit(type, payload) {
+    for (const fn of this.handlers[type] || []) fn(payload);
+  }
+  send() {}
+  close() {
+    this.readyState = 3;
+    this.emit("close", {});
+  }
+}
+
+const sandbox = {
+  window: {WebSocket: FakeWebSocket, location: {href: "http://localhost/"}},
+  WebSocket: FakeWebSocket,
+  URL,
+  console,
+  setTimeout,
+  clearTimeout,
+  Error,
+  JSON,
+  Boolean,
+  String,
+};
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), vm.createContext(sandbox));
+
+async function readySession(errors) {
+  const session = sandbox.window.StreamingAsr.createSession({
+    source: "test",
+    onError: error => errors.push(error.message),
+  });
+  const connected = session.connect();
+  lastSocket.emit("open", {});
+  lastSocket.emit("message", {data: JSON.stringify({kind: "ready"})});
+  await connected;
+  return session;
+}
+
+(async () => {
+  const errors = [];
+  await readySession(errors);
+  lastSocket.emit("close", {});
+  lastSocket.emit("close", {});
+  if (errors.length !== 1) throw new Error("expected one close error, got " + JSON.stringify(errors));
+  if (!errors[0].includes("closed")) throw new Error("unexpected error: " + errors[0]);
+
+  const clientErrors = [];
+  const clientClosed = await readySession(clientErrors);
+  clientClosed.close();
+  if (clientErrors.length !== 0) throw new Error("client close must not report an error");
+  process.stdout.write("ok");
+})().catch(error => { console.error(error); process.exit(1); });
+"""
+
+
+def test_stream_close_after_ready_surfaces_one_error_and_client_close_is_quiet(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to exercise the stream client")
+
+    harness = tmp_path / "asr_stream_close.cjs"
+    harness.write_text(STREAM_CLOSE_HARNESS, encoding="utf-8")
+    script = Path("src/character_memory/web/asr_stream.js").resolve()
+    completed = subprocess.run(
+        [node, str(harness), str(script)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "ok"
+
+
 def test_audio_worklet_emits_16khz_pcm16_without_audible_output(tmp_path):
     node = shutil.which("node")
     if not node:

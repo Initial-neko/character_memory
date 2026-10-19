@@ -489,6 +489,14 @@ class SQLiteStore:
         with self._lock:
             outer = self._tx_depth == 0
             if outer:
+                # sqlite3's default isolation mode opens an implicit transaction
+                # for the first DML statement. A bare write that fails (unique
+                # constraint, foreign key, disk error) leaves that transaction
+                # open, and the next BEGIN then raises "cannot start a
+                # transaction within a transaction" forever on this shared
+                # connection. Roll back the failed page before starting again.
+                if self.conn.in_transaction:
+                    self.conn.rollback()
                 self.conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             self._tx_depth += 1
             try:

@@ -1,5 +1,9 @@
 from pathlib import Path
 
+import pytest
+
+from character_memory.group_autonomous_visual import _register_generated_media
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "character_memory"
@@ -25,6 +29,44 @@ def test_group_visual_reuses_generate_image_contract_without_runtime_monkey_patc
     assert '"media_id": asset.id' in visual
     assert 'hub.publish(group_channel(group.id), "group_character_event"' in visual
     assert "VisualPromptPlanner(runtime.model).compile_prompt" in visual
+
+
+def test_failed_media_registration_deletes_saved_bytes():
+    asset = object()
+
+    class Store:
+        def add_media_asset(self, item):
+            raise RuntimeError("database unavailable")
+
+    class MediaStorage:
+        deleted = []
+
+        def delete(self, item):
+            self.deleted.append(item)
+
+    storage = MediaStorage()
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        _register_generated_media(Store(), storage, asset)
+    assert storage.deleted == [asset]
+
+
+def test_registered_media_is_kept():
+    asset = object()
+
+    class Store:
+        def __init__(self):
+            self.assets = []
+
+        def add_media_asset(self, item):
+            self.assets.append(item)
+
+    class MediaStorage:
+        def delete(self, item):
+            raise AssertionError("registered media must not be deleted")
+
+    store = Store()
+    _register_generated_media(store, MediaStorage(), asset)
+    assert store.assets == [asset]
 
 
 def test_chat_timestamp_formatter_shows_month_day_and_seconds():

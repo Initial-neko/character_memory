@@ -400,6 +400,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         global_sticker_catalog=global_sticker_catalog,
         sticker_catalog_for=sticker_catalog_for,
         refresh_runtime_sticker_catalog=refresh_runtime_sticker_catalog,
+        character_write_lock=character_write_lock,
         create_character_from_draft=create_character_from_draft,
         rollback_created_character=rollback_created_character,
         check_character_capacity=check_character_capacity,

@@ -31,7 +31,7 @@ def test_exact_duplicate_unicode_outside_shortlist(tmp_path):
         assert accepted == []
         assert decisions[0]["decision"] == "SKIP_DUPLICATE"
         assert decisions[0]["duplicate_memory_id"] == old.id
-        assert runtime._active_memory_duplicate("rin", NOW, "STRASSE", None) == (old.id, 1.0)
+        assert runtime._active_memory_duplicate("rin", "STRASSE", None) == (old.id, 1.0)
         assert store.find_active_memory_by_content("other", "STRASSE", at=NOW) is None
         assert store.find_active_memory_by_content("rin", "STRASSE", at=old.event_time - timedelta(seconds=1)) is None
         store.set_memory_active(old.id, False)

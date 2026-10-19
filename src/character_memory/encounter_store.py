@@ -595,8 +595,15 @@ class EncounterRepository:
     def _public_call(row) -> dict:
         return {key: value for key, value in dict(row).items() if key not in {'token', 'lease_epoch'}}
 
-    def _expire_calls(self, now: datetime) -> None:
-        self.store.conn.execute("UPDATE encounter_calls SET status='EXPIRED',updated_at=? WHERE status IN ('RINGING','ACCEPTED','CONNECTED') AND lease_epoch<=?", (now.isoformat(),epoch_us(now)))
+    def _expire_calls(self, now: datetime, *, keep_id: str | None = None) -> None:
+        sql="UPDATE encounter_calls SET status='EXPIRED',updated_at=? WHERE status IN ('RINGING','ACCEPTED','CONNECTED') AND lease_epoch<=?"
+        args: list=[now.isoformat(),epoch_us(now)]
+        if keep_id:
+            # The caller is actively deciding this invitation. Its own model
+            # latency must not expire the row it is about to decide.
+            sql+=" AND id<>?"
+            args.append(keep_id)
+        self.store.conn.execute(sql,args)
 
     def begin_call(self, candidate_id: int, now: datetime) -> dict:
         token = secrets.token_urlsafe(32)
@@ -616,7 +623,7 @@ class EncounterRepository:
 
     def decide_call(self, identifier: str, accept: bool, reason: str, now: datetime) -> dict:
         with self.store.transaction():
-            self._expire_calls(now)
+            self._expire_calls(now, keep_id=identifier)
             row=self.store.conn.execute('SELECT * FROM encounter_calls WHERE id=?',(identifier,)).fetchone()
             if row is None:
                 raise KeyError('call not found')
@@ -669,6 +676,9 @@ class EncounterRepository:
             calls=self.store.conn.execute('SELECT COUNT(*) FROM encounter_calls WHERE candidate_id=? AND connected_at IS NOT NULL',(candidate_id,)).fetchone()[0]
         user,character=counts.get('USER',0),counts.get('CHARACTER',0)
         return {'user_messages':user,'character_replies':character,'mutual_turns':min(user,character),
-            'connected_calls':int(calls),'shared_experiences':int(user>0)+int(calls),
+            # A one-sided user message is not a shared experience; it becomes one
+            # only after the character has actually answered. Connected calls
+            # count on their own because the call itself is the shared event.
+            'connected_calls':int(calls),'shared_experiences':int(user>0 and character>0)+int(calls),
             'familiarity':'正在认识' if user else '初次见面','trust':'暂无足够依据',
             'basis':'仅统计持久化消息和已连接的通话；不计算好感度，也不据次数推断信任。'}

@@ -388,6 +388,27 @@ class EnsembleRepository:
             raise KeyError("activated ensemble build not found")
         return build
 
+    def recorded_group(self, build_id: str) -> str | None:
+        """Return the group a confirmation attempt already created for this build."""
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT group_id FROM ensemble_build_aliases WHERE build_id=?",
+                (build_id,),
+            ).fetchone()
+        return str(row["group_id"]) if row is not None else None
+
+    def record_group(self, build_id: str, group_id: str) -> None:
+        """Persist the created group before activation so a crash can resume."""
+        with self.store._lock:
+            self.store.conn.execute(
+                """
+                INSERT INTO ensemble_build_aliases(build_id,group_id) VALUES(?,?)
+                ON CONFLICT(build_id) DO UPDATE SET group_id=excluded.group_id
+                """,
+                (build_id, group_id),
+            )
+            self.store._maybe_commit()
+
     def active_context(self, group_id: str) -> dict[str, Any] | None:
         """Read public origin context only for confirmed ensemble groups."""
         with self.store._lock:
@@ -1022,7 +1043,26 @@ Content:
         if len(selected) > MAX_GROUP_CHARACTERS:
             raise ValueError(f"群聊最多选择 {MAX_GROUP_CHARACTERS} 位角色")
 
-        new_items = [item for item in selected if not item.get("existing_character_id")]
+        profiles_reader = getattr(self.access, "character_profiles", None)
+        known_ids = {
+            str(profile.get("id"))
+            for profile in profiles_reader()
+        } if callable(profiles_reader) else set()
+
+        def requested_character_id(item: dict[str, Any]) -> str:
+            # A retry after an interrupted confirmation reuses the identity the
+            # first attempt wrote for this durable build. Those members already
+            # exist, so they must not be charged against capacity a second time.
+            if item.get("reuse_existing") is not False:
+                return ""
+            return f"character-{group_id.rsplit('-', 1)[-1]}-{int(item.get('index', -1))}"
+
+        new_items = [
+            item
+            for item in selected
+            if not item.get("existing_character_id")
+            and requested_character_id(item) not in known_ids
+        ]
         checker = getattr(self.access, "check_character_capacity", None)
         if not callable(checker):
             raise RuntimeError("character capacity checker is unavailable")
@@ -1037,9 +1077,11 @@ Content:
             raise RuntimeError("character creator is unavailable")
 
         created_ids: list[str] = []
+        build_character_ids: list[str] = []
         member_ids: list[str] = []
         voice_design_items: list[tuple[str, PersonaDraft]] = []
         legacy_group = self.groups.get_group(group_id, include_archived=True)
+        recorded_group_id = self.repository.recorded_group(group_id)
         created_group_id: str | None = None
         active_group_id = group_id
         try:
@@ -1049,9 +1091,17 @@ Content:
                     member_ids.append(existing)
                     continue
                 draft = PersonaDraft.model_validate(item["draft"])
+                # A retry after an interrupted confirmation must reuse the
+                # identity the first attempt wrote for this durable build,
+                # rather than inventing a second set of people.
+                requested_id = requested_character_id(item)
+                if requested_id and requested_id in known_ids:
+                    member_ids.append(requested_id)
+                    build_character_ids.append(requested_id)
+                    continue
                 profile = creator(
                     draft,
-                    f"character-{uuid4().hex[:12]}" if item.get("reuse_existing") is False else "",
+                    requested_id,
                     confirm_over_soft_limit=True,
                     # The batch check above gives the UI one confirmation and
                     # a useful all-or-nothing forecast. The actual character
@@ -1071,16 +1121,33 @@ Content:
                 )
                 character_id = str(profile["id"])
                 created_ids.append(character_id)
+                build_character_ids.append(character_id)
                 member_ids.append(character_id)
+                known_ids.add(character_id)
                 voice_design_items.append((character_id, draft))
-            if legacy_group is not None:
+            if (
+                recorded_group_id is not None
+                and self.groups.get_group(recorded_group_id, include_archived=True) is not None
+            ):
+                # The previous attempt created this group but never activated
+                # the build. Finish that attempt instead of creating a second
+                # disjoint group for the same build.
+                self.groups.rename_group(recorded_group_id, build["group_name"], now)
+                self.groups.replace_members(recorded_group_id, member_ids, now)
+                active_group_id = recorded_group_id
+            elif legacy_group is not None:
                 self.groups.rename_group(group_id, build["group_name"], now)
                 self.groups.replace_members(group_id, member_ids, now)
             else:
-                group = self.groups.create_group(build["group_name"], member_ids, now)
+                group = self.groups.create_group(
+                    build["group_name"],
+                    member_ids,
+                    now,
+                    on_created=lambda created_id: self.repository.record_group(group_id, created_id),
+                )
                 active_group_id = group.id
                 created_group_id = group.id
-            self._bind_created_characters_to_group(created_ids, active_group_id)
+            self._bind_created_characters_to_group(build_character_ids, active_group_id)
             public_participants = [
                 {
                     "character_id": character_id,

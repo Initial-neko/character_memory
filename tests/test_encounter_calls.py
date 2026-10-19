@@ -28,6 +28,19 @@ def test_call_refusal_is_durable_and_not_a_connected_call(encounter):
     assert repo.list_calls(c['id'])[0]['status']=='DECLINED'
 
 
+def test_shared_experiences_require_a_character_reply(encounter):
+    service,repo,c,now,model=encounter
+    repo.append_message(c['id'],'USER','你好',now)
+    metrics=repo.metrics(c['id'])
+    assert metrics['user_messages']==1
+    assert metrics['character_replies']==0
+    assert metrics['mutual_turns']==0
+    # One-sided speech is not yet an experience the two of them shared.
+    assert metrics['shared_experiences']==0
+    repo.append_message(c['id'],'CHARACTER','你好呀。',now+timedelta(seconds=1))
+    assert repo.metrics(c['id'])['shared_experiences']==1
+
+
 def test_call_session_requires_token_and_actual_connection(encounter):
     service,repo,c,now,model=encounter
     model.structured_for_session=lambda *a:SimpleNamespace(accept=True,reason='现在可以聊。')
@@ -54,6 +67,28 @@ def test_dismiss_during_call_decision_cannot_connect(encounter):
         service.request_call(c['id'],now=now)
     assert repo.metrics(c['id'])['connected_calls']==0
     assert repo.list_calls(c['id'])[0]['status']=='CANCELLED'
+
+
+def test_decision_completed_after_the_ringing_lease_still_accepts(encounter):
+    service,repo,c,now,model=encounter
+    invitation=repo.begin_call(c['id'],now)
+    # The service decides with now+elapsed; a slow model may finish after the
+    # 90s RINGING lease. The server held the invitation open, so it must win.
+    result=repo.decide_call(invitation['id'],True,'刚忙完，可以聊。',now+timedelta(seconds=120))
+    assert result['status']=='ACCEPTED'
+    repo.update_call(invitation['id'],invitation['session_token'],'CONNECTED',now+timedelta(seconds=120))
+    assert repo.list_calls(c['id'])[0]['status']=='CONNECTED'
+
+
+def test_deciding_one_invitation_still_expires_other_stale_calls(encounter):
+    service,repo,c,now,model=encounter
+    other=repo.create_candidate(source_type='GENERATED',draft={'name':'遥'},encounter_hook='hi',opening_message='你好',now=now)
+    current=repo.begin_call(c['id'],now)
+    stale=repo.begin_call(other['id'],now)
+    result=repo.decide_call(current['id'],True,'好',now+timedelta(seconds=120))
+    assert result['status']=='ACCEPTED'
+    statuses={item['id']:item['status'] for item in repo.list_calls(other['id'])}
+    assert statuses[stale['id']]=='EXPIRED'
 
 
 def test_static_status_route_survives_candidate_detail_route(encounter):

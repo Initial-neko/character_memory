@@ -55,6 +55,14 @@ _WEB_QUERIES = (
 )
 
 
+class _ReplyGenerationFailure(RuntimeError):
+    """Carry the transcript owner of a failed model call back to its worker."""
+
+    def __init__(self, line_id: int | None):
+        super().__init__("encounter reply generation failed")
+        self.line_id = line_id
+
+
 class EncounterWebSeed(BaseModel):
     inspiration_description: str = Field(min_length=20, max_length=1800)
     suggested_name: str = Field(default="", max_length=48)
@@ -434,11 +442,18 @@ Excerpt:
 请作为这个人物自然回复最后一句。保持人物自主性，不要为了让用户留下你而推销自己。
 只输出结构化 message。
 """
-        reply = self.access.require_bundle().model.structured_for_session(
-            prompt,
-            EncounterReply,
-            f"encounter-chat:{candidate_id}",
-        )
+        try:
+            reply = self.access.require_bundle().model.structured_for_session(
+                prompt,
+                EncounterReply,
+                f"encounter-chat:{candidate_id}",
+            )
+        except Exception as exc:
+            # The scheduler may have observed an older line before this
+            # transcript was read. Failure and success must use the same owner.
+            raise _ReplyGenerationFailure(
+                transcript[-1]["id"] if transcript else None
+            ) from exc
         with self.repository.lifecycle_lock(candidate_id):
             latest=self.repository.list_messages(candidate_id,limit=1)
             if transcript and latest and latest[-1]['id']!=transcript[-1]['id']:
@@ -719,15 +734,31 @@ class EncounterScheduler:
                     break
                 candidate_id, queued_at = self._pending_replies.popleft()
                 self._in_flight.add(candidate_id)
+            reply_line_id = None
             try:
+                # Keep the ownership snapshot inside the try: a transient read
+                # failure must still reach the finally that clears in-flight,
+                # or the candidate would never be enqueued again.
+                latest = self.repository.list_messages(candidate_id, limit=1)
+                reply_line_id = latest[-1]["id"] if latest else None
                 result = self.service.reply(candidate_id)
-            except Exception:
+            except Exception as exc:
+                if isinstance(exc, _ReplyGenerationFailure):
+                    reply_line_id = exc.line_id
                 # The person's message is already durable, so a failed reply must
                 # not travel back to them as an error; the log keeps the reason.
                 logger.exception("encounter.reply_failed candidate=%s", candidate_id)
-                with self.repository.store._lock:
-                    self.repository.store.conn.execute("UPDATE encounter_candidates SET error=? WHERE id=? AND status IN ('NEW','SEEN','CHATTING')",('角色暂时没有回应，可以稍后重试。',candidate_id))
-                    self.repository.store._maybe_commit()
+                with self.repository.lifecycle_lock(candidate_id):
+                    latest = self.repository.list_messages(candidate_id, limit=1)
+                    current_line_id = latest[-1]["id"] if latest else None
+                    if current_line_id != reply_line_id:
+                        # A newer line arrived while this reply was running. That
+                        # line owns the retry state; a stale failure must not
+                        # overwrite the error it already cleared.
+                        continue
+                    with self.repository.store._lock:
+                        self.repository.store.conn.execute("UPDATE encounter_candidates SET error=? WHERE id=? AND status IN ('NEW','SEEN','CHATTING')",('角色暂时没有回应，可以稍后重试。',candidate_id))
+                        self.repository.store._maybe_commit()
                 continue
             finally:
                 with self._pending_lock:

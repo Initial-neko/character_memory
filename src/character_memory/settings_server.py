@@ -380,27 +380,38 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
             != str(before.get("tts_device") or "").strip().lower()
         )
         gsv_preconfigured = False
+        persisted = False
+
+        def restore_provisional_gsv() -> None:
+            """Undo a provisional sidecar configure after a pre-persistence failure."""
+            if not gsv_preconfigured or persisted:
+                return
+            try:
+                # Restore configuration only. Re-preloading here would load a
+                # heavy model on an error path; the next synthesis loads lazily.
+                _configure_gsv(before, preload=False)
+            except Exception as restore_exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"保存未完成，且恢复 GSV 运行态失败：{restore_exc}；"
+                        "磁盘配置未写入，但 sidecar 可能仍使用临时配置。"
+                    ),
+                ) from restore_exc
 
         try:
             # GSV may currently be unhealthy only because the values being saved
             # are its missing assets. Apply them without preloading first so the
             # normal health gate can validate the prospective provider.
             if gsv_updates or gsv_device_update:
-                _configure_gsv(raw_values, preload=False)
+                # The sidecar may apply the change before its response is lost.
+                # Record the attempt first so any failure restores the old values.
                 gsv_preconfigured = True
+                _configure_gsv(raw_values, preload=False)
 
             values = validated_tts_values(raw_values)
-            try:
-                result = settings_store.save_values(values)
-            except Exception:
-                # Runtime was only provisionally changed. Restore the previous
-                # persisted GSV configuration if the atomic persistence step fails.
-                if gsv_preconfigured:
-                    try:
-                        _configure_gsv(before, preload=before_provider == "gsv")
-                    except Exception:
-                        pass
-                raise
+            result = settings_store.save_values(values)
+            persisted = True
 
             after = settings_store.snapshot()["values"]
             after_provider = str(after.get("tts_provider") or "").strip().lower()
@@ -451,11 +462,14 @@ def create_settings_app(config_path: str = "config.yaml", *, store: SettingsStor
                 "settings": settings_snapshot(),
             }
         except ValueError as exc:
+            restore_provisional_gsv()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except httpx.HTTPStatusError as exc:
+            restore_provisional_gsv()
             detail = exc.response.text or str(exc)
             raise HTTPException(status_code=400, detail=f"GSV runtime configuration failed: {detail}") from exc
         except Exception as exc:
+            restore_provisional_gsv()
             raise HTTPException(status_code=500, detail=f"保存配置失败：{exc}") from exc
 
     @app.post("/v1/tts-preview")

@@ -207,7 +207,10 @@ def test_real_group_peer_seen_by_follower_can_read_and_send_reference(isolated_a
     trace=store.conn.execute('SELECT source_conversation_event_id,trace_json FROM conversation_runtime_traces WHERE conversation_id=? AND character_id=?',[group.id,a]).fetchone()
     assert trace['source_conversation_event_id']==root.id and root.id!=peer.id
     proof=json.loads(trace['trace_json'])
-    if 'recent_group_event_ids' not in proof:pytest.skip('真实输入回执由Draft #282提供；单#283对旧trace保守拒绝，不猜参与')
+    # The producer now always records the group events this follower saw.
+    # Skipping when the field is absent would turn a trace-schema regression
+    # into a green CI run.
+    assert 'recent_group_event_ids' in proof, 'trace must record the group events the follower actually saw'
     assert peer.id in proof['recent_group_event_ids']
     reference={'character_id':a,'key':f'group:{peer.id}'}
     with TestClient(app) as client:

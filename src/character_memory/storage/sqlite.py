@@ -384,9 +384,20 @@ class SQLiteStore:
             source_event_id = trace.get("source_event_id") or metadata.get("source_event_id")
             if source_event_id is None:
                 continue
+            try:
+                source_event = int(source_event_id)
+                if not -(2**63) <= source_event < 2**63:
+                    raise ValueError("source_event_id is outside SQLite INTEGER range")
+            except (TypeError, ValueError, OverflowError):
+                # One malformed historical row must not brick every startup.
+                logger.warning(
+                    "storage.legacy_trace skipped_invalid_source_event_id event_id=%s value=%r",
+                    row["id"], source_event_id,
+                )
+                continue
             self.conn.execute(
                 "INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO NOTHING",
-                (row["character_id"], int(source_event_id), row["event_time"], row["event_time_epoch"], json.dumps(trace, ensure_ascii=False)),
+                (row["character_id"], source_event, row["event_time"], row["event_time_epoch"], json.dumps(trace, ensure_ascii=False)),
             )
             self.conn.execute(
                 "UPDATE events SET metadata_json=? WHERE id=?",
@@ -433,12 +444,24 @@ class SQLiteStore:
             source_event_id = trace.get("source_event_id") or metadata.get("source_event_id")
             if source_event_id is None:
                 continue
+            try:
+                source_event = int(source_event_id)
+                if not -(2**63) <= source_event < 2**63:
+                    raise ValueError("source_event_id is outside SQLite INTEGER range")
+            except (TypeError, ValueError, OverflowError):
+                # The compatibility cursor still advances past this row, so a
+                # damaged trace cannot block every later startup.
+                logger.warning(
+                    "storage.legacy_trace skipped_invalid_source_event_id event_id=%s value=%r",
+                    event_row["id"], source_event_id,
+                )
+                continue
             self.conn.execute(
                 "INSERT INTO runtime_traces(character_id,source_event_id,created_at,created_at_epoch,trace_json) "
                 "VALUES(?,?,?,?,?) ON CONFLICT(source_event_id) DO NOTHING",
                 (
                     event_row["character_id"],
-                    int(source_event_id),
+                    source_event,
                     event_row["event_time"],
                     event_row["event_time_epoch"],
                     json.dumps(trace, ensure_ascii=False),
@@ -466,6 +489,14 @@ class SQLiteStore:
         with self._lock:
             outer = self._tx_depth == 0
             if outer:
+                # sqlite3's default isolation mode opens an implicit transaction
+                # for the first DML statement. A bare write that fails (unique
+                # constraint, foreign key, disk error) leaves that transaction
+                # open, and the next BEGIN then raises "cannot start a
+                # transaction within a transaction" forever on this shared
+                # connection. Roll back the failed page before starting again.
+                if self.conn.in_transaction:
+                    self.conn.rollback()
                 self.conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             self._tx_depth += 1
             try:
@@ -505,6 +536,13 @@ class SQLiteStore:
     @classmethod
     def _memory_from_row(cls, r, *, include_embedding: bool = True) -> Memory:
         keys = set(r.keys())
+        try:
+            metadata = json.loads(r["metadata_json"])
+        except (ValueError, TypeError):
+            metadata = None
+        if not isinstance(metadata, dict):
+            logger.warning("storage.memory invalid_metadata memory_id=%s", r["id"])
+            metadata = {"metadata_status": "INVALID"}
         return Memory(
             id=r["id"],
             character_id=r["character_id"],
@@ -516,7 +554,7 @@ class SQLiteStore:
             active=bool(r["active"]),
             pinned=bool(r["pinned"]) if "pinned" in keys else False,
             superseded_by=r["superseded_by"] if "superseded_by" in keys else None,
-            metadata=json.loads(r["metadata_json"]),
+            metadata=metadata,
             embedding=cls._unpack(r["embedding"]) if include_embedding else None,
         )
 

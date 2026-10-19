@@ -491,7 +491,6 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 for candidate, embedding, decision in accepted_memories:
                     duplicate_id, duplicate_similarity = runtime._active_memory_duplicate(
                         character_id,
-                        now,
                         candidate.content,
                         embedding,
                     )

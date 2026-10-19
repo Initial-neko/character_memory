@@ -5,7 +5,10 @@ import sqlite3
 import threading
 import time
 
+import pytest
+
 from character_memory.domain.models import Event, EventType
+from character_memory.media import MediaAsset
 from character_memory.storage.sqlite import SQLiteStore, STORE_BUSY_TIMEOUT_SECONDS
 
 
@@ -101,6 +104,36 @@ def test_two_writers_serialize_and_preserve_both_events(tmp_path):
         thread.join(timeout=3) if thread.ident is not None else None
         first.close()
         second.close()
+
+
+def test_failed_bare_write_does_not_poison_next_transaction(tmp_path):
+    store = SQLiteStore(tmp_path / "bare-write.db")
+    now = datetime(2026, 10, 13, tzinfo=timezone.utc)
+
+    def asset(asset_id: str) -> MediaAsset:
+        return MediaAsset(
+            id=asset_id,
+            character_id="rin",
+            original_name="a.png",
+            mime_type="image/png",
+            storage_name="a.png",
+            created_at=now,
+            size_bytes=1,
+        )
+
+    try:
+        store.add_media_asset(asset("duplicate"))
+        with pytest.raises(sqlite3.IntegrityError):
+            store.add_media_asset(asset("duplicate"))
+        # sqlite3 leaves the implicit transaction open after the failed insert.
+        assert store.conn.in_transaction
+        # The next explicit transaction must recover instead of failing with
+        # "cannot start a transaction within a transaction".
+        with store.transaction(immediate=True):
+            store.add_media_asset(asset("after-recovery"))
+        assert store.get_media_asset("after-recovery") is not None
+    finally:
+        store.close()
 
 
 def test_busy_writer_fails_boundedly_without_leaking_transaction(tmp_path):

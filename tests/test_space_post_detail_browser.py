@@ -270,7 +270,11 @@ def test_space_lightbox_moves_between_real_post_images(page, space_server_with_i
 
     detail = page.locator(".space-detail-view")
     expect(detail).to_be_visible()
-    triggers = detail.locator(f'[data-space-post="{post_id}"] [data-space-image-open]')
+    # Desktop detail adds a main-image button for the selected thumbnail; the
+    # thumbnail sequence is still the lightbox's two-image set.
+    triggers = detail.locator(
+        f'[data-space-post="{post_id}"] [data-space-image-open]:not([data-space-gallery-main])'
+    )
     expect(triggers).to_have_count(2)
     triggers.nth(0).click()
     dialog = page.get_by_role("dialog", name="动态图片预览")
@@ -414,3 +418,110 @@ def test_space_comment_reply_and_thread_controls_work_in_browser(page, space_ser
     assert {str(item["id"]) for item in replies}.issubset(
         {str(item["id"]) for item in stored["comments"]}
     )
+
+
+@pytest.mark.parametrize("width,height", [(1440, 900), (390, 844)])
+@pytest.mark.parametrize("kind", ["image", "text"])
+def test_space_detail_visual_evidence(page, space_server_with_image, width, height, kind):
+    # Existing isolated browser fixture owns all mutations and model substitutes.
+    import hashlib
+    import json
+    from test_mobile_views_playwright import _visual_run_dir
+    ROOT = Path(__file__).resolve().parents[1]
+    OUT = _visual_run_dir() / "post-detail"
+    OUT.mkdir(parents=True, exist_ok=True)
+    base, first_media, second_media = space_server_with_image
+    page.set_viewport_size({"width": width, "height": height})
+    page.set_default_timeout(10000)
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    short = "午后的阅读角。把桌面收拾好，留下了放书和热茶的位置。窗外有风，屋里刚好安静。"
+    content = short if kind == "image" else short + "\n\n" + "整理书架时找到一本旧笔记，里面记着上次想尝试的几种做法。我把今天的观察补在最后一页，明天再回来看看。\n" * 8
+    body = {"character_id": "rin", "content": content}
+    if kind == "image":
+        body["media_ids"] = [first_media, second_media]
+    created = page.request.post(base + "/v1/space/posts", data=body)
+    assert created.ok, created.text()
+    post_id = str(created.json()["post"]["id"])
+    page.goto(f"{base}/?view=space&space_post={post_id}", wait_until="domcontentloaded")
+    detail = page.locator(".space-detail-view")
+    expect(detail).to_be_visible()
+    expect(detail.locator(".space-content")).to_contain_text("午后的阅读角")
+    page.locator("img").evaluate_all("imgs => Promise.all(imgs.map(i => i.decode().catch(() => {})))")
+    form = detail.locator(f'[data-space-comment-form="{post_id}"]')
+    form.locator(".space-comment-input").fill("这里看起来很适合读书。桌边的小位置也留得刚好。")
+    form.locator(".space-comment-submit").click()
+    expect(detail.get_by_text("这里看起来很适合读书。桌边的小位置也留得刚好。", exact=True)).to_be_visible()
+    stored = page.request.get(f"{base}/v1/space/posts/{post_id}").json()["post"]
+    assert any(c["content"].startswith("这里看起来") for c in stored["comments"])
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "horizontal overflow"
+    scene = f"post-detail-{kind}-{width}x{height}"
+    captures = []
+    def capture(suffix, full=False):
+        path = OUT / f"{scene}-{suffix}.png"
+        page.screenshot(path=str(path), full_page=full, animations="disabled")
+        captures.append({"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                         "full_page": full, "at": datetime.now(timezone.utc).isoformat(),
+                         "scroll_y": page.evaluate("scrollY")})
+    page.evaluate("scrollTo(0,0)")
+    capture("initial")
+    capture("full", full=True)
+    if kind == "image":
+        if width > 820:
+            # Desktop uses the approved main-image + thumbnail hierarchy.
+            expect(detail.locator(".space-media-gallery")).to_have_count(1)
+            expect(detail.locator(".space-media-main")).to_have_count(1)
+            expect(detail.locator(".space-media-thumb")).to_have_count(2)
+            main_image = detail.locator(".space-media-main img")
+            first_src = main_image.get_attribute("src")
+            second_thumb = detail.locator(".space-media-thumb").nth(1)
+            second_thumb.click()
+            dialog = page.get_by_role("dialog", name="动态图片预览")
+            expect(dialog).to_be_visible()
+            page.keyboard.press("Escape")
+            expect(dialog).to_be_hidden()
+            expect(second_thumb).to_have_class("space-media-thumb is-selected")
+            assert main_image.get_attribute("src") != first_src
+        else:
+            # Mobile keeps the existing equal grid until its reference is approved.
+            expect(detail.locator(".space-media-gallery")).to_have_count(0)
+            expect(detail.locator(".space-media-cell")).to_have_count(2)
+        trigger = detail.locator('[data-space-image-open]').first
+        trigger.click()
+        dialog = page.get_by_role("dialog", name="动态图片预览")
+        expect(dialog).to_be_visible()
+        expect(dialog.locator(".space-lightbox-image")).to_be_visible()
+        capture("lightbox")
+        page.keyboard.press("Escape")
+        expect(dialog).to_be_hidden()
+    rendered_media_count = detail.locator('[data-space-image-open]').count()
+    assert rendered_media_count == ((3 if width > 820 else 2) if kind == "image" else 0)
+    assets = {}
+    for path in ["src/character_memory/web/index.html", "src/character_memory/web/space.js",
+                 "src/character_memory/web/space.css", "src/character_memory/web/frontend_v2.css",
+                 "tests/e2e_space_app.py", "tests/e2e_realtime_app.py"]:
+        raw = (ROOT / path).read_bytes()
+        assets[path] = hashlib.sha256(raw).hexdigest()
+    served = {}
+    for url, path in [("/", "src/character_memory/web/index.html"),
+                      ("/static/space.js", "src/character_memory/web/space.js"),
+                      ("/static/space.css", "src/character_memory/web/space.css")]:
+        response = page.request.get(base + url)
+        assert response.ok
+        payload = response.body().replace(b"\r\n", b"\n")
+        committed = subprocess.check_output(["git", "show", f"HEAD:{path}"], cwd=ROOT).replace(b"\r\n", b"\n")
+        assert payload == committed, path
+        served[path] = hashlib.sha256(payload).hexdigest()
+    assert errors == [], errors
+    evidence = dict(scene=scene, exact_tested_source_sha=subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        isolated_runtime_identity="Existing e2e fixture starts a new Python process from this checkout; source and served bytes recorded",
+        formal_service_runtime_sha=None, browser=page.context.browser.version,
+        viewport=page.evaluate("({width:innerWidth,height:innerHeight})"),
+        sample=dict(kind=kind, content_length=len(content), requested_media_count=len(body.get("media_ids", [])),
+                    rendered_media_count=rendered_media_count,
+                    comments_count=len(stored["comments"]), post_id=post_id),
+        screenshots=captures, source_sha256=assets, served_sha256=served, errors=errors,
+        boundary="Temporary DB/media/personas, deterministic no-provider model; sample repository-owned media. No formal data or paid provider validation.",
+        model_visual_verdict="PENDING_LUNA_MAX", human_visual_signoff="PENDING")
+    (OUT / f"{scene}.json").write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -1,7 +1,7 @@
 """Native group SSE ownership during overlapping room entries.
 
-Known failure is narrowly marked; remove the marker when the implementation is
-fixed. With the marker retained, a successful fixed run is a strict XPASS.
+These regressions exercise real native EventSource delivery and stale view
+ownership. A stale subscription is a failure; no known-failure marker remains.
 """
 from __future__ import annotations
 

@@ -18,6 +18,17 @@
 
 聊天使用紧凑的侧栏、头像、气泡与输入区。底部消息留白通过 ResizeObserver 跟随输入区实际高度，包括多行草稿和来电状态提示；图片迟到解码后仅在用户没有离开最新位置时跟随到底部，不抢回正在阅读历史的滚动位置。聊天隐藏时，历史初始化与后台消息不会把其他栏目滚到底部；离开 Space 详情进入其他栏目时，也不会带入原列表的滚动位置。
 
+### Direct history paging ownership
+
+A Direct history request captures the history view instance that started it.
+Before applying the response and in the older-page `finally`, the client
+requires the same Direct mode, the same character id and the same history
+object; an A → B → A switch creates a new history object, so an id-only check
+cannot accept an older request. A stale request may clear its own loading flag
+but must not change the current render signature, cursor, loading state or DOM.
+The real Chromium regression records every actual render, because an assertion
+that only waits for B's text can miss a transient wrong display.
+
 ## 1. User message first, reaction later
 
 正式 WebUI 发送用户消息时使用异步 accept path：
@@ -206,6 +217,8 @@ Research 负责群体事实及初始关系；新角色随后复用 `PersonaBuild
 `/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；选中成员的 `relationship_notes` 作为初始公开群关系连同 build 一起持久化并按当前有效成员筛选注入正常/自主群聊上下文，明确标注其不是实际发生过的群消息，不进入 Event/Memory；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。
 
 READY build 是可跨请求保留的 research 快照，不是提交时的角色注册表快照。再次打开 AI 建群会恢复最近一条 READY / FAILED build；服务重启时遗留的 BUILDING 会转成可重试的 FAILED，而不是永久卡在整理中。confirm 会重新按当前 active Character 匹配每位成员；research 后被删除/归档的旧 ID 不会写进新群，期间新建的同名 active Character 可以直接复用。同一 build 的重复/并发 confirm 只提交一次；成功 re-key 到真实 group id 后，原 build id 仍作为幂等别名接受响应重试。批量容量先用于确认页预测，真正创建每个 Character 时仍在共享 registry lock 下重查硬上限，防止头像/声音 onboarding 释放锁期间有其它创建插入。新角色的 `creation.json.group_id` 在真实 GroupConversation 创建后改写为最终 group id，不保留已经被 re-key 掉的临时 build id。
+
+已完成激活的 build 会通过 durable alias 识别重复确认，同进程并发确认由 per-build lock 串行化。确认过程中创建的真实群在激活前就写入 build 的 durable alias，`reuse_existing=false` 的人物使用由 build id 与成员 index 推导的稳定身份；若进程在群提交后、build 激活前退出，重启后的再次确认会复用该群和已写入的人物，然后完成激活，而不是创建第二套人物与群。中途只写入部分人物时，重试补齐缺失成员。既有 Recall、人物和群的事实不会因恢复而被自动删除。
 
 可选 `use_voice_design=true` 只在用户显式勾选后生效。它要求用户已经手动启动 Qwen3 VoiceDesign sidecar；群聊和 Character 核心 commit 完成后，后台才按角色 identity/personality/speech style 逐个尝试 VoiceDesign + freeze。VoiceDesign 未启动、不可用或单个角色生成失败都只记日志并保留现有默认/回退 voice，绝不回滚 Character 或 Group。
 
@@ -1066,3 +1079,4 @@ key; it must never execute a shell. Only a returned matching GitHub Issue URL is
 accepted as created. Exceptions, timeout, invalid remote response and interrupted
 RUNNING writes are UNKNOWN, consume quota and cannot be blindly resubmitted.
 Backend-only boundary: VISUAL N/A; no user interface is changed.
+

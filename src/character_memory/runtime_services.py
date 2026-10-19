@@ -133,6 +133,9 @@ class CharacterRuntimeAccess:
     global_sticker_catalog: Callable[[], Any]
     sticker_catalog_for: Callable[[str], Any]
     refresh_runtime_sticker_catalog: Callable[[Any], None]
+    # Shared with ApiCharacterService: archive/restore and any feature that
+    # publishes on behalf of a character must serialize on the same lock.
+    character_write_lock: Any
 
     # Encounter is a candidate layer, not a second character registry. It uses
     # these callbacks only when the user explicitly keeps a candidate.

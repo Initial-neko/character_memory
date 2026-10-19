@@ -452,31 +452,43 @@
 
   CM.loadDirectHistory = async ({beforeId = null, appendOlder = false} = {}) => {
     const requested = CM.state.characterId;
+    // Capture the view instance, not just the id: A -> B -> A creates a new
+    // history object, so an id comparison alone would accept A's stale page.
+    const history = CM.state.directHistory;
     const params = new URLSearchParams({character_id:requested, limit:"50"});
     if (beforeId != null) params.set("before_id", String(beforeId));
     const data = await CM.api(`/v1/chat/history-page?${params.toString()}`);
-    if (CM.isGroupConversation() || requested !== CM.state.characterId) return;
+    if (CM.isGroupConversation() || requested !== CM.state.characterId || history !== CM.state.directHistory) return;
     const incoming = data.messages || [];
     if (appendOlder) {
-      const existing = new Set(CM.state.directHistory.messages.map(item => item.id));
-      CM.state.directHistory.messages = [...incoming.filter(item => !existing.has(item.id)), ...CM.state.directHistory.messages];
-    } else CM.state.directHistory.messages = incoming;
-    CM.state.directHistory.hasMore = Boolean(data.has_more);
-    CM.state.directHistory.nextBeforeId = data.next_before_id ?? null;
-    CM.renderHistory(CM.state.directHistory.messages, {preserveScroll:appendOlder});
+      const existing = new Set(history.messages.map(item => item.id));
+      history.messages = [...incoming.filter(item => !existing.has(item.id)), ...history.messages];
+    } else history.messages = incoming;
+    history.hasMore = Boolean(data.has_more);
+    history.nextBeforeId = data.next_before_id ?? null;
+    CM.renderHistory(history.messages, {preserveScroll:appendOlder});
     CM.features.unread?.markRead?.(requested);
     CM.renderCharacterList();
-    await CM.emit("historyLoaded", {type:"DIRECT", characterId:requested, messages:CM.state.directHistory.messages});
+    await CM.emit("historyLoaded", {type:"DIRECT", characterId:requested, messages:history.messages});
   };
 
   CM.loadOlderDirectHistory = async () => {
     const history = CM.state.directHistory;
+    const requested = CM.state.characterId;
     if (CM.isGroupConversation() || history.loadingOlder || !history.hasMore || history.nextBeforeId == null) return;
     history.loadingOlder = true;
     CM.state.lastRenderedSignature = "";
     CM.renderHistory(history.messages, {preserveScroll:true});
     try { await CM.loadDirectHistory({beforeId:history.nextBeforeId, appendOlder:true}); }
-    finally { history.loadingOlder = false; CM.state.lastRenderedSignature = ""; CM.renderHistory(history.messages, {preserveScroll:true}); }
+    finally {
+      // Only the view that started this request may clear the render signature
+      // and repaint. A stale request must not touch the current person's DOM.
+      history.loadingOlder = false;
+      if (history === CM.state.directHistory && requested === CM.state.characterId && !CM.isGroupConversation()) {
+        CM.state.lastRenderedSignature = "";
+        CM.renderHistory(history.messages, {preserveScroll:true});
+      }
+    }
   };
 
   CM.loadHistory = async () => CM.isGroupConversation() ? CM.features.groups?.loadHistory?.() : CM.loadDirectHistory();
@@ -498,6 +510,9 @@
     CM.renderCharacterList();
     CM.dom.chat.innerHTML = '<div class="empty">正在加载聊天记录…</div>';
     await CM.loadDirectHistory();
+    // The user may have switched again while this history page was in flight.
+    // Only the view that owns the current identity may connect and announce it.
+    if (CM.isGroupConversation() || nextId !== CM.state.characterId) return;
     CM.connectDirectStream();
     CM.updateComposerState();
     await CM.emit("conversationChanged", {type:"DIRECT", characterId:nextId});
@@ -833,7 +848,14 @@
       if (trace) CM.showTrace(trace.dataset.trace);
     });
     d.input.addEventListener("input", () => { d.input.style.height = "auto"; d.input.style.height = `${Math.min(d.input.scrollHeight, 150)}px`; });
-    d.input.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); d.composer.requestSubmit(); } });
+    // A composing IME reports the Enter that confirms a candidate as well.
+    // Sending there cuts a Chinese/Japanese word in half, so match the Space
+    // comment composer and ignore both the standard flag and legacy keyCode 229.
+    d.input.addEventListener("keydown", event => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      d.composer.requestSubmit();
+    });
     d.composer.addEventListener("submit", event => { event.preventDefault(); CM.submitCurrentText().catch(error => console.error("submit failed", error)); });
     const updateNow = () => { d.nowText.textContent = new Date().toLocaleString([], {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}); };
     updateNow();

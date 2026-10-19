@@ -33,7 +33,7 @@ def attach_history_routes(app):
         sticker = catalog.historical_get(sticker_id)
         if sticker is None or catalog.asset_path(sticker_id) is None:
             return None
-        return {**sticker.model_dump(mode="json"), "url": f"/v1/stickers/{sticker.id}/asset"}
+        return {**sticker.model_dump(mode="json"), "url": catalog.asset_url(sticker.id)}
 
     def image_payload(character_id: str, catalog, image_id: str | None):
         if not image_id:
@@ -96,7 +96,10 @@ def attach_history_routes(app):
         trace_sources = repository.trace_sources(character_id, source_ids)
 
         # One resource snapshot per page. Do not reparse manifests for every row.
-        sticker_catalog = access.global_sticker_catalog()
+        # Direct sends validate against the character's catalog, which includes
+        # its private pool; resolving history through the global pool would drop
+        # those stickers on reload.
+        sticker_catalog = access.sticker_catalog_for(character_id)
         image_catalog = load_image_catalog(profile["persona_path"])
         return {
             "character_id": character_id,

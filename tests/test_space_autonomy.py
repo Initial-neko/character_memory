@@ -1674,6 +1674,31 @@ def test_character_archived_during_planning_cannot_publish_autonomous_post(tmp_p
     store.close()
 
 
+def test_archived_during_planning_skips_paid_media_generation(tmp_path):
+    access, store, _ = _access(tmp_path, ids=("c00",))
+    now = datetime(2026, 10, 19, 8, 0, tzinfo=timezone.utc)
+    profiles = access.character_profiles()
+
+    class ArchiveDuringPlanning(SpaceModel):
+        def structured_for_session(self, prompt, schema, session_id):
+            profiles[0]["archived_at"] = now.isoformat()
+            return super().structured_for_session(prompt, schema, session_id)
+
+    access.require_bundle().model = ArchiveDuringPlanning()
+    service = SpaceAutonomyService(access, SpaceRepository(store))
+    media_calls = []
+    service.media_executor = SimpleNamespace(
+        execute=lambda *args, **kwargs: media_calls.append(args) or {"relations": [], "errors": []},
+        discard=lambda relations: None,
+    )
+
+    with pytest.raises(ValueError, match="archived"):
+        service.run_opportunity("c00", now=now, cascade=False, source="DEV")
+
+    assert media_calls == []
+    store.close()
+
+
 def test_the_comment_thread_queue_refuses_to_grow_without_limit(tmp_path):
     """One comment already fans out to several model calls, so the backlog is capped.
 

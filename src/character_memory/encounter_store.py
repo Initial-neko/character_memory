@@ -605,6 +605,14 @@ class EncounterRepository:
             args.append(keep_id)
         self.store.conn.execute(sql,args)
 
+    def extend_call_lease(self, identifier: str, now: datetime, seconds: int) -> None:
+        """Bound how long an in-flight decision may hold a RINGING invitation."""
+        with self.store.transaction():
+            self.store.conn.execute(
+                "UPDATE encounter_calls SET lease_epoch=? WHERE id=? AND status='RINGING'",
+                (epoch_us(now+timedelta(seconds=max(1,int(seconds)))),identifier),
+            )
+
     def begin_call(self, candidate_id: int, now: datetime) -> dict:
         token = secrets.token_urlsafe(32)
         identifier = uuid.uuid4().hex

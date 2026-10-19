@@ -3,10 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 _ALLOWED_EXTENSIONS = {".png", ".webp", ".gif", ".jpg", ".jpeg"}
+
+
+def _single_line(value: str) -> str:
+    """Catalog text is untrusted data; newlines could forge a new prompt line."""
+    if "\r" in value or "\n" in value or any(ord(char) < 32 for char in value):
+        raise ValueError("catalog text must be a single line without control characters")
+    return value
 
 
 class CharacterImage(BaseModel):
@@ -15,6 +22,16 @@ class CharacterImage(BaseModel):
     label: str = Field(min_length=1, max_length=80)
     tags: list[str] = Field(default_factory=list, max_length=12)
     description: str = Field(default="", max_length=320)
+
+    @field_validator("label", "description")
+    @classmethod
+    def _validate_single_line(cls, value: str) -> str:
+        return _single_line(value)
+
+    @field_validator("tags")
+    @classmethod
+    def _validate_tags(cls, values: list[str]) -> list[str]:
+        return [_single_line(value) for value in values]
 
 
 class ImageCatalog:

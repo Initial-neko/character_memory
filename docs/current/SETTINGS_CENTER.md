@@ -137,6 +137,16 @@ unrelated quoted/nested extension keys are preserved. An update that would break
 a cross-field YAML anchor/alias is rejected before persistence rather than
 writing a configuration that cannot be reloaded.
 
+GSV provisional configuration is applied before TTS health/voice validation.
+If that later validation rejects a save, persistence is not attempted and the
+previous GSV configuration is restored to the sidecar, so a rejected save cannot
+leave runtime values that differ from the durable files or the Settings GET.
+Restoration changes configuration only; it does not preload a model on the error
+path, and the next synthesis loads lazily. If restoring the sidecar itself
+fails, the response is a 500 that states both the save failure and the restore
+failure instead of presenting an ordinary validation error. Post-persistence
+`runtime_apply` reporting covers only failures after the write succeeds.
+
 All Settings mutations are serialized per Settings Server process. The lock
 covers reading the previous state, validation, backup, `config.yaml` / `.env`
 persistence, GSV provisional runtime apply and rollback, and the mutation

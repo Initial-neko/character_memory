@@ -499,6 +499,10 @@ Sources:
             "media_intents": [item.model_dump(mode="json") for item in plan.media_intents],
         }
         content = str(plan.social_post or "").strip()
+        # The plan ran outside the archive lock. Do not buy image/video/TTS
+        # generation for a character archived during that window; the final
+        # publish check alone would only discard the paid bytes afterwards.
+        self._require_active(character_id)
         media_result = self.media_executor.execute(
             character_id,
             list(plan.media_intents),

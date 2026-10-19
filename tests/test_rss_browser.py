@@ -441,3 +441,39 @@ def test_cancel_and_restore_subscription_in_desktop_ui(rss_page, rss_server):
     restored = page.request.get(rss_server + "/v1/rss/sources").json()["sources"]
     assert any(s["id"] == source_id for s in restored)
     assert original_ids <= {item["id"] for item in page.request.get(rss_server + f"/v1/rss/items?source_id={source_id}").json()["items"]}
+
+def test_source_focus_survives_completed_feed_response(rss_page, rss_server):
+    """Known unfixed #599: automatic reader updates must preserve navigation focus."""
+    from playwright.sync_api import expect
+
+    page = rss_page
+    response = page.request.post(rss_server + '/v1/rss/sources', data={
+        'feed_url': 'https://93.184.216.34/navigation-focus.xml', 'name': '筛选验收源',
+    })
+    assert response.ok
+    source_id = str(response.json()['source']['id'])
+    page.reload()
+    expect(page.locator('.feed-card[aria-pressed="true"]')).to_have_count(1)
+    expect(page.locator('#articleBody')).to_contain_text('Feed 提供')
+    selected = page.locator(f'[data-feed-source="{source_id}"]')
+    held = []
+
+    def hold_source_response(route):
+        from urllib.parse import parse_qs, urlparse
+        query = parse_qs(urlparse(route.request.url).query)
+        if query.get('source_id') == [source_id]:
+            held.append(route)
+        else:
+            route.continue_()
+
+    page.route('**/v1/rss/items?**', hold_source_response)
+    selected.click()
+    expect(selected).to_be_focused()
+    page.wait_for_function('document.querySelector("#feedStatus").textContent.includes("加载文章")')
+    assert len(held) == 1
+    held[0].continue_()
+    expect(page.locator('#articleBody')).to_contain_text('新增产品文章')
+    expect(page.locator('.feed-card')).to_have_count(1)
+    expect(selected).to_have_attribute('aria-pressed', 'true')
+    # Assert after the asynchronous automatic reader update, not just after click.
+    expect(selected).to_be_focused()

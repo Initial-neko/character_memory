@@ -17,7 +17,7 @@ def test_desktop_chat_has_compact_readable_sizes(page, live_life):
     expect(page.locator('.composer')).to_be_visible()
     assert page.locator('.composer').bounding_box()['height'] <= 115
     assert page.locator('.topbar').bounding_box()['height'] <= 95
-    assert page.locator('.sidebar').bounding_box()['width'] == 272
+    assert page.locator('.sidebar').bounding_box()['width'] == 236
 
 
 def test_late_chat_image_keeps_latest_message_above_composer(page, live_life):

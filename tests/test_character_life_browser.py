@@ -102,7 +102,7 @@ def test_shared_shell_profile_rail_and_mobile_layout(life_page):
     expect(p.locator("#lifeCharacters")).to_contain_text("林绘")
     expect(p.locator("#lifeCharacters")).to_contain_text("另一位角色")
     rail=p.locator(".life-nav").bounding_box()
-    assert rail["y"] >= 60
+    assert rail["y"] >= 52
     p.locator("[data-life-character='b']").click()
     expect(p.locator("#character")).to_have_value("b")
     expect(p.locator("#timeline")).to_contain_text("另一个人物独立经历")

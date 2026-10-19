@@ -1,8 +1,8 @@
 /* Chat shell V2: one stable layout contract for sidebar, header and composer. */
 
 :root {
-  --cm-sidebar-expanded: 280px;
-  --cm-sidebar-compact: 68px;
+  --cm-sidebar-expanded: 236px;
+  --cm-sidebar-compact: 60px;
   --cm-sidebar-width: var(--cm-sidebar-expanded);
 }
 
@@ -15,7 +15,7 @@ body.sidebar-collapsed { --cm-sidebar-width: var(--cm-sidebar-compact); }
 
 .sidebar {
   width: var(--cm-sidebar-width);
-  padding: 12px 10px;
+  padding: 10px 8px;
   overflow: hidden;
   transition: width .18s ease, transform .18s ease;
 }

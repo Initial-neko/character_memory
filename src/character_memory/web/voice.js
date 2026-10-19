@@ -19,6 +19,9 @@
   const SPEAKABLE_ACTIONS = new Set(["MESSAGE", "REPLY", "MINIMAL_RESPONSE", "PROACTIVE_MESSAGE"]);
   // Used only until /health answers; the runtime owns the real value.
   const DEFAULT_SILENCE_MS = 900;
+  // A streaming segment that produced partials but never a final must not hold
+  // the call in "recording" forever.
+  const STREAMING_SEGMENT_TIMEOUT_MS = 8000;
 
   const voice = {
     active: false,
@@ -36,6 +39,7 @@
     streamingAsr: false,
     streamingSegmentId: null,
     streamingSegmentStartedAt: 0,
+    streamingSegmentWatchdog: null,
     seenAsrSegments: new Set(),
     eventSource: null,
     encounterPoll: null,
@@ -546,6 +550,31 @@
     return `${String(data?.session_id || "")}:${String(data?.segment_id ?? "")}`;
   }
 
+  function clearStreamingSegmentWatchdog() {
+    if (voice.streamingSegmentWatchdog) {
+      clearTimeout(voice.streamingSegmentWatchdog);
+      voice.streamingSegmentWatchdog = null;
+    }
+  }
+
+  function armStreamingSegmentWatchdog() {
+    clearStreamingSegmentWatchdog();
+    if (!voice.streamingSegmentId) return;
+    voice.streamingSegmentWatchdog = setTimeout(() => {
+      voice.streamingSegmentWatchdog = null;
+      if (!voice.active || !voice.micActive || !voice.streamingAsr || !voice.streamingSegmentId) return;
+      // Partials arrived but the recognizer never finalized the segment. Return
+      // to listening instead of staying stuck in "recording", and retire the
+      // segment so a late final cannot interrupt the next utterance.
+      voice.seenAsrSegments.add(voice.streamingSegmentId);
+      voice.streamingSegmentId = null;
+      voice.streamingSegmentStartedAt = 0;
+      setCapturePhase("listening");
+      if (dom.transcript) dom.transcript.textContent = "没有等到完整识别结果，已回到聆听。";
+      if (!replyInFlight()) setPhase("listening", "正在听… · 流式识别");
+    }, STREAMING_SEGMENT_TIMEOUT_MS);
+  }
+
   function handleStreamingPartial(data) {
     if (!voice.active || !voice.micActive || !voice.streamingAsr) return;
     const text = String(data?.text || "").trim();
@@ -555,12 +584,14 @@
       voice.streamingSegmentId = key;
       voice.streamingSegmentStartedAt = performance.now();
     }
+    armStreamingSegmentWatchdog();
     setCapturePhase("recording");
     if (dom.transcript && !replyInFlight()) dom.transcript.textContent = `你：${text} …`;
     if (!replyInFlight()) setPhase("recording", "正在听你说…");
   }
 
   async function handleStreamingFinal(data) {
+    clearStreamingSegmentWatchdog();
     if (!voice.active || !voice.micActive || !voice.streamingAsr) return;
     const key = streamingSegmentKey(data);
     if (voice.seenAsrSegments.has(key)) return;
@@ -623,6 +654,7 @@
         try { session.close(); } catch (_) {}
         voice.asrSession = null;
         voice.streamingAsr = false;
+        clearStreamingSegmentWatchdog();
         voice.streamingSegmentId = null;
         voice.streamingSegmentStartedAt = 0;
         try {
@@ -1138,6 +1170,7 @@
     try { voice.asrSession?.cancel?.(); } catch (_) {}
     voice.asrSession = null;
     voice.streamingAsr = false;
+    clearStreamingSegmentWatchdog();
     voice.streamingSegmentId = null;
     voice.streamingSegmentStartedAt = 0;
     voice.seenAsrSegments = new Set();
@@ -1208,6 +1241,7 @@
       voice.preRoll = [];
       voice.chunks = [];
       voice.hotFrames = 0;
+      clearStreamingSegmentWatchdog();
       voice.streamingSegmentId = null;
       voice.streamingSegmentStartedAt = 0;
       voice.seenAsrSegments = new Set();
@@ -1269,6 +1303,7 @@
       voice.hotFrames = 0;
       voice.asrSession = null;
       voice.streamingAsr = false;
+      clearStreamingSegmentWatchdog();
       voice.streamingSegmentId = null;
       voice.streamingSegmentStartedAt = 0;
       voice.seenAsrSegments = new Set();

@@ -669,6 +669,9 @@ class EncounterRepository:
             calls=self.store.conn.execute('SELECT COUNT(*) FROM encounter_calls WHERE candidate_id=? AND connected_at IS NOT NULL',(candidate_id,)).fetchone()[0]
         user,character=counts.get('USER',0),counts.get('CHARACTER',0)
         return {'user_messages':user,'character_replies':character,'mutual_turns':min(user,character),
-            'connected_calls':int(calls),'shared_experiences':int(user>0)+int(calls),
+            # A one-sided user message is not a shared experience; it becomes one
+            # only after the character has actually answered. Connected calls
+            # count on their own because the call itself is the shared event.
+            'connected_calls':int(calls),'shared_experiences':int(user>0 and character>0)+int(calls),
             'familiarity':'正在认识' if user else '初次见面','trust':'暂无足够依据',
             'basis':'仅统计持久化消息和已连接的通话；不计算好感度，也不据次数推断信任。'}

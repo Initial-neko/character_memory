@@ -80,7 +80,10 @@ class ApiResourceService:
         # must never publish an older catalog over a newer removal.
         with sticker_library_lock(global_dir):
             catalog = self.global_sticker_catalog()
-            for character_id, runtime in current.runtimes.items():
+            # Snapshot the keys: character creation inserts into the same dict
+            # from another thread, and mutating it during iteration turns a
+            # sticker refresh into a 5xx.
+            for character_id, runtime in list(current.runtimes.items()):
                 runtime.sticker_catalog = character_sticker_catalog(catalog, global_dir, character_id)
 
     def ai_sticker_tagger(self, scope: str = "global"):

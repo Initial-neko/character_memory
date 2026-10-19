@@ -110,6 +110,8 @@ WRITE
 
 Embedding 与第一轮 exact/near-duplicate 判断在事务外执行，避免远端或本地模型计算占住 SQLite 写锁。真正写入前会在 derived-state 事务内用当前 active Memory 再检查一次；Direct、Group、Space/World 等渠道即使并发形成相同或近似候选，也只有一个可以写入。输掉竞态的候选在 Trace 中记录为 `SKIP_DUPLICATE_AT_COMMIT`，并保留命中的 Memory ID 与 similarity。
 
+事务内的提交重查以当前 active Memory 集合为准，不受来源 `event_time` 上限限制：较新来源先提交、较旧来源迟到提交时，迟到候选也能看到已提交的新条目并记为 `SKIP_DUPLICATE_AT_COMMIT`。Context / Recall 仍保留各自的 `event_time <= at` 未来屏障；提交去重不复用该读取边界。
+
 这些是 Eval baseline，不是永久产品定律。
 
 Trace 记录：

@@ -195,21 +195,28 @@ def attach_space_routes(app):
             }
         return profile_payload(comment.character_id)
 
-    def comment_sticker_payload(sticker_id: str | None, *, active: bool = False) -> dict | None:
+    def comment_sticker_payload(
+        sticker_id: str | None, *, active: bool = False, character_id: str | None = None,
+    ) -> dict | None:
         clean_id = str(sticker_id or "").strip()
         if not clean_id:
             return None
-        catalog_factory = getattr(access, "global_sticker_catalog", None)
-        if not callable(catalog_factory):
-            return {"id": clean_id, "label": "表情包", "url": f"/v1/stickers/{clean_id}/asset"}
-        catalog = catalog_factory()
+        if character_id and callable(getattr(access, "sticker_catalog_for", None)):
+            # A character's comment may use its private pool; the global catalog
+            # would resolve that id to None on every reload.
+            catalog = access.sticker_catalog_for(character_id)
+        else:
+            catalog_factory = getattr(access, "global_sticker_catalog", None)
+            if not callable(catalog_factory):
+                return {"id": clean_id, "label": "表情包", "url": f"/v1/stickers/{clean_id}/asset"}
+            catalog = catalog_factory()
         sticker = catalog.get(clean_id) if active else catalog.historical_get(clean_id)
         if sticker is None or catalog.asset_path(clean_id) is None:
             return None
         return {
             "id": sticker.id,
             "label": sticker.label,
-            "url": f"/v1/stickers/{sticker.id}/asset",
+            "url": catalog.asset_url(sticker.id),
         }
 
     def relation_for_asset(asset) -> dict:
@@ -337,7 +344,10 @@ def attach_space_routes(app):
                     "author": comment_author_payload(item),
                     "content": item.content,
                     "sticker_id": item.sticker_id,
-                    "sticker": comment_sticker_payload(item.sticker_id),
+                    "sticker": comment_sticker_payload(
+                        item.sticker_id,
+                        character_id=item.character_id if item.actor_type == "CHARACTER" else None,
+                    ),
                     "created_at": item.created_at.isoformat(),
                     "reply_to_comment_id": item.reply_to_comment_id,
                     "mentions": list(item.mentions),
@@ -424,7 +434,25 @@ def attach_space_routes(app):
             asset = access.read_store.get_media_asset(media_id)
             if asset is None or access.media_storage.asset_path(asset) is None:
                 raise HTTPException(status_code=400, detail=f"media not found: {media_id}")
+            # A public post's media are read as the author's expression. Borrowing
+            # another character's asset would publish their material under this
+            # character's name, so ownership is part of the post contract.
+            if asset.character_id != req.character_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"media {media_id} belongs to another character",
+                )
             relations.append(relation_for_asset(asset))
+
+        # ``source_event_id`` is rendered as auditable provenance. An arbitrary
+        # or foreign event id would make the post claim a history it never had.
+        if req.source_event_id is not None:
+            source_event = access.read_store.get_event(int(req.source_event_id))
+            if source_event is None or source_event.character_id != req.character_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="source_event_id must reference one of the character's events",
+                )
 
         repository = repo()
         now = datetime.now().astimezone()
@@ -469,7 +497,9 @@ def attach_space_routes(app):
                 else:
                     for mentioned_id in req.mentions:
                         require_known(mentioned_id, active=True)
-                if req.sticker_id and comment_sticker_payload(req.sticker_id, active=True) is None:
+                if req.sticker_id and comment_sticker_payload(
+                    req.sticker_id, active=True, character_id=req.character_id,
+                ) is None:
                     raise HTTPException(status_code=400, detail="sticker not found")
                 comment = repository.add_comment(
                     post_id,
@@ -503,7 +533,10 @@ def attach_space_routes(app):
             "comment": {
                 **comment.model_dump(mode="json"),
                 "author": comment_author_payload(comment),
-                "sticker": comment_sticker_payload(comment.sticker_id),
+                "sticker": comment_sticker_payload(
+                    comment.sticker_id,
+                    character_id=comment.character_id if comment.actor_type == "CHARACTER" else None,
+                ),
             },
             # Replies are produced by the scheduler thread, so this response no
             # longer carries them. The field stays as an empty list so a client
@@ -529,7 +562,10 @@ def attach_space_routes(app):
             "comment": {
                 **comment.model_dump(mode="json"),
                 "author": comment_author_payload(comment),
-                "sticker": comment_sticker_payload(comment.sticker_id),
+                "sticker": comment_sticker_payload(
+                    comment.sticker_id,
+                    character_id=comment.character_id if comment.actor_type == "CHARACTER" else None,
+                ),
             },
             "post": {
                 "id": post.id,

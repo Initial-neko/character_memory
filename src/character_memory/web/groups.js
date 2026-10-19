@@ -10,6 +10,9 @@
   let groupStream = null;
   let groupStreamId = null;
   let historyState = {groupId:null, messages:[], hasMore:false, nextBeforeId:null, loadingOlder:false};
+  // Every enter/leave starts a new view instance. An older entry may finish its
+  // history fetch later, but it must not reconnect the stream or emit events.
+  let entryGeneration = 0;
   const sceneAdvanceRequests = new Map();
   const section = document.getElementById("sidebarGroups");
   if (!section) throw new Error("sidebar group slot is missing");
@@ -398,11 +401,14 @@
 
   async function loadHistory({beforeId = null, appendOlder = false} = {}) {
     const requested = activeId();
+    // Capture the view instance too: A -> B -> A keeps the same group id but
+    // replaces historyState, so an id-only check would apply the old response.
+    const state = historyState;
     if (!requested) return;
     const params = new URLSearchParams({limit:"50"});
     if (beforeId != null) params.set("before_id", String(beforeId));
     const data = await CM.api(`/v1/groups/${encodeURIComponent(requested)}/history?${params.toString()}`);
-    if (!CM.isGroupConversation() || requested !== activeId()) return;
+    if (!CM.isGroupConversation() || requested !== activeId() || state !== historyState) return;
     const index = groups.findIndex(item => item.id === requested);
     if (index >= 0 && data.group) groups[index] = data.group;
     if (historyState.groupId !== requested) resetHistory(requested);
@@ -418,11 +424,17 @@
   }
 
   async function loadOlderHistory() {
-    if (!CM.isGroupConversation() || historyState.loadingOlder || !historyState.hasMore || historyState.nextBeforeId == null) return;
-    historyState.loadingOlder = true;
-    renderHistory(historyState.messages, {preserveScroll:true});
-    try { await loadHistory({beforeId:historyState.nextBeforeId, appendOlder:true}); }
-    finally { historyState.loadingOlder = false; renderHistory(historyState.messages, {preserveScroll:true}); }
+    const state = historyState;
+    if (!CM.isGroupConversation() || state.loadingOlder || !state.hasMore || state.nextBeforeId == null) return;
+    state.loadingOlder = true;
+    renderHistory(state.messages, {preserveScroll:true});
+    try { await loadHistory({beforeId:state.nextBeforeId, appendOlder:true}); }
+    finally {
+      state.loadingOlder = false;
+      if (state === historyState && CM.isGroupConversation()) {
+        renderHistory(state.messages, {preserveScroll:true});
+      }
+    }
   }
 
   function applyHeader() {
@@ -464,6 +476,7 @@
   async function enter(groupId) {
     const group = groups.find(item => item.id === groupId);
     if (!group) return;
+    const generation = ++entryGeneration;
     CM.closeDirectStream?.();
     closeStream();
     CM.state.conversation = {type:"GROUP", groupId};
@@ -478,6 +491,9 @@
     CM.updateHeader();
     CM.dom.chat.innerHTML = '<div class="empty">正在加载群聊记录…</div>';
     await loadHistory();
+    // A newer enter/leave owns the view now. Do not reconnect its stream,
+    // overwrite composer state or emit a stale conversationChanged.
+    if (generation !== entryGeneration) return;
     connectStream(groupId);
     CM.updateComposerState();
     await CM.emit("conversationChanged", {type:"GROUP", groupId});
@@ -485,6 +501,7 @@
 
   function leave() {
     if (!CM.isGroupConversation()) return;
+    entryGeneration += 1;
     closeStream();
     pending.delete(activeId());
     CM.state.conversation = {type:"DIRECT", groupId:null};

@@ -200,6 +200,8 @@ member C -> ...
 
 `group_character_event` 在每个成员提交后立刻 SSE 推送，不需要等整个群组结束才展示第一条回复。
 
+群入口使用视图 generation：每次 `enter`/`leave` 都会使之前未完成的入口失效。初始历史请求返回后，只有仍属于当前 generation 的入口才能建立 SSE、更新输入区状态并发出 `conversationChanged`；迟到的入口不会关闭当前群的订阅。历史响应自身的过期检查仍保留，但它不覆盖入口 await 之后的副作用，因此 generation 与群 ID 检查同时生效。
+
 ### Ensemble groups（一键建群）
 
 `POST /v1/ensembles` 只创建一个不可见的 `BUILDING` build record，不提前创建真实 GroupConversation；`POST /v1/ensembles/prepare` 是一键入口，会创建 build record 后执行联网 research。失败时 build 保留为可重试状态，不再因为一次 Provider / structured-output 错误把整次输入和进度删掉。兼容的 `/{build_id}/research` 可继续对已有 build 重试资料整理；单个失败成员还可以通过 `/{build_id}/members/{index}/retry` 局部恢复。

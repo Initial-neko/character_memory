@@ -449,8 +449,10 @@ class GroupAutonomyScheduler:
                 self.run_once()
             except Exception:
                 logger.exception("group.autonomy scheduler_loop_error")
-            self._wake.wait(self.poll_seconds)
+            # Clear before sleeping so a concurrent enqueue cannot be silently
+            # erased between wait() returning and clear().
             self._wake.clear()
+            self._wake.wait(self.poll_seconds)
         logger.info("group.autonomy scheduler_stop")
 
     def start(self) -> None:

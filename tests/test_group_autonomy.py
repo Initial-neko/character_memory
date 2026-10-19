@@ -571,3 +571,38 @@ def test_failed_run_cadence_survives_database_reopen(tmp_path):
         assert model.calls == []
     finally:
         reopened.close()
+
+
+def test_group_scheduler_clears_wake_before_sleeping_so_concurrent_enqueue_survives():
+    access = SimpleNamespace(
+        settings=SimpleNamespace(group_autonomy_interval_minutes=360.0),
+    )
+    scheduler = GroupAutonomyScheduler(access, SimpleNamespace(), poll_seconds=60)
+
+    class WakeAfterWait:
+        """A config/force-due wake lands exactly as wait() returns."""
+
+        def __init__(self):
+            self._set = False
+
+        def set(self):
+            self._set = True
+
+        def clear(self):
+            self._set = False
+
+        def is_set(self):
+            return self._set
+
+        def wait(self, timeout=None):
+            self._set = True
+            scheduler._stop.set()
+            return True
+
+    wake = WakeAfterWait()
+    scheduler._wake = wake
+    scheduler.run_once = lambda now=None: []
+
+    scheduler._loop()
+
+    assert wake.is_set() is True

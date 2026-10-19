@@ -22,7 +22,7 @@ def test_image_module_is_loaded_and_packaged():
     assert 'CM.registerFeature("images"' in text
     assert 'event.key !== "Enter"' in text
     assert "event.shiftKey" in text
-    assert "event.isComposing" in text
+    assert "CM.isImeConfirming(event)" in text
     assert 'event.target.closest(".image-bubble img")' in text
     assert "image-lightbox" in text
     assert ".image-lightbox" in css_text

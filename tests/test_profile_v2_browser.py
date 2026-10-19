@@ -259,3 +259,35 @@ def test_profile_request_epoch_ignores_older_profile_resolution(page, profile_ap
     expect(about.locator("dd").nth(1)).to_have_text(second_profile.get("tagline") or "尚未填写")
     expect(page.locator("[data-profile-status]")).to_have_text("")
     assert page.request.get(f"{base}/health").json()["runtime_loaded"] is False
+
+
+def test_profile_chat_opens_direct_for_deferred_character_and_survives_reload(page, profile_app):
+    from character_memory.config import set_character_direct_pending
+
+    base, _, _, _, access = profile_app
+    deferred = access.character_profiles()[1]["id"]
+    set_character_direct_pending(access.settings, deferred, True)
+
+    prepare_profile(page, base)
+    page.evaluate("id => window.CM.features.profile.open(id)", deferred)
+    page.wait_for_function("document.body.classList.contains('profile-mode')")
+    page.locator("[data-profile-chat]").click()
+
+    page.wait_for_function("id => window.CM.state.characterId === id", arg=deferred)
+    page.wait_for_function(
+        "id => [...document.querySelectorAll('#characterList [data-character]')]"
+        ".some(el => el.dataset.character === id)",
+        arg=deferred,
+    )
+
+    page.reload()
+    page.wait_for_function(
+        "id => window.CM && window.CM.state.characterId === id && document.body.dataset.cmReady === 'true'",
+        arg=deferred,
+    )
+    assert page.evaluate("window.CM.state.characterId") == deferred
+    assert page.evaluate(
+        "id => [...document.querySelectorAll('#characterList [data-character]')]"
+        ".some(el => el.dataset.character === id)",
+        deferred,
+    )

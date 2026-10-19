@@ -109,5 +109,34 @@
   $("peer").onchange=()=>load();$("searchForm").onsubmit=e=>{e.preventDefault();load();};$("retry").onclick=()=>load();$("more").onclick=()=>load(true);$("character").onchange=()=>{identity();load();};$("day").onchange=()=>{identity();load();};$("today").onclick=()=>{$("day").value=dateString(new Date());identity();load();};
   for(const [id,delta] of [["previous",-1],["next",1]])$(id).onclick=()=>{const d=new Date($("day").value+"T12:00:00");d.setDate(d.getDate()+delta);$("day").value=dateString(d);identity();load();};
   $("day").value=dateString(new Date());
-  get('/v1/characters?include_deferred=true').then(data=>{profiles=data.characters;$("character").innerHTML=profiles.map(p=>`<option value="${esc(p.id)}">${esc(p.name||p.id)}</option>`).join("");const wanted=new URLSearchParams(location.search).get("character");if(profiles.some(p=>p.id===wanted))$("character").value=wanted;identity();const desired=new URLSearchParams(location.search).get("view");if(profiles.length&&["changes","relationships","intents"].includes(desired))document.querySelector(`[data-view="${desired}"]`).click();else if(profiles.length)load();else $("status").textContent="还没有可查看的人物。";}).catch(e=>{$("status").textContent=e.message;});
+  async function bootstrap() {
+    const data=await get('/v1/characters?include_deferred=true');
+    profiles=data.characters||[];
+    const wanted=new URLSearchParams(location.search).get("character");
+    // Archived characters are absent from the active list, but their read-only
+    // life is still viewable. Resolve the URL target explicitly instead of
+    // silently falling back to the first character and showing someone else.
+    if(wanted&&!profiles.some(p=>p.id===wanted)){
+      try{const archived=await get('/v1/characters?archived=true&include_deferred=true');const match=(archived.characters||[]).find(p=>p.id===wanted);if(match)profiles=[...profiles,match];}catch(_){}
+    }
+    const missing=Boolean(wanted)&&!profiles.some(p=>p.id===wanted);
+    $("character").innerHTML=profiles.map(p=>`<option value="${esc(p.id)}">${esc(p.name||p.id)}${p.archived_at?"（已归档）":""}</option>`).join("");
+    if(missing){
+      $("character").innerHTML='<option value="" selected disabled>人物不存在</option>'+$("character").innerHTML;
+      $("character").value="";
+      $("heading").textContent="人物不可用";
+      $("status").textContent="链接指定的人物不存在或已删除；为避免显示其他人物的经历，未加载任何记录。";
+      $("timeline").replaceChildren();
+      $("details").innerHTML='<p class="empty-detail">没有可显示的人物。请返回聊天或从人物列表重新选择。</p>';
+      $("more").hidden=true;
+      return;
+    }
+    if(wanted)$("character").value=wanted;
+    identity();
+    const desired=new URLSearchParams(location.search).get("view");
+    if(profiles.length&&["changes","relationships","intents"].includes(desired))document.querySelector(`[data-view="${desired}"]`).click();
+    else if(profiles.length)load();
+    else $("status").textContent="还没有可查看的人物。";
+  }
+  bootstrap().catch(e=>{$("status").textContent=e.message;});
 })();

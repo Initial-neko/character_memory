@@ -158,3 +158,19 @@ def test_desktop_identity_and_timeline_fit_their_layout(life_page):
     assert layout["paragraphScrollWidth"] <= layout["paragraphClientWidth"]
     assert layout["paragraphRight"] <= layout["cardRight"]
     assert layout["documentScrollWidth"] <= layout["viewportWidth"]
+
+
+def test_archived_and_unknown_characters_never_show_another_character(life_server, page):
+    from playwright.sync_api import expect
+    page.set_viewport_size({"width":1600,"height":1000})
+
+    page.goto(life_server + '/life?character=c')
+    expect(page.locator('#heading')).to_contain_text('归档人物')
+    expect(page.locator('#timeline')).to_contain_text('归档人物的独立经历')
+    expect(page.locator('#timeline')).not_to_contain_text('真实分页测试')
+    expect(page.locator('#character')).to_have_value('c')
+
+    page.goto(life_server + '/life?character=ghost')
+    expect(page.locator('#status')).to_contain_text('不存在')
+    expect(page.locator('#timeline')).not_to_contain_text('真实分页测试')
+    expect(page.locator('#timeline .event-card')).to_have_count(0)

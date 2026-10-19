@@ -410,6 +410,14 @@
     status.textContent = "正在打开私聊…";
     switchingForChat = true;
     try {
+      // A character created by a group build stays out of the sidebar until the
+      // user opens direct chat. Doing that only through switchCharacter left
+      // the entry missing, and the next reload fell back to another character.
+      const profile = activeProfile || profileFromState(targetId);
+      if (profile?.direct_pending) {
+        await CM.api(`/v1/characters/${encodeURIComponent(targetId)}/open-direct`, {method: "POST"});
+        await CM.loadCharacters();
+      }
       if (CM.isGroupConversation() || CM.state.characterId !== targetId) {
         await CM.switchCharacter(targetId);
       }

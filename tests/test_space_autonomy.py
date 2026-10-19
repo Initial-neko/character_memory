@@ -1718,3 +1718,41 @@ def test_the_comment_thread_queue_refuses_to_grow_without_limit(tmp_path):
     assert scheduler.enqueue_comment_thread(7, MAX_PENDING_COMMENT_THREADS) is False
     assert scheduler.pending_thread_count() == MAX_PENDING_COMMENT_THREADS
     store.close()
+
+
+def test_space_scheduler_clears_wake_before_sleeping_so_concurrent_enqueue_survives(tmp_path):
+    access, store, _ = _access(tmp_path)
+    scheduler = SpaceAutonomyScheduler(access, SpaceRepository(store), poll_seconds=60)
+
+    class WakeAfterWait:
+        """An enqueue lands exactly as wait() returns."""
+
+        def __init__(self):
+            self._set = False
+
+        def set(self):
+            self._set = True
+
+        def clear(self):
+            self._set = False
+
+        def is_set(self):
+            return self._set
+
+        def wait(self, timeout=None):
+            self._set = True
+            scheduler._stop.set()
+            return True
+
+    wake = WakeAfterWait()
+    scheduler._wake = wake
+    scheduler.drain_pending_threads = lambda **kwargs: []
+    scheduler.run_once = lambda now=None: []
+    scheduler.pending_thread_count = lambda: 0
+
+    scheduler._loop()
+
+    # With the old wait()-then-clear() order this enqueue was erased and the
+    # comment follow-up waited out a full poll interval.
+    assert wake.is_set() is True
+    store.close()

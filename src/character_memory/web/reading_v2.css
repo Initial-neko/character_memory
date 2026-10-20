@@ -7,6 +7,7 @@ body.reading-page {
   color: var(--ui-text, #191b42);
   font-family: var(--ui-font, "Microsoft YaHei", sans-serif);
 }
+body.life-page { font-size: 13px; }
 
 /* Life timeline */
 .identity-copy { min-width:0; }
@@ -25,11 +26,13 @@ body.reading-page {
 }
 .life-nav .brand { display: none; }
 .life-page-nav { display: grid; gap: 6px; }
-.life-page-nav a {
+/* Outrank the legacy `.life-nav nav a` sizing still shipped in life.css. */
+.life-page .life-nav .life-page-nav { margin-top: 0; }
+.life-page .life-nav .life-page-nav a {
   display: flex;
   align-items: center;
-  min-height: 42px;
-  padding: 10px 14px;
+  min-height: 38px;
+  padding: 8px 14px;
   border-radius: 12px;
   color: var(--ui-muted);
   font-size: 14px;
@@ -84,7 +87,7 @@ body.reading-page {
 .life-header .avatar { width: 64px; height: 64px; background: var(--ui-surface-sunken); color: var(--ui-accent); font-size: 25px; }
 .life-header .avatar img { object-fit: cover; }
 .life-header .eyebrow { margin: 0 0 3px; color: var(--ui-muted); font-size: 11px; letter-spacing: .04em; }
-.life-header h1 { margin: 0 0 7px; color: var(--ui-text); font: 650 23px var(--ui-font); letter-spacing: 0; }
+.life-header h1 { margin: 0 0 7px; color: var(--ui-text); font: 650 20px var(--ui-font); letter-spacing: 0; }
 .identity-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--ui-muted); font-size: 12px; }
 .identity-controls label { display: flex; align-items: center; gap: 6px; }
 .identity-controls select { min-height: 32px; padding: 5px 9px; border-color: var(--ui-line); border-radius: var(--ui-r-md); font-size: 12px; }
@@ -100,7 +103,7 @@ body.reading-page {
 .life-page .details { border: 1px solid var(--ui-line); border-radius: var(--ui-r-lg); background: var(--ui-surface); box-shadow: 0 5px 20px rgba(58, 35, 112, .025); }
 .life-page .records { min-width: 0; padding: 18px 18px 20px; }
 .life-page .tabs { display: flex; overflow-x: auto; gap: 5px; border-bottom: 1px solid var(--ui-line); }
-.life-page .tabs button { min-height: 40px; padding: 9px 12px; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: var(--ui-muted); font-size: 14px; }
+.life-page .tabs button { min-height: 38px; padding: 8px 12px; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: var(--ui-muted); font-size: 13px; }
 .life-page .tabs [aria-selected="true"] { border-bottom: 3px solid var(--ui-accent); color: var(--ui-accent); font-weight: 650; }
 .life-page .subtitle { margin: 13px 0; color: var(--ui-muted); font-size: 12px; }
 .life-page .filters { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -120,11 +123,11 @@ body.reading-page {
 .life-page .timeline-row.selected::after { background: var(--ui-accent); }
 .life-page .card-head,
 .life-page .card-head h2 { min-width: 0; }
-.life-page .card-head h2 { color: var(--ui-text); font-size: 15px; overflow-wrap: anywhere; }
-.life-page .badge { background: var(--ui-surface-sunken); color: var(--ui-accent); }
+.life-page .card-head h2 { color: var(--ui-text); font-size: 14px; overflow-wrap: anywhere; }
+.life-page .badge { background: var(--ui-surface-sunken); color: var(--ui-accent); font-size: 11px; }
 .life-page .badge.warn { background: var(--ui-warn-bg); color: var(--ui-warn); }
 .life-page .badge.plan { background: var(--ui-surface-soft); color: var(--ui-muted); }
-.life-page .event-card p { max-width: 100%; color: var(--ui-muted); font-size: 13px; line-height: 1.7; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.life-page .event-card p { max-width: 100%; color: var(--ui-muted); font-size: 12.5px; line-height: 1.7; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .life-page .event-card small,
 .life-page .hint,
 .life-page .footnote { color: var(--ui-muted); }
@@ -132,9 +135,10 @@ body.reading-page {
 .life-page #more { margin: 6px 0 0 70px; }
 .life-page .footnote { margin: 18px 4px 0; font-size: 11px; }
 .life-page .details { position: sticky; top: 90px; max-height: calc(100vh - 108px); overflow: auto; padding: 20px; }
-.life-page .details h2 { color: var(--ui-text); font: 650 19px var(--ui-font); }
-.life-page .details h3 { margin: 20px 0 8px; color: var(--ui-text); font-size: 14px; }
-.life-page .details p { color: var(--ui-text); font-size: 13px; }
+.life-page .details h2 { color: var(--ui-text); font: 650 17px var(--ui-font); }
+.life-page .details h3 { margin: 18px 0 7px; color: var(--ui-text); font-size: 13px; }
+.life-page .details p { color: var(--ui-text); font-size: 12.5px; }
+.life-page .details .facts { font-size: 12px; }
 .life-page .details .detail-subtitle,
 .life-page .details .hint { color: var(--ui-muted); }
 .life-page .details a { color: var(--ui-link); }
@@ -290,7 +294,7 @@ body.reading-page {
 @media (max-width: 760px) {
   .life-nav { position: static; width: auto; max-height: none; padding: 71px 12px 9px; border-right: 0; border-bottom: 1px solid var(--ui-line); }
   .life-page-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
-  .life-page-nav a { justify-content: center; min-height: 36px; padding: 7px 5px; font-size: 11px; }
+  .life-page .life-nav .life-page-nav a { justify-content: center; min-height: 36px; padding: 7px 5px; font-size: 11px; }
   .life-character-section { margin-top: 9px; }
   .life-character-section h2 { margin: 0 5px 6px; }
   .life-character-list { display: flex; overflow-x: auto; gap: 6px; padding-bottom: 2px; }
@@ -300,7 +304,7 @@ body.reading-page {
   .life-main { margin: 0; padding: 12px 12px 30px; }
   .life-header { align-items: flex-start; padding: 13px; }
   .life-header .avatar { width: 48px; height: 48px; }
-  .life-header h1 { font-size: 18px; }
+  .life-header h1 { font-size: 17px; }
   .life-header .notice { display: none; }
   .identity-controls { gap: 6px; font-size: 11px; }
   .identity-controls select { max-width: 145px; }
@@ -337,7 +341,7 @@ body.reading-page {
   .source-actions { justify-content: flex-start; flex-wrap: wrap; }
 }
 @media (max-width: 380px) {
-  .life-page-nav a { font-size: 10px; }
+  .life-page .life-nav .life-page-nav a { font-size: 10px; }
   .life-header .identity { gap: 9px; }
   .identity-controls label { display: block; }
   .feed-card { grid-template-columns: 1fr; }

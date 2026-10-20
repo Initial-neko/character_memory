@@ -125,6 +125,7 @@ def test_desktop_identity_and_timeline_fit_their_layout(life_page):
       const details = rect('.details');
       const active = document.querySelector('.life-page-nav [aria-current="page"]');
       const activeColor = getComputedStyle(active).color;
+      const navFont = getComputedStyle(document.querySelector('.life-page-nav a')).fontSize;
       const accentProbe = document.createElement('span');
       accentProbe.style.color = getComputedStyle(document.body).getPropertyValue('--ui-accent').trim();
       document.body.append(accentProbe);
@@ -141,6 +142,7 @@ def test_desktop_identity_and_timeline_fit_their_layout(life_page):
         globalHeaderBottom: globalHeader.bottom,
         activeColor,
         accentColor,
+        navFont,
         recordsRight: records.right,
         detailsLeft: details.left,
         paragraphClientWidth: paragraph.clientWidth,
@@ -153,6 +155,8 @@ def test_desktop_identity_and_timeline_fit_their_layout(life_page):
     }""")
     assert layout["identityTop"] >= layout["globalHeaderBottom"] + 8
     assert layout["activeColor"] == layout["accentColor"]
+    # The legacy life.css nav rule must not outrank the compact rail size.
+    assert layout["navFont"] == "14px"
     assert layout["detailsLeft"] >= layout["recordsRight"]
     assert layout["paragraphClientWidth"] > 0
     assert layout["paragraphScrollWidth"] <= layout["paragraphClientWidth"]

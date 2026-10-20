@@ -94,6 +94,16 @@
   sourceFilter.innerHTML = '订阅来源 <select aria-label="按订阅来源筛选 Space" title="只筛选资讯，不代表角色已经阅读"><option value="">全部订阅</option></select><a href="/sources">管理订阅 ↗</a>';
   pageHeading.after(sourceFilter);
   const sourceSelect = sourceFilter.querySelector("select");
+  const topicsRail = document.createElement("aside");
+  topicsRail.className = "space-topics-rail";
+  topicsRail.setAttribute("aria-label", "热点讨论");
+  topicsRail.hidden = true;
+  topicsRail.innerHTML = '<header><h2>热点讨论</h2><span>World Pulse · 真实收集</span></header><div class="space-topics-content"></div>';
+  feedWrap.append(topicsRail);
+  const topicsContent = topicsRail.querySelector(".space-topics-content");
+  const desktopMedia = window.matchMedia("(min-width: 821px)");
+  let railTopics = new Map();
+  let railCollectionEnabled = null;
 
   let opened = false;
   let filterCharacterId = null;
@@ -585,7 +595,7 @@
     const links = urls.map((url, index) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${rss ? "查看原文" : `聚合来源 ${index + 1}`} ↗</a>`).join("");
     const comments = (item.comments || []).map(comment => `<div class="space-topic-take">${avatarHtml(comment.author || profileFor(comment.character_id), "space-avatar")}<div><strong>${esc(comment.author?.name || comment.character_id)}</strong><p>${esc(comment.content)}</p><time>${esc(CM.fmtTime(comment.created_at))}</time></div></div>`).join("");
     const evidence = (item.evidence || []).map(entry => `<blockquote class="space-outside-excerpt"><small>${entry.kind === "OPINION" ? "外界观点" : "来源节选"} · ${esc(entry.author || "作者未标明")}${entry.published_at ? ` · ${esc(entry.published_at)}` : " · 原文时间未标明"}</small><p>${esc(entry.quote)}</p><a href="${esc(entry.url)}" target="_blank" rel="noopener noreferrer">查看引用所在页面 ↗</a></blockquote>`).join("");
-    return `<article class="space-post space-external-card" data-space-entry="${esc(item.key)}">
+    return `<article class="space-post space-external-card" data-space-kind="${rss ? "RSS" : "TOPIC"}" data-space-entry="${esc(item.key)}">
       ${rss && item.image_url ? `<a href="/sources?item=${esc(item.id)}" class="space-external-cover"><img loading="lazy" src="${esc(item.image_url)}" alt="${esc(item.title)}"></a>` : ""}
       <div class="space-post-body">
         <div class="space-external-label"><span>${rss ? "订阅资讯" : "热点讨论"}</span><time>${esc(CM.fmtTime(item.created_at))}</time></div>
@@ -835,7 +845,42 @@
     }
     currentPageButton.hidden = CM.isGroupConversation() || !CM.state.characterId;
     sourceFilter.hidden = Boolean(filterCharacterId) || !["ALL", "RSS"].includes(filterKind) || Boolean(detailPostId);
+    const showRail = desktopMedia.matches && !filterCharacterId && filterKind === "ALL" && !filterSourceId && !detailPostId;
+    topicsRail.hidden = !showRail;
+    feedWrap.classList.toggle("has-topics-rail", showRail);
+    // Reuse the existing World/relationship actions in the same desktop rail.
+    // Moving the nodes preserves their real handlers and pending requests.
+    const socialRail = shell.querySelector(".cm-social-rail");
+    if (socialRail) {
+      const owner = showRail ? topicsRail : shell;
+      if (socialRail.parentElement !== owner) owner.append(socialRail);
+    }
   }
+
+  async function refreshTopics(navigation) {
+    if (!desktopMedia.matches || filterCharacterId || filterKind !== "ALL" || filterSourceId) return;
+    topicsContent.innerHTML = '<p class="space-source-caveat">正在读取已收集话题…</p>';
+    try {
+      const data = await CM.api("/v1/space/feed?kind=TOPIC&limit=4");
+      if (navigation !== navigationEpoch || !opened) return;
+      for (const item of data.items || []) railTopics.set(item.key, item);
+      railCollectionEnabled = data.collection_status?.pulse_enabled ?? null;
+      renderTopics();
+    } catch (error) {
+      if (navigation !== navigationEpoch || !opened) return;
+      renderTopics();
+      topicsContent.insertAdjacentHTML("afterbegin", `<p class="space-source-caveat">热点读取失败：${CM.escapeHtml(error.message)}</p>`);
+    }
+  }
+  function renderTopics() {
+    topicsContent.innerHTML = [...railTopics.values()].map(feedEntryHtml).join("")
+      || '<p class="space-source-caveat">暂无已收集的热点话题。</p>';
+    if (railCollectionEnabled === false) topicsContent.insertAdjacentHTML("afterbegin", '<p class="space-source-caveat">热点采集未开启 · 以下为历史话题</p>');
+  }
+  desktopMedia.addEventListener("change", () => {
+    updatePageNav();
+    if (opened && desktopMedia.matches) refreshTopics(navigationEpoch).catch(console.warn);
+  });
 
   function updateFeedMeta() {
     const loaded = feedKeys.size;
@@ -924,6 +969,10 @@
       const posts = entries.filter(item => item.kind === "POST" && item.post).map(item => item.post);
       feedLoaded = true;
       const freshEntries = entries.filter(item => !feedKeys.has(item.key));
+      if (!filterCharacterId && filterKind === "ALL" && !filterSourceId) {
+        for (const item of entries) if (item.kind === "TOPIC") railTopics.set(item.key, item);
+        if (desktopMedia.matches) renderTopics();
+      }
       entries.forEach(item => feedKeys.add(item.key));
       posts.forEach(post => postsById.set(String(post.id), post));
       feedHasMore = Boolean(data.has_more);
@@ -983,9 +1032,12 @@
     filterCharacterId = characterId || null;
     filterKind = kind;
     filterSourceId = sourceId;
+    railTopics = new Map();
+    railCollectionEnabled = null;
     sourceSelect.value = sourceId || "";
     setOpen(true);
     updatePageNav();
+    refreshTopics(navigation).catch(console.warn);
     window.scrollTo({top:0, behavior:"auto"});
     await loadMentionProfiles();
     if (navigation !== navigationEpoch || !opened) return;

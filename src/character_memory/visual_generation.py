@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import base64
-import importlib.util
-import io
 import logging
 import re
-import sys
+import time
+from urllib.parse import quote
 from enum import Enum
 from typing import Any, Protocol
 
@@ -197,7 +196,7 @@ class MsimgProvider:
         else:
             values = [str(part).strip() for part in models if str(part).strip()]
         self.models = values or ["qwen"]
-        self.timeout_seconds = max(30.0, float(timeout_seconds))
+        self.timeout_seconds = max(10.0, float(timeout_seconds))
         self._owns_downloader = downloader is None
         self.downloader = downloader or httpx.Client(timeout=self.timeout_seconds)
 
@@ -205,68 +204,97 @@ class MsimgProvider:
         return bool(self.api_key)
 
     def available(self) -> bool:
-        if not self.configured():
-            return False
-        if "msimg" in sys.modules:
-            return True
+        # Uses the core httpx dependency; availability never spends remote quota.
+        return self.configured()
+
+    def _response(self, method: str, url: str, *, deadline: float, **kwargs) -> httpx.Response:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("ModelScope image generation timed out")
         try:
-            return importlib.util.find_spec("msimg") is not None
-        except (ImportError, ValueError):
-            return False
+            response = self.downloader.request(method, url, timeout=remaining, **kwargs)
+        except httpx.TimeoutException:
+            raise RuntimeError("ModelScope image generation timed out") from None
+        except httpx.HTTPError:
+            # Do not expose signed download URLs, response bodies or prompts.
+            raise RuntimeError("ModelScope image generation network request failed") from None
+        if response.is_error:
+            hint = ""
+            if response.status_code in {401, 403}:
+                hint = "; check MSIMG_API_KEY / MODELSCOPE_API_TOKEN and model access"
+            elif response.status_code == 429:
+                hint = "; check ModelScope quota/rate limit; no paid provider fallback"
+            raise RuntimeError(f"ModelScope image generation failed with HTTP {response.status_code}{hint}")
+        if time.monotonic() >= deadline:
+            raise RuntimeError("ModelScope image generation timed out")
+        return response
+
+    @staticmethod
+    def _json(response: httpx.Response) -> dict:
+        try:
+            value = response.json()
+        except ValueError:
+            raise RuntimeError("ModelScope returned invalid JSON") from None
+        if not isinstance(value, dict):
+            raise RuntimeError("ModelScope returned an invalid response")
+        return value
 
     def generate(self, request: ImageGenerationRequest) -> ImageGenerationResult:
         if not self.api_key:
             raise RuntimeError("MSIMG_API_KEY / MODELSCOPE_API_TOKEN is not configured")
         if request.reference_images:
-            raise RuntimeError("msimg 0.0.4 does not expose a reference-image contract")
-        try:
-            from msimg import generate_image
-        except ImportError as exc:
-            raise RuntimeError("msimg is not installed; install the image-generation extra") from exc
-
-        model_value: str | list[str] = self.models[0] if len(self.models) == 1 else self.models
-        result = generate_image(
-            prompt=request.prompt,
-            api_configs=self.api_key,
-            models=model_value,
-            size=request.aspect_ratio or request.size or "1:1",
-            enable_failover=len(self.models) > 1,
-            poll_timeout=int(self.timeout_seconds),
-        )
-        if not result:
-            raise RuntimeError("msimg returned no image")
-
-        image = result.get("image") if isinstance(result, dict) else None
-        if image is not None and hasattr(image, "save"):
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-            payload = buffer.getvalue()
-            if payload:
-                size = getattr(image, "size", None)
-                width = int(size[0]) if isinstance(size, tuple) and len(size) >= 2 else None
-                height = int(size[1]) if isinstance(size, tuple) and len(size) >= 2 else None
-                return ImageGenerationResult(
-                    provider=self.name,
-                    model=str(result.get("model") or self.models[0]),
-                    payload=payload,
-                    mime_type=_sniff_mime(payload),
-                    width=width,
-                    height=height,
-                )
-
-        url = str(result.get("url") or "") if isinstance(result, dict) else ""
-        if not url:
-            raise RuntimeError("msimg result contained neither image nor url")
-        response = self.downloader.get(url, headers={"Accept": "image/*"})
-        if response.is_error or not response.content:
-            raise RuntimeError(f"msimg generated image download failed with HTTP {response.status_code}")
-        mime = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-        return ImageGenerationResult(
-            provider=self.name,
-            model=str(result.get("model") or self.models[0]),
-            payload=response.content,
-            mime_type=_sniff_mime(response.content, mime if mime.startswith("image/") else "image/png"),
-        )
+            raise RuntimeError("ModelScope text-to-image does not expose a reference-image contract")
+        # Preserve the historical msimg aliases without importing its SDK. The
+        # SDK swallows HTTP errors, retries POSTs and prints private prompts.
+        aliases = {
+            "qwen": "Qwen/Qwen-Image", "qwen-image": "Qwen/Qwen-Image",
+            "flux-majic": "MAILAND/majicflus_v1", "flux-muse": "MusePublic/489_ckpt_FLUX_1",
+            "flux-xiaohongshu": "yiwanji/FLUX_xiao_hong_shu_ji_zhi_zhen_shi_V2",
+            "sdxl-muse": "MusePublic/42_ckpt_SD_XL",
+        }
+        sizes = {"1:1": "1328x1328", "2:3": "1056x1584", "3:2": "1584x1056",
+                 "3:4": "1140x1472", "4:3": "1472x1140", "9:16": "928x1664",
+                 "16:9": "1664x928", "2.35:1": "1880x800"}
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        base = "https://api-inference.modelscope.cn/v1"
+        deadline = time.monotonic() + self.timeout_seconds
+        for configured_model in self.models:
+            model = aliases.get(configured_model, configured_model)
+            response = self._response(
+                "POST", f"{base}/images/generations", deadline=deadline,
+                headers={**headers, "X-ModelScope-Async-Mode": "true"},
+                json={"model": model, "prompt": request.prompt,
+                      "size": sizes.get(request.aspect_ratio, "1328x1328")},
+            )
+            task_id = self._json(response).get("task_id")
+            if not isinstance(task_id, str) or not task_id.strip():
+                raise RuntimeError("ModelScope returned no task_id")
+            while True:
+                result = self._json(self._response(
+                    "GET", f"{base}/tasks/{quote(task_id, safe='')}", deadline=deadline,
+                    headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
+                ))
+                status = result.get("task_status")
+                if status == "SUCCEED":
+                    images = result.get("output_images")
+                    if not isinstance(images, list) or not images or not isinstance(images[0], str):
+                        raise RuntimeError("ModelScope succeeded without an output image")
+                    image = self._response("GET", images[0], deadline=deadline, headers={"Accept": "image/*"})
+                    if not image.content:
+                        raise RuntimeError("ModelScope returned an empty image")
+                    return ImageGenerationResult(provider=self.name, model=model, payload=image.content,
+                                                 mime_type=_sniff_mime(image.content))
+                if status in {"FAILED", "CANCELED", "CANCELLED"}:
+                    # Only an explicitly configured second ModelScope model can
+                    # be attempted; transport/auth/quota errors stop immediately.
+                    break
+                if status not in {"PENDING", "PROCESSING", "RUNNING"}:
+                    raise RuntimeError("ModelScope returned an unknown task status")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("ModelScope image generation timed out")
+                time.sleep(min(5.0, remaining))
+        raise RuntimeError(f"ModelScope image generation task {status}")
 
     def close(self) -> None:
         if self._owns_downloader:

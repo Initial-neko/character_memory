@@ -108,11 +108,8 @@ def test_profile_renders_real_bounded_records_safely_and_opens_life(page, profil
     from playwright.sync_api import expect
 
     base, character, event, store, access = profile_app
-    response = page.request.post(
-        f"{base}/v1/space/posts",
-        data={"character_id": character, "content": "真实公开动态 <script>window.POST_FORGED=true</script>"},
-    )
-    assert response.status == 200, response.text()
+    # Historical text posts remain readable after the new image publication gate.
+    access.space_repository.create_post(character, "真实公开动态 <script>window.POST_FORGED=true</script>", datetime.now(timezone.utc))
     before_events = store.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
 
     install_profile(page, base, character)
@@ -163,11 +160,7 @@ def test_profile_request_epoch_ignores_older_character_response(page, profile_ap
         pytest.skip("isolated app needs two active characters for the race check")
     second = second_profile["id"]
     second_name = second_profile["name"]
-    response = page.request.post(
-        f"{base}/v1/space/posts",
-        data={"character_id": second, "content": "第二个人物的真实动态"},
-    )
-    assert response.status == 200, response.text()
+    access.space_repository.create_post(second, "第二个人物的真实动态", datetime.now(timezone.utc))
 
     prepare_profile(page, base, first)
     pending = []
@@ -261,7 +254,8 @@ def test_profile_request_epoch_ignores_older_profile_resolution(page, profile_ap
     assert page.request.get(f"{base}/health").json()["runtime_loaded"] is False
 
 
-def test_profile_chat_opens_direct_for_deferred_character_and_survives_reload(page, profile_app):
+@pytest.mark.parametrize("over_soft", [False, True])
+def test_profile_chat_opens_direct_for_deferred_character_and_survives_reload(page, profile_app, over_soft):
     from character_memory.config import set_character_direct_pending
 
     base, _, _, _, access = profile_app
@@ -271,7 +265,15 @@ def test_profile_chat_opens_direct_for_deferred_character_and_survives_reload(pa
     prepare_profile(page, base)
     page.evaluate("id => window.CM.features.profile.open(id)", deferred)
     page.wait_for_function("document.body.classList.contains('profile-mode')")
-    page.locator("[data-profile-chat]").click()
+    if over_soft:
+        page.evaluate("window.CM.state.characterCapacity.softLimit = 1")
+        dialogs = []
+        page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
+        with page.expect_request(lambda request: "/open-direct?confirm_over_soft_limit=true" in request.url):
+            page.locator("[data-profile-chat]").click()
+        assert len(dialogs) == 1
+    else:
+        page.locator("[data-profile-chat]").click()
 
     page.wait_for_function("id => window.CM.state.characterId === id", arg=deferred)
     page.wait_for_function(

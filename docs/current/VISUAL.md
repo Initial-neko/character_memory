@@ -584,11 +584,14 @@ data URL image draft
 
 - Provider id: `msimg`
 - API key: `MSIMG_API_KEY` 或 `MODELSCOPE_API_TOKEN`
-- 依赖本地 `msimg==0.0.4`
+- 默认 Provider，优先使用 ModelScope 额度；显式选择 `agnes` 仍有效，失败不会自动切到 Agnes。
+- 使用项目已有 `httpx` 直接调用官方异步 API，不依赖 `msimg` SDK；保留 `msimg` Provider id 和旧模型 aliases。
 - 当前 integration 不支持 reference images
 - models 可通过 `msimg_models` 配置
 
-`GET /v1/visual/providers` 的 `available` 对 msimg 主要描述本地 dependency/runtime 是否可用，不是每次都执行远程生成 API 探测。
+`GET /v1/visual/providers` 的 `available` 对 msimg 表示本地凭据已配置；不会执行远程 API 探测或扣减生图额度，也不保证 token、模型权限或额度远端有效。
+
+传输遵循 [ModelScope 官方异步示例](https://www.modelscope.cn/models/Qwen/Qwen-Image)：单次提交 `POST /v1/images/generations`，然后在同一超时预算内查询 `/v1/tasks/{task_id}`，成功后下载输出图片。POST 不自动重试。HTTP 401/403 提示核查 `MSIMG_API_KEY / MODELSCOPE_API_TOKEN` 和模型权限；429 提示核查额度；错误不回显 prompt、token、响应正文或签名下载 URL。只有显式配置多个 `msimg_models` 且任务已明确 FAILED/CANCELED 时才尝试下一个 ModelScope 模型，网络/鉴权/额度错误立即停止。
 
 ### 10. Dev Console
 
@@ -618,7 +621,7 @@ Avatar Generate 不维护第二套 Prompt 编译器。它复用显式 Image 工�
 Non-sensitive ImageGen configuration stays in `config.yaml`：
 
 ```yaml
-image_generation_provider: "agnes"
+image_generation_provider: "msimg"
 image_generation_timeout_seconds: 180
 agnes_base_url: "https://apihub.agnes-ai.com/v1"
 agnes_image_model: "agnes-image-2.1-flash"

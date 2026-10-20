@@ -78,11 +78,11 @@ class Settings(BaseModel):
 
     # P0.19 direct-character visual capability. Both providers share one
     # provider-neutral request/result contract. Agnes supports reference images;
-    # msimg 0.0.4 is currently text-to-image only in this integration.
+    # ModelScope is text-to-image only in this integration.
     direct_autonomous_image_generation_enabled: bool = False
     direct_autonomous_image_daily_max_generations: int = Field(default=3, ge=0, le=100)
     direct_autonomous_image_cooldown_hours: float = Field(default=8.0, ge=0.0, le=168.0)
-    image_generation_provider: str = "agnes"
+    image_generation_provider: str = "msimg"
     image_generation_timeout_seconds: float = Field(default=180.0, ge=10.0, le=600.0)
     agnes_api_key: str = ""
     agnes_base_url: str = "https://apihub.agnes-ai.com/v1"
@@ -618,8 +618,9 @@ def split_direct_pending(
     sidebar *and* both member pickers; deferring only hides it from the sidebar.
     A deferred character is a perfectly playable member of every group -- it is
     how the user asked for it to be introduced -- so anything that offers
-    characters to put in a group, a Space audience or a voice call has to keep
-    seeing it.
+    characters to put in a group or a voice call has to keep seeing it.
+    Deferred characters do not consume direct-chat capacity; Space applies its
+    own explicit group-only audience exclusion.
     """
 
     return [profile for profile in profiles if ("direct_pending" in profile) is pending]

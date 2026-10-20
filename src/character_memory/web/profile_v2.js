@@ -415,7 +415,12 @@
       // the entry missing, and the next reload fell back to another character.
       const profile = activeProfile || profileFromState(targetId);
       if (profile?.direct_pending) {
-        await CM.api(`/v1/characters/${encodeURIComponent(targetId)}/open-direct`, {method: "POST"});
+        const capacity = CM.state.characterCapacity || {};
+        const count = Number(capacity.activeTotal ?? CM.state.characters.length);
+        const soft = Number(capacity.softLimit ?? 10);
+        const overSoft = count + 1 > soft;
+        if (overSoft && !window.confirm(`开启后将有 ${count + 1} 位私聊角色，超过 ${soft} 位提醒阈值。仍要开启吗？`)) return;
+        await CM.api(`/v1/characters/${encodeURIComponent(targetId)}/open-direct${overSoft ? "?confirm_over_soft_limit=true" : ""}`, {method: "POST"});
         await CM.loadCharacters();
       }
       if (CM.isGroupConversation() || CM.state.characterId !== targetId) {

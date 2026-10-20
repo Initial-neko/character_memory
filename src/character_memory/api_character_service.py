@@ -20,6 +20,7 @@ from character_memory.config import (
     set_character_archived,
     set_character_direct_pending,
     split_archived,
+    split_direct_pending,
 )
 from character_memory.group_store import GroupRepository
 from character_memory.persona_builder import (
@@ -156,8 +157,9 @@ class ApiCharacterService:
                 not archived
                 and target is not None
                 and "archived_at" in target
+                and "direct_pending" not in target
             ):
-                active_count = len(active_profiles)
+                active_count = len(split_direct_pending(active_profiles, False))
                 if active_count >= MAX_ACTIVE_CHARACTERS:
                     raise HTTPException(
                         status_code=409,
@@ -228,7 +230,7 @@ class ApiCharacterService:
         confirm_over_soft_limit: bool = False,
     ) -> dict:
         count = max(0, int(add_count))
-        active_count = len(split_archived(self.profiles(), False))
+        active_count = len(split_direct_pending(split_archived(self.profiles(), False), False))
         result_count = active_count + count
         if result_count > MAX_ACTIVE_CHARACTERS:
             raise CharacterCapacityExceeded(active_count, count)
@@ -306,7 +308,8 @@ class ApiCharacterService:
         # search happen after this lock is released, so one slow provider cannot
         # block unrelated archive/create operations.
         with self.character_write_lock:
-            if not skip_capacity_check:
+            group_only = str((creation or {}).get("source") or "") == "ENSEMBLE_BUILDER"
+            if not skip_capacity_check and not group_only:
                 self.check_capacity(
                     1,
                     confirm_over_soft_limit=confirm_over_soft_limit,
@@ -493,7 +496,7 @@ class ApiCharacterService:
             "left_groups": [group.id for group in groups],
         }
 
-    def open_direct(self, character_id: str) -> dict[str, Any]:
+    def open_direct(self, character_id: str, *, confirm_over_soft_limit: bool = False) -> dict[str, Any]:
         """Give a deferred character its own place in the sidebar.
 
         Idempotent, because the button that calls it lives on a member list that
@@ -526,6 +529,11 @@ class ApiCharacterService:
                 )
 
             was_pending = "direct_pending" in profile
+            if was_pending:
+                try:
+                    self.check_capacity(1, confirm_over_soft_limit=confirm_over_soft_limit)
+                except (CharacterCapacityConfirmationRequired, CharacterCapacityExceeded) as exc:
+                    raise HTTPException(status_code=409, detail=exc.detail()) from exc
             set_character_direct_pending(self.settings, character_id, False)
             self.refresh_cache()
 

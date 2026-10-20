@@ -30,6 +30,9 @@ from character_memory.stickers import Sticker, StickerCatalog
 
 
 class SpaceModel(PersonModel):
+    def _request(self, messages, conversation_id, json_object=False):
+        return "A quiet cozy room, illustration for the public post"
+
     def __init__(self):
         self.opportunities = 0
         self.prompts = []
@@ -105,6 +108,9 @@ class FakeVoiceExecutor:
     def execute(self, character_id, intents, *, now, runtime=None):
         assert character_id == "c00"
         assert len(intents) == 1
+        if intents[0].type.value == "GENERATE_IMAGE":
+            return {"relations": [{"media_id": "image-asset-1", "media_type": "IMAGE",
+                "source_type": "GENERATED", "metadata": {}}], "errors": []}
         assert intents[0].type.value == "VOICE"
         return {
             "relations": [
@@ -306,6 +312,8 @@ class StickerThreadModel(SpaceModel):
 
 
 def _access(tmp_path, ids=("c00", "c01", "c02"), model=None, sticker_catalog=None):
+    from character_memory.media import MediaStorage
+    from test_space_media_executor import FakeImageProvider
     store = SQLiteStore(tmp_path / "space-autonomy.db")
     embedding = DeterministicEmbedding()
     model = model or SpaceModel()
@@ -337,11 +345,14 @@ def _access(tmp_path, ids=("c00", "c01", "c02"), model=None, sticker_catalog=Non
             space_audience_size=5,
             space_scheduler_poll_seconds=60.0,
             space_thread_reply_rounds=2,
+            image_generation_provider="fake",
         ),
         read_store=store,
         store=lambda: store,
         character_profiles=lambda: profiles,
         require_bundle=lambda: bundle,
+        media_storage=MediaStorage(tmp_path / "media"),
+        services=SimpleNamespace(image_generation_providers={"fake": FakeImageProvider()}),
     )
     return access, store, model
 
@@ -858,7 +869,7 @@ def test_space_reply_rounds_clamp_at_the_documented_four_round_ceiling(tmp_path)
     store.close()
 
 
-def test_space_voice_only_post_persists_transcript_as_social_event_context(tmp_path):
+def test_space_voice_plan_keeps_transcript_and_adds_required_image(tmp_path):
     access, store, _ = _access(tmp_path, ids=("c00",), model=VoiceSpaceModel())
     repository = SpaceRepository(store)
     service = SpaceAutonomyService(access, repository)
@@ -869,9 +880,9 @@ def test_space_voice_only_post_persists_transcript_as_social_event_context(tmp_p
 
     assert outcome["posted"] is True
     assert outcome["post"]["content"] == ""
-    assert outcome["post"]["media_count"] == 1
-    assert outcome["post"]["media_items"][0]["media_type"] == "VOICE"
-    assert outcome["post"]["media_items"][0]["metadata"]["transcript"] == "今天不想打字，就这样说一句。晚安。"
+    assert outcome["post"]["media_count"] == 2
+    assert outcome["post"]["media_items"][0]["media_type"] == "IMAGE"
+    assert outcome["post"]["media_items"][1]["metadata"]["transcript"] == "今天不想打字，就这样说一句。晚安。"
 
     social = [
         item for item in store.list_events("c00")
@@ -879,7 +890,7 @@ def test_space_voice_only_post_persists_transcript_as_social_event_context(tmp_p
     ]
     assert len(social) == 1
     assert social[0].content == "[语音动态] 今天不想打字，就这样说一句。晚安。"
-    assert social[0].metadata["media_types"] == ["VOICE"]
+    assert social[0].metadata["media_types"] == ["IMAGE", "VOICE"]
     store.close()
 
 
@@ -993,7 +1004,7 @@ def test_a_video_plan_is_accepted_once_it_has_words_beside_it():
     assert plan.social_post == "楼下的猫今天肯让我摸了。"
 
 
-def test_space_media_failure_does_not_block_text_post(tmp_path):
+def test_space_search_failure_uses_generated_image_before_publishing(tmp_path):
     access, store, _ = _access(tmp_path, ids=("c00",), model=FailingMediaModel())
     repository = SpaceRepository(store)
     service = SpaceAutonomyService(access, repository)
@@ -1003,7 +1014,8 @@ def test_space_media_failure_does_not_block_text_post(tmp_path):
 
     assert outcome["posted"] is True
     assert outcome["post"]["content"] == "图如果拿不到也没关系，文字还是想发。"
-    assert outcome["post"]["media_count"] == 0
+    assert outcome["post"]["media_count"] == 1
+    assert outcome["post"]["media_items"][0]["source_type"] == "GENERATED"
     assert outcome["media_errors"]
     assert outcome["media_errors"][0]["type"] == "SEARCH_IMAGE"
     store.close()
@@ -1084,7 +1096,7 @@ def test_space_prompt_states_the_media_capability_without_policing_it(tmp_path):
     service.run_opportunity("c00", now=now, source="DEV")
 
     prompt = model.prompts[0]
-    assert "文字、0-9 张图片、一条语音" in prompt
+    assert "每条发布的动态必须至少包含一张对应的图片" in prompt
     assert "GENERATE_VIDEO 当前不可用" in prompt
     assert "强行配图" not in prompt
     assert "不要为了展示功能" not in prompt
@@ -1519,7 +1531,7 @@ def test_space_ledger_marks_a_repaired_media_intent_instead_of_losing_it(tmp_pat
     finally:
         model.close()
 
-    assert model.requests == 2
+    assert model.requests == 3  # two planning attempts and one illustration prompt
     assert outcome["plan"]["media_intents"] == []
     assert outcome["plan"]["has_text"] is True
 

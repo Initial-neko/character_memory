@@ -70,35 +70,129 @@ def test_agnes_provider_requires_key():
     provider.close()
 
 
-def test_msimg_provider_is_lazy_and_maps_pil_like_image(monkeypatch):
-    seen = {}
+def test_msimg_provider_uses_official_async_api_without_optional_sdk(monkeypatch):
+    from character_memory.config import Settings
+    assert Settings().image_generation_provider == "msimg"
+    monkeypatch.setitem(sys.modules, "msimg", None)
+    requests = []
 
-    class FakeImage:
-        size = (640, 640)
+    def handler(request):
+        requests.append(request)
+        if request.method == "POST":
+            assert request.headers["X-ModelScope-Async-Mode"] == "true"
+            assert json.loads(request.content) == {
+                "model": "Qwen/Qwen-Image", "prompt": "portrait", "size": "1140x1472"
+            }
+            return httpx.Response(200, json={"task_id": "task-1"})
+        if "/tasks/" in str(request.url):
+            assert request.headers["X-ModelScope-Task-Type"] == "image_generation"
+            return httpx.Response(200, json={"task_status": "SUCCEED", "output_images": ["https://cdn.example/image.png"]})
+        assert "authorization" not in request.headers
+        return httpx.Response(200, content=_PNG, headers={"content-type": "image/png"})
 
-        def save(self, buffer, format):
-            assert format == "PNG"
-            buffer.write(_PNG)
-
-    def generate_image(**kwargs):
-        seen.update(kwargs)
-        return {"image": FakeImage(), "model": "mock-qwen"}
-
-    monkeypatch.setitem(sys.modules, "msimg", SimpleNamespace(generate_image=generate_image))
-    provider = MsimgProvider("modelscope-secret", models="qwen,flux-majic")
-    assert provider.configured() is True
-    assert provider.available() is True
-    out = provider.generate(ImageGenerationRequest(prompt="portrait", aspect_ratio="3:4"))
-
-    assert seen["api_configs"] == "modelscope-secret"
-    assert seen["models"] == ["qwen", "flux-majic"]
-    assert seen["size"] == "3:4"
-    assert seen["enable_failover"] is True
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = MsimgProvider("modelscope-secret", models="qwen", downloader=client)
+        assert provider.available() is True
+        out = provider.generate(ImageGenerationRequest(prompt="portrait", aspect_ratio="3:4"))
     assert out.provider == "msimg"
-    assert out.model == "mock-qwen"
+    assert out.model == "Qwen/Qwen-Image"
     assert out.payload == _PNG
-    assert (out.width, out.height) == (640, 640)
-    provider.close()
+    assert len(requests) == 3
+
+
+def test_msimg_auth_failure_is_actionable_redacted_and_never_retried():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(401, json={"message": "modelscope-secret sensitive prompt"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = MsimgProvider("modelscope-secret", models="qwen,flux-majic", downloader=client)
+        with pytest.raises(RuntimeError, match="HTTP 401.*MSIMG_API_KEY / MODELSCOPE_API_TOKEN") as err:
+            provider.generate(ImageGenerationRequest(prompt="sensitive prompt"))
+    assert "modelscope-secret" not in str(err.value)
+    assert "sensitive prompt" not in str(err.value)
+    assert len(requests) == 1
+
+
+def test_msimg_failed_task_stops_without_download_or_provider_fallback():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"task_id": "task-1"})
+        return httpx.Response(200, json={"task_status": "FAILED", "errors": {"message": "private details"}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = MsimgProvider("secret", downloader=client)
+        with pytest.raises(RuntimeError, match="task FAILED"):
+            provider.generate(ImageGenerationRequest(prompt="portrait"))
+    assert len(requests) == 2
+
+
+@pytest.mark.parametrize("status", [403, 429])
+def test_msimg_permission_or_quota_failure_never_attempts_another_model(status):
+    requests = []
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(status, json={"message": "private details"})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = MsimgProvider("secret", models="qwen,flux-majic", downloader=client)
+        with pytest.raises(RuntimeError, match=f"HTTP {status}"):
+            provider.generate(ImageGenerationRequest(prompt="portrait"))
+    assert len(requests) == 1
+
+
+def test_msimg_pending_task_has_one_bounded_budget(monkeypatch):
+    from character_memory import visual_generation
+    clock = [0.0]
+    monkeypatch.setattr(visual_generation.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(visual_generation.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    requests = []
+    def handler(request):
+        requests.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"task_id": "task-1"})
+        return httpx.Response(200, json={"task_status": "PENDING"})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = MsimgProvider("secret", timeout_seconds=10, downloader=client)
+        with pytest.raises(RuntimeError, match="timed out"):
+            provider.generate(ImageGenerationRequest(prompt="portrait"))
+    assert clock[0] == 10.0
+    assert len([r for r in requests if r.method == "POST"]) == 1
+    assert len(requests) == 3
+
+
+def test_msimg_only_explicit_model_list_can_fail_over_after_terminal_failure():
+    models = []
+    def handler(request):
+        if request.method == "POST":
+            models.append(json.loads(request.content)["model"])
+            return httpx.Response(200, json={"task_id": str(len(models))})
+        if "/tasks/1" in str(request.url):
+            return httpx.Response(200, json={"task_status": "FAILED"})
+        if "/tasks/2" in str(request.url):
+            return httpx.Response(200, json={"task_status": "SUCCEED", "output_images": ["https://cdn.example/image.png"]})
+        return httpx.Response(200, content=_PNG)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = MsimgProvider("secret", models="qwen,flux-majic", downloader=client)
+        result = provider.generate(ImageGenerationRequest(prompt="portrait"))
+    assert models == ["Qwen/Qwen-Image", "MAILAND/majicflus_v1"]
+    assert result.model == "MAILAND/majicflus_v1"
+
+
+def test_msimg_missing_task_id_rejects_response_without_retry():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"data": []})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = MsimgProvider("secret", downloader=client)
+        with pytest.raises(RuntimeError, match="no task_id"):
+            provider.generate(ImageGenerationRequest(prompt="portrait"))
+    assert len(calls) == 1
 
 
 def test_msimg_provider_rejects_reference_images_before_import():

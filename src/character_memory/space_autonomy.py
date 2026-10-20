@@ -24,7 +24,7 @@ from character_memory.domain.models import (
 )
 from character_memory.activity_schedule import paced_interval_minutes, reference_billing_window
 from character_memory.space_media import SpacePostMediaRepository
-from character_memory.space_media_executor import SpaceMediaExecutor
+from character_memory.space_media_executor import SpaceMediaExecutor, materialize_space_post_media
 from character_memory.space_store import SpaceRepository
 from character_memory.time_utils import epoch_us
 
@@ -517,15 +517,21 @@ Sources:
         # The plan ran outside the archive lock. Do not buy image/video/TTS
         # generation for a character archived during that window; the final
         # publish check alone would only discard the paid bytes afterwards.
-        self._require_active(character_id)
-        media_result = self.media_executor.execute(
-            character_id,
-            list(plan.media_intents),
-            now=now,
-            runtime=runtime,
+        media_result = materialize_space_post_media(
+            self.media_executor, character_id, list(plan.media_intents), content=content,
+            now=now, runtime=runtime,
+            max_items=getattr(self.access.settings, "space_media_max_items", 3),
+            before_execute=lambda: self._require_active(character_id),
         )
         relations = list(media_result["relations"])
         media_errors = list(media_result["errors"])
+        if media_result.get("reason"):
+            return {
+                "character_id": character_id, "character_name": self._name(profile),
+                "posted": False, "post": None, "audience": [], "reason": media_result["reason"],
+                "media_errors": media_errors,
+                "world": world, "plan": plan_payload, "model_calls": ledger, "source": source,
+            }
         if not content and not relations:
             return {
                 "character_id": character_id,
@@ -1420,7 +1426,7 @@ class SpaceAutonomyScheduler:
                     source="SCHEDULED",
                     model_calls=model_calls,
                 )
-                status = "POSTED" if result["posted"] else "NO_POST"
+                status = "POSTED" if result["posted"] else "FAILED" if result.get("reason") == "IMAGE_REQUIRED" else "NO_POST"
                 post_id = (result.get("post") or {}).get("id")
                 self.repository.finish_opportunity_run(
                     run_id,
@@ -1431,11 +1437,12 @@ class SpaceAutonomyScheduler:
                     # A published post whose audience step broke is still a
                     # published post; keep the reason in the ledger instead of
                     # downgrading the run to FAILED and losing the post id.
-                    error=str(result.get("audience_error") or ""),
+                    error=str(result.get("audience_error") or result.get("reason") or ""),
                     details={
                         "world": result.get("world") or {},
                         "plan": result.get("plan") or {},
                         "media_errors": result.get("media_errors") or [],
+                        "reason": result.get("reason"),
                         "audience_error": result.get("audience_error") or "",
                         "model_calls": model_calls,
                     },

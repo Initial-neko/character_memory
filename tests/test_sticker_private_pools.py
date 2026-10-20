@@ -153,9 +153,7 @@ def test_private_sticker_survives_history_page_and_space_comment_payload(tmp_pat
         assert client.get(message["sticker"]["url"]).content == b"tagged-png"
         assert client.get(f'/v1/stickers/{sticker["id"]}/asset').status_code == 404
 
-        post = client.post("/v1/space/posts", json={
-            "character_id": "neko", "content": "带私有表情的评论",
-        }).json()["post"]
+        post = {"id": app.state.character_memory.space_repository.create_post("neko", "带私有表情的评论", now).id}
         created = client.post(f'/v1/space/posts/{post["id"]}/comments', json={
             "character_id": "neko", "content": "看这个", "sticker_id": sticker["id"],
         })

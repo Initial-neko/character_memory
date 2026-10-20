@@ -233,10 +233,11 @@
   async function restoreCharacter(characterId) {
     if (!characterId) return;
     const capacity = CM.state.characterCapacity || {activeTotal:CM.state.characters.length,softLimit:10,hardLimit:20};
-    if (Number(capacity.activeTotal || 0) >= Number(capacity.hardLimit || 20)) {
+    const needsSlot = !archived.find(item => item.id === characterId)?.direct_pending;
+    if (needsSlot && Number(capacity.activeTotal || 0) >= Number(capacity.hardLimit || 20)) {
       throw new Error(`角色已达到 ${capacity.hardLimit || 20} 位上限，请先归档一位人物。`);
     }
-    const needsConfirm = Number(capacity.activeTotal || 0) >= Number(capacity.softLimit || 10);
+    const needsConfirm = needsSlot && Number(capacity.activeTotal || 0) >= Number(capacity.softLimit || 10);
     if (needsConfirm && !window.confirm(`当前已有 ${capacity.activeTotal} 位角色。恢复后会超过 10 位提醒阈值，是否继续？`)) return;
     const query = needsConfirm ? "?confirm_over_soft_limit=true" : "";
     const result = await CM.api(`/v1/characters/${encodeURIComponent(characterId)}/restore${query}`, {method:"POST"});

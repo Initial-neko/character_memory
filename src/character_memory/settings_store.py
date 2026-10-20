@@ -177,7 +177,7 @@ SETTING_HELP: dict[str, str] = {
     "direct_autonomous_image_generation_enabled": "允许显式 Direct 时间/到期意图机会生成合成图片；默认关闭，不新增调度器，重启生效。",
     "direct_autonomous_image_daily_max_generations": "应用共用的 UTC 每日自主图片预约上限；失败和中断仍消耗，0 禁止，用户消息生图不计入；重启生效。",
     "direct_autonomous_image_cooldown_hours": "同一人物两次自主图片预约之间的真实时间小时数；失败仍消耗，用户消息生图不计入；重启生效。",
-    "image_generation_provider": "显式 AI 生图和角色自主生图使用的 Provider。",
+    "image_generation_provider": "显式 AI 生图和角色自主生图使用的 Provider；默认 ModelScope（msimg）优先使用其额度，失败不自动切换 Agnes。",
     "image_generation_timeout_seconds": "单次 ImageGen Provider 请求的最大等待时间。",
     "agnes_base_url": "Agnes ImageGen 的 API 根地址；只有切换网关/排查路由时需要修改。",
     "agnes_image_model": "Agnes 使用的图像模型 ID。",

@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from urllib.request import urlopen
 
 import pytest
@@ -28,6 +29,24 @@ pytestmark = [
 ]
 
 ROOT = Path(__file__).resolve().parents[1]
+class IsolatedSpaceURL(str):
+    def __new__(cls, base: str, database: str):
+        value = super().__new__(cls, base)
+        value.database = database
+        return value
+
+
+def seed_legacy_text_post(base: str, content: str, character_id: str = 'rin') -> str:
+    """Read-compatibility fixture; never bypass the new-publication HTTP gate."""
+    from character_memory.storage.sqlite import SQLiteStore
+    from character_memory.space_store import SpaceRepository
+
+    store = SQLiteStore(base.database)
+    try:
+        post = SpaceRepository(store).create_post(character_id, content, datetime.now(timezone.utc))
+        return str(post.id)
+    finally:
+        store.close()
 
 
 def _free_port() -> int:
@@ -94,13 +113,19 @@ def space_server(tmp_path_factory):
         output = process.stdout.read() if process.stdout else ""
         raise RuntimeError(f"Space UI server did not become ready:\n{output}")
 
-    yield base
-
-    process.terminate()
     try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        process.kill()
+        yield IsolatedSpaceURL(base, env['CHARACTER_MEMORY_E2E_DB'])
+    finally:
+        # Wrapping fixtures call generator.close(); cleanup must handle GeneratorExit.
+        # Windows venv Python launches a child interpreter which must also stop.
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
+        else:
+            process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
 
 
 def test_space_mention_picker_includes_deferred_roles(page, space_server):
@@ -112,12 +137,7 @@ def test_space_mention_picker_includes_deferred_roles(page, space_server):
     assert "deferred-space-role" not in {item["id"] for item in default_characters}
     assert "deferred-space-role" in {item["id"] for item in all_characters}
 
-    created = page.request.post(
-        f"{space_server}/v1/space/posts",
-        data={"character_id": "rin", "content": "deferred 角色 @ 选择器测试"},
-    )
-    assert created.ok
-    post_id = str(created.json()["post"]["id"])
+    post_id = seed_legacy_text_post(space_server, "deferred 角色 @ 选择器测试")
 
     page.goto(space_server, wait_until="domcontentloaded")
     page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
@@ -130,12 +150,7 @@ def test_space_mention_picker_includes_deferred_roles(page, space_server):
 
 def test_open_comment_panel_re_reads_scheduler_replies(page, space_server):
     page.set_default_timeout(15000)
-    created = page.request.post(
-        f"{space_server}/v1/space/posts",
-        data={"character_id": "rin", "content": "浏览器对账测试动态"},
-    )
-    assert created.ok
-    post_id = str(created.json()["post"]["id"])
+    post_id = seed_legacy_text_post(space_server, "浏览器对账测试动态")
 
     page.goto(space_server, wait_until="domcontentloaded")
     page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
@@ -166,12 +181,7 @@ def test_delayed_reconcile_preserves_comment_draft_and_focus(page, space_server)
     """Background replies must not erase text typed after a comment is sent."""
 
     page.set_default_timeout(15000)
-    response = page.request.post(
-        f"{space_server}/v1/space/posts",
-        data={"character_id": "rin", "content": "第二条草稿保护测试"},
-    )
-    assert response.ok
-    post_id = str(response.json()["post"]["id"])
+    post_id = seed_legacy_text_post(space_server, "第二条草稿保护测试")
     page.goto(space_server, wait_until="domcontentloaded")
     page.locator(".cm-global-nav").get_by_role("button", name="Space", exact=True).click()
     post = page.locator(f'[data-space-post="{post_id}"]')

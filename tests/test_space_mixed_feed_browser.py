@@ -8,6 +8,7 @@ import pytest
 
 from character_memory.rss_sources import RssRepository, ParsedFeedItem
 from character_memory.storage.sqlite import SQLiteStore
+from character_memory.media import MediaStorage
 from character_memory.world_activity import WorldPulseRepository, WorldPulseTopicDraft
 import test_space_reconciliation_playwright as server_module
 
@@ -29,6 +30,13 @@ def mixed_server(tmp_path_factory, monkeypatch):
         base = next(fixture)
     store = SQLiteStore(captured['CHARACTER_MEMORY_E2E_DB'])
     try:
+        # Repository-owned artwork, copied only into the isolated fixture store.
+        artwork = Path(__file__).resolve().parents[1] / 'src' / 'character_memory' / 'web' / 'artwork' / 'ambient-window.webp'
+        asset = MediaStorage(captured['CHARACTER_MEMORY_E2E_MEDIA']).save_bytes(
+            character_id='rin', original_name='isolated-artwork.webp', payload=artwork.read_bytes(),
+            created_at=datetime.now(timezone.utc), source='GENERATED_TEST',
+        )
+        store.add_media_asset(asset)
         rss = RssRepository(store)
         source = rss.create_source('https://example.com/feed', name='AI HOT · 隔离示例')
         other = rss.create_source('https://example.org/feed', name='另一订阅')
@@ -43,10 +51,17 @@ def mixed_server(tmp_path_factory, monkeypatch):
                                    ['https://example.com/topic'], now,
                                    evidence=[{'kind':'OPINION', 'quote':'这是有归属的外界观点', 'url':'https://example.com/topic', 'author':'示例作者', 'published_at':'', 'verification':'EXACT_FETCHED_EXCERPT'}])
         pulse.add_comment(topic['id'], 'rin', '我只对这个角度感兴趣。', now)
-        yield base, source['id']
+        yield MixedServer(base, source['id'], asset.id)
     finally:
         store.close()
         fixture.close()
+
+
+class MixedServer(tuple):
+    def __new__(cls, base, source_id, media_id):
+        instance = super().__new__(cls, (base, source_id))
+        instance.media_id = media_id
+        return instance
 
 
 @pytest.mark.parametrize('width', [1440, 390])
@@ -54,9 +69,9 @@ def test_mixed_tabs_sources_links_and_character_detail(page, mixed_server, width
     from playwright.sync_api import expect
     base, source_id = mixed_server
     page.set_viewport_size({'width':width, 'height':960})
-    created = page.request.post(f'{base}/v1/space/posts', data={'character_id':'rin', 'content':'角色自发的一句话。'}).json()['post']
+    created = page.request.post(f'{base}/v1/space/posts', data={'character_id':'rin', 'content':'隔离测试配图动态。', 'media_ids':[mixed_server.media_id]}).json()['post']
     page.goto(f'{base}/?view=space')
-    expect(page.locator('[data-space-entry]').first).to_be_visible()
+    expect(page.locator('[data-space-entry]:visible').first).to_be_visible()
     page.locator('[data-space-page-action="RSS"]').click()
     page.locator('.space-source-filter select').select_option(str(source_id))
     expect(page.locator('.space-source-name').first).to_have_text('AI HOT · 隔离示例')
@@ -65,11 +80,12 @@ def test_mixed_tabs_sources_links_and_character_detail(page, mixed_server, width
     assert page.locator('.space-source-links a').first.get_attribute('href').startswith('/sources?item=')
     article_href = page.locator('.space-source-links a').first.get_attribute('href')
     page.locator('[data-space-page-action="TOPIC"]').click()
-    expect(page.locator('.space-external-card h2')).to_have_text('隔离演示话题')
-    page.get_by_text('来源节选与外界观点 · 1', exact=True).click()
-    expect(page.locator('.space-outside-excerpt')).to_contain_text('示例作者')
-    page.get_by_text('角色的回应 · 1', exact=True).click()
-    expect(page.locator('.space-topic-take')).to_contain_text('我只对这个角度感兴趣')
+    topic_feed = page.locator('.space-feed')
+    expect(topic_feed.locator('.space-external-card h2')).to_have_text('隔离演示话题')
+    topic_feed.get_by_text('来源节选与外界观点 · 1', exact=True).click()
+    expect(topic_feed.locator('.space-outside-excerpt')).to_contain_text('示例作者')
+    topic_feed.get_by_text('角色的回应 · 1', exact=True).click()
+    expect(topic_feed.locator('.space-topic-take')).to_contain_text('我只对这个角度感兴趣')
     assert page.locator('.space-source-links a').first.get_attribute('href') == 'https://example.com/topic'
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     output = os.getenv('MIXED_FEED_SCREENSHOTS')
@@ -79,7 +95,7 @@ def test_mixed_tabs_sources_links_and_character_detail(page, mixed_server, width
         page.screenshot(path=str(Path(output) / f'isolated-topic-{width}.png'), full_page=True)
     page.locator('[data-space-page-action="POST"]').click()
     page.locator(f'[data-space-post-open="{created["id"]}"]').click()
-    expect(page.locator('.space-post-detail-text-only')).to_be_visible()
+    expect(page.locator('.space-post-detail .space-post-media')).to_be_visible()
     expect(page.locator('.space-source-filter')).to_be_hidden()
     page.locator('[data-space-detail-back]').click()
     expect(page.locator('[data-space-post]').first).to_be_visible()

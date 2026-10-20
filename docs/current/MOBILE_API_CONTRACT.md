@@ -37,14 +37,14 @@ All paths below are relative to the noted base. JSON request/response is default
 
 | Capability | Method + path | Request / response notes |
 |---|---|---|
-| Characters | `GET /v1/characters?archived=false&include_deferred=false` | `{characters,soft_limit,active_limit,active_total,overflow_count}`; Space mention pickers should request `include_deferred=true`, since non-archived deferred characters are valid Space participants but are hidden from the direct-chat sidebar |
+| Characters | `GET /v1/characters?archived=false&include_deferred=false` | `{characters,soft_limit,active_limit,active_total,overflow_count}`; `active_total` counts non-archived characters with an opened direct chat, excluding deferred group-only members; Space mention pickers should request `include_deferred=true`, since non-archived deferred characters are valid Space participants but are hidden from the direct-chat sidebar |
 | LLM Usage | `GET /v1/llm/usage?hours=1&limit=80` | existing read-only Core usage view; `hours` 1..2160 (default 24), `limit` 1..300 (default 80); `{window_hours,summary,by_feature,by_model,recent}`. Includes request/token/retry/error/latency attribution; no monetary cost field is available, so clients must not infer currency cost. Does not return Prompt/Response bodies. |
 | Character life observer | `GET /v1/characters/{character_id}/life` | Read-only operator projection; `day=YYYY-MM-DD`, UTC `offset` minutes (-840..840), `channel=ALL/DIRECT/GROUP/SPACE/WORLD/INTENT`, `view=life/changes/relationships/intents`, literal `query` up to 200 characters, relationship `peer`, opaque `cursor`, `limit` 1..50 (default 30). Returns `{character_id,items,next_cursor,read_only,undated_count}`; each item has namespaced `key`, actual source, result, optional saved state comparison/Memory/Intent audit. No model calls, public feed or synthetic relationship scores. See MEMORY for privacy/provenance boundary. |
 | Sidebar summaries | `GET /v1/characters/summaries` | `{characters:[...]}`; includes latest-message summary |
 | Character draft | `POST /v1/characters/draft` | request: `description` required, optional `name,age,tags`; response `{draft}` |
 | Confirm new character | `POST /v1/characters` | request: `{draft,character_id?,confirm_over_soft_limit?,creation?}`; response `{character,description}`; may return 409 |
 | Persona detail | `GET /v1/characters/{character_id}/persona` | persona inspector payload |
-| Open deferred direct | `POST /v1/characters/{character_id}/open-direct` | moves a group-created deferred character to direct list |
+| Open deferred direct | `POST /v1/characters/{character_id}/open-direct` | opens a group-created character's direct chat and consumes one role slot; 409 soft-limit needs explicit confirmation via `?confirm_over_soft_limit=true`, hard limit refuses without clearing the deferred marker; repeat opens are idempotent |
 | Direct history | `GET /v1/chat/history-page?character_id=X&limit=50&before_id=N` | `{character_id,messages,has_more,next_before_id}`; paginate with returned cursor |
 | Send direct | `POST /v1/chat/messages` | 202, `{accepted,event_id,message}`; details below |
 | Group list | `GET /v1/groups?archived=false` | `{groups}` |
@@ -66,6 +66,7 @@ All paths below are relative to the noted base. JSON request/response is default
 | AI ensemble cancel | `POST /v1/ensembles/{group_id}/cancel` | `{build}` |
 | Events | `GET /v1/events/stream` | SSE (see section 4) |
 | Space list | `GET /v1/space/posts?limit=10&before_id=N&character_id=X` | `{posts,total,has_more,next_before_id,...}`; server caps page to 10 |
+| Space publish | `POST /v1/space/posts` | requires at least one available IMAGE in `media_ids` (legacy `media_id` accepted), owned by `character_id`; no-image returns 400 with `detail.code=IMAGE_REQUIRED`; this endpoint does not implicitly purchase generation |
 | Space post detail | `GET /v1/space/posts/{post_id}` | `{post}` |
 | Space comment | `POST /v1/space/posts/{post_id}/comments` | `{content,reply_to_comment_id?,sticker_id?,mentions?:[character_id],client_request_id?}`; omit `character_id` for human user; user comments may mention up to 4 active characters by stable ID; a repeated request ID with identical payload returns the existing comment, while reuse with a different payload returns 409 |
 | Space notifications | `GET /v1/space/notifications?unread_only=true&limit=50`; `POST /v1/space/notifications/{notification_id}/read` | durable in-app unread notifications for role replies to user comments and structured role @user; list cap 100; read is idempotent; no background OS push |

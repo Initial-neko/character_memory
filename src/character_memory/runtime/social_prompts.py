@@ -34,7 +34,7 @@ def space_post_prompt(person_context, *, memory_text, event_text, now,
 不要凭空创造没有发生过的新事件。
 
 本次只规划 Space 动态：
-- 一条动态可以是：文字、0-9 张图片、一条语音、一个短视频，或合理组合。
+- 每条发布的动态必须至少包含一张对应的图片（SEARCH_IMAGE 或 GENERATE_IMAGE）；可以再附文字、一条语音或一个短视频。生图失败不会发布无图动态。
 - social_post 和 media_intents 都可以为空。
 - 如果发文字，写成这个人物自己会公开发出的自然短动态，不要写“根据我的记忆/状态”等系统口吻。
 - SEARCH_IMAGE 用于现实中已经存在、适合从互联网搜索的图片；query 必须是简短公开搜索词，不能泄露私聊原句、用户隐私或长期记忆里的秘密。

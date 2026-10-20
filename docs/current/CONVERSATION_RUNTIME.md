@@ -216,19 +216,19 @@ Research 负责群体事实及初始关系；新角色随后复用 `PersonaBuild
 
 `/confirm` 由用户勾选后才创建或复用 Character，并在确认成功时创建真实 GroupConversation、把 build re-key 到真实 group id；选中成员的 `relationship_notes` 作为初始公开群关系连同 build 一起持久化并按当前有效成员筛选注入正常/自主群聊上下文，明确标注其不是实际发生过的群消息，不进入 Event/Memory；`/cancel` 放弃未激活 build。confirm **不会自动开聊**——它只建角色、写成员并进入正常群聊生命周期，进群后仍需用户自己发第一句。
 
-READY build 是可跨请求保留的 research 快照，不是提交时的角色注册表快照。再次打开 AI 建群会恢复最近一条 READY / FAILED build；服务重启时遗留的 BUILDING 会转成可重试的 FAILED，而不是永久卡在整理中。confirm 会重新按当前 active Character 匹配每位成员；research 后被删除/归档的旧 ID 不会写进新群，期间新建的同名 active Character 可以直接复用。同一 build 的重复/并发 confirm 只提交一次；成功 re-key 到真实 group id 后，原 build id 仍作为幂等别名接受响应重试。批量容量先用于确认页预测，真正创建每个 Character 时仍在共享 registry lock 下重查硬上限，防止头像/声音 onboarding 释放锁期间有其它创建插入。新角色的 `creation.json.group_id` 在真实 GroupConversation 创建后改写为最终 group id，不保留已经被 re-key 掉的临时 build id。
+READY build 是可跨请求保留的 research 快照，不是提交时的角色注册表快照。再次打开 AI 建群会恢复最近一条 READY / FAILED build；服务重启时遗留的 BUILDING 会转成可重试的 FAILED，而不是永久卡在整理中。confirm 会重新按当前 active Character 匹配每位成员；research 后被删除/归档的旧 ID 不会写进新群，期间新建的同名 active Character 可以直接复用。同一 build 的重复/并发 confirm 只提交一次；成功 re-key 到真实 group id 后，原 build id 仍作为幂等别名接受响应重试。群聊专属新人物默认延迟私聊，不占独立角色名额；开启私聊时才在共享 registry lock 内检查并计入容量，和普通创建、恢复操作串行。新角色的 `creation.json.group_id` 在真实 GroupConversation 创建后改写为最终 group id，不保留已经被 re-key 掉的临时 build id。
 
 已完成激活的 build 会通过 durable alias 识别重复确认，同进程并发确认由 per-build lock 串行化。确认过程中创建的真实群在激活前就写入 build 的 durable alias，`reuse_existing=false` 的人物使用由 build id 与成员 index 推导的稳定身份；若进程在群提交后、build 激活前退出，重启后的再次确认会复用该群和已写入的人物，然后完成激活，而不是创建第二套人物与群。中途只写入部分人物时，重试补齐缺失成员。既有 Recall、人物和群的事实不会因恢复而被自动删除。
 
 可选 `use_voice_design=true` 只在用户显式勾选后生效。它要求用户已经手动启动 Qwen3 VoiceDesign sidecar；群聊和 Character 核心 commit 完成后，后台才按角色 identity/personality/speech style 逐个尝试 VoiceDesign + freeze。VoiceDesign 未启动、不可用或单个角色生成失败都只记日志并保留现有默认/回退 voice，绝不回滚 Character 或 Group。
 
-模型调用量级：`SOURCE` 模式一次群体 research + 最多每个新成员一次 `PersonaBuilder` 模型生成（可能附带结构化修复重试）；已有人物不再次生成，失败的单个角色采用本地确定性兜底。`ORIGINAL` 模式不触发 World Observer，但仍需一次群体生成和新人物深化。受角色容量约束：软阈值 10 位、硬上限 20 位，由 API 强制（`api.py` 的 `SOFT_ACTIVE_CHARACTERS` / `MAX_ACTIVE_CHARACTERS`），超过硬上限整批拒绝而不是截断。
+模型调用量级：`SOURCE` 模式一次群体 research + 最多每个新成员一次 `PersonaBuilder` 模型生成（可能附带结构化修复重试）；已有人物不再次生成，失败的单个角色采用本地确定性兜底。`ORIGINAL` 模式不触发 World Observer，但仍需一次群体生成和新人物深化。独立角色容量仍为软阈值 10 位、硬上限 20 位；仅未归档且已开启私聊的人物计入。群聊人数仍由既有 Group 合同限制，不用私聊容量阻断建群。
 
 ### Curated original Ensemble template
 
 AI 建群入口提供「预览温暖异世界」，对应 `GET /v1/ensembles/templates` 的 `warm-isekai` 模板。`POST /v1/ensembles/templates/{template_id}/prepare` 将莉娅、芙露、赛琳、米娅四位原创成年人物的固定完整 Persona 和初始关系保存为普通 `READY` build；这一步不调用模型、搜索、头像或声音服务，也不创建人物、群聊或互动 Event。未知模板返回 404，不留下构建记录。重新打开入口仍使用现有 READY build 恢复流程。
 
-确认继续使用既有 `/{build_id}/confirm`、容量检查、回滚和幂等别名。模板草稿的 `reuse_existing=false` 持久化在既有 drafts JSON 中，在预览、重启恢复和确认时都不会按名字复用现有人物；因此容量计数把所选成员全部视为新建。创建来源仍是 `ENSEMBLE_BUILDER`，tags 标明 `原创情景` 和模板 ID，group_id 绑定真实群聊。固定模板不显示单人模型深化入口。创建后的头像/声音初始化与正常群聊反应沿用现有流程，不能把预览零调用理解为创建或聊天零调用。
+确认继续使用既有 `/{build_id}/confirm`、回滚和幂等别名。模板草稿的 `reuse_existing=false` 持久化在既有 drafts JSON 中，在预览、重启恢复和确认时都不会按名字复用现有人物；这些人物虽全部新建，但均不占独立角色名额；capacity 的 add_count=0，group_member_count 表示将新建的群聊人物数。创建来源仍是 `ENSEMBLE_BUILDER`，tags 标明 `原创情景` 和模板 ID，group_id 绑定真实群聊。固定模板不显示单人模型深化入口。创建后的头像/声音初始化与正常群聊反应沿用现有流程，不能把预览零调用理解为创建或聊天零调用。
 
 背景与关系继续通过 Initial Public Group Context 注入，明确不是已发生的聊天。确认不自动发开场或创建记忆。群聊侧栏的「灯溪镇的一晚」及 `?experience=warm-isekai` 优先恢复该模板的 ACTIVE 群聊，其次恢复 READY 草稿，不覆盖其他建群草稿；没有进度时先预览，仍需确认创建。开场选项是用户点击后发送的普通群消息，不预写人物回应。
 
@@ -394,7 +394,7 @@ Character 生命周期一律是**旁挂标记**，不写进 `persona.yaml`：整
 
 群成员身份有一条硬约束：`remove_member` 不允许把群降到 2 人以下，而 `GET /v1/groups` 与群归档抽屉都会过滤掉成员数 <2 的群。绕开这条下限不会留下"小群"，而是留下一个用户**既看不见、也无法恢复**的群。所以删除改为**拒绝并点名**那些只有 2 人的群，让用户先归档它。
 
-**延迟私聊（deferred direct chat）**：ensemble 批量建群创建的人物默认带 `direct_pending.yaml`。它们是**完全正常的角色**——照常参与群聊、Space、语音、World——只是暂不进侧边栏，直到用户主动开启。`POST /v1/characters/{id}/open-direct`（幂等）移除标记。
+**延迟私聊（deferred direct chat）**：ensemble 批量建群创建的人物默认带 `direct_pending.yaml`。它们是**完全正常的角色**——照常参与群聊、Space、语音、World——只是暂不进侧边栏，直到用户主动开启。`POST /v1/characters/{id}/open-direct`（幂等）在容量检查通过后移除标记。`GET /v1/characters.active_total` 仅统计未归档且无 direct_pending 的人物；已有延迟人物也立即按相同规则计算，无需改写人物文件。开启私聊超过软阈值时返回 409/ACTIVE_CHARACTER_SOFT_LIMIT，用户确认后以 `?confirm_over_soft_limit=true` 重试；超过硬限返回 409/ACTIVE_CHARACTER_HARD_LIMIT，保留标记且不占位。已开启私聊的重复请求不再次检查或重复计数。恢复已归档的延迟人物同样不占名额。
 
 过滤只发生在"会渲染成侧边栏"的那两条路径上：
 

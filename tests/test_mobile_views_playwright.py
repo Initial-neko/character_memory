@@ -25,6 +25,26 @@ from urllib.request import urlopen
 import pytest
 
 
+class _SpaceServerUrl(str):
+    """Keep the isolated database reachable for historical-content fixtures."""
+
+    def __new__(cls, url, db_path):
+        result = super().__new__(cls, url)
+        result.db_path = db_path
+        return result
+
+
+def _historical_space_post(server, content):
+    from character_memory.storage.sqlite import SQLiteStore
+    from character_memory.space_store import SpaceRepository
+
+    store = SQLiteStore(server.db_path)
+    try:
+        return str(SpaceRepository(store).create_post("rin", content, datetime.now(timezone.utc)).id)
+    finally:
+        store.close()
+
+
 if os.getenv("RUN_PLAYWRIGHT") == "1":
     from playwright.sync_api import expect
 else:
@@ -404,14 +424,18 @@ def space_server(tmp_path):
         output = process.stdout.read() if process.stdout else ""
         raise RuntimeError(f"fake Core E2E server did not become ready:\n{output}")
 
-    yield base_url
-
-    process.terminate()
     try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=5)
+        yield _SpaceServerUrl(base_url, root / "e2e.sqlite3")
+    finally:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True)
+        else:
+            process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def _open_app_on_mobile(page, base_url: str) -> None:
@@ -429,12 +453,7 @@ def _open_space_on_mobile(page, base_url: str) -> None:
 
 
 def test_space_comment_ui_submits_deferred_role_as_structured_mention(page, space_server):
-    created = page.request.post(
-        f"{space_server}/v1/space/posts",
-        data={"character_id": "rin", "content": "移动端结构化提及验收"},
-    )
-    assert created.ok
-    post_id = str(created.json()["post"]["id"])
+    post_id = _historical_space_post(space_server, "移动端结构化提及验收")
 
     _open_space_on_mobile(page, space_server)
     post = page.locator(f'[data-space-post="{post_id}"]')
@@ -474,17 +493,8 @@ def test_space_comment_ui_submits_deferred_role_as_structured_mention(page, spac
 
 
 def test_space_notification_opens_target_marks_read_and_highlights_comment(page, space_server):
-    detail_source = page.request.post(
-        f"{space_server}/v1/space/posts",
-        data={"character_id": "rin", "content": "打开通知前停留的另一条动态"},
-    )
-    created = page.request.post(
-        f"{space_server}/v1/space/posts",
-        data={"character_id": "rin", "content": "移动端通知定位验收"},
-    )
-    assert detail_source.ok and created.ok
-    detail_source_id = str(detail_source.json()["post"]["id"])
-    post_id = str(created.json()["post"]["id"])
+    detail_source_id = _historical_space_post(space_server, "打开通知前停留的另一条动态")
+    post_id = _historical_space_post(space_server, "移动端通知定位验收")
     user_comment = page.request.post(
         f"{space_server}/v1/space/posts/{post_id}/comments",
         data={"content": "这里需要角色回复", "client_request_id": "mobile-notice-user"},

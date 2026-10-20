@@ -61,7 +61,7 @@ class DirectVisualRuntime:
             cooldown_hours=float(getattr(self.settings, "direct_autonomous_image_cooldown_hours", 8)))
 
     def _provider(self):
-        name = str(runtime_setting(self.settings, "image_generation_provider", "agnes") or "agnes").strip().lower()
+        name = str(runtime_setting(self.settings, "image_generation_provider", "msimg") or "msimg").strip().lower()
         services = getattr(self.access, "services", None)
         providers = getattr(services, "image_generation_providers", {}) if services is not None else {}
         # Legacy test adapters may still inject the provider map directly.

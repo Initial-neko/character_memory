@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 import pytest
+from test_space_reconciliation_playwright import space_server as _ensemble_live_server_fixture
 
 if os.getenv("RUN_PLAYWRIGHT") == "1":
     from playwright.sync_api import expect
@@ -173,3 +174,99 @@ def test_custom_scene_sends_four_fields_and_restores_failed_input(ensemble_page)
     expect(page.locator("[data-ensemble-mode]")).to_have_value("SCENE")
     for name, value in data.items():
         expect(page.locator(f"[data-ensemble-scene-{name}]")).to_have_value(value)
+
+
+class MissingMobileDrawerHandoff(AssertionError):
+    """The AI drawer is open but still covered by its mobile entry sidebar."""
+
+
+@pytest.fixture
+def ensemble_live_server(tmp_path_factory):
+    """Each control owns a fresh database, including its resumable READY build."""
+    fixture = _ensemble_live_server_fixture.__wrapped__(tmp_path_factory)
+    try:
+        yield next(fixture)
+    finally:
+        fixture.close()
+
+
+@pytest.mark.parametrize("width,height,entry", [
+    pytest.param(390, 844, "ai", marks=pytest.mark.xfail(
+        strict=True, raises=MissingMobileDrawerHandoff,
+        reason="Known mobile AI-builder sidebar handoff defect; remove after repair")),
+    (390, 844, "warm"),
+    (1440, 900, "ai"),
+    (1440, 900, "warm"),
+])
+def test_ensemble_sidebar_drawer_handoff(page, ensemble_live_server, width, height, entry):
+    """Real HTTP/renderer: the destination drawer must receive pointer input."""
+    from datetime import datetime, timezone
+    import hashlib
+    import subprocess
+
+    space_server = ensemble_live_server
+    page.set_viewport_size({"width": width, "height": height})
+    page.set_default_timeout(10000)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(space_server, wait_until="domcontentloaded")
+    if width <= 820:
+        page.locator("#sidebarMobileButton").click()
+        assert page.locator("body").evaluate("el=>el.classList.contains('sidebar-mobile-open')")
+    page.locator(".ensemble-create-button" if entry == "ai" else ".scene-entry-button").click()
+    target = page.locator('[data-ensemble-template="warm-isekai"]' if entry == "ai" else '[data-ensemble-confirm]')
+    expect(target).to_be_visible()
+    expect(page.locator("#drawer")).to_have_attribute("aria-hidden", "false")
+    page.locator("img").evaluate_all("imgs=>Promise.all(imgs.map(i=>i.decode().catch(()=>{})))")
+    # Reach the actual target using normal browser scrolling, never force-click.
+    target.scroll_into_view_if_needed()
+    observation = target.evaluate("""el=>{
+      const r=el.getBoundingClientRect();
+      const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+      return {sidebar_mobile_open:document.body.classList.contains('sidebar-mobile-open'),
+        center_reaches_target:!!hit&&(hit===el||el.contains(hit)),
+        center_hit:hit?.tagName+'.'+hit?.className,
+        sidebar_z:getComputedStyle(document.querySelector('.sidebar')).zIndex,
+        drawer_z:getComputedStyle(document.querySelector('#drawer')).zIndex};
+    }""")
+    click_error = None
+    try:
+        target.click(trial=True, timeout=1200)
+    except Exception as exc:
+        click_error = str(exc)
+    evidence = Path(os.environ.get("CORE_VISUAL_EVIDENCE_DIR", "artifacts/core-visual-evidence"))
+    evidence = evidence / "ensemble-handoff"
+    evidence.mkdir(parents=True, exist_ok=True)
+    stem = f"{entry}-{width}x{height}"
+    image_path = evidence / f"{stem}.png"
+    page.screenshot(path=str(image_path), animations="disabled")
+    served = {}
+    for name in ("index.html", "ensemble.js", "ensemble.css", "app.js", "sidebar_collapse.js", "chat_refine.css", "styles.css"):
+        response = page.request.get(space_server + ("/" if name == "index.html" else "/static/" + name))
+        assert response.ok
+        payload = response.body().replace(b"\r\n", b"\n")
+        committed = subprocess.check_output(["git", "show", f"HEAD:src/character_memory/web/{name}"], cwd=ROOT).replace(b"\r\n", b"\n")
+        assert payload == committed, name
+        served[name] = hashlib.sha256(payload).hexdigest()
+    assert errors == [], errors
+    # A passing control confirms the normal existing warm-experience handoff.
+    payload = {"at": datetime.now(timezone.utc).isoformat(), "entry": entry,
+        "source_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "runtime_identity": "Fresh existing isolated e2e process; served assets compared to exact committed content",
+        "formal_runtime_sha": None, "browser": page.context.browser.version,
+        "viewport": {"width": width, "height": height}, "observation": observation,
+        "trial_click_error": click_error, "errors": errors, "served_sha256": served,
+        "screenshot": {"path": image_path.name, "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest()},
+        "boundary": "Temporary DB/media/personas; deterministic fixture; no confirm/creation, generated media, provider or formal data validation",
+        "approved_reference": None, "design_consistency": "BLOCKED: no approved Ensemble/mobile reference", "human_signoff": "PENDING"}
+    (evidence / f"{stem}.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if width <= 820 and entry == "ai":
+        assert observation["sidebar_mobile_open"]
+        assert not observation["center_reaches_target"]
+        assert "sidebar" in observation["center_hit"]
+        assert click_error and "intercepts pointer events" in click_error
+        raise MissingMobileDrawerHandoff("AI builder remains covered by the mobile sidebar")
+    assert not observation["sidebar_mobile_open"]
+    assert observation["center_reaches_target"]
+    assert click_error is None
+

@@ -9,6 +9,7 @@ from character_memory.web_lifecycle import background_services
 from character_memory.domain.models import SpaceMediaIntent, SpaceMediaIntentType
 from character_memory.space_autonomy import SpaceAutonomyScheduler, SpaceAutonomyService, autonomy_enabled
 from character_memory.space_media import MAX_SPACE_MEDIA_PER_POST, SpacePostMediaRepository
+from character_memory.space_media_executor import materialize_space_post_media
 from character_memory.space_store import MAX_COMMENTERS_PER_POST, MAX_SPACE_MENTIONS, SpaceRepository
 from character_memory.space_feed import SpaceFeed
 
@@ -485,17 +486,23 @@ def attach_space_routes(app):
                     detail="source_event_id must reference one of the character's events",
                 )
 
+        if not any(item["media_type"] == "IMAGE" for item in relations):
+            raise HTTPException(status_code=400, detail={
+                "code": "IMAGE_REQUIRED",
+                "message": "每条新动态必须至少附一张属于作者的图片；请先上传图片或完成 AI 生图。",
+            })
+
         repository = repo()
         now = datetime.now().astimezone()
         try:
-            post = repository.create_post(
-                req.character_id,
-                req.content,
-                now,
-                media_id=req.media_ids[0] if req.media_ids else None,
-                source_event_id=req.source_event_id,
-            )
-            if relations:
+            with repository.store.transaction():
+                post = repository.create_post(
+                    req.character_id,
+                    req.content,
+                    now,
+                    media_id=req.media_ids[0] if req.media_ids else None,
+                    source_event_id=req.source_event_id,
+                )
                 media_repository.replace_for_post(post.id, relations, now)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -753,24 +760,28 @@ def attach_space_routes(app):
                 runtime = getattr(bundle, "runtimes", {}).get(character_id)
                 if runtime is None:
                     raise KeyError(f"runtime not found for character: {character_id}")
-            result = autonomy.media_executor.execute(
-                character_id,
-                [intent],
-                now=now,
-                runtime=runtime,
+            result = materialize_space_post_media(
+                autonomy.media_executor, character_id, [intent], content=req.content.strip(),
+                now=now, runtime=runtime,
+                max_items=getattr(access.settings, "space_media_max_items", 3),
+                before_execute=lambda: require_known(character_id, active=True),
             )
             relations = list(result["relations"])
-            if not relations:
-                raise RuntimeError(
-                    (result["errors"][-1]["error"] if result["errors"] else "media executor returned no media")
-                )
-            post = repository.create_post(
-                character_id,
-                req.content.strip(),
-                now,
-                media_id=relations[0]["media_id"],
-            )
-            media_repository.replace_for_post(post.id, relations, now)
+            if result.get("reason"):
+                raise HTTPException(status_code=502, detail={
+                    "code": result["reason"], "message": "Space post requires an image",
+                    "media_errors": result["errors"],
+                })
+            try:
+                with autonomy._archive_guard(), repository.store.transaction():
+                    require_known(character_id, active=True)
+                    post = repository.create_post(
+                        character_id, req.content.strip(), now, media_id=relations[0]["media_id"],
+                    )
+                    media_repository.replace_for_post(post.id, relations, now)
+            except Exception:
+                autonomy.media_executor.discard(relations)
+                raise
             return {
                 "ok": True,
                 "intent": intent.model_dump(mode="json"),

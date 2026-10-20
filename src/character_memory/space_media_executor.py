@@ -29,13 +29,65 @@ from character_memory.video_generation import (
 logger = logging.getLogger("character_memory.space_media_executor")
 
 
+def materialize_space_post_media(
+    executor, character_id: str, intents: list[SpaceMediaIntent], *, content: str,
+    now: datetime, max_items: int, runtime=None, before_execute=None,
+) -> dict[str, Any]:
+    """Build image-bearing post media before purchasing optional voice/video."""
+    relations: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    if not content.strip() and not intents:
+        return {"relations": relations, "errors": errors}
+    image_types = {SpaceMediaIntentType.SEARCH_IMAGE, SpaceMediaIntentType.GENERATE_IMAGE}
+    images = [item for item in intents if item.type in image_types]
+    others = [item for item in intents if item.type not in image_types]
+    limit = max(0, min(9, int(max_items)))
+    image_slots = limit - len(others)
+    if image_slots < 1:
+        return {"relations": [], "errors": [{"type": "MEDIA_LIMIT", "error":
+            f"Space post needs one image plus {len(others)} voice/video attachments; limit is {limit}"}],
+            "reason": "IMAGE_REQUIRED"}
+
+    def execute(intent):
+        if before_execute is not None:
+            before_execute()
+        result = executor.execute(character_id, [intent], now=now, runtime=runtime)
+        relations.extend(result["relations"])
+        errors.extend(result["errors"])
+
+    try:
+        for intent in images:
+            remaining = image_slots - len(relations)
+            if remaining <= 0:
+                break
+            execute(intent.model_copy(update={"count": min(intent.count, remaining)}))
+        if not relations and not any(item.type == SpaceMediaIntentType.GENERATE_IMAGE for item in images):
+            public_text = content.strip() or next((
+                item.voice_text or item.video_prompt or item.query or item.visual_intent
+                for item in intents
+                if item.voice_text or item.video_prompt or item.query or item.visual_intent
+            ), "公开分享的日常场景")
+            execute(SpaceMediaIntent(type=SpaceMediaIntentType.GENERATE_IMAGE, purpose="SCENE", count=1,
+                visual_intent=("为这条公开动态创作对应配图，不添加未发生的经历：" + public_text)[:800]))
+        if not any(item.get("media_type") == "IMAGE" for item in relations):
+            executor.discard(relations)
+            return {"relations": [], "errors": errors or [{"type": "GENERATE_IMAGE",
+                "error": "Space post requires an image"}], "reason": "IMAGE_REQUIRED"}
+        for intent in others:
+            execute(intent)
+        return {"relations": relations, "errors": errors}
+    except Exception:
+        executor.discard(relations)
+        raise
+
+
 class SpaceMediaExecutor:
     """Execute optional Space media intents into durable MediaAssets.
 
     The planner decides whether media is natural for the post. This class does
     not make social decisions; it executes SEARCH_IMAGE / GENERATE_IMAGE / GENERATE_VIDEO / VOICE
-    and returns ordered Space attachment relations. Every intent is fail-soft so
-    text publication is never coupled to an external media or TTS provider.
+    and returns ordered Space attachment relations. Each intent reports its own
+    failure; the Space publisher enforces the required-image publication gate.
     """
 
     def __init__(
@@ -353,7 +405,7 @@ class SpaceMediaExecutor:
             raise RuntimeError("Space image generation is disabled")
         providers = self._providers()
         provider_name = str(
-            getattr(self.settings, "image_generation_provider", "agnes") or "agnes"
+            getattr(self.settings, "image_generation_provider", "msimg") or "msimg"
         ).strip().lower()
         provider = providers.get(provider_name)
         if provider is None or not provider.available():

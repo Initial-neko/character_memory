@@ -303,7 +303,7 @@
 
   CM.showCharacterOverflow = () => {
     const current = CM.state.characterId;
-    CM.openDrawer("全部人物", `当前 ${CM.state.characterCapacity.activeTotal || CM.state.characters.length} / ${CM.state.characterCapacity.hardLimit || 20} 位；侧边栏只展示最多 10 位`);
+    CM.openDrawer("全部人物", `当前 ${CM.state.characterCapacity.activeTotal ?? CM.state.characters.length} / ${CM.state.characterCapacity.hardLimit || 20} 位；侧边栏只展示最多 10 位`);
     CM.dom.drawerBody.innerHTML = `<div class="character-overflow-list">${CM.state.characters.map(profile => {
       const active = !CM.isGroupConversation() && profile.id === current;
       return `<button type="button" class="character-overflow-card ${active ? "active" : ""}" data-overflow-character="${CM.escapeHtml(profile.id)}"><span class="character-avatar">${CM.escapeHtml(CM.initialFor(profile))}</span><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>${CM.escapeHtml(profile.identity || profile.tagline || "")}</small></span></button>`;

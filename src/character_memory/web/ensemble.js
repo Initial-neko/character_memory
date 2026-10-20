@@ -47,7 +47,8 @@
   let lastScene = {background:"", characters:"", relationships:"", opening:""};
 
   function introHtml() {
-    return `
+    const desktop = window.matchMedia("(min-width: 821px)").matches;
+    const html = `
       <div class="ensemble-builder">
         <div class="ensemble-intro">
           <strong>先体验一个温暖异世界</strong>
@@ -88,6 +89,28 @@
         <div class="ensemble-error hidden" data-ensemble-error></div>
       </div>
     `;
+    if (!desktop) return html;
+    const content = document.createElement("div");
+    content.innerHTML = html;
+    const builder = content.querySelector(".ensemble-builder");
+    builder.classList.add("ensemble-builder-desktop");
+    builder.querySelector(".ensemble-intro").innerHTML = `
+      <img class="ensemble-template-art" src="/static/artwork/ambient-window.webp" alt="温暖窗边的情景氛围插画">
+      <div><strong>灯溪镇的一晚</strong><p>旅店主人、炼金学徒、巡林人和乐师。先看四人的原创设定，确认后创建专属人物和群聊。</p>
+      <button type="button" data-ensemble-template="warm-isekai" title="预览原创设定；确认后创建群聊">预览体验</button></div>`;
+    builder.querySelectorAll(".ensemble-intro")[1].remove();
+    builder.insertAdjacentHTML("afterbegin", '<ol class="ensemble-steps" aria-label="建群步骤"><li aria-current="step"><b>1</b> 描述想法</li><li><b>2</b> 预览成员</li><li><b>3</b> 开始群聊</li></ol>');
+    const voice = builder.querySelector("[data-ensemble-voice-design]").closest("label");
+    const details = document.createElement("details");
+    details.className = "ensemble-voice-details";
+    details.innerHTML = '<summary>声音设置（可选）</summary>';
+    voice.before(details);
+    details.append(voice);
+    const actions = builder.querySelector(".ensemble-actions");
+    actions.classList.add("ensemble-start-actions");
+    actions.before(Object.assign(document.createElement("p"), {className:"ensemble-capacity-note", textContent:"群成员不占角色名额，开启私聊后才计入。"}));
+    actions.querySelector("[data-ensemble-start]").textContent = "整理成员草稿";
+    return content.innerHTML;
   }
 
   function restoreSceneFields() {
@@ -216,23 +239,14 @@
     const selected = selectedItems(build);
     const newCount = selected.filter(item => !item.existing_character_id).length;
     const active = Number(build.capacity?.active_count ?? CM.state.characterCapacity?.activeTotal ?? CM.state.characters.length);
-    const soft = Number(build.capacity?.soft_limit ?? 10);
-    const hard = Number(build.capacity?.hard_limit ?? 20);
-    const result = active + newCount;
     const summary = CM.dom.drawerBody.querySelector("[data-ensemble-capacity]");
     const confirm = CM.dom.drawerBody.querySelector("[data-ensemble-confirm]");
     const count = CM.dom.drawerBody.querySelector("[data-ensemble-selected-count]");
     if (count) count.textContent = `已选择 ${selected.length} 位，其中新建 ${newCount} 位`;
     if (summary) {
-      summary.classList.toggle("warning", result > soft && result <= hard);
-      summary.classList.toggle("blocked", result > hard);
-      summary.innerHTML = result > hard
-        ? `当前 ${active} 位角色，本次需要新建 ${newCount} 位，结果将是 <strong>${result}/${hard}</strong>。请减少勾选人数。`
-        : result > soft
-          ? `创建后将是 <strong>${result}/${hard}</strong> 位角色，已经超过 10 位提醒阈值；本页确认一次即可继续。`
-          : `创建后将是 <strong>${result}/${hard}</strong> 位角色。`;
+      summary.textContent = `群成员不占角色名额，开启私聊后才计入。当前已开启 ${active} 位私聊角色。`;
     }
-    if (confirm) confirm.disabled = selected.length < 2 || selected.length > 12 || result > hard;
+    if (confirm) confirm.disabled = selected.length < 2 || selected.length > 12;
   }
 
   function renderBuildFailure(build) {
@@ -442,17 +456,8 @@
   async function confirmBuild() {
     if (!currentBuild?.group_id) return;
     const selected = selectedItems(currentBuild);
-    if (selected.length < 2) {
-      showError("至少保留两位群成员。");
-      return;
-    }
-    const newCount = selected.filter(item => !item.existing_character_id).length;
-    const active = Number(currentBuild.capacity?.active_count ?? CM.state.characterCapacity?.activeTotal ?? CM.state.characters.length);
-    const soft = Number(currentBuild.capacity?.soft_limit ?? 10);
-    const hard = Number(currentBuild.capacity?.hard_limit ?? 20);
-    const result = active + newCount;
-    if (result > hard) {
-      showError(`最多只能保留 ${hard} 位正式角色，请减少勾选人数。`);
+    if (selected.length < 2 || selected.length > 12) {
+      showError("请选择 2 至 12 位群成员。");
       return;
     }
     const confirm = CM.dom.drawerBody.querySelector("[data-ensemble-confirm]");
@@ -462,7 +467,7 @@
         method:"POST",
         body:JSON.stringify({
           selected_indices:selected.map(item => Number(item.index)),
-          confirm_over_soft_limit:result > soft,
+          confirm_over_soft_limit:false,
           use_voice_design:useVoiceDesignRequested,
         }),
       });

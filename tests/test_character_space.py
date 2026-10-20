@@ -83,6 +83,24 @@ def _save_test_audio(app, character_id: str, index: int, *, source: str = "SPACE
     return asset
 
 
+def test_new_manual_space_posts_require_an_owned_image(tmp_path: Path):
+    app = create_api(str(_config(tmp_path, count=2)))
+    attach_space_routes(app)
+    with TestClient(app) as client:
+        text_only = client.post("/v1/space/posts", json={"character_id": "c00", "content": "文字"})
+        assert text_only.status_code == 400
+        assert text_only.json()["detail"]["code"] == "IMAGE_REQUIRED"
+        audio = _save_test_audio(app, "c00", 0)
+        voice_only = client.post("/v1/space/posts", json={"character_id": "c00", "media_ids": [audio.id]})
+        assert voice_only.status_code == 400
+        assert client.get("/v1/space/posts").json()["total"] == 0
+        image = _save_test_media(app, "c00", 1)
+        ready = client.post("/v1/space/posts", json={"character_id": "c00", "media_ids": [audio.id, image.id]})
+        assert ready.status_code == 200
+        assert ready.json()["post"]["media_count"] == 2
+        assert client.get("/health").json()["runtime_loaded"] is False
+
+
 def test_post_readers_do_not_depend_on_comment_only_columns(tmp_path: Path):
     """Only comments carry an actor; a post read must not touch that column.
 
@@ -490,7 +508,7 @@ def test_space_api_archive_rules_preserve_history_but_stop_new_participation(tmp
     attach_space_routes(app)
 
     with TestClient(app) as client:
-        created = client.post("/v1/space/posts", json={"character_id":"c00", "content":"今天有点想出去走走。"})
+        created = client.post("/v1/space/posts", json={"character_id":"c00", "content":"今天有点想出去走走。", "media_ids": [_save_test_media(app, "c00", 0).id]})
         assert created.status_code == 200
         post_id = created.json()["post"]["id"]
         assert client.get("/health").json()["runtime_loaded"] is False
@@ -516,7 +534,7 @@ def test_space_api_archive_rules_preserve_history_but_stop_new_participation(tmp
         assert feed["posts"][0]["likes"][0]["character"]["archived"] is True
 
         set_character_archived(settings, "c00", True)
-        assert client.post("/v1/space/posts", json={"character_id":"c00", "content":"归档后不能发"}).status_code == 409
+        assert client.post("/v1/space/posts", json={"character_id":"c00", "content":"归档后不能发", "media_ids": [_save_test_media(app, "c00", 0).id]}).status_code == 409
         # The old post is not deleted merely because its author was archived.
         still_there = client.get(f"/v1/space/posts/{post_id}")
         assert still_there.status_code == 200
@@ -610,6 +628,7 @@ def test_space_post_rejects_foreign_media_and_source_event(tmp_path: Path):
                 "character_id": "c00",
                 "content": "伪造来源",
                 "source_event_id": foreign_event.id,
+                "media_ids": [_save_test_media(app, "c00", 0).id],
             },
         )
         assert forged_source.status_code == 400
@@ -630,6 +649,7 @@ def test_space_post_rejects_foreign_media_and_source_event(tmp_path: Path):
                 "character_id": "c00",
                 "content": "合法来源",
                 "source_event_id": own_event.id,
+                "media_ids": [_save_test_media(app, "c00", 0).id],
             },
         )
         assert accepted.status_code == 200
@@ -641,6 +661,7 @@ def test_space_post_rejects_foreign_media_and_source_event(tmp_path: Path):
                 "character_id": "c00",
                 "content": "越界来源",
                 "source_event_id": 2**70,
+                "media_ids": [_save_test_media(app, "c00", 0).id],
             },
         )
         assert too_large.status_code == 422
@@ -654,7 +675,7 @@ def test_space_feed_survives_a_deleted_sticker_author(tmp_path: Path, monkeypatc
     with TestClient(app) as client:
         post_id = client.post(
             "/v1/space/posts",
-            json={"character_id": "c00", "content": "帖子还在。"},
+            json={"character_id": "c00", "content": "帖子还在。", "media_ids": [_save_test_media(app, "c00", 0).id]},
         ).json()["post"]["id"]
         store = app.state.character_memory.read_store
         SpaceRepository(store).add_comment(
@@ -689,14 +710,15 @@ def test_space_api_projects_audio_assets_as_voice_media(tmp_path: Path):
 
     with TestClient(app) as client:
         audio = _save_test_audio(app, "c00", 1)
+        image = _save_test_media(app, "c00", 2)
         created = client.post(
             "/v1/space/posts",
-            json={"character_id":"c00", "content":"听一下。", "media_ids":[audio.id]},
+            json={"character_id":"c00", "content":"听一下。", "media_ids":[image.id, audio.id]},
         )
         assert created.status_code == 200
         post = created.json()["post"]
-        assert post["media_count"] == 1
-        item = post["media_items"][0]
+        assert post["media_count"] == 2
+        item = post["media_items"][1]
         assert item["media_type"] == "VOICE"
         assert item["mime_type"] == "audio/wav"
         assert item["available"] is True
@@ -707,7 +729,7 @@ def test_mixed_space_feed_route_keeps_existing_post_contract(tmp_path: Path):
     app = create_api(str(_config(tmp_path, count=1)))
     attach_space_routes(app)
     with TestClient(app) as client:
-        post = client.post('/v1/space/posts', json={'character_id': 'c00', 'content': '真实动态'}).json()['post']
+        post = client.post('/v1/space/posts', json={'character_id': 'c00', 'content': '真实动态', "media_ids": [_save_test_media(app, 'c00', 0).id]}).json()['post']
         data = client.get('/v1/space/feed').json()
         assert data['items'][0]['kind'] == 'POST'
         assert data['items'][0]['post'] == post
@@ -725,10 +747,10 @@ def test_deferred_group_only_author_disappears_from_both_feed_routes(tmp_path: P
     attach_space_routes(app)
     with TestClient(app) as client:
         visible = client.post(
-            '/v1/space/posts', json={'character_id': 'c00', 'content': '公开动态'}
+            '/v1/space/posts', json={'character_id': 'c00', 'content': '公开动态', "media_ids": [_save_test_media(app, 'c00', 0).id]}
         ).json()['post']
         hidden = client.post(
-            '/v1/space/posts', json={'character_id': 'c01', 'content': '群聊角色的动态'}
+            '/v1/space/posts', json={'character_id': 'c01', 'content': '群聊角色的动态', "media_ids": [_save_test_media(app, 'c01', 0).id]}
         ).json()['post']
         set_character_direct_pending(settings, 'c01', True)
 
@@ -752,7 +774,7 @@ def test_browser_user_can_comment_and_reload_the_same_space_fact(tmp_path: Path)
     with TestClient(app) as client:
         created = client.post(
             "/v1/space/posts",
-            json={"character_id":"c00", "content":"今天有点想出门。"},
+            json={"character_id":"c00", "content":"今天有点想出门。", "media_ids": [_save_test_media(app, "c00", 0).id]},
         )
         assert created.status_code == 200
         post_id = created.json()["post"]["id"]
@@ -804,7 +826,7 @@ def test_space_api_accepts_mentions_and_reads_notifications_idempotently(tmp_pat
     with TestClient(app) as client:
         post_id = client.post(
             "/v1/space/posts",
-            json={"character_id": "c00", "content": "想去海边看看。"},
+            json={"character_id": "c00", "content": "想去海边看看。", "media_ids": [_save_test_media(app, "c00", 0).id]},
         ).json()["post"]["id"]
         user_response = client.post(
             f"/v1/space/posts/{post_id}/comments",
@@ -885,7 +907,7 @@ def test_space_comment_stays_durable_and_idempotent_when_follow_up_queue_is_full
 
         post_id = client.post(
             "/v1/space/posts",
-            json={"character_id": "c00", "content": "想去海边看看。"},
+            json={"character_id": "c00", "content": "想去海边看看。", "media_ids": [_save_test_media(app, "c00", 0).id]},
         ).json()["post"]["id"]
         body = {
             "content": "那我们找一天出发吧。",
@@ -915,7 +937,7 @@ def test_space_idempotent_replay_survives_archiving_a_mentioned_character(tmp_pa
     with TestClient(app) as client:
         post_id = client.post(
             "/v1/space/posts",
-            json={"character_id": "c00", "content": "想去海边看看。"},
+            json={"character_id": "c00", "content": "想去海边看看。", "media_ids": [_save_test_media(app, "c00", 0).id]},
         ).json()["post"]["id"]
         body = {
             "content": "@角色01 你愿意一起去吗？",
@@ -966,7 +988,7 @@ def test_a_failed_follow_up_never_unsends_a_stored_comment(tmp_path: Path, monke
     with TestClient(app) as client:
         post_id = client.post(
             "/v1/space/posts",
-            json={"character_id": "c00", "content": "今天降温了。"},
+            json={"character_id": "c00", "content": "今天降温了。", "media_ids": [_save_test_media(app, "c00", 0).id]},
         ).json()["post"]["id"]
 
         response = client.post(
@@ -998,7 +1020,7 @@ def test_space_feed_pages_ten_items_and_can_filter_one_character(tmp_path: Path)
     with TestClient(app) as client:
         for index in range(13):
             author = "c00" if index % 2 == 0 else "c01"
-            response = client.post("/v1/space/posts", json={"character_id":author, "content":f"动态 {index}"})
+            response = client.post("/v1/space/posts", json={"character_id":author, "content":f"动态 {index}", "media_ids": [_save_test_media(app, author, 0).id]})
             assert response.status_code == 200
 
         feed = client.get("/v1/space/posts?limit=50").json()
@@ -1142,7 +1164,7 @@ def test_uploaded_image_media_is_inline_for_space_lightbox(tmp_path: Path):
 
 
 
-def test_space_dev_media_can_request_a_video_and_reports_the_missing_provider(tmp_path: Path):
+def test_space_dev_media_video_requires_an_image_before_buying_video(tmp_path: Path):
     """GENERATE_VIDEO has to be reachable from the explicit-media entry point.
 
     A video intent carries its own fields, so a request model that cannot hold
@@ -1172,8 +1194,8 @@ def test_space_dev_media_can_request_a_video_and_reports_the_missing_provider(tm
         assert wordless.status_code == 400
         assert "requires content" in wordless.text
 
-        # With a prompt the request reaches the executor, so the remaining
-        # failure is the absent provider rather than the request shape.
+        # A valid video plan first needs its required illustration. No video
+        # provider is purchased when that illustration cannot be generated.
         reached = client.post(
             "/v1/space/dev/media/c00",
             json={
@@ -1184,7 +1206,8 @@ def test_space_dev_media_can_request_a_video_and_reports_the_missing_provider(tm
             },
         )
         assert reached.status_code == 502
-        assert "video generation provider is unavailable" in reached.text
+        assert reached.json()["detail"]["code"] == "IMAGE_REQUIRED"
+        assert reached.json()["detail"]["media_errors"]
 
 
 def test_space_dev_video_smoke_answers_without_reaching_the_provider(tmp_path: Path):

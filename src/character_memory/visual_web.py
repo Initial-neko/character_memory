@@ -150,7 +150,7 @@ def attach_visual_routes(app) -> None:
         return f"data:{metadata.content_type};base64,{base64.b64encode(payload).decode('ascii')}"
 
     def provider_named(name: str):
-        provider_name = (name or getattr(settings, "image_generation_provider", "agnes") or "agnes").strip().lower()
+        provider_name = (name or getattr(settings, "image_generation_provider", "msimg") or "msimg").strip().lower()
         provider = providers.get(provider_name)
         if provider is None:
             raise HTTPException(status_code=400, detail=f"Unknown image provider: {provider_name}")
@@ -163,8 +163,6 @@ def attach_visual_routes(app) -> None:
             key_hint = "AGNES_API_KEY" if provider_name == "agnes" else "MSIMG_API_KEY / MODELSCOPE_API_TOKEN"
             raise HTTPException(status_code=503, detail=f"{provider_name} is not configured; set {key_hint}")
         if not provider.available():
-            if provider_name == "msimg":
-                raise HTTPException(status_code=503, detail="msimg is configured but unavailable; run bash scripts/sync-all.sh")
             raise HTTPException(status_code=503, detail=f"{provider_name} is configured but unavailable")
         return provider_name, provider
 
@@ -236,7 +234,7 @@ def attach_visual_routes(app) -> None:
     @app.get("/v1/visual/providers")
     def visual_providers():
         return {
-            "default": str(getattr(settings, "image_generation_provider", "agnes") or "agnes"),
+            "default": str(getattr(settings, "image_generation_provider", "msimg") or "msimg"),
             "providers": [provider_status(name, provider) for name, provider in providers.items()],
         }
 

@@ -38,7 +38,7 @@ def attach_core_character_routes(app, access: CoreApiRouteAccess):
     def characters(archived: bool = False, include_deferred: bool = False):
         profiles = access.character_profiles()
         listed = split_archived(profiles, archived)
-        active_total = len(split_archived(profiles, False))
+        active_total = len(split_direct_pending(split_archived(profiles, False), False))
         if not archived and not include_deferred:
             # Characters a batch build created are deferred: alive everywhere
             # else, but absent from the sidebar, which is how the user asked for
@@ -70,12 +70,12 @@ def attach_core_character_routes(app, access: CoreApiRouteAccess):
         }
 
     @app.post("/v1/characters/{character_id}/open-direct")
-    def open_direct_character(character_id: str):
+    def open_direct_character(character_id: str, confirm_over_soft_limit: bool = False):
         # No voice-registry refresh: a deferred character was never withdrawn
         # from the roster the GSV sidecar resolves, so opening its sidebar entry
         # changes nothing for voice. Paying the reload stall here would be pure
         # cost on a button the user may press several times in a row.
-        return access.open_direct_character(character_id)
+        return access.open_direct_character(character_id, confirm_over_soft_limit=confirm_over_soft_limit)
 
     @app.get("/v1/characters/summaries")
     def character_summaries(archived: bool = False):

@@ -27,12 +27,7 @@ pytestmark = [
 
 
 def _create_post(page, base: str, content: str) -> str:
-    response = page.request.post(
-        f"{base}/v1/space/posts",
-        data={"character_id": "rin", "content": content},
-    )
-    assert response.ok
-    return str(response.json()["post"]["id"])
+    return reconciliation_tests.seed_legacy_text_post(base, content)
 
 
 @pytest.mark.parametrize('width', [1440, 390])
@@ -106,9 +101,12 @@ def test_space_feed_lays_out_real_posts_in_multiple_columns(page, space_server_w
         payload = {'character_id': 'rin', 'content': content}
         if kind == 'mixed' and index % 3 == 0:
             payload['media_ids'] = [media_id]
-        response = page.request.post(base + '/v1/space/posts', data=payload)
-        assert response.ok
-        post_ids.append(str(response.json()['post']['id']))
+        if payload.get('media_ids'):
+            response = page.request.post(base + '/v1/space/posts', data=payload)
+            assert response.ok
+            post_ids.append(str(response.json()['post']['id']))
+        else:
+            post_ids.append(_create_post(page, base, content))
     page.set_viewport_size({'width': width, 'height': 844 if width == 390 else 992})
     page.goto(base + '/?view=space')
     feed = page.locator('.space-feed')
@@ -118,7 +116,7 @@ def test_space_feed_lays_out_real_posts_in_multiple_columns(page, space_server_w
         expect(card).to_be_visible()
     feed.locator('img').evaluate_all("images => Promise.all(images.map(image => image.decode().catch(() => {})))")
     columns = int(feed.evaluate('element => getComputedStyle(element).columnCount'))
-    assert columns == (1 if width == 390 else 3)
+    assert columns == (1 if width == 390 else 2)
     boxes = [card.bounding_box() for card in cards]
     positions = {round(box['x']) for box in boxes}
     if width == 390:
@@ -353,12 +351,7 @@ def test_space_comment_enter_waits_for_ime_composition(page, space_server):
 
 
 def test_space_comment_reply_and_thread_controls_work_in_browser(page, space_server):
-    created = page.request.post(
-        f"{space_server}/v1/space/posts",
-        data={"character_id": "rin", "content": "评论线程按钮真实行为测试"},
-    )
-    assert created.ok
-    post_id = str(created.json()["post"]["id"])
+    post_id = _create_post(page, space_server, "评论线程按钮真实行为测试")
     roots = []
     for index in range(4):
         response = page.request.post(
@@ -440,9 +433,11 @@ def test_space_detail_visual_evidence(page, space_server_with_image, width, heig
     body = {"character_id": "rin", "content": content}
     if kind == "image":
         body["media_ids"] = [first_media, second_media]
-    created = page.request.post(base + "/v1/space/posts", data=body)
-    assert created.ok, created.text()
-    post_id = str(created.json()["post"]["id"])
+        created = page.request.post(base + "/v1/space/posts", data=body)
+        assert created.ok, created.text()
+        post_id = str(created.json()["post"]["id"])
+    else:
+        post_id = _create_post(page, base, content)
     page.goto(f"{base}/?view=space&space_post={post_id}", wait_until="domcontentloaded")
     detail = page.locator(".space-detail-view")
     expect(detail).to_be_visible()

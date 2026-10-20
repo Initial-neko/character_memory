@@ -101,11 +101,10 @@ def test_a_batch_built_character_stays_out_of_the_sidebar_until_asked(tmp_path: 
 
         # Not in the sidebar...
         assert nova not in _sidebar(client)
-        # ...but not hidden either: the picker can still see it, and it is a
-        # perfectly ordinary active character as far as capacity is concerned.
+        # The picker still sees the group member, but only direct chats use slots.
         deferred = client.get("/v1/characters?include_deferred=true").json()
         assert nova in [item["id"] for item in deferred["characters"]]
-        assert client.get("/v1/characters").json()["active_total"] == len(before) + 1
+        assert client.get("/v1/characters").json()["active_total"] == len(before)
         assert (tmp_path / "personas" / nova / DIRECT_PENDING_FILENAME).is_file()
 
         # The avatar manager's list republishes itself into the sidebar, so it
@@ -125,7 +124,38 @@ def test_a_batch_built_character_stays_out_of_the_sidebar_until_asked(tmp_path: 
         assert opened.json()["was_pending"] is False, "the second press had nothing left to do"
 
         assert nova in _sidebar(client)
+        assert client.get("/v1/characters").json()["active_total"] == len(before) + 1
         assert not (tmp_path / "personas" / nova / DIRECT_PENDING_FILENAME).exists()
+
+
+def test_group_member_creation_at_capacity_and_open_direct_boundary(tmp_path, monkeypatch):
+    import character_memory.api_character_service as service_module
+
+    monkeypatch.setattr(service_module, "MAX_ACTIVE_CHARACTERS", 2)
+    with TestClient(create_api(str(_config(tmp_path)))) as client:
+        member = _create(client, "Nova", source="ENSEMBLE_BUILDER")
+        response = client.post(f"/v1/characters/{member['id']}/open-direct")
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "ACTIVE_CHARACTER_HARD_LIMIT"
+        assert (tmp_path / "personas" / member['id'] / DIRECT_PENDING_FILENAME).exists()
+        assert member['id'] not in _sidebar(client)
+        assert client.post(f"/v1/characters/{member['id']}/archive").status_code == 200
+        assert client.post(f"/v1/characters/{member['id']}/restore").status_code == 200
+        assert client.get("/v1/characters").json()["active_total"] == 2
+
+
+def test_open_direct_soft_limit_requires_confirmation_and_is_idempotent(tmp_path, monkeypatch):
+    import character_memory.api_character_service as service_module
+
+    monkeypatch.setattr(service_module, "SOFT_ACTIVE_CHARACTERS", 2)
+    with TestClient(create_api(str(_config(tmp_path)))) as client:
+        member = _create(client, "Nova", source="ENSEMBLE_BUILDER")
+        url = f"/v1/characters/{member['id']}/open-direct"
+        response = client.post(url)
+        assert response.status_code == 409
+        assert response.json()["detail"]["confirmation_required"] is True
+        assert client.post(url + "?confirm_over_soft_limit=true").status_code == 200
+        assert client.post(url).json()["was_pending"] is False
 
 
 def test_a_hand_made_character_is_never_deferred(tmp_path: Path):

@@ -472,16 +472,17 @@ class EnsembleBuilderService:
         ]
 
     def _capacity_payload(self, add_count: int = 0) -> dict[str, int | bool]:
-        active = len(self._active_profiles())
+        active = sum("direct_pending" not in item for item in self._active_profiles())
         soft = int(getattr(self.access, "soft_active_characters", 10))
         hard = int(getattr(self.access, "max_active_characters", 20))
         return {
             "active_count": active,
-            "add_count": int(add_count),
-            "result_count": active + int(add_count),
+            "add_count": 0,
+            "group_member_count": int(add_count),
+            "result_count": active,
             "soft_limit": soft,
             "hard_limit": hard,
-            "warning": active + int(add_count) > soft,
+            "warning": False,
         }
 
     def _refresh_existing_matches(
@@ -1050,26 +1051,13 @@ Content:
         } if callable(profiles_reader) else set()
 
         def requested_character_id(item: dict[str, Any]) -> str:
-            # A retry after an interrupted confirmation reuses the identity the
-            # first attempt wrote for this durable build. Those members already
-            # exist, so they must not be charged against capacity a second time.
+            # Reuse the durable identity after interrupted confirmation.
             if item.get("reuse_existing") is not False:
                 return ""
             return f"character-{group_id.rsplit('-', 1)[-1]}-{int(item.get('index', -1))}"
 
-        new_items = [
-            item
-            for item in selected
-            if not item.get("existing_character_id")
-            and requested_character_id(item) not in known_ids
-        ]
-        checker = getattr(self.access, "check_character_capacity", None)
-        if not callable(checker):
-            raise RuntimeError("character capacity checker is unavailable")
-        checker(
-            len(new_items),
-            confirm_over_soft_limit=confirm_over_soft_limit,
-        )
+        # Group-only identities do not reserve direct-chat capacity. The
+        # registry enforces that boundary when the user opens a direct chat.
 
         creator = getattr(self.access, "create_character_from_draft", None)
         rollback = getattr(self.access, "rollback_created_character", None)
@@ -1103,11 +1091,8 @@ Content:
                     draft,
                     requested_id,
                     confirm_over_soft_limit=True,
-                    # The batch check above gives the UI one confirmation and
-                    # a useful all-or-nothing forecast. The actual character
-                    # write still rechecks the hard boundary under the shared
-                    # registry lock because onboarding releases that lock for
-                    # provider work and another creation may interleave.
+                    # The registry derives group-only status from creation
+                    # provenance; do not globally bypass its normal checks.
                     skip_capacity_check=False,
                     creation={
                         "source": "ENSEMBLE_BUILDER",

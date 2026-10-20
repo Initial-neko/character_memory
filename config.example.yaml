@@ -104,8 +104,9 @@ direct_autonomous_image_generation_enabled: false
 direct_autonomous_image_daily_max_generations: 3
 # Minimum real-time hours between autonomous reservations for one character.
 direct_autonomous_image_cooldown_hours: 8.0
-# Provider for explicit tools and character synthetic image expression.
-image_generation_provider: "agnes"
+# Provider for explicit tools and character synthetic image expression; msimg uses ModelScope quota first.
+# Agnes remains an explicit alternative; failures never switch to a paid provider.
+image_generation_provider: "msimg"
 
 # Maximum seconds allowed for one ImageGen provider request.
 image_generation_timeout_seconds: 180

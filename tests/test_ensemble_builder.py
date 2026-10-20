@@ -95,17 +95,17 @@ def test_research_retry_preserves_curated_template_without_paid_rebuild(tmp_path
     assert retried["overview"] == build["overview"]
 
 
-def test_template_capacity_counts_same_name_people_as_new(tmp_path):
+def test_template_members_do_not_use_direct_capacity_even_with_same_name(tmp_path):
     access, store, _, profiles, created = _access(tmp_path)
     profiles.extend({"id": f"existing-{i}", "name": name} for i, name in enumerate(["莉娅", "芙露", "赛琳", "米娅"]))
     profiles.extend({"id": f"other-{i}", "name": f"Other {i}"} for i in range(12))
     service = EnsembleBuilderService(access, EnsembleRepository(store))
     build = service.prepare_template("warm-isekai")
-    assert build["capacity"]["add_count"] == 4
-    with pytest.raises(ValueError, match="hard limit"):
-        service.confirm(build["group_id"], [0, 1, 2, 3])
-    assert created == []
-    assert service.groups.list_groups() == []
+    assert build["capacity"]["add_count"] == 0
+    assert build["capacity"]["group_member_count"] == 4
+    confirmed = service.confirm(build["group_id"], [0, 1, 2, 3])
+    assert len(created) == 4
+    assert len(confirmed["group"]["member_ids"]) == 4
 
 
 def test_template_routes_preview_without_model_or_character_writes(tmp_path):
@@ -260,7 +260,7 @@ def _access(tmp_path):
     )
 
     def check_capacity(add_count, *, confirm_over_soft_limit=False):
-        active = len(profiles)
+        active = sum("direct_pending" not in profile for profile in profiles)
         result = active + int(add_count)
         if result > 20:
             raise ValueError("hard limit")
@@ -276,7 +276,8 @@ def _access(tmp_path):
         skip_capacity_check=False,
         creation=None,
     ):
-        if not skip_capacity_check:
+        group_only = (creation or {}).get("source") == "ENSEMBLE_BUILDER"
+        if not skip_capacity_check and not group_only:
             check_capacity(
                 1,
                 confirm_over_soft_limit=confirm_over_soft_limit,
@@ -300,6 +301,8 @@ def _access(tmp_path):
             "persona_path": str(persona_path),
         }
         profiles.append(profile)
+        if group_only:
+            profile["direct_pending"] = True
         created.append(character_id)
         creation_records.append({"character_id": character_id, **(creation or {})})
         return profile
@@ -411,7 +414,7 @@ def test_confirmation_rechecks_stale_existing_character_matches(tmp_path):
     store.close()
 
 
-def test_confirmation_rechecks_capacity_at_each_character_write(tmp_path):
+def test_group_confirmation_does_not_compete_with_concurrent_direct_creation(tmp_path):
     access, store, _, profiles, created = _access(tmp_path)
     for index in range(17):
         profiles.append(
@@ -437,17 +440,10 @@ def test_confirmation_rechecks_capacity_at_each_character_write(tmp_path):
 
     access.create_character_from_draft = create_with_concurrent_character
 
-    with pytest.raises(ValueError, match="hard limit"):
-        service.confirm(
-            started["group_id"],
-            [0, 1, 2],
-            confirm_over_soft_limit=True,
-        )
-
-    assert GroupRepository(store).list_groups() == []
-    assert "okabe" not in {item["id"] for item in profiles}
-    assert "mayuri" not in {item["id"] for item in profiles}
-    assert created == []
+    result = service.confirm(started["group_id"], [0, 1, 2])
+    assert len(result["group"]["member_ids"]) == 3
+    assert "concurrent" in {item["id"] for item in profiles}
+    assert len(created) == 2
     store.close()
 
 

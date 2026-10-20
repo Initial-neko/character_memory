@@ -102,6 +102,16 @@ def test_opening_builder_restores_ready_confirmation(ensemble_page):
     assert requests == ["/v1/ensembles"], json.dumps(requests, ensure_ascii=False)
 
 
+def test_group_creation_does_not_consume_direct_capacity(ensemble_page):
+    page = ensemble_page
+    page.evaluate("window.__resumableBuild.capacity.active_count = 20")
+    page.locator(".ensemble-create-button").click()
+    expect(page.locator("[data-ensemble-confirm]")).to_be_enabled()
+    expect(page.locator("[data-ensemble-capacity]")).to_contain_text("群成员不占角色名额")
+    page.locator("[data-ensemble-member]").first.uncheck()
+    expect(page.locator("[data-ensemble-confirm]")).to_be_disabled()
+
+
 def test_warm_template_previews_before_confirmation_and_creates_once(ensemble_page):
     page = ensemble_page
     page.evaluate("""() => {

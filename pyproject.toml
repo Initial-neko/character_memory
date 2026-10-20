@@ -40,9 +40,8 @@ tts-kokoro = [
 tts-edge = [
   "edge-tts==7.2.8",
 ]
-# Agnes uses the core httpx dependency. msimg stays opt-in when selecting only
-# the image-generation extra, but it is also part of the canonical `all` dev
-# stack below so `uv sync --extra all` keeps Voice/API/ImageGen together.
+# Both image providers use core httpx. Keep the legacy msimg extra pinned for
+# compatibility with existing installations; runtime no longer requires its SDK.
 image-generation = ["msimg==0.0.4"]
 ui = ["streamlit>=1.37,<2"]
 dev = ["pytest==9.1.1"]

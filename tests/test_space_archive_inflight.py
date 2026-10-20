@@ -80,7 +80,9 @@ def test_archived_role_cannot_publish_late_space_reply(tmp_path, monkeypatch, pa
         # attach/start saw api_key="", so no autonomous scheduler thread starts.
         access.settings.api_key = "offline-fake-not-a-provider-key"
         access.settings.space_thread_reply_rounds = 1
-        post_id = client.post("/v1/space/posts", json={"character_id": "c01", "content": "fixture post"}).json()["post"]["id"]
+        # This historical text fixture tests archive/reaction races, not new
+        # publication, which now requires an image.
+        post_id = access.space_repository.create_post("c01", "fixture post", datetime.now(timezone.utc)).id
         body = {"content": "fixture user comment", "client_request_id": f"{path}-{phase}"}
         if path == "explicit_mention":
             body["mentions"] = ["c01"]

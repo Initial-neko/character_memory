@@ -97,6 +97,10 @@ uv run character-memory eval evals/p0_relationship.jsonl
 
 Eval 使用临时 SQLite，不污染正式人物数据。
 
+Eval CLI 输出一份 JSON 报告，保留 `passed / total / by_tag / results`。非空且全部通过时退出码为 `0`；存在失败用例时为 `1`；没有可执行用例时为 `2`。配置、输入解析或运行异常以非零状态失败，不输出虚假的成功报告。自动化必须同时核对退出状态与实际执行用例，不能把空结果视作通过。
+
+CLI 状态传播的隔离/子进程测试不证明真实模型质量；真实 Provider 的评测仍需在目标环境单独运行并保存 JSON、模型/配置版本和退出码。
+
 注意：结构规则只能验证可观察 contract。Persona 是否真的像某个人物仍需要盲评或未来 Judge Model，不能靠关键词断言。
 
 ## 3. Engineering regression layers

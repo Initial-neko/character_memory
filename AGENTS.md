@@ -6,6 +6,7 @@ Keep it short and stable. Detailed architecture, feature behavior, task state, a
 
 ## Core rules
 
+- For project development requests, follow [AI Development Loop V1.0](.agents/skills/ai-development-loop/SKILL.md); scale its six stages to the task and keep Issue/PR as the task record.
 - `main` is the integration source of truth.
 - Extend the existing Person runtime, durable event model, Memory model, and shared services instead of creating parallel systems.
 - Check `docs/current/TECH_DEBT.md` before proposing a refactor. A recorded entry means the trade-off was already decided.

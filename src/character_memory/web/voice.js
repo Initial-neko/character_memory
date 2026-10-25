@@ -804,31 +804,20 @@
       if(!response.ok)throw Error(await response.text());
       return response.json();
     }
-    if (target.scope === "group") {
-      const path = hasVisual
-        ? `/v1/visual/groups/${encodeURIComponent(target.conversationId)}/messages`
-        : `/v1/groups/${encodeURIComponent(target.conversationId)}/messages`;
-      response = await fetch(path, {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({message:text, ...(live2d ? {live2d} : {}), ...(hasVisual ? {visual_frames:visualFrames} : {})}),
-      });
-    } else {
-      const path = hasVisual ? "/v1/visual/direct/messages" : "/v1/chat/messages";
-      response = await fetch(path, {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({
-          message:text,
-          character_id:target.characterId,
-          ...(live2d ? {live2d} : {}),
-          conversation_id:target.conversationId,
-          ...(hasVisual ? {visual_frames:visualFrames} : {}),
-        }),
-      });
+    const path = target.scope === "group"
+      ? (hasVisual ? `/v1/visual/groups/${encodeURIComponent(target.conversationId)}/messages` : `/v1/groups/${encodeURIComponent(target.conversationId)}/messages`)
+      : (hasVisual ? "/v1/visual/direct/messages" : "/v1/chat/messages");
+    const payload = {message:text, ...(live2d ? {live2d} : {}),
+      ...(target.scope === "direct" ? {character_id:target.characterId,conversation_id:target.conversationId} : {}),
+      ...(hasVisual ? {visual_frames:visualFrames} : {})};
+    const options = {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)};
+    let result;
+    if (!hasVisual) result = await CM.api(path, options);
+    else {
+      response = await fetch(path, options);
+      if (!response.ok) throw new Error(await response.text());
+      result = await response.json();
     }
-    if (!response.ok) throw new Error(await response.text());
-    const result = await response.json();
     if (target.scope === "direct" && isViewingTarget() && result.message) CM.mergeDirectMessage?.(result.message);
     if (target.scope === "group" && isViewingTarget()) {
       await CM.features.groups?.reconcileLatest?.(target.conversationId);

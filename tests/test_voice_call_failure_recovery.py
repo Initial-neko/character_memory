@@ -61,6 +61,11 @@ const CM = {
   conversationIdFor:id => `direct:${id}`,
   directEventToMessage:value => value,
   mergeDirectMessage:silent,
+  api:async (path, options) => {
+    const response=await fetchStub(path, options);
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+  },
 };
 
 async function fetchStub(url, options = {}) {

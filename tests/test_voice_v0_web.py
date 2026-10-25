@@ -269,6 +269,11 @@ function boot() {
     conversationIdFor(characterId) { return "direct:" + characterId; },
     directEventToMessage() { return {}; },
     mergeDirectMessage() {},
+    async api(path, options) {
+      const response=await sandbox.fetch(path, options);
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    },
   };
 
   const sandbox = {

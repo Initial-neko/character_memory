@@ -201,6 +201,7 @@
       const row = document.createElement("article");
       row.className = `message-row ${message.role}`;
       row.dataset.messageId = message.id ?? "";
+      if (message.client_request_id) row.dataset.clientRequestId = message.client_request_id;
       const contentHtml = CM.messageContentHtml(message, {variant: "group"});
       row.innerHTML = `<div class="avatar"></div><div class="bubble-wrap">${contentHtml}<div class="message-meta"><span>${CM.fmtTime(message.event_time)}</span>${turnButton(message)}</div></div>`;
       CM.bindMessageContent(row);
@@ -522,7 +523,7 @@
       return result;
     } catch (error) {
       console.error("[group message failed]", groupId, error);
-      if (CM.isGroupConversation() && groupId === activeId()) {
+      if (!error.clientSendId && CM.isGroupConversation() && groupId === activeId()) {
         const box = document.createElement("div");
         box.className = "error";
         box.textContent = `发送失败：${error.message}`;

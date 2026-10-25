@@ -26,7 +26,7 @@ from character_memory.application.chat_service import build_user_event
 from character_memory.application.group_conversation_service import build_group_user_event, resolve_group_mentions
 from character_memory.group_store import GroupRepository
 from character_memory.group_web import GroupChatRequest
-from character_memory.message_projection import upload_caption
+from character_memory.message_projection import upload_caption, client_request_fields
 from character_memory.web_lifecycle import background_services
 
 
@@ -169,6 +169,7 @@ def attach_async_routes(app):
         return {
             "id": event.id,
             "role": "user",
+            **client_request_fields(event.metadata),
             "character_id": event.character_id,
             "content": event.metadata.get("display_text", event.content),
             "event_time": event.event_time.isoformat(),
@@ -206,6 +207,7 @@ def attach_async_routes(app):
             "conversation_id": event.conversation_id,
             "turn_id": event.turn_id,
             "role": "user",
+            **client_request_fields(event.metadata),
             "actor_type": "USER",
             "actor_id": "user",
             "actor_name": "我",
@@ -260,6 +262,8 @@ def attach_async_routes(app):
             sticker=selected_sticker,
             image=selected_image,
         )
+        if req.request_id is not None:
+            event.metadata["client_request_id"] = req.request_id
         # Presentation is auxiliary to the immutable user fact, and resource names
         # are derived on the server instead of trusting browser-supplied lists.
         presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, [req.character_id])
@@ -343,6 +347,8 @@ def attach_async_routes(app):
             sticker=selected_sticker,
             mentions=mentions,
         )
+        if req.request_id is not None:
+            event.metadata["client_request_id"] = req.request_id
         try:
             presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, group.member_ids)
             if presentation:

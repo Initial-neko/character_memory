@@ -126,6 +126,7 @@
     try {
       await CM.sendDirectPayload({message:caption, image:{filename:currentDraft.filename, data_url:currentDraft.data_url}});
     } catch (error) {
+      if (error.clientSendId) return;
       const box = document.createElement("div");
       box.className = "error";
       box.textContent = `发送图片失败：${error.message}`;

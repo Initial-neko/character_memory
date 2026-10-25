@@ -60,7 +60,7 @@ POST /v1/visual/groups/{conversation_id}/messages
 `POST /v1/chat/messages` and `POST /v1/groups/{id}/messages` accept an optional
 strict nonblank `request_id` (at most 128 characters). It is defined only on the
 async request schemas. Without a key the existing independent-send behavior and
-response are unchanged. Current WebUI does not yet send keys.
+response are unchanged. The WebUI supplies a fresh key for each intentional new send; explicit retries reuse the original key and frozen request body.
 
 A key is scoped to the existing local operator and Direct character/conversation
 or Group conversation. The validated payload fingerprint excludes the key and
@@ -84,7 +84,7 @@ not-yet-delivered new-protocol task can recover, while a provider outcome marked
 UNKNOWN is never blindly executed again.
 
 This acceptance surface is W2 A, per-Person cognition is B1/B2a and durable
-delivery below is B2b. C client retry-key integration remains unfinished.
+delivery below is B2b. The client lifecycle below supplies C retry-key integration.
 A crash during attachment staging can still leave an orphan file; this is not
 an exactly-once external-effects claim. No acceptance key is claimed for Visual
 Capture or legacy sync APIs.
@@ -95,6 +95,43 @@ It uses production Direct/Group routes, temporary personas/SQLite, a local fixed
 provider and two API processes; text/image retries keep four facts, two media
 assets and six known provider calls. This checks acceptance counts, not model
 quality, durable execution recovery or visual acceptance.
+
+
+### Browser send identity and recovery
+
+Ordinary Direct/Group text, image, sticker, life-reference and recognized-voice
+sends pass through `web/client_sends.js`. Each intentional new send creates a
+UUID, including identical content sent twice. Native IndexedDB stores the final
+mention-enriched JSON before HTTP; unavailable storage prevents sending. Explicit
+retry reuses that exact body and UUID. Refresh/focus only reads records and never
+resends them. Visual Capture/encounter and legacy synchronous APIs keep their
+existing protocols.
+
+The four status cards distinguish transport uncertainty, active confirmation,
+accepted source and an initially rejected request. An unknown attempt stays
+unknown even if a later retry receives 4xx: that response cannot disprove an
+earlier commit. Editing a rejected message restores its text/attachment into the
+existing editor; the next send has a new identity. Switching conversations hides
+other scopes. Concurrent retries in one tab share a transport; persisted acceptance
+cannot be overwritten by a late failure from another tab.
+
+Source metadata and Direct/Group history expose optional `client_request_id` for
+keyed messages. Cards attach by that identity, never by text or a numeric event ID
+alone. An accepted cache entry cannot recreate an evicted history bubble. Browser
+records are projections, not additional facts or authentication credentials.
+
+IndexedDB version 2 adds a state index while preserving existing sends. Accepted
+entries drop pending image bytes and retain at most 100 recent acknowledgements;
+unknown/rejected entries are not pruned. Clearing browser data can lose local retry
+identity but does not delete server facts. Storage remains origin-local and is
+not a cross-device outbox.
+
+Run `RUN_PLAYWRIGHT=1 pytest -q tests/test_client_sends_browser.py` against the
+isolated real API/SQLite fixture for refresh, lost-ACK, attachment, scope and retry
+checks. Its deterministic local provider proves transport behavior, not model
+quality, microphone hardware or human visual acceptance. Approved component
+references and rendered evidence belong to Issue #649 / PR #654; final human
+visual/experience acceptance remains a separate gate.
 
 
 ### Durable async delivery and frozen batches

@@ -116,7 +116,7 @@ def _expire_intents(config_path: str, *, character: str | None, due_before: str 
         store.close()
 
 
-def _run_eval(config_path: str, path: str):
+def _run_eval(config_path: str, path: str) -> int:
     settings = load_settings(config_path)
     with tempfile.TemporaryDirectory(prefix="character-memory-eval-") as tmp:
         isolated = settings.model_copy(update={"db_path": str(Path(tmp) / "eval.db")})
@@ -134,6 +134,9 @@ def _run_eval(config_path: str, path: str):
             bucket["total"] += 1
             bucket["passed"] += int(result["pass"])
     _print_json({"passed": sum(1 for r in results if r["pass"]), "total": len(results), "by_tag": by_tag, "results": results})
+    if not results:
+        return 2
+    return 0 if all(result["pass"] for result in results) else 1
 
 
 def _run_server(config_path: str, host: str, port: int):
@@ -225,8 +228,7 @@ def main():
         )
         return
     if args.cmd == "eval":
-        _run_eval(args.config, args.path)
-        return
+        raise SystemExit(_run_eval(args.config, args.path))
     if args.cmd in {"serve", "web"}:
         _run_server(args.config, args.host, args.port)
         return

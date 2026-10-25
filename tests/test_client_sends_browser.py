@@ -1,6 +1,5 @@
 """Real browser/HTTP checks for durable client send identity (no paid models)."""
 import os
-import sys
 from pathlib import Path
 from uuid import uuid4
 import pytest
@@ -9,14 +8,12 @@ from test_p0_17b_playwright import realtime_server, _open
 pytestmark = [pytest.mark.browser, pytest.mark.skipif(os.getenv('RUN_PLAYWRIGHT') != '1', reason='explicit browser runtime')]
 
 @pytest.fixture
-def page():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as p:
-        options = {'channel':'chrome'} if sys.platform == 'win32' else {}
-        browser = p.chromium.launch(**options)
-        context = browser.new_context(viewport={'width':1280,'height':900})
-        yield context.new_page()
-        context.close(); browser.close()
+def page(browser):
+    # Share pytest-playwright's session runtime; nesting sync_playwright fails
+    # when other browser modules have already started that runtime.
+    context = browser.new_context(viewport={'width':1280,'height':900})
+    yield context.new_page()
+    context.close()
 
 
 def _capture(page, tmp_path, name):

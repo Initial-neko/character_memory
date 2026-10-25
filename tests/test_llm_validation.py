@@ -163,3 +163,40 @@ def test_structured_call_trace_has_no_rejected_output_when_the_first_attempt_val
     assert result.trace.attempt == 1
     assert result.trace.rejected_response_text == ""
     assert result.trace.validation_error == ""
+
+
+def test_source_fidelity_reaches_provider_for_person_and_presentation_subclass():
+    class PresentedReaction(PersonReaction):
+        pass
+    for schema in (PersonReaction, PresentedReaction):
+        captured=[]
+        model=OpenAICompatibleModel('fixture-key',attempts=1)
+        def request(messages, **kwargs):
+            captured.append(messages)
+            return '{"actions":[]}'
+        model._request=request
+        try:
+            result=model._call_result('unchanged persona/context',schema)
+            assert len(captured)==1 and result.value.actions==[]
+            system=captured[0][0]
+            assert system['role']=='system'
+            assert system['content'].startswith('事实准确性优先于人物化修辞和叙事完整。')
+            assert '偏好或愿望不是已做过' in system['content']
+            assert '当前用户给出的原文可以引用' in system['content']
+            assert '不增删字符、标点或额外回应' in system['content']
+            assert captured[0][1]=={'role':'user','content':'unchanged persona/context'}
+        finally:
+            model.close()
+
+
+def test_non_person_structured_system_does_not_gain_person_fidelity_policy():
+    from pydantic import BaseModel
+    class Other(BaseModel):
+        value: str
+    model=OpenAICompatibleModel('fixture-key',attempts=1)
+    try:
+        messages=model.preview_messages('non-person contract',Other)
+        assert messages[0]['content']=='根据输入返回符合目标对象语义的 JSON 对象，不要添加 JSON 之外的解释。'
+        assert messages[1]['content']=='non-person contract'
+    finally:
+        model.close()

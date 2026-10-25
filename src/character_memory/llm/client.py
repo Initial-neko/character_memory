@@ -27,6 +27,15 @@ from character_memory.llm.usage import (
 logger = logging.getLogger("character_memory.llm")
 
 
+# Factual modality is a provider-system boundary; the runtime supplies the sources.
+_PERSON_SOURCE_FIDELITY = (
+    '事实准确性优先于人物化修辞和叙事完整。'
+    '对外消息与安全摘要必须共同保持来源中的主体、确定程度和行动状态：偏好或愿望不是已做过，约定不是已完成，未记录不是不存在；不要为自然感补造往事、引语、动机、准备细节或结果。'
+    '明确报告已完成的事实可以承认，当前用户给出的原文可以引用，不以缺少旧记录否认当前输入。'
+    '用户要求原样重复时，只重复原文，不增删字符、标点或额外回应。'
+)
+
+
 @dataclass(frozen=True)
 class ModelCallTrace:
     request_messages: list[dict] = field(default_factory=list)
@@ -500,7 +509,7 @@ class OpenAICompatibleModel(PersonModel):
     def _system_prompt(schema: type[BaseModel]) -> str:
         if issubclass(schema, PersonReaction):
             memory_types = "；".join(f"{kind}：{meaning}" for kind, meaning in MEMORY_TYPE_DESCRIPTIONS.items())
-            return (
+            return _PERSON_SOURCE_FIDELITY + (
                 "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State、Available Stickers、Available Images 和 Behavioral Contract。"
                 "返回一个 JSON 对象。actions 是必填的顶层字段；actions 必须可以是空数组，即使决定沉默也必须显式输出 actions=[]。actions 中每个对象使用 type 字段表示动作类型，不要使用 action 字段；文本动作使用 message 字段，不要使用 text 字段。"
                 "actions 为 0 到 3 个动作；通常使用 MESSAGE，单独字符表情可用 EMOJI；需要真的发一条语音时用 VOICE_MESSAGE，message 就是这段语音的完整内容（不是把文字自动朗读）；若输入的 Behavioral Contract 明确指定 SPACE_LIKE / SPACE_COMMENT 等专用动作，则必须只使用该场景允许的专用动作，不要退回普通聊天动作；若输入列出了 Available Stickers，可以用 STICKER 并填写 sticker_id；若列出了 Available Images，可以用 IMAGE 并填写 image_id。"

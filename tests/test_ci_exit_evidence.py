@@ -42,3 +42,47 @@ def test_faulthandler_survives_pytest_and_records_exit_stage_abort(tmp_path):
     assert result.returncode != 0
     assert "1 passed" in result.stdout
     assert "Fatal Python error: Aborted" in result.stderr
+
+
+def _collect_nodes(arguments):
+    env={**os.environ,'PYTHONIOENCODING':'utf-8'}
+    result=subprocess.run([sys.executable,'-m','pytest','--collect-only','-q',*arguments],
+        cwd=ROOT,env=env,capture_output=True,text=True,encoding='utf-8',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    return {line.replace('\\','/') for line in result.stdout.splitlines()
+            if line.startswith('tests') and '::' in line}
+
+
+def _ci_selection(step):
+    import shlex
+    args=shlex.split(step['run'])
+    args=args[args.index('pytest')+1:]
+    selected=[]
+    iterator=iter(args)
+    for value in iterator:
+        if value=='--browser':
+            next(iterator)
+        elif not value.startswith('--junitxml=') and value!='-q':
+            selected.append(value)
+    return selected
+
+
+def test_ci_browser_selection_covers_all_collected_browser_nodes():
+    workflow=yaml.safe_load((ROOT/'.github/workflows/ci.yml').read_text())
+    step=next(s for s in workflow['jobs']['browser-smoke']['steps'] if s['name']=='Run browser smoke')
+    expected=_collect_nodes(['-m','browser'])
+    actual=_collect_nodes(_ci_selection(step))
+    assert expected,'browser collection must not be empty'
+    assert not expected-actual, 'Browser nodes missing from CI: '+repr(sorted(expected-actual))
+    assert step['env']['RUN_PLAYWRIGHT']=='1'
+
+
+def test_windows_ci_runs_native_browser_process_tree_reaping():
+    workflow=yaml.safe_load((ROOT/'.github/workflows/ci.yml').read_text())
+    job=workflow['jobs']['windows-smoke']
+    step=next(s for s in job['steps'] if s['name']=='Run Windows-sensitive smoke tests')
+    target='tests/test_browser_session.py::test_real_chromium_close_reaps_entire_windows_process_tree'
+    assert _collect_nodes([target]) <= _collect_nodes(_ci_selection(step))
+    assert {**job.get('env',{}),**step.get('env',{})}.get('RUN_PLAYWRIGHT')=='1'
+    assert any('playwright install chromium' in s.get('run','') for s in job['steps'])
+    assert any('--extra browser' in s.get('run','') for s in job['steps'])

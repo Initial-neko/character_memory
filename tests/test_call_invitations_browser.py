@@ -171,8 +171,19 @@ def test_real_call_invitation_pending_and_denied(page,call_server,width,height):
                 'invitation_bbox':page.locator('section[aria-label="人物来电邀请"]').bounding_box()})
     assert page.evaluate('window.MIC_REQUESTS')==0
     capture('pending')
-    page.get_by_role('button',name='接受并开启语音').click()
+    pending_cancellations=[]
+    cancel_url=f"{base}/v1/call-invitations/{item['id']}/cancel"
+    page.route(cancel_url, lambda route: pending_cancellations.append(route))
+    with page.expect_request(cancel_url):
+        page.get_by_role('button',name='接受并开启语音').click()
     expect(page.locator('section[aria-label="人物来电邀请"]')).to_contain_text('麦克风未开启')
+    # Permission feedback can precede the async voiceStopped cleanup response.
+    # Keep that response in flight deliberately; the hint is not DB evidence.
+    assert repo.get(item['id'])['status']=='ACCEPTED'
+    assert len(pending_cancellations)==1
+    with page.expect_response(cancel_url) as cancelled:
+        pending_cancellations[0].continue_()
+    assert cancelled.value.status==200
     assert repo.get(item['id'])['status']=='CANCELLED'
     assert repo.get(item['id'])['connected_at'] is None
     assert page.evaluate('window.CM.features.voice.state.active') is False

@@ -34,6 +34,7 @@ src/character_memory/
 
 ### `application/`
 
+- `fact_provenance.py` — Memory旧字段到严格FactRef的只读来源解析；不初始化schema或复制事实。
 - `chat_service.py` — direct application service / per-character lock。
 - `voice_message_materializer.py` / `voice_message_service.py` — durable Voice Message 的正式 TTS 请求、ready/failed 状态和事件更新。
 - `async_conversation.py` — ReactionScheduler、watermark、SSE hub。
@@ -47,6 +48,7 @@ src/character_memory/
 
 ### `domain/`
 
+- `facts.py` — 不同权威事实域的不可变FactRef身份契约。
 - `models.py` — `Event / Memory / PersonReaction / ActionDecision / ...`。
 
 `llm/usage.py` 拥有调用归因 scope 与 durable request 计量；Runtime Trace 保留模型 I/O，两者通过 logical call id 关联。

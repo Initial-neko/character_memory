@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from character_memory.domain.models import Memory
+from character_memory.application.fact_provenance import resolve_memory_provenance
 
 
 class MemoryActiveRequest(BaseModel):
@@ -27,6 +28,7 @@ def _ensure_character(access, character_id: str) -> None:
 
 def _memory_payload(store, memory: Memory) -> dict:
     source = None
+    provenance = resolve_memory_provenance(store, memory)
     metadata = dict(memory.metadata or {})
     origin = str(metadata.get("origin") or "").upper()
 
@@ -37,21 +39,21 @@ def _memory_payload(store, memory: Memory) -> dict:
             "event_id": metadata.get("source_conversation_event_id"),
             "turn_id": metadata.get("turn_id"),
         }
-    elif memory.source_event_id is not None:
-        event = store.get_event(memory.source_event_id)
-        if event is not None:
-            source = {
-                "kind": str(event.metadata.get("channel") or "DIRECT"),
-                "event_id": event.id,
-                "event_type": event.event_type.value,
-                "event_time": event.event_time.isoformat(),
-                "content": event.content,
-                "metadata": event.metadata,
-            }
+    elif provenance["status"] == "RESOLVED":
+        event = provenance["fact"]
+        source = {
+            "kind": str(event["metadata"].get("channel") or "DIRECT"),
+            "event_id": event["id"],
+            "event_type": event["event_type"],
+            "event_time": event["event_time"],
+            "content": event["content"],
+            "metadata": event["metadata"],
+        }
 
     return {
         **memory.model_dump(mode="json", exclude={"embedding"}),
         "source": source,
+        "provenance": provenance,
     }
 
 

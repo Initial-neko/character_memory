@@ -250,6 +250,27 @@ Memory v1  ──纠正──> Memory v2
    └ inactive + superseded_by
 ```
 
+Memory API 的每个记忆响应还包含独立的 `provenance`：
+`ref / status / fact`。`FactRef` 使用 SQLite signed int64 范围内的严格正整数 ID 与 `EVENT` 或
+`CONVERSATION_EVENT` 类型；后者必须带 `conversation_id`。当前从原有
+`source_event_id` / GROUP metadata 解析，不新增事实副本、不改表或回填历史。
+状态为 `UNRECORDED`（无来源）、`INVALID`（引用格式无效）、`UNRESOLVED`
+（不存在、损坏或无资格读取）、`RESOLVED`（已读取真实事实）。错误群聊引用
+不能回退到同号 Direct Event；Direct 来源必须属于该记忆人物。
+
+Group 来源要求精确会话、已记录的 turn 匹配，以及该人物对同一源事件的
+持久 Trace 或其本人发出的真实消息见证；当前在群里不等于当时经历过。
+归档或移出不抹掉历史见证。读取不初始化 Group schema、不调用模型或
+embedding；未知/损坏来源不推定原文。更正、固定、忘记、恢复仍保留原始来源。
+旧 `source` 响应保持兼容，Group 原文仅在新增 `provenance.fact` 中提供，
+现有界面不会因此新增来源正文。数据库故障仍报错，不冒充“无来源”。
+
+可重复的真实 HTTP / 重启验收：
+`python scripts/validate_memory_provenance.py --output <evidence.json>`。
+它使用生产 API 组合及 Memory routes、临时配置/人物/SQLite、deterministic
+embedding，与真实回环 HTTP 子进程；验证同号跨域、归属、治理与重开，
+记录确切 commit、dirty 状态、事实哈希和零模型调用。它不是模型品质或视觉验收。
+
 Memory governance API 位于 `memory_web.py`。当前不做复杂的角色记忆分类器、批量规则、知识图谱或来源级策略管理。
 
 ### World Observation memory policy

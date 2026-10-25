@@ -507,6 +507,36 @@ class GroupRepository:
             self.store._maybe_commit()
             return cur.rowcount > 0
 
+    @staticmethod
+    def read_source_fact(store, conversation_id: str, event_id: int,
+                         character_id: str, *, turn_id: str | None = None) -> GroupEvent | None:
+        """Resolve a witnessed shared fact without initializing/migrating a repo.
+
+        A durable trace survives membership changes and archival. Membership
+        alone does not prove that the character actually perceived this fact.
+        """
+        with store._lock:
+            tables = {row[0] for row in store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('conversation_events','conversation_runtime_traces')"
+            )}
+            if tables != {"conversation_events", "conversation_runtime_traces"}:
+                return None
+            turn_filter = " AND e.turn_id=?" if turn_id is not None else ""
+            args = [event_id, conversation_id, character_id, character_id]
+            if turn_id is not None:
+                args.append(turn_id)
+            row = store.conn.execute(
+                "SELECT e.* FROM conversation_events e WHERE e.id=? AND e.conversation_id=? "
+                "AND e.event_time_epoch IS NOT NULL AND ("
+                "(e.actor_type='CHARACTER' AND e.actor_id=?) OR EXISTS ("
+                "SELECT 1 FROM conversation_runtime_traces t "
+                "WHERE t.source_conversation_event_id=e.id AND t.character_id=? "
+                "AND t.conversation_id=e.conversation_id AND t.turn_id=e.turn_id))"
+                + turn_filter, args,
+            ).fetchone()
+            return GroupRepository._event_from_row(row) if row is not None else None
+
     def list_events(self, conversation_id: str, limit: int = 160, *, source_event: GroupEvent | None = None, character_id: str | None = None) -> list[GroupEvent]:
         limit = max(1, min(int(limit), 500))
         with self.store._lock:

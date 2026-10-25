@@ -13,7 +13,7 @@ import uuid
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from character_memory.domain.models import PersonReaction, SpacePostPlan
+from character_memory.domain.models import MEMORY_TYPE_DESCRIPTIONS, PersonReaction, SpacePostPlan
 from character_memory.llm.usage import (
     LlmUsageRecorder,
     current_llm_usage_context,
@@ -499,6 +499,7 @@ class OpenAICompatibleModel(PersonModel):
     @staticmethod
     def _system_prompt(schema: type[BaseModel]) -> str:
         if issubclass(schema, PersonReaction):
+            memory_types = "；".join(f"{kind}：{meaning}" for kind, meaning in MEMORY_TYPE_DESCRIPTIONS.items())
             return (
                 "你正在决定一个持续存在人物对当前事件的反应。严格遵循输入中的 Persona、Memory、Mental State、Available Stickers、Available Images 和 Behavioral Contract。"
                 "返回一个 JSON 对象。actions 是必填的顶层字段；actions 必须可以是空数组，即使决定沉默也必须显式输出 actions=[]。actions 中每个对象使用 type 字段表示动作类型，不要使用 action 字段；文本动作使用 message 字段，不要使用 text 字段。"
@@ -508,6 +509,8 @@ class OpenAICompatibleModel(PersonModel):
                 "没有真正想回复的内容时 actions 必须是空数组，不要省略 actions，也不要因为用户发了消息就强行回复。"
                 "perception 和 reaction 在有明确内容时尽量各写一句非常短的开发者安全摘要；mental_state_update 没有持续变化时留空。"
                 "memory_candidates、intent_candidates 没有必要时都用空数组。不要输出隐藏思维链，也不要为了填字段编造内部活动。"
+                "memory_candidates 每项使用 content、memory_type、importance（0到1）字段，按内容主体、参与关系和实际来源选择类型，不按消息渠道机械分类。"
+                f"memory_type 只选：{memory_types}。类型只是语义注释，不能证明事实或给予权限；不确定时用 EPISODIC，没有值得记忆的事实仍用空数组。"
                 "对外表达必须像这个人物本人自然聊天：不要刻意惜字，标点、停顿、emoji、颜文字、自然追问、表情包、图片和连续两三条消息都按 Persona 使用，但不要机械拆句或刷屏。"
                 "不要把人物写成客服，也不要无条件迎合用户。"
             )

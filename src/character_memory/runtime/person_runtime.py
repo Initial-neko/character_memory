@@ -10,6 +10,9 @@ import numpy as np
 
 from character_memory.call_invitations import CallInvitationPolicy, CallInvitationRepository
 from character_memory.application.action_materialization import materialize_expressive_action
+from character_memory.domain.facts import FactRef
+from character_memory.storage.message_receipts import ReactionExecutionRepository, ExecutionUnavailable
+from character_memory.time_utils import epoch_us
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
 from character_memory.runtime.person_context import PersonContextBuilder
 from character_memory.runtime.reaction_engine import evaluate_reaction
@@ -108,9 +111,16 @@ class PersonRuntime:
         self.intent_policy = intent_policy or IntentPolicy()
         self.call_policy = call_policy or CallInvitationPolicy()
         self._call_invitations = None
+        self._execution_receipts = None
         self.research_service = None
         self.sticker_retriever = StickerRetriever(embeddings)
         self.context_builder = PersonContextBuilder(store, recall, persona)
+
+    @property
+    def execution_receipts(self):
+        if self._execution_receipts is None:
+            self._execution_receipts = ReactionExecutionRepository(self.store)
+        return self._execution_receipts
 
     def _active_memory_duplicate(self, character_id: str, content: str, embedding):
         """Return a current exact/near duplicate at the durable write boundary.
@@ -481,13 +491,50 @@ class PersonRuntime:
                 decisions.append({"type":"CALL_INVITE", "decision":"DROP_PERMISSION_CHANNEL_QUOTA_OR_COOLDOWN"})
         return reaction.model_copy(update={"actions":kept,"action":kept[0] if kept else ActionDecision(type=ActionType.NO_REPLY)}), decisions
 
-    def handle(
+    def handle(self, event: Event, *, image_data_urls=None, persist_event=True, commit_guard=None):
+        ReactionExecutionRepository.require_independent_boundary(self.store)
+        if persist_event:
+            event = self.store.append_event(event)
+        elif event.id is None:
+            raise ValueError("persist_event=False requires an already persisted event id")
+        source_ref = FactRef(kind="EVENT", id=event.id)
+        actual = self.store.get_event(source_ref.id)
+        if (actual is None or actual.character_id != event.character_id
+                or actual.event_type != event.event_type or actual.content != event.content
+                or epoch_us(actual.event_time) != epoch_us(event.event_time)
+                or actual.metadata.get("conversation_id") != event.metadata.get("conversation_id")):
+            raise ValueError("reaction source does not match its authoritative fact")
+        if commit_guard is not None and not commit_guard():
+            raise SupersededReaction(f"reaction for source event {event.id} was superseded before claim")
+        work = self.execution_receipts.claim(source_ref, event.character_id,
+            legacy_check=lambda: self.store.get_runtime_trace(event.id) is not None)
+        if work.result is not None:
+            try:
+                cached = RuntimeResult.model_validate(work.result)
+                if (cached.event.id != event.id or cached.event.character_id != event.character_id
+                        or cached.event.content != event.content or cached.event.event_type != event.event_type
+                        or cached.event.metadata.get("conversation_id") != event.metadata.get("conversation_id")
+                        or epoch_us(cached.event.event_time) != epoch_us(event.event_time)
+                        or any(item.character_id != event.character_id for item in cached.recalled_memories)):
+                    raise ValueError("cached cognition identity mismatch")
+            except ValueError as exc:
+                raise ExecutionUnavailable("CORRUPT_RESULT") from exc
+            return cached.model_copy(update={"replayed": True})
+        try:
+            return self._handle_claimed_event(event, image_data_urls=image_data_urls,
+                persist_event=False, commit_guard=commit_guard, execution=work)
+        except BaseException as exc:
+            self.execution_receipts.fail(work, exc, superseded=isinstance(exc, SupersededReaction))
+            raise
+
+    def _handle_claimed_event(
         self,
         event: Event,
         *,
         image_data_urls: list[str] | None = None,
         persist_event: bool = True,
         commit_guard: Callable[[], bool] | None = None,
+        execution=None,
     ):
         started = time.perf_counter()
         timings: dict[str, float] = {}
@@ -516,6 +563,10 @@ class PersonRuntime:
         )
 
         conversation_id = str(event.metadata.get("conversation_id") or f"{event.character_id}:default")
+        def begin_model():
+            if commit_guard is not None and not commit_guard():
+                raise SupersededReaction(f"reaction for source event {event.id} superseded before model")
+            self.execution_receipts.begin_model(execution)
         evaluation = evaluate_reaction(
             self,
             event=event,
@@ -526,6 +577,7 @@ class PersonRuntime:
             allow_generate_image=not direct_visual_permission(event, store=self.store),
             allow_call_invite=self._call_available(event),
             context_suffix=self.research_service.prompt(event) if self.research_service else '',
+            before_model=begin_model,
         )
         research_info = None
         if self.research_service is not None:
@@ -745,6 +797,10 @@ class PersonRuntime:
                         },
                     )
                 )
+                result = RuntimeResult(event=event, recalled_memories=memories, reaction=reaction,
+                    context=context, mental_state_before=state_before, created_memory_ids=created_memory_ids,
+                    created_intent_ids=created_intent_ids, timings=timings)
+                self.execution_receipts.commit(execution, result.model_dump(mode="json"))
         except SupersededReaction:
             timings["persist_ms"] = _ms(stage)
             timings["runtime_total_ms"] = _ms(started)

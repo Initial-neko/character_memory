@@ -70,3 +70,103 @@ class MessageReceiptRepository:
         with self.store.transaction(immediate=True):
             self.store.conn.execute("UPDATE message_acceptance_receipts SET dispatch=? WHERE scope=? AND request_id=? AND dispatch='RECORDED'",
                 (state, namespace, request_id))
+
+
+class ExecutionUnavailable(RuntimeError):
+    """A source has no safely repeatable execution at the requested version."""
+    def __init__(self, state: str):
+        self.state = state
+        super().__init__(f"reaction execution is {state}; automatic replay is not allowed")
+
+
+@dataclass
+class ReactionClaim:
+    source: FactRef
+    character_id: str
+    version: str
+    token: str | None
+    result: dict | None = None
+
+
+class ReactionExecutionRepository:
+    """Per-Person cognition receipts owned beside message acceptance receipts.
+
+    PREPARING is distinct from the irreversible model-call boundary. B1 does
+    not reclaim an abandoned owner; durable handoff/recovery is the next layer.
+    """
+    def __init__(self, store):
+        self.store = store
+        def migrate():
+            store.conn.execute("""CREATE TABLE conversation_reaction_receipts(
+                source_ref_json TEXT NOT NULL, character_id TEXT NOT NULL,
+                reaction_version TEXT NOT NULL, state TEXT NOT NULL,
+                owner_token TEXT NOT NULL, result_json TEXT, error_kind TEXT,
+                PRIMARY KEY(source_ref_json,character_id,reaction_version))""")
+        store.apply_schema_migration("conversation/002-reaction-execution", migrate, immediate=True)
+
+    @staticmethod
+    def require_independent_boundary(store):
+        # _tx_depth is connection-wide. Acquire the RLock before interpreting
+        # it as this caller's transaction rather than another thread's work.
+        with store._lock:
+            if store._tx_depth:
+                raise RuntimeError("reaction execution cannot run inside a caller transaction")
+
+    @staticmethod
+    def _key(claim):
+        return (claim.source.model_dump_json(), claim.character_id, claim.version)
+
+    def claim(self, source: FactRef, character_id: str, *, version="1", legacy_check=None):
+        self.require_independent_boundary(self.store)
+        from uuid import uuid4
+        work = ReactionClaim(source, character_id, version, uuid4().hex)
+        with self.store.transaction(immediate=True):
+            row = self.store.conn.execute("SELECT * FROM conversation_reaction_receipts "
+                "WHERE source_ref_json=? AND character_id=? AND reaction_version=?", self._key(work)).fetchone()
+            if row is not None:
+                if row["state"] == "COMMITTED":
+                    try:
+                        result = json.loads(row["result_json"])
+                        if not isinstance(result, dict):
+                            raise ValueError("invalid result")
+                    except (ValueError, TypeError) as exc:
+                        raise ExecutionUnavailable("CORRUPT_RESULT") from exc
+                    return ReactionClaim(source, character_id, version, None, result)
+                if row["state"] != "FAILED_BEFORE_CALL":
+                    raise ExecutionUnavailable(row["state"])
+                self.store.conn.execute("UPDATE conversation_reaction_receipts SET state='PREPARING', "
+                    "owner_token=?,error_kind=NULL WHERE source_ref_json=? AND character_id=? AND reaction_version=?",
+                    (work.token, *self._key(work)))
+            else:
+                if legacy_check is not None and legacy_check():
+                    raise ExecutionUnavailable("LEGACY_TRACE_REQUIRES_RECONCILIATION")
+                self.store.conn.execute("INSERT INTO conversation_reaction_receipts VALUES(?,?,?,?,?,?,?)",
+                    (*self._key(work), "PREPARING", work.token, None, None))
+        return work
+
+    def begin_model(self, work):
+        self.require_independent_boundary(self.store)
+        with self.store.transaction(immediate=True):
+            changed = self.store.conn.execute("UPDATE conversation_reaction_receipts SET state='CALLING' "
+                "WHERE source_ref_json=? AND character_id=? AND reaction_version=? AND owner_token=? AND state='PREPARING'",
+                (*self._key(work), work.token)).rowcount
+            if changed != 1:
+                raise ExecutionUnavailable("LOST_OWNER")
+
+    def commit(self, work, result: dict):
+        with self.store._lock:
+            if self.store._tx_depth <= 0:
+                raise RuntimeError("cognition and its receipt must share the caller transaction")
+            changed = self.store.conn.execute("UPDATE conversation_reaction_receipts SET state='COMMITTED',result_json=? "
+                "WHERE source_ref_json=? AND character_id=? AND reaction_version=? AND owner_token=? AND state='CALLING'",
+                (json.dumps(result, ensure_ascii=False), *self._key(work), work.token)).rowcount
+            if changed != 1:
+                raise ExecutionUnavailable("LOST_OWNER")
+
+    def fail(self, work, error, *, superseded=False):
+        with self.store.transaction(immediate=True):
+            self.store.conn.execute("UPDATE conversation_reaction_receipts SET state="
+                "CASE WHEN ? THEN 'SUPERSEDED' WHEN state='PREPARING' THEN 'FAILED_BEFORE_CALL' ELSE 'UNKNOWN' END, "
+                "error_kind=? WHERE source_ref_json=? AND character_id=? AND reaction_version=? "
+                "AND owner_token=? AND state IN ('PREPARING','CALLING')",
+                (int(superseded), type(error).__name__, *self._key(work), work.token))

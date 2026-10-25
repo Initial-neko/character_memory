@@ -515,12 +515,13 @@ class ReactionScheduler:
                             ) == watermark)
                         ),
                     )
-                self.publish_direct_responses(
-                    bundle.store,
-                    character_id,
-                    conversation_id,
-                    watermark,
-                )
+                if not result.replayed:
+                    self.publish_direct_responses(
+                        bundle.store,
+                        character_id,
+                        conversation_id,
+                        watermark,
+                    )
                 self.hub.publish(
                     channel,
                     "reaction_complete",
@@ -579,6 +580,8 @@ class ReactionScheduler:
                     return self._latest_group_user_id(service, conversation_id) == watermark
 
                 def member_done(decision: dict) -> None:
+                    if decision.get("replayed"):
+                        return
                     for raw_event in decision.get("emitted_events") or []:
                         self.hub.publish(channel, "group_character_event", raw_event)
                         if self.voice_materializer is not None and (raw_event.get("metadata") or {}).get("action") == "VOICE_MESSAGE":

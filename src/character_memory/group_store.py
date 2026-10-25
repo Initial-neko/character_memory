@@ -507,6 +507,13 @@ class GroupRepository:
             self.store._maybe_commit()
             return cur.rowcount > 0
 
+    def get_event(self, conversation_id: str, event_id: int) -> GroupEvent | None:
+        """Read an exact internal fact; caller owns participant authorization."""
+        with self.store._lock:
+            row = self.store.conn.execute("SELECT * FROM conversation_events WHERE id=? AND conversation_id=?",
+                (event_id, conversation_id)).fetchone()
+            return self._event_from_row(row) if row is not None else None
+
     @staticmethod
     def read_source_fact(store, conversation_id: str, event_id: int,
                          character_id: str, *, turn_id: str | None = None) -> GroupEvent | None:

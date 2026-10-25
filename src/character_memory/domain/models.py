@@ -393,6 +393,7 @@ class PersonReaction(BaseModel):
 
 
 class RuntimeResult(BaseModel):
+    replayed: bool = False
     event: Event
     recalled_memories: list[Memory]
     reaction: PersonReaction

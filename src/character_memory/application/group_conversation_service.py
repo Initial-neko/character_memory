@@ -7,13 +7,31 @@ import time
 from typing import Callable
 from uuid import uuid4
 
+from pydantic import BaseModel, Field
+
 from character_memory.application.action_materialization import materialize_expressive_action
 from character_memory.application.incoming_message import normalize_user_fact
-from character_memory.domain.models import ActionType, Event, EventType, Memory
+from character_memory.domain.facts import FactRef
+from character_memory.storage.message_receipts import ExecutionUnavailable, ReactionExecutionRepository
+from character_memory.time_utils import epoch_us
+from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory
 from character_memory.group_store import GroupEvent, GroupRepository, MAX_GROUP_CHARACTERS
 from character_memory.runtime.reaction_engine import evaluate_reaction
 from character_memory.live2d_behavior import behavior_metadata
 from character_memory.visual_runtime import direct_visual_available
+
+
+class _MemberResult(BaseModel):
+    character_id: str
+    actions: list[ActionDecision] = Field(max_length=3)
+    emitted_event_ids: list[int]
+    emitted_events: list[GroupEvent]
+    created_memory_ids: list[int]
+    perception: str
+    reaction: str
+    model_ms: float
+    explicitly_mentioned: bool
+    autonomous: bool
 
 
 logger = logging.getLogger("character_memory.application.group")
@@ -365,7 +383,48 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             return self.chat_service._lock_for(character_id)
         return threading.RLock()
 
-    def _react_member(
+    def _react_member(self, *, group, source_event, character_id, image_data_urls=None,
+                      commit_guard=None, mentioned_ids=None, autonomous=False, autonomous_phase=""):
+        ReactionExecutionRepository.require_independent_boundary(self.store)
+        source_ref = FactRef(kind="CONVERSATION_EVENT", id=source_event.id, conversation_id=group.id)
+        actual = self.repo.get_event(group.id, source_ref.id)
+        if (actual is None or actual.turn_id != source_event.turn_id or actual.content != source_event.content
+                or actual.actor_type != source_event.actor_type or actual.actor_id != source_event.actor_id
+                or actual.event_type != source_event.event_type
+                or epoch_us(actual.event_time) != epoch_us(source_event.event_time)):
+            raise ValueError("reaction source does not match its authoritative shared fact")
+        if commit_guard is not None and not commit_guard():
+            raise SupersededGroupReaction("group reaction superseded before claim")
+        runtime = self.runtimes[character_id]
+        receipts = runtime.execution_receipts
+        def legacy():
+            return self.store.conn.execute("SELECT 1 FROM conversation_runtime_traces "
+                "WHERE conversation_id=? AND turn_id=? AND source_conversation_event_id=? AND character_id=?",
+                (group.id, source_event.turn_id, source_event.id, character_id)).fetchone() is not None
+        work = receipts.claim(source_ref,
+            character_id, legacy_check=legacy)
+        if work.result is not None:
+            try:
+                cached = _MemberResult.model_validate(work.result)
+                if (cached.character_id != character_id
+                        or cached.emitted_event_ids != [item.id for item in cached.emitted_events]
+                        or any(item.actor_type != "CHARACTER" or item.actor_id != character_id
+                               or item.conversation_id != group.id
+                               or item.metadata.get("source_conversation_event_id") != source_event.id
+                               for item in cached.emitted_events)):
+                    raise ValueError("cached cognition identity mismatch")
+            except ValueError as exc:
+                raise ExecutionUnavailable("CORRUPT_RESULT") from exc
+            return {**cached.model_dump(mode="json"), "replayed": True}
+        try:
+            return self._react_member_claimed(group=group, source_event=source_event, character_id=character_id,
+                image_data_urls=image_data_urls, commit_guard=commit_guard, mentioned_ids=mentioned_ids,
+                autonomous=autonomous, autonomous_phase=autonomous_phase, execution=work)
+        except BaseException as exc:
+            receipts.fail(work, exc, superseded=isinstance(exc, SupersededGroupReaction))
+            raise
+
+    def _react_member_claimed(
         self,
         *,
         group,
@@ -376,6 +435,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         mentioned_ids: list[str] | None = None,
         autonomous: bool = False,
         autonomous_phase: str = "",
+        execution=None,
     ) -> dict:
         runtime = self.runtimes[character_id]
         started = time.perf_counter()
@@ -417,6 +477,10 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "live2d": source_event.metadata.get("live2d"),
                 },
             )
+            def begin_model():
+                if commit_guard is not None and not commit_guard():
+                    raise SupersededGroupReaction("group reaction superseded before model")
+                runtime.execution_receipts.begin_model(execution)
             evaluation = evaluate_reaction(
                 runtime,
                 event=synthetic,
@@ -441,6 +505,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 # User-triggered Group turns may use the same visual tool as
                 # Direct. Autonomous opportunities intentionally cannot.
                 allow_generate_image=(not autonomous and direct_visual_available()),
+                before_model=begin_model,
             )
             context = evaluation.context
             model_call = evaluation.model_call
@@ -581,6 +646,19 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     "total_ms": _ms(started),
                 }
                 self.repo.add_trace(group.id, source_event.turn_id, character_id, int(source_event.id), now, trace)
+                decision = {
+                    "character_id": character_id,
+                    "actions": [action.model_dump(mode="json") for action in reaction.actions],
+                    "emitted_event_ids": [event.id for event in emitted_events],
+                    "emitted_events": [event.model_dump(mode="json") for event in emitted_events],
+                    "created_memory_ids": created_memory_ids,
+                    "perception": reaction.perception,
+                    "reaction": reaction.reaction,
+                    "model_ms": model_ms,
+                    "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
+                    "autonomous": bool(autonomous),
+                }
+                runtime.execution_receipts.commit(execution, decision)
 
             generation_action = next(
                 (action for action in reaction.actions if action.type == ActionType.GENERATE_IMAGE),
@@ -618,18 +696,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                 model_ms,
                 _ms(started),
             )
-            return {
-                "character_id": character_id,
-                "actions": [action.model_dump(mode="json") for action in reaction.actions],
-                "emitted_event_ids": [event.id for event in emitted_events],
-                "emitted_events": [event.model_dump(mode="json") for event in emitted_events],
-                "created_memory_ids": created_memory_ids,
-                "perception": reaction.perception,
-                "reaction": reaction.reaction,
-                "model_ms": model_ms,
-                "explicitly_mentioned": "*" in (mentioned_ids or []) or character_id in (mentioned_ids or []),
-                "autonomous": bool(autonomous),
-            }
+            return decision
 
     def react_autonomous(
         self,

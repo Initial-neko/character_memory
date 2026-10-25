@@ -49,6 +49,7 @@ def evaluate_reaction(
     allow_generate_image: bool = False,
     allow_call_invite: bool = False,
     capabilities=None,
+    before_model: Callable[[], None] | None = None,
 ) -> ReactionEvaluation:
     """Run the shared Recall -> Context -> Model -> resource-sanitize pipeline."""
 
@@ -139,6 +140,8 @@ def evaluate_reaction(
     if image_data_urls:
         purpose = f"{purpose}_VISION"
 
+    if before_model is not None:
+        before_model()
     stage = time.perf_counter()
     with presentation_scope(event), llm_usage_scope(
         feature=feature,

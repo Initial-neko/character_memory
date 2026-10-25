@@ -70,6 +70,10 @@ class EvalRunner:
             criteria = case.get("review_criteria", [])
             if not isinstance(criteria, list) or any(not isinstance(item, str) for item in criteria):
                 raise ValueError("review_criteria must be a list of strings")
+            if "messages_equal" in case:
+                expected = case["messages_equal"]
+                if not isinstance(expected, list) or any(not isinstance(item, str) for item in expected):
+                    raise ValueError("messages_equal must be a list of strings")
             event = Event(
                 character_id=character_id,
                 event_type=EventType(case.get("event_type", "USER_MESSAGE")),
@@ -100,6 +104,8 @@ class EvalRunner:
                 ok = ok and len(messages) <= int(case["max_messages"])
             ok = ok and all(text in joined for text in case.get("message_contains", []))
             ok = ok and all(text not in joined for text in case.get("message_not_contains", []))
+            if "messages_equal" in case:
+                ok = ok and messages == case["messages_equal"]
             if case.get("require_safe_summary"):
                 ok = ok and bool(out.reaction.perception.strip()) and bool(out.reaction.reaction.strip())
             if "min_memory_writes" in case:

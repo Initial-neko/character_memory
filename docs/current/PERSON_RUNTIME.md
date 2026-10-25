@@ -166,6 +166,13 @@ quotation is a separate question. Missing details are unknown, not evidence that
 an arrangement was never decided. These boundaries also apply to derived candidates.
 
 
+The compatible Provider also places the source-fidelity boundary before
+character-style instructions in the PersonReaction system message (including
+presentation subclasses). Source modality applies to both outward actions and
+safe summaries; an explicit request to repeat wording permits no extra characters
+or follow-up. Other structured schemas and the supplied Persona/context remain
+unchanged. This adds no extra reaction, retry or output-rewriting filter.
+
 This is a model-facing instruction in the existing single reaction call, not a
 semantic verifier or a guarantee that all provider output is factual. Runtime
 permissions and durable execution receipts remain server-enforced; live review

@@ -117,3 +117,50 @@ def test_legacy_case_keeps_output_shape_and_needs_no_fixture_interface(tmp_path)
     result=EvalRunner(ResourceEvalRuntime()).run_jsonl(path)[0]
     assert result['pass'] is True and result['actions']==['IMAGE']
     assert 'seed_event_ids' not in result and 'review_required' not in result
+
+
+@pytest.mark.parametrize('actual,expected,passed', [
+    (['先听我说完，再一起想办法'], ['先听我说完，再一起想办法'], True),
+    (['先听我说完，再一起想办法。'], ['先听我说完，再一起想办法'], False),
+    ([' 先听我说完，再一起想办法'], ['先听我说完，再一起想办法'], False),
+    (['先听我说完，再一起想办法\n'], ['先听我说完，再一起想办法'], False),
+    (['先听我说完，再一起想办法', '一字不差'], ['先听我说完，再一起想办法'], False),
+    ([], ['先听我说完，再一起想办法'], False),
+    (['second', 'first'], ['first', 'second'], False),
+    (['first\nsecond'], ['first', 'second'], False),
+    ([], [], True),
+])
+def test_messages_equal_checks_exact_message_sequence(tmp_path, actual, expected, passed):
+    from types import SimpleNamespace
+    from character_memory.domain.models import ActionDecision, ActionType
+    from test_review_regressions import FakeEvalStore
+
+    class ReplayRuntime:
+        store = FakeEvalStore()
+        def handle(self, event):
+            return SimpleNamespace(event=event.model_copy(update={'id': 1}),
+                # Isolate EvalRunner comparison from ActionDecision's upstream trimming.
+                reaction=PersonReaction.model_construct(actions=[ActionDecision.model_construct(type=ActionType.MESSAGE, message=text) for text in actual]),
+                recalled_memories=[], created_memory_ids=[], context='')
+
+    path=tmp_path/'exact.jsonl'
+    path.write_text(json.dumps({'id':'exact','event_time':NOW.isoformat(),'content':'repeat',
+        'messages_equal':expected}), encoding='utf-8')
+    assert EvalRunner(ReplayRuntime()).run_jsonl(path)[0]['pass'] is passed
+
+
+@pytest.mark.parametrize('expected', [None, 'not-a-list', ['text', 42], {}])
+def test_invalid_messages_equal_fails_before_reaction_or_fixture_writes(tmp_path, expected):
+    store=SQLiteStore(tmp_path/'invalid-exact.db')
+    embeddings=DeterministicEmbedding()
+    model=RecordingModel()
+    runtime=PersonRuntime(store,VectorRecall(store,embeddings),embeddings,model,'persona')
+    path=tmp_path/'invalid-exact.jsonl'
+    path.write_text(json.dumps({'id':'invalid','event_time':NOW.isoformat(),'content':'repeat',
+        'messages_equal':expected,'seed_events':[{'event_time':NOW.isoformat(),'content':'source'}]}),encoding='utf-8')
+    try:
+        with pytest.raises(ValueError,match='messages_equal'):
+            EvalRunner(runtime).run_jsonl(path)
+        assert not model.prompts and store.list_events('rin')==[]
+    finally:
+        store.close()

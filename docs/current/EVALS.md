@@ -127,7 +127,17 @@ Optional `review_criteria` is a list of semantic checks copied into results with
 `review_required`. The existing `pass` field only reports mechanical assertions;
 nonempty review criteria remain pending until the actual output is separately
 reviewed. Known forbidden phrases detect specific regressions but cannot prove
-all paraphrases factual. Review must distinguish preference/plan from completed
+all paraphrases factual. Optional `messages_equal` validates the complete ordered
+message-text list exactly (including punctuation, whitespace and extra messages),
+without additional stripping or Unicode normalization. This compares the runtime
+result; upstream ActionDecision normalization may already have trimmed provider
+text, so it does not establish byte equality of the raw provider response. `[]`
+expects no message text, not
+necessarily silence from media actions. Invalid non-list/non-string expectations
+fail before fixture writes or reactions. Existing cases without this key retain
+substring checks. The visible-quotation case uses strict equality because the user
+requested the original wording, while open-ended conversation still requires
+semantic review. Review must distinguish preference/plan from completed
 action, invented quotation from sourced quotation, and overcautious denial from
 appropriate acknowledgement of an explicit user report.
 

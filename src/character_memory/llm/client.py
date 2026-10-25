@@ -630,6 +630,17 @@ class OpenAICompatibleModel(PersonModel):
                         logical_call_id=logical_call_id,
                     ),
                 )
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                # Connection establishment failed before the request was sent.
+                # Share the existing total attempt budget with schema repair;
+                # do not replay uncertain read/write failures or close a client
+                # that concurrent calls may still be using.
+                if attempt_number >= self.attempts:
+                    raise
+                logger.warning(
+                    "provider.structured_call connection_retry attempt=%d/%d error_type=%s",
+                    attempt_number, self.attempts, type(exc).__name__,
+                )
             except (json.JSONDecodeError, ValidationError, KeyError, TypeError, ValueError) as exc:
                 last_error = exc
                 last_text = attempt_text

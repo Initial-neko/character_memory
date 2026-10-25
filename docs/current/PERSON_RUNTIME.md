@@ -153,6 +153,19 @@ explicit Persona history, actual participated events or sourced observations;
 user stories and RSS examples cannot become the character's own experiences.
 The same distinction applies to cognitive and future-intent candidates.
 
+Preferences, wishes, plans and conditional scenarios retain their original
+certainty: wanting to do something does not establish past performance, repeated
+habit or a result. Memory is a derived summary, not automatically a verbatim
+quote. With no visible original wording the Person paraphrases faithfully and
+does not invent attributed quotes, motives or outcomes. Explicitly sourced
+completion may still be stated as completed, and visible original wording may
+be quoted accurately; the rule must not force denial of known facts or rote
+confirmation questions. Current user-provided wording is itself a source for
+current quotation and does not require a matching old Memory; confirming a past
+quotation is a separate question. Missing details are unknown, not evidence that an action did not happen or
+an arrangement was never decided. These boundaries also apply to derived candidates.
+
+
 This is a model-facing instruction in the existing single reaction call, not a
 semantic verifier or a guarantee that all provider output is factual. Runtime
 permissions and durable execution receipts remain server-enforced; live review

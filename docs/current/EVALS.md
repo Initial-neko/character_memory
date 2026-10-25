@@ -99,6 +99,38 @@ Eval 使用临时 SQLite，不污染正式人物数据。
 
 注意：结构规则只能验证可观察 contract。Persona 是否真的像某个人物仍需要盲评或未来 Judge Model，不能靠关键词断言。
 
+### Memory modality suite
+
+`evals/memory_modality.jsonl` adds four complementary cases: a remembered
+preference, an unexecuted agreement, an explicitly reported completed fact and
+visible original wording. Run it through the same CLI and isolated temporary
+SQLite as other JSONL suites:
+
+```bash
+uv run character-memory eval evals/memory_modality.jsonl
+```
+
+Cases may opt into `seed_events`: each source specifies `event_time`, `content`,
+optional `event_type` (default USER_MESSAGE), `metadata` and `memories`.
+Each derived memory supplies `content`, optional `memory_type` (default EPISODIC)
+and `importance` (default 0.5). The runner computes embeddings before writes,
+then atomically imports each source and its memories with the case's character,
+source event ID/time and `eval_fixture=true`. No extra character reaction is
+purchased for seeds; embedding still uses the configured provider and may incur
+its normal cost. Fixtures are synthetic test data, not actual user history.
+Results expose `seed_event_ids` and `seed_memory_ids` for provenance checks.
+Existing cases without seeds keep their original path. Cases run in file order
+and share their character's temporary history, so fixture authors must avoid
+unintended cross-case facts or choose explicitly configured separate characters.
+
+Optional `review_criteria` is a list of semantic checks copied into results with
+`review_required`. The existing `pass` field only reports mechanical assertions;
+nonempty review criteria remain pending until the actual output is separately
+reviewed. Known forbidden phrases detect specific regressions but cannot prove
+all paraphrases factual. Review must distinguish preference/plan from completed
+action, invented quotation from sourced quotation, and overcautious denial from
+appropriate acknowledgement of an explicit user report.
+
 ## 3. Engineering regression layers
 
 ### Pytest

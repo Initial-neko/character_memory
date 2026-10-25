@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from character_memory.domain.models import EXPRESSIVE_ACTIONS, Event, EventType
+from character_memory.domain.models import EXPRESSIVE_ACTIONS, Event, EventType, Memory
 
 
 class EvalRunner:
@@ -24,6 +24,42 @@ class EvalRunner:
             return self.runtime[character_id]
         return self.runtime
 
+    @staticmethod
+    def _seed_events(runtime, character_id, seeds):
+        """Import explicit synthetic fixtures, without buying extra reactions."""
+        if not isinstance(seeds, list):
+            raise ValueError("seed_events must be a list")
+        event_ids, memory_ids = [], []
+        for seed in seeds:
+            if not isinstance(seed, dict):
+                raise ValueError("each seed_event must be an object")
+            event = Event(
+                character_id=character_id,
+                event_type=EventType(seed.get("event_type", "USER_MESSAGE")),
+                event_time=datetime.fromisoformat(seed["event_time"]),
+                content=seed["content"],
+                metadata={**seed.get("metadata", {}), "eval_fixture": True},
+            )
+            # Embed before any write/transaction. A failed embedding leaves no
+            # partial source fixture and cannot hold SQLite's write lock.
+            specs = seed.get("memories", [])
+            if not isinstance(specs, list) or any(not isinstance(spec, dict) for spec in specs):
+                raise ValueError("seed memories must be a list of objects")
+            memories = [Memory(
+                character_id=character_id, content=spec["content"],
+                memory_type=spec.get("memory_type", "EPISODIC"),
+                event_time=event.event_time, importance=spec.get("importance", .5),
+                embedding=runtime.embeddings.embed(spec["content"]),
+                metadata={"eval_fixture": True},
+            ) for spec in specs]
+            with runtime.store.transaction():
+                source = runtime.store.append_event(event)
+                ids = [runtime.store.add_memory(memory.model_copy(update={"source_event_id": source.id})).id
+                       for memory in memories]
+            event_ids.append(source.id)
+            memory_ids.extend(ids)
+        return event_ids, memory_ids
+
     def run_jsonl(self, path):
         results = []
         for line in Path(path).read_text(encoding="utf-8").splitlines():
@@ -31,6 +67,9 @@ class EvalRunner:
                 continue
             case = json.loads(line)
             character_id = case.get("character_id", "rin")
+            criteria = case.get("review_criteria", [])
+            if not isinstance(criteria, list) or any(not isinstance(item, str) for item in criteria):
+                raise ValueError("review_criteria must be a list of strings")
             event = Event(
                 character_id=character_id,
                 event_type=EventType(case.get("event_type", "USER_MESSAGE")),
@@ -39,6 +78,7 @@ class EvalRunner:
                 metadata={"conversation_id": case.get("conversation_id", f"eval:{character_id}")},
             )
             runtime = self._runtime_for(character_id)
+            seed_ids, seed_memory_ids = self._seed_events(runtime, character_id, case.get("seed_events", []))
             out = runtime.handle(event)
             actions = list(out.reaction.actions)
             action_types = [action.type.value for action in actions]
@@ -88,4 +128,8 @@ class EvalRunner:
                     "memory_decisions": (trace or {}).get("memory_decisions", []),
                 }
             )
+            if "seed_events" in case:
+                results[-1].update(seed_event_ids=seed_ids, seed_memory_ids=seed_memory_ids)
+            if "review_criteria" in case:
+                results[-1].update(review_required=bool(criteria), review_criteria=criteria)
         return results

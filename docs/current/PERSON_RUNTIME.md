@@ -535,6 +535,19 @@ The server remains authoritative: illegal channel actions are discarded with
 `DROP_WRONG_CHANNEL` in runtime trace decisions. This does not disable the
 separate existing World Pulse public-comment workflow or expand media rights.
 
+### Recent experience window
+
+Shared PersonContextBuilder reads exclude known local reaction ACTION receipts
+(non-null `trace_id`) before applying the recent-event limit. Explicitly supplied
+channel events apply the same filter before truncation. Real
+`fact_kind=ROLE_COLLABORATION_MESSAGE` ACTION projections remain experiences,
+even if they carry a trace reference. Unknown historical ACTIONs are retained;
+the runtime does not guess missing provenance. Character/time boundaries,
+chronological ordering and current-event exclusion still apply. Default store
+reads retain all receipts for audit; this projection neither deletes facts nor
+adds model calls. Direct, Space and World reuse this window; supplied Group
+conversation facts keep their existing visibility.
+
 ### Observed-experience context projection
 
 The shared PersonContextSnapshot now carries `observed_events` separately from

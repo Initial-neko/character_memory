@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from character_memory.domain.models import Event, Memory
+from character_memory.domain.models import Event, EventType, Memory
 from character_memory.time_utils import epoch_us
 
 
@@ -42,12 +42,24 @@ class PersonContextBuilder:
     ) -> PersonContextSnapshot:
         memories = self.recall.recall(character_id, str(query or "").strip() or "recent personal context", now=at)
         if recent_events is None:
-            recent = self.store.list_events(character_id, limit=max(1, recent_limit + 2), before=at)
+            recent = self.store.list_events(
+                character_id, limit=max(1, recent_limit + 2), before=at,
+                exclude_reaction_receipts=True,
+            )
             if exclude_event_id is not None:
                 recent = [item for item in recent if item.id != exclude_event_id]
             recent = recent[-recent_limit:]
         else:
-            recent = [item for item in recent_events if epoch_us(item.event_time) <= epoch_us(at) and (exclude_event_id is None or item.id != exclude_event_id)][-recent_limit:]
+            recent = [
+                item for item in recent_events
+                if not (
+                    item.event_type == EventType.ACTION
+                    and item.metadata.get("trace_id") is not None
+                    and item.metadata.get("fact_kind") != "ROLE_COLLABORATION_MESSAGE"
+                )
+                and epoch_us(item.event_time) <= epoch_us(at)
+                and (exclude_event_id is None or item.id != exclude_event_id)
+            ][-recent_limit:]
         observed = self.store.recall_observed_events(character_id, query, at=at, projection=observed_projection)
         return PersonContextSnapshot(
             persona=self.persona,

@@ -2,6 +2,10 @@
 
 Character Memory is an experimental project under active development. Contributions should keep the repository easy to run, test, and understand from the current tree rather than from historical implementation notes.
 
+## AI Development Loop
+
+Follow [AI Development Loop V1.0](.agents/skills/ai-development-loop/SKILL.md) for requirement evaluation, reuse research, planning, implementation and acceptance. Complete the rationale and open-source investigation before an implementation Plan and Ready Issue. Issues own the plan, scope and acceptance evidence; PRs own the implementation and verification results. Applicable real-runtime frontend interaction/visual checks, backend API checks and unit tests must all pass before delivery; human experience acceptance remains separate.
+
 ## Development setup
 
 Requirements:

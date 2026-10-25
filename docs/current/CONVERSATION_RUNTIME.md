@@ -104,10 +104,19 @@ States are PREPARING, CALLING, COMMITTED, FAILED_BEFORE_CALL, UNKNOWN and
 SUPERSEDED. The model-call boundary changes PREPARING to CALLING before the
 provider is invoked. Execution/claim/model entry reject a caller-owned DB
 transaction, so this stage cannot remain uncommitted during a provider call.
-Only a confirmed pre-call failure can be explicitly retried;
-an existing PREPARING/CALLING owner or UNKNOWN result is not automatically
-reclaimed. This layer has no abandoned-owner lease takeover yet. Newer user
-watermarks are checked before the call and at commit; stale work is SUPERSEDED.
+A confirmed pre-call failure permits explicit retry. New PREPARING claims have a
+server epoch-time deadline controlled by `reaction_preparation_lease_seconds`
+(default 120, range 1–3600, runtime restart required; configuration-file only).
+An expired PREPARING claim may be replaced atomically with a new owner token.
+The old owner cannot enter CALLING, commit, or overwrite the replacement's state;
+model entry also refuses an expired deadline even before another owner arrives.
+CALLING/UNKNOWN never become retryable because time passed. Legacy PREPARING
+rows without deadlines require reconciliation. Wall-clock rollback delays takeover
+rather than permitting it; event timestamps and simulation clocks do not control
+this deadline. A new claimant must still validate source, scope and current guard.
+This permits safe explicit recovery; it does not introduce a durable queue or
+startup scan. Newer user watermarks are checked before the call and at commit;
+stale work is SUPERSEDED.
 
 Mental State, Memory/Intent, visible events, trace and COMMITTED result receipt
 share one transaction. Failure rolls back all cognition effects while retaining
@@ -129,7 +138,10 @@ B2 adds durable delivery and aggregate status; B1 alone does not close W2.
 production HTTP Direct/Group text/image reactions with a local fixed provider,
 then terminates an actual API process while one provider response is withheld.
 A fresh process reuses committed cognition and refuses the interrupted call;
-counts and core-state hashes must not change. Paid models and formal data are
+counts and core-state hashes must not change. A separate preparation worker is
+terminated before model entry; after its real server-time deadline, a fresh
+runtime recovers once, caches the result and rejects the old owner. Paid models
+and formal data are
 not used; this proves execution boundaries, not model quality or queue recovery.
 
 

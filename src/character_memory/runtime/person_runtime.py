@@ -100,7 +100,7 @@ def _cosine(left: list[float], right: list[float]) -> float | None:
 
 
 class PersonRuntime:
-    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None, image_catalog=None, *, intent_policy: IntentPolicy | None = None, call_policy: CallInvitationPolicy | None = None):
+    def __init__(self, store, recall, embeddings, model, persona: str, sticker_catalog=None, image_catalog=None, *, intent_policy: IntentPolicy | None = None, call_policy: CallInvitationPolicy | None = None, reaction_preparation_lease_seconds: float = 120.0):
         self.store = store
         self.recall = recall
         self.embeddings = embeddings
@@ -112,6 +112,7 @@ class PersonRuntime:
         self.call_policy = call_policy or CallInvitationPolicy()
         self._call_invitations = None
         self._execution_receipts = None
+        self.reaction_preparation_lease_seconds = reaction_preparation_lease_seconds
         self.research_service = None
         self.sticker_retriever = StickerRetriever(embeddings)
         self.context_builder = PersonContextBuilder(store, recall, persona)
@@ -119,7 +120,7 @@ class PersonRuntime:
     @property
     def execution_receipts(self):
         if self._execution_receipts is None:
-            self._execution_receipts = ReactionExecutionRepository(self.store)
+            self._execution_receipts = ReactionExecutionRepository(self.store, preparation_lease_seconds=self.reaction_preparation_lease_seconds)
         return self._execution_receipts
 
     def _active_memory_duplicate(self, character_id: str, content: str, embedding):

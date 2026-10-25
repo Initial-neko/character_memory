@@ -141,6 +141,7 @@ def build_app_from_settings(settings: Settings, *, clock: Clock | None = None, s
                 image_by_id[character_id],
                 intent_policy=intent_policy,
                 call_policy=CallInvitationPolicy.from_settings(settings),
+                reaction_preparation_lease_seconds=getattr(settings, "reaction_preparation_lease_seconds", 120.0),
             )
             for character_id, persona in persona_by_id.items()
         }

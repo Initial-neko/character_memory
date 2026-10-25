@@ -122,6 +122,88 @@ def replay(config):
     print(json.dumps({"results": results}, ensure_ascii=False))
 
 
+def preparation_worker(config, *, recover=False):
+    from character_memory.app import build_app_from_settings
+    from character_memory.config import load_settings
+    from character_memory.domain.models import Event, EventType
+    from character_memory.domain.facts import FactRef
+    from character_memory.storage.message_receipts import ExecutionUnavailable, ReactionClaim
+    bundle = build_app_from_settings(load_settings(str(config)))
+    marker = config.with_suffix(".preparation.json")
+    try:
+        person = bundle.chat.runtime["momo"]
+        if not recover:
+            event = bundle.store.append_event(Event(character_id="momo", event_type=EventType.USER_MESSAGE,
+                event_time=datetime.now(timezone.utc), content="模型前中断后只恢复一次",
+                metadata={"conversation_id": "preparation-recovery"}))
+            ref = FactRef(kind="EVENT", id=event.id)
+            claim = person.execution_receipts.claim(ref, "momo")
+            deadline = bundle.store.conn.execute("SELECT preparation_deadline FROM conversation_reaction_receipts "
+                "WHERE source_ref_json=? AND character_id='momo'", (ref.model_dump_json(),)).fetchone()[0]
+            pending_marker = marker.with_suffix(".tmp")
+            pending_marker.write_text(json.dumps({"source_id": event.id, "token": claim.token, "deadline": deadline}), encoding="utf-8")
+            pending_marker.replace(marker)
+            while True:
+                time.sleep(.1)
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        event = bundle.store.get_event(data["source_id"])
+        result = person.handle(event, persist_event=False)
+        assert not result.replayed
+        before = snapshot(config.parent / "accept.db")
+        assert person.handle(event, persist_event=False).replayed
+        assert snapshot(config.parent / "accept.db") == before
+        old = ReactionClaim(FactRef(kind="EVENT", id=event.id), "momo", "1", data["token"])
+        try:
+            person.execution_receipts.begin_model(old)
+        except ExecutionUnavailable as exc:
+            assert exc.state == "LOST_OWNER"
+        else:
+            raise AssertionError("old preparation owner was not fenced")
+        print(json.dumps({"source_id": event.id, "state": "COMMITTED", "replayed_without_writes": True,
+            "old_owner_fenced": True}))
+    finally:
+        bundle.close()
+
+
+def validate_preparation(config, folder, state):
+    settings = json.loads(config.read_text(encoding="utf-8"))
+    settings["reaction_preparation_lease_seconds"] = 1
+    config.write_text(json.dumps(settings), encoding="utf-8")
+    before_calls = state["calls"]
+    marker = config.with_suffix(".preparation.json")
+    with (folder / "preparation.log").open("ab") as log:
+        process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--prepare", str(config)],
+            cwd=folder, env=environment(folder), stdout=log, stderr=log)
+        try:
+            until = time.monotonic() + 30
+            while not marker.exists():
+                if process.poll() is not None:
+                    raise RuntimeError((folder / "preparation.log").read_text(encoding="utf-8", errors="replace"))
+                if time.monotonic() > until:
+                    raise TimeoutError("preparation claim was not persisted")
+                time.sleep(.05)
+            data = json.loads(marker.read_text(encoding="utf-8"))
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(timeout=5)
+    assert state["calls"] == before_calls
+    # Use the persisted real server-time deadline, not event/simulated time.
+    until = time.monotonic() + 5
+    while time.time() <= data["deadline"]:
+        if time.monotonic() > until:
+            raise TimeoutError("preparation lease did not expire")
+        time.sleep(.05)
+    recovered = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--recover-preparation", str(config)],
+        cwd=folder, env=environment(folder), capture_output=True, text=True, encoding="utf-8", timeout=40)
+    assert recovered.returncode == 0, recovered.stderr
+    result = json.loads(recovered.stdout.splitlines()[-1])
+    assert state["calls"] == before_calls + 1
+    return {**result, "terminated_pid": process.pid, "additional_provider_calls": 1}
+
+
 def validate(output):
     from character_memory.domain.facts import FactRef
     from character_memory.group_store import GroupRepository
@@ -216,6 +298,9 @@ def validate(output):
             assert before == after
             evidence.update(status="PASS", replay_results=results, provider_calls=state["calls"], snapshot=after)
             evidence["checks"].extend(["fresh_process_reuses_committed_cognition_without_calls_or_writes", "terminated_provider_inflight_worker_is_not_reexecuted"])
+            evidence["preparation_recovery"] = validate_preparation(config, folder, state)
+            evidence["provider_calls"] = state["calls"]
+            evidence["checks"].append("terminated_pre_model_worker_recovered_once_after_real_deadline")
     finally:
         release.set(); provider.shutdown(); provider.server_close()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -228,6 +313,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path)
     parser.add_argument("--serve", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--replay", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--prepare", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--recover-preparation", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.serve:
@@ -239,6 +326,10 @@ if __name__ == "__main__":
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
     elif args.replay:
         replay(args.replay)
+    elif args.prepare:
+        preparation_worker(args.prepare)
+    elif args.recover_preparation:
+        preparation_worker(args.recover_preparation, recover=True)
     else:
         if args.output is None:
             parser.error("--output is required")

@@ -1,6 +1,24 @@
 """Pure prompt composition: inputs are snapshots, never permission or tool owners."""
 from dataclasses import dataclass
 import json
+from datetime import datetime, timezone
+
+from character_memory.time_utils import aware_datetime
+
+
+def render_memory_lines(memories) -> str:
+    """Preserve Memory temporal provenance without inferring fact validity."""
+    lines = []
+    for memory in memories:
+        at = getattr(memory, 'event_time', None)
+        stamp = aware_datetime(at).astimezone(timezone.utc).isoformat() if isinstance(at, datetime) else 'unknown'
+        source = getattr(memory, 'source_event_id', None)
+        source = source if type(source) is int and source > 0 else 'unknown'
+        lines.append(f'- [{memory.memory_type}] [memory_event_time={stamp} source_event_id={source}] {memory.content}')
+    if not lines:
+        return '- 无'
+    return ('时间锚点是记忆关联事件时间，不等同于内容中每件事的实际发生时间或有效期限；'
+            '旧记忆中的“今天/明天”不能直接当作本轮日期，unknown 不推测。\n' + '\n'.join(lines))
 
 
 @dataclass(frozen=True)

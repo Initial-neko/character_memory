@@ -3,6 +3,9 @@ from character_memory.live2d_behavior import bind_presentation
 
 import asyncio
 from datetime import datetime
+from typing import Annotated
+from pydantic import Field
+from character_memory.storage.message_receipts import MessageReceiptRepository, ReceiptConflict
 import json
 import os
 import logging
@@ -22,6 +25,17 @@ from character_memory.group_store import GroupRepository
 from character_memory.group_web import GroupChatRequest
 from character_memory.message_projection import upload_caption
 from character_memory.web_lifecycle import background_services
+
+
+MessageRequestId = Annotated[str, Field(strict=True, min_length=1, max_length=128, pattern=r"\S")]
+
+
+class AsyncChatRequest(ChatRequest):
+    request_id: MessageRequestId | None = None
+
+
+class AsyncGroupChatRequest(GroupChatRequest):
+    request_id: MessageRequestId | None = None
 
 
 logger = logging.getLogger("character_memory.async_web")
@@ -200,8 +214,7 @@ def attach_async_routes(app):
             "turn_summary": None,
         }
 
-    @app.post("/v1/chat/messages", status_code=202)
-    def accept_direct_message(req: ChatRequest):
+    def persist_direct_message(req: AsyncChatRequest, rollback_callbacks=None):
         ensure_character(req.character_id)
         selected_sticker = sticker_for(req.sticker_id)
         store = active_store()
@@ -224,6 +237,8 @@ def attach_async_routes(app):
                     data_url=req.image.data_url,
                     created_at=now,
                 )
+                if rollback_callbacks is not None:
+                    rollback_callbacks.append(lambda: access.media_storage.delete(asset))
                 store.add_media_asset(asset)
                 selected_image = asset.model_dump(mode="json")
             except ValueError as exc:
@@ -247,26 +262,28 @@ def attach_async_routes(app):
                 event.content, reference = prepare_life_message(store, req.life_reference, req.message, character_id=req.character_id, conversation_id=req.conversation_id)
                 event.metadata["life_reference"] = reference
             event = store.append_event(event)
-        scheduler.enqueue_direct(
-            req.character_id,
-            req.conversation_id,
-            event,
-            image_data_url=image_data_url,
-        )
-        logger.info(
-            "async.accept direct character=%s conversation=%s event_id=%s",
-            req.character_id,
-            req.conversation_id,
-            event.id,
-        )
-        return {
+        response = {
             "accepted": True,
             "event_id": event.id,
             "message": direct_user_payload(event, selected_image),
         }
 
-    @app.post("/v1/groups/{conversation_id}/messages", status_code=202)
-    def accept_group_message(conversation_id: str, req: GroupChatRequest):
+        def dispatch():
+            scheduler.enqueue_direct(
+                req.character_id,
+                req.conversation_id,
+                event,
+                image_data_url=image_data_url,
+            )
+            logger.info(
+                "async.accept direct character=%s conversation=%s event_id=%s",
+                req.character_id,
+                req.conversation_id,
+                event.id,
+            )
+        return response, dispatch
+
+    def persist_group_message(conversation_id: str, req: AsyncGroupChatRequest, rollback_callbacks=None):
         store = active_store()
         repository = GroupRepository(store)
         group = repository.get_group(conversation_id)
@@ -298,6 +315,8 @@ def attach_async_routes(app):
                     data_url=req.image.data_url,
                     created_at=now,
                 )
+                if rollback_callbacks is not None:
+                    rollback_callbacks.append(lambda: access.media_storage.delete(asset))
                 store.add_media_asset(asset)
                 selected_image = asset.model_dump(mode="json")
             except ValueError as exc:
@@ -325,14 +344,72 @@ def attach_async_routes(app):
                 store.delete_media_asset(asset.id)
                 access.media_storage.delete(asset)
             raise HTTPException(status_code=404, detail="group not found") from exc
-        scheduler.enqueue_group(conversation_id, event, image_data_url=image_data_url)
-        logger.info("async.accept group conversation=%s event_id=%s mentions=%s", conversation_id, event.id, mentions)
-        return {
+        response = {
             "accepted": True,
             "event_id": event.id,
             "turn_id": event.turn_id,
             "message": group_user_payload(event, selected_image),
         }
+
+        def dispatch():
+            scheduler.enqueue_group(conversation_id, event, image_data_url=image_data_url)
+            logger.info("async.accept group conversation=%s event_id=%s mentions=%s", conversation_id, event.id, mentions)
+        return response, dispatch
+
+    def accept_message(scope, req, persist, *, source_kind, conversation_id=None):
+        if req.request_id is None:
+            response, dispatch = persist(None)
+            dispatch()
+            return response
+        store = active_store()
+        repository = MessageReceiptRepository(store)
+        cleanup, dispatches = [], []
+        def create():
+            response, dispatch = persist(cleanup)
+            dispatches.append(dispatch)
+            return response
+        try:
+            accepted = repository.accept(scope, req.request_id,
+                req.model_dump(mode="json", exclude={"request_id"}), create,
+                source_kind=source_kind, conversation_id=conversation_id)
+        except BaseException as exc:
+            for rollback in cleanup:
+                try:
+                    rollback()
+                except OSError:
+                    logger.exception("async.accept media rollback failed")
+            if isinstance(exc, ReceiptConflict):
+                raise HTTPException(409, str(exc)) from exc
+            raise
+        if accepted.created:
+            try:
+                dispatches[0]()
+            except BaseException:
+                repository.mark_dispatch(scope, req.request_id, "UNKNOWN")
+                raise
+            repository.mark_dispatch(scope, req.request_id, "ENQUEUED")
+            accepted.dispatch = "ENQUEUED"
+        return {**accepted.response, "request_receipt": {
+            "request_id": req.request_id, "replayed": not accepted.created,
+            "acceptance": "ACCEPTED", "dispatch": accepted.dispatch,
+            "execution": "NOT_TRACKED",
+        }}
+
+    @app.post("/v1/chat/messages", status_code=202)
+    def accept_direct_message(req: AsyncChatRequest):
+        ensure_character(req.character_id)
+        return accept_message(["DIRECT", req.character_id, req.conversation_id], req,
+            lambda cleanup: persist_direct_message(req, cleanup), source_kind="EVENT")
+
+    @app.post("/v1/groups/{conversation_id}/messages", status_code=202)
+    def accept_group_message(conversation_id: str, req: AsyncGroupChatRequest):
+        # Group schema must be initialized outside the fact+receipt transaction.
+        group = GroupRepository(active_store()).get_group(conversation_id)
+        if group is None:
+            raise HTTPException(404, "group not found")
+        return accept_message(["GROUP", conversation_id], req,
+            lambda cleanup: persist_group_message(conversation_id, req, cleanup),
+            source_kind="CONVERSATION_EVENT", conversation_id=conversation_id)
 
     @app.get("/v1/events/stream")
     async def event_stream(

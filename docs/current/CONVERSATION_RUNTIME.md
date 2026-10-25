@@ -55,6 +55,42 @@ POST /v1/visual/groups/{conversation_id}/messages
 
 用户已经发送的事实不等待 LLM 完成。
 
+### Optional durable message acceptance keys
+
+`POST /v1/chat/messages` and `POST /v1/groups/{id}/messages` accept an optional
+strict nonblank `request_id` (at most 128 characters). It is defined only on the
+async request schemas. Without a key the existing independent-send behavior and
+response are unchanged. Current WebUI does not yet send keys.
+
+A key is scoped to the existing local operator and Direct character/conversation
+or Group conversation. The validated payload fingerprint excludes the key and
+server-generated time/IDs. Same key/payload returns the original accepted source;
+a changed valid payload returns 409 before writing media/facts or dispatching.
+Two processes serialize acceptance in SQLite; source and receipt commit together.
+The stored response is a derived acceptance projection, not another fact owner.
+Staged attachment files are removed on ordinary acceptance rollback.
+
+Keyed responses add `request_receipt`: acceptance=ACCEPTED, replayed, the request
+ID and the last confirmed dispatch stage. RECORDED means fact+receipt committed;
+ENQUEUED only means the in-memory scheduler accepted handoff; UNKNOWN records a
+failed/ambiguous handoff. Execution is explicitly NOT_TRACKED. Replays never
+re-enqueue or call a provider, including across restarts. A receipt with a missing
+source fails rather than creating a replacement. These stages do not prove
+model completion or restart recovery; a RECORDED/UNKNOWN task is not auto-retried.
+
+This is W2 A only. Durable dispatch recovery, per-character execution/derived
+commit receipts and client retry-key integration remain W2 B/C. A crash during
+attachment staging can still leave an orphan file; this is not an exactly-once
+external-effects claim. No key is claimed for Visual Capture or legacy sync APIs.
+
+Repeat real isolated HTTP checks with
+`python scripts/validate_message_receipts.py --output <evidence.json>`.
+It uses production Direct/Group routes, temporary personas/SQLite, a local fixed
+provider and two API processes; text/image retries keep four facts, two media
+assets and six known provider calls. This checks acceptance counts, not model
+quality, durable execution recovery or visual acceptance.
+
+
 Character reaction 由 `ReactionScheduler` 异步处理，通过 SSE 推给前端。
 
 Visual Capture 是例外中的“transient payload”：Camera/Screen frame bytes 不作为普通聊天附件持久化，只把必要 metadata 写进 Event，并把 image data URLs 传给本轮模型 Vision context。

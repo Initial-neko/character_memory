@@ -70,6 +70,7 @@ src/character_memory/
 
 ### `storage/`
 
+- `message_receipts.py` — Direct/Group async持久接受键、来源引用与最后确认的队列交接阶段；不声明模型执行完成。
 - `sqlite.py` — core tables、migration ledger、Event/Memory/Trace/Intent/Media persistence。
 - `chat_history.py` — direct history read model。
 - `message_search.py` — direct/group durable message search repository helpers。

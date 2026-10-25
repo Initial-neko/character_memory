@@ -229,9 +229,8 @@ class SpaceAutonomyService:
             recent_limit=16,
             observed_projection="PUBLIC",
         )
-        memory_text = "\n".join(
-            f"- [{item.memory_type}] {item.content}" for item in person_context.memories
-        ) or "- 无"
+        from character_memory.runtime.prompt_parts import render_memory_lines
+        memory_text = render_memory_lines(person_context.memories)
         event_text = "\n".join(
             f"- {item.event_time.isoformat()} {item.event_type.value}: {item.content}"
             for item in person_context.recent_events

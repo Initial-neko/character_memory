@@ -162,6 +162,8 @@ score = 0.70 * semantic
 - re-embed 先完成批量向量计算并校验数量，再在一个事务中写入；写入失败会回滚整批，不留下部分重建结果；
 - Recall 结果只是 Context，不等于人物必须在回复中提起它。
 
+Direct/Group 的 Relationship/Recalled Memory，以及 Space/World 的记忆投影使用同一纯渲染函数，保留每条 Memory 的 `event_time` 和 `source_event_id`。时间输出为显式 UTC；旧 naive 时间沿用既有按 UTC 解释的约定。缺失时间或来源标为 `unknown`，不使用本轮时间回填。该时间是 Memory 关联事件的时间锚点，不能推定内容中每件事发生于此时、仍然有效，或把旧内容的“今天/明天”直接解释为当前日期。此投影不修改 Memory、来源事实、召回顺序/数量，也不新增模型调用。
+
 ### Bounded candidate set
 
 长期运行不再在每一轮把该 Character 的全部 active Memory BLOB 解包并做 NumPy cosine。SQLite 构造近期、高重要性和显式固定记忆的候选并集：

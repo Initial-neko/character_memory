@@ -4,7 +4,7 @@ from datetime import timezone
 import json
 
 from character_memory.domain.models import Event, EventType
-from character_memory.runtime.prompt_parts import PromptParts, render_capabilities
+from character_memory.runtime.prompt_parts import PromptParts, render_capabilities, render_memory_lines
 
 
 def _event_channel(event) -> str:
@@ -113,8 +113,8 @@ def compile_context_parts(
 ) -> PromptParts:
     relationship = [m for m in memories if m.memory_type.upper() in {"USER", "SHARED"}]
     other = [m for m in memories if m not in relationship]
-    relationship_text = "\n".join(f"- [{m.memory_type}] {m.content}" for m in relationship) or "- 无"
-    recalled = "\n".join(f"- [{m.memory_type}] {m.content}" for m in other) or "- 无"
+    relationship_text = render_memory_lines(relationship)
+    recalled = render_memory_lines(other)
     recent = (
         "\n".join(_recent_event_text(e) for e in (recent_events or []))
         or "- 无"

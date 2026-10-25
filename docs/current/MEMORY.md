@@ -176,14 +176,18 @@ Direct/Group 的 Relationship/Recalled Memory，以及 Space/World 的记忆投�
 ```text
 recent active memories      <= 768
 highest-importance memories <= 256
+recall-only USER/SHARED supplement <= 256 (highest importance, then newest)
 all eligible pinned memories (no count cap)
                      ↓ de-duplicate by id
-vector ranking working set  <= 1024 + eligible pinned count
+recall vector working set   <= 1280 + eligible pinned count
+admission working set       <= 1024 + eligible pinned count (no supplement)
 ```
 
-“highest importance”分支保证很老但重要的 Memory 不会仅因时间久就从候选集消失。全部有效固定记忆都会参加排序，重复 ID 只保留一次；大量固定会增加计算开销，固定并不保证全部进入最终 Context（默认最多召回 8 条）。最终候选仍使用 semantic + recency + importance + pinned 公式排序。没有语义最低阈值，相似度为零的记忆仍可能因新近性或重要性入选。
+“highest importance”分支保证很老但重要的 Memory 不会仅因时间久就从候选集消失。全部有效固定记忆都会参加排序，重复 ID 只保留一次；大量固定会增加计算开销，固定并不保证全部进入最终 Context（默认最多召回 8 条）。Recall 单独请求一个最多 256 条 USER/SHARED 的候选分支，沿用同人物、active 与 event_time 屏障；默认 store 读取及 admission 不请求此分支。该有界分支让旧关系记忆不必与 Space 动态争同一个候选名额，但不能保证所有历史关系记忆永远在候选集内。
 
-Admission 的 exact duplicate 另走 SQLite 全 active 精确文本查询，以与运行时一致的 Unicode `strip().casefold()` 规则比较，因此一条很老的完全相同 Memory 即使不在 vector shortlist 中，也不会重复写入。Semantic near-duplicate 检查只对 bounded candidate set 做 cosine。
+评分公式不变。对于本次候选中稳定排序的语义 top-K（K 为本次返回上限），最多保护其中两条 cosine > 0 的 USER/SHARED，其余位置按原综合 score 补满，最终仍按 score 输出，条数不增加。仅有关系类型但语义名次未达前 K 的条目不受保护；零 query 向量也不触发保护。固定记忆继续保留原加分，不等于必定入选。这里使用相对语义名次，不新增模型相关的固定余弦阈值；仍没有全局语义最低阈值，因此没有相关记忆时也可能返回不相关条目，不能把该策略当成已校准的相关性判断。
+
+Admission 的 exact duplicate 另走 SQLite 全 active 精确文本查询，以与运行时一致的 Unicode `strip().casefold()` 规则比较，因此一条很老的完全相同 Memory 即使不在 vector shortlist 中，也不会重复写入。Semantic near-duplicate 检查只对原 bounded candidate set 做 cosine，不启用 Recall 专用的关系候选补充或位置保护。
 
 这不是 ANN，也不是最终长期记忆算法；它只是用低复杂度改动限制非固定记忆的每轮 Python/NumPy 工作量；显式固定记忆数量仍会增加工作量。是否引入 sqlite-vec/FAISS/专用向量库仍由长期 benchmark 决定。
 

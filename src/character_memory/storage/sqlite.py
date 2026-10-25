@@ -756,17 +756,20 @@ class SQLiteStore:
         at: datetime | None = None,
         recent_limit: int = 768,
         important_limit: int = 256,
+        relationship_limit: int = 0,
     ) -> list[Memory]:
         """Bound vector work without introducing a vector database.
 
         Candidate recall keeps the most recent active memories plus the
         highest-importance memories (including old ones), plus all eligible
-        pinned memories. Unpinned candidates are bounded; explicit pins can
-        increase BLOB unpacking/cosine work beyond that bound.
+        pinned memories. Recall can request a bounded USER/SHARED supplement;
+        the default admission working set stays unchanged. Explicit pins can
+        increase BLOB unpacking/cosine work beyond the unpinned bound.
         """
 
         recent_limit = max(1, int(recent_limit))
         important_limit = max(1, int(important_limit))
+        relationship_limit = max(0, int(relationship_limit))
         with self._lock:
             where = "character_id=? AND active=1 AND event_time_epoch IS NOT NULL"
             args: list = [character_id]
@@ -790,7 +793,14 @@ class SQLiteStore:
                 args,
             ).fetchall()
 
-            rows = {int(row["id"]): row for row in [*recent, *important, *pinned]}
+            relationships = []
+            if relationship_limit:
+                relationships = self.conn.execute(
+                    f"SELECT * FROM memories WHERE {where} AND UPPER(memory_type) IN ('USER','SHARED') "
+                    "ORDER BY importance DESC,event_time_epoch DESC,id DESC LIMIT ?",
+                    [*args, relationship_limit],
+                ).fetchall()
+            rows = {int(row["id"]): row for row in [*recent, *important, *pinned, *relationships]}
             ordered = sorted(
                 rows.values(),
                 key=lambda row: (int(row["event_time_epoch"] or 0), int(row["id"])),

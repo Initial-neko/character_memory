@@ -27,7 +27,7 @@ class VectorRecall:
         pinned = []
         candidate_loader = getattr(self.store, "list_memory_candidates", None)
         if callable(candidate_loader):
-            source_memories = candidate_loader(character_id, at=n)
+            source_memories = candidate_loader(character_id, at=n, relationship_limit=256)
         else:
             source_memories = self.store.list_memories(character_id)
         for memory in source_memories:
@@ -59,5 +59,17 @@ class VectorRecall:
             + 0.12 * np.asarray(pinned, dtype=np.float32)
         )
         count = min(limit or self.limit, len(memories))
-        order = np.argsort(-scores, kind="stable")[:count]
-        return [memories[int(index)] for index in order]
+        score_order = np.argsort(-scores, kind="stable")
+        # Type alone is not relevance: protect only relationships already among
+        # this query's semantic top-K. No model-dependent absolute threshold.
+        semantic_order = np.argsort(-semantic, kind="stable")[:count]
+        protected = [
+            int(index) for index in semantic_order
+            if semantic[index] > 0 and memories[int(index)].memory_type.upper() in {"USER", "SHARED"}
+        ][:min(2, count)]
+        selected = set(protected)
+        for index in score_order:
+            if len(selected) >= count:
+                break
+            selected.add(int(index))
+        return [memories[int(index)] for index in score_order if int(index) in selected]

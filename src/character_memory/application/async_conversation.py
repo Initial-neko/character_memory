@@ -149,6 +149,7 @@ class _PendingState:
     pending_since: float | None = None
     last_submit_at: float = 0.0
     active: bool = False
+    generation: int = 0
     last_activity: float = field(default_factory=time.monotonic)
 
 
@@ -177,6 +178,8 @@ class ReactionScheduler:
         self.quiet_seconds = quiet_seconds
         self.max_burst_seconds = max_burst_seconds
         self.voice_materializer = voice_materializer
+        self.delivery = None
+        self._workers: set[threading.Thread] = set()
         self._guard = threading.Lock()
         self._states: dict[str, _PendingState] = {}
         # Group locks stay strongly owned because a raw RLock has no explicit
@@ -260,6 +263,7 @@ class ReactionScheduler:
         now = time.monotonic()
         should_start = False
         queued_watermark = 0
+        worker_generation = 0
         incoming_id = int(event.id)
         urls = [str(value).strip() for value in (image_data_urls or []) if str(value).strip()]
         with state.condition:
@@ -304,11 +308,30 @@ class ReactionScheduler:
             queued_watermark = int(state.latest_event.id) if state.latest_event is not None else incoming_id
             if not state.active and queued_watermark > state.processed_id:
                 state.active = True
+                state.generation += 1
+                worker_generation = state.generation
                 should_start = True
             state.condition.notify_all()
         self.hub.publish(key, "reaction_status", {"state": "queued", "watermark": queued_watermark})
         if should_start:
-            threading.Thread(target=target, args=(key, state), daemon=True, name=f"reaction-{key[:32]}").start()
+            def run():
+                try:
+                    target(key, state)
+                finally:
+                    with self._guard:
+                        self._workers.discard(threading.current_thread())
+                    with state.condition:
+                        if state.generation == worker_generation:
+                            state.active = False
+                            state.condition.notify_all()
+            worker = threading.Thread(target=run, daemon=True, name=f"reaction-{key[:32]}")
+            with self._guard:
+                if self._closed.is_set():
+                    with state.condition:
+                        state.active = False
+                    return False
+                self._workers.add(worker)
+                worker.start()
         return True
 
     @staticmethod
@@ -345,6 +368,7 @@ class ReactionScheduler:
         *,
         image_data_url: str | None = None,
         image_data_urls: list[str] | None = None,
+        only_if_idle: bool = False,
     ) -> None:
         key = group_channel(conversation_id)
         self._enqueue(
@@ -352,6 +376,7 @@ class ReactionScheduler:
             event,
             self._image_urls(image_data_url, image_data_urls),
             lambda channel, state: self._run_group(channel, state, conversation_id),
+            only_if_idle=only_if_idle,
         )
 
     @staticmethod
@@ -488,6 +513,15 @@ class ReactionScheduler:
                 state.pending_since = time.monotonic()
             state.condition.notify_all()
 
+    def prepare_recovery(self, channel, event_id):
+        state = self._state(channel)
+        with state.condition:
+            if state.active:
+                return False
+            state.processed_id = min(state.processed_id, event_id - 1)
+            state.latest_event = None
+            return True
+
     def _run_direct(self, channel: str, state: _PendingState, character_id: str, conversation_id: str) -> None:
         while not self._closed.is_set():
             snapshot = self._snapshot_after_quiet(state)
@@ -496,25 +530,31 @@ class ReactionScheduler:
             event, watermark, image_urls, _mentions = snapshot
             self.hub.publish(channel, "reaction_status", {"state": "typing", "watermark": watermark})
             superseded = False
+            batch = None
+            cycle_error = None
             try:
                 bundle = self.get_bundle()
+                if self.delivery is not None:
+                    batch, persisted_urls = self.delivery.begin(event, kind="EVENT", bundle=bundle)
+                    if batch is not None:
+                        image_urls = persisted_urls
                 runtime = bundle.runtimes[character_id]
+                def current():
+                    durable = self.delivery is None or self.delivery.guard(batch, character_id)
+                    latest = (self._latest_direct_visual_source_id(bundle.store, character_id, conversation_id)
+                        if event.event_type.value == "VISUAL_OBSERVATION"
+                        else self._latest_direct_user_id(bundle.store, character_id, conversation_id))
+                    return durable and not self._closed.is_set() and latest == watermark
                 with bundle.chat._lock_for(character_id):
                     bundle.store.set_world_time(character_id, event.event_time)
                     result = runtime.handle(
                         event,
                         image_data_urls=image_urls or None,
                         persist_event=False,
-                        commit_guard=(
-                            (lambda: self._latest_direct_visual_source_id(
-                                bundle.store, character_id, conversation_id
-                            ) == watermark)
-                            if event.event_type.value == "VISUAL_OBSERVATION"
-                            else (lambda: self._latest_direct_user_id(
-                                bundle.store, character_id, conversation_id
-                            ) == watermark)
-                        ),
+                        commit_guard=current,
                     )
+                if self.delivery is not None:
+                    self.delivery.finish(batch)
                 if not result.replayed:
                     self.publish_direct_responses(
                         bundle.store,
@@ -537,9 +577,12 @@ class ReactionScheduler:
                 logger.info("scheduler.direct superseded character=%s conversation=%s watermark=%s", character_id, conversation_id, watermark)
                 self.hub.publish(channel, "reaction_status", {"state": "superseded", "watermark": watermark})
             except Exception as exc:
+                cycle_error = exc
                 logger.exception("scheduler.direct failed character=%s conversation=%s", character_id, conversation_id)
                 self.hub.publish(channel, "reaction_error", {"watermark": watermark, "message": str(exc)})
 
+            if self.delivery is not None and batch is not None:
+                self.delivery.finish(batch, superseded=superseded, error=cycle_error)
             if superseded:
                 self._retry_superseded(state)
                 continue
@@ -560,6 +603,8 @@ class ReactionScheduler:
             event, watermark, image_urls, mentions = snapshot
             self.hub.publish(channel, "reaction_status", {"state": "typing", "watermark": watermark})
             superseded = False
+            batch = None
+            cycle_error = None
             try:
                 bundle = self.get_bundle()
                 service = GroupConversationService(
@@ -575,9 +620,16 @@ class ReactionScheduler:
                 # the config surface (HOT_APPLY_FIELDS only covers TTS).
                 # Mentioned members always participate regardless.
                 max_speakers = effective_group_speaker_limit(bundle.settings)
+                if self.delivery is not None:
+                    batch, persisted_urls = self.delivery.begin(event, kind="CONVERSATION_EVENT", bundle=bundle,
+                        service=service, max_speakers=max_speakers)
+                    if batch is not None:
+                        image_urls = persisted_urls
+                        mentions = batch.snapshot["mentions"]
 
                 def current() -> bool:
-                    return self._latest_group_user_id(service, conversation_id) == watermark
+                    return ((self.delivery is None or self.delivery.guard(batch)) and not self._closed.is_set()
+                        and self._latest_group_user_id(service, conversation_id) == watermark)
 
                 def member_done(decision: dict) -> None:
                     if decision.get("replayed"):
@@ -606,7 +658,14 @@ class ReactionScheduler:
                         on_member=member_done,
                         mention_order=mentions,
                         max_speakers=max_speakers,
+                        frozen_plan=batch.snapshot["plan"] if batch is not None else None,
+                        member_guard=(lambda person: self.delivery.guard(batch, person, conversation_id=conversation_id))
+                            if batch is not None else None,
                     )
+                if any(decision.get("error") for decision in result.get("decisions", [])):
+                    cycle_error = RuntimeError("group member did not complete")
+                if self.delivery is not None:
+                    self.delivery.finish(batch, error=cycle_error)
                 self.hub.publish(
                     channel,
                     "reaction_complete",
@@ -632,9 +691,12 @@ class ReactionScheduler:
                 logger.info("scheduler.group superseded conversation=%s watermark=%s", conversation_id, watermark)
                 self.hub.publish(channel, "reaction_status", {"state": "superseded", "watermark": watermark, "turn_id": event.turn_id})
             except Exception as exc:
+                cycle_error = exc
                 logger.exception("scheduler.group failed conversation=%s", conversation_id)
                 self.hub.publish(channel, "reaction_error", {"watermark": watermark, "turn_id": event.turn_id, "message": str(exc)})
 
+            if self.delivery is not None and batch is not None:
+                self.delivery.finish(batch, superseded=superseded, error=cycle_error)
             if superseded:
                 self._retry_superseded(state)
                 continue
@@ -650,3 +712,10 @@ class ReactionScheduler:
         for state in states:
             with state.condition:
                 state.condition.notify_all()
+        # Providers own bounded request timeouts. Keep the shared SQLite store
+        # alive until all model callbacks have observed shutdown and exited.
+        with self._guard:
+            workers = list(self._workers)
+        for worker in workers:
+            if worker is not threading.current_thread():
+                worker.join()

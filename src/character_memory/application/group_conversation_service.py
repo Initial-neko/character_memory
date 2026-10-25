@@ -546,7 +546,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             created_memory_ids: list[int] = []
             emitted_events: list[GroupEvent] = []
 
-            with self.store.transaction():
+            with self.store.transaction(immediate=True):
                 if commit_guard is not None and not commit_guard():
                     raise SupersededGroupReaction(
                         f"group reaction for source event {source_event.id} was superseded"
@@ -823,16 +823,7 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             "message_count": min(len(emitted), cap),
         }
 
-    def react_from_event(
-        self,
-        source_event: GroupEvent,
-        *,
-        image_data_urls: list[str] | None = None,
-        commit_guard: Callable[[], bool] | None = None,
-        on_member: Callable[[dict], None] | None = None,
-        mention_order: list[str] | None = None,
-        max_speakers: int | None = None,
-    ) -> dict:
+    def plan_reaction(self, source_event, *, mention_order=None, max_speakers=None):
         group = self.repo.get_group(source_event.conversation_id)
         if group is None:
             raise KeyError(f"unknown group: {source_event.conversation_id}")
@@ -863,6 +854,33 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             keep_unmentioned = unmentioned[:allowance]
             deferred_speaker_ids = unmentioned[allowance:]
             ordered = list(explicit_mentions) + keep_unmentioned
+        return {"speaker_order": ordered, "explicit_mentions": explicit_mentions,
+            "mentions": mentions, "deferred_speaker_ids": deferred_speaker_ids, "max_speakers": max_speakers}
+
+    def react_from_event(
+        self,
+        source_event: GroupEvent,
+        *,
+        image_data_urls: list[str] | None = None,
+        commit_guard: Callable[[], bool] | None = None,
+        on_member: Callable[[dict], None] | None = None,
+        mention_order: list[str] | None = None,
+        max_speakers: int | None = None,
+        frozen_plan: dict | None = None,
+        member_guard: Callable[[str], bool] | None = None,
+    ) -> dict:
+        group = self.repo.get_group(source_event.conversation_id)
+        if group is None:
+            raise KeyError(f"unknown group: {source_event.conversation_id}")
+        plan = frozen_plan if frozen_plan is not None else self.plan_reaction(
+            source_event, mention_order=mention_order, max_speakers=max_speakers)
+        ordered = list(plan["speaker_order"])
+        explicit_mentions = list(plan["explicit_mentions"])
+        mentions = list(plan["mentions"])
+        deferred_speaker_ids = list(plan["deferred_speaker_ids"])
+        max_speakers = plan["max_speakers"]
+        if len(ordered) != len(set(ordered)) or len(ordered) > MAX_GROUP_CHARACTERS:
+            raise ValueError("invalid frozen reaction plan")
         logger.info(
             "group.reaction start conversation=%s source_event=%s order=%s mentions=%s deferred=%s max_speakers=%s",
             group.id,
@@ -879,12 +897,16 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     f"group reaction for source event {source_event.id} was superseded before {character_id}"
                 )
             try:
+                def current_member(character_id=character_id):
+                    if member_guard is not None and not member_guard(character_id):
+                        raise PermissionError("group member scope changed")
+                    return commit_guard is None or commit_guard()
                 decision = self._react_member(
                     group=group,
                     source_event=source_event,
                     character_id=character_id,
                     image_data_urls=image_data_urls,
-                    commit_guard=commit_guard,
+                    commit_guard=current_member,
                     mentioned_ids=explicit_mentions,
                 )
             except SupersededGroupReaction:

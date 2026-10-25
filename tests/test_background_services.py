@@ -24,6 +24,7 @@ WORKERS_IN_START_ORDER = [
     "space_autonomy",
     "encounter_scheduler",
     "async_reactions",
+    "reaction_delivery",
     "group_autonomy",
     "wake_loop",
 ]

@@ -73,13 +73,18 @@ Staged attachment files are removed on ordinary acceptance rollback.
 Keyed responses add `request_receipt`: acceptance=ACCEPTED, replayed, the request
 ID and the last confirmed dispatch stage. RECORDED means fact+receipt committed;
 ENQUEUED only means the in-memory scheduler accepted handoff; UNKNOWN records a
-failed/ambiguous handoff. Execution is explicitly NOT_TRACKED. Replays never
-re-enqueue or call a provider, including across restarts. A receipt with a missing
+failed/ambiguous handoff. New-protocol execution reports PENDING, RUNNING,
+COGNITION_COMMITTED, SUPERSEDED, UNKNOWN or BLOCKED through the durable delivery
+owner below. Older receipts without a delivery remain NOT_TRACKED. Replaying an
+acceptance does not directly enqueue/call a provider; the delivery scanner owns
+safe recovery across restarts. A receipt with a missing
 source fails rather than creating a replacement. These stages do not prove
-model completion or restart recovery; a RECORDED/UNKNOWN task is not auto-retried.
+model completion. Dispatch UNKNOWN is separate from cognition UNKNOWN: a saved,
+not-yet-delivered new-protocol task can recover, while a provider outcome marked
+UNKNOWN is never blindly executed again.
 
-This acceptance surface is W2 A. The per-Person cognition receipt below is
-W2 B1; durable dispatch recovery and client retry-key integration remain B2/C.
+This acceptance surface is W2 A, per-Person cognition is B1/B2a and durable
+delivery below is B2b. C client retry-key integration remains unfinished.
 A crash during attachment staging can still leave an orphan file; this is not
 an exactly-once external-effects claim. No acceptance key is claimed for Visual
 Capture or legacy sync APIs.
@@ -91,6 +96,42 @@ provider and two API processes; text/image retries keep four facts, two media
 assets and six known provider calls. This checks acceptance counts, not model
 quality, durable execution recovery or visual acceptance.
 
+
+### Durable async delivery and frozen batches
+
+Async Direct/Group messages, including sends without a request key, commit their
+source FactRef and delivery projection together. No-key sends remain independent
+new facts. Media staging and input preparation happen before the short no-key
+fact/delivery transaction; normal failures remove the staged asset/file. Keyed
+acceptance retains its fingerprint/receipt transaction. Visual Capture and sync
+legacy routes are outside this protocol; old history is never scanned as jobs.
+
+The scheduler freezes each new target watermark before model entry: covered
+FactRefs, scoped media asset IDs, ordered mentions and the existing Group speaker
+plan (rotation, mention priority, limit and deferred members). Restart reuses the
+snapshot rather than recomputing it from changed settings/membership. Each actual
+member still rechecks current scope before calls and derived commits. Revocation,
+missing source/media or invalid snapshots are BLOCKED, never successful silence.
+Media is read through the existing MediaStorage; unavailable bytes are not replaced
+with text-only input. A newer target supersedes the old owner and carries pending
+images/mentions forward while preserving all original facts.
+
+Delivery uses atomic batch owner tokens and the formal preparation lease. The
+BackgroundServices scanner resumes only pending new-protocol work or expired
+batch ownership; an empty scan never initializes a model. Person receipts prevent
+repeating committed/unknown calls. If the batch lease expires before a later
+Person PREPARING lease, delivery defers to the Person deadline instead of dropping
+the task. Partial Group completion reuses committed members and retains unknown
+members as UNKNOWN; cognition is complete only when all planned people committed.
+Short derived transactions reserve the SQLite writer before scope/Memory reads,
+while provider calls remain outside transactions. Failures are not repaired by
+replaying an uncertain model request.
+
+At shutdown the scanner stops before scheduler workers, and workers exit before
+the shared store closes. Known safe pre-call work stays recoverable; interrupted
+calls remain conservative UNKNOWN. Delivery statuses describe cognition, not
+optional post-commit image/voice completion or human/visual acceptance. SSE IDs
+and buffers remain process-local; history reconciles missed publications.
 
 ### Per-Person cognition execution receipts
 
@@ -131,8 +172,9 @@ approved rollout must stop old writers before enabling this boundary.
 
 COMMITTED describes cognition, not completion of optional post-commit image,
 voice or other executor work. Their existing lifecycle/receipts still own those
-effects. Public acceptance receipts still report execution=NOT_TRACKED until
-B2 adds durable delivery and aggregate status; B1 alone does not close W2.
+effects. New async acceptance receipts report aggregate cognition delivery state;
+legacy receipts without a delivery remain NOT_TRACKED. Client integration and
+full product acceptance are still required before W2 closes.
 
 `python scripts/validate_reaction_receipts.py --output <evidence.json>` runs
 production HTTP Direct/Group text/image reactions with a local fixed provider,
@@ -668,13 +710,13 @@ Durable user fact
 
 当前 Scheduler/SSE hub 是进程内对象。
 
-SQLite 虽然 durable，但 pending reaction queue、SSE sequence 与 worker state 不跨进程共享。因此当前不要启用多个 Character Runtime app workers 期待自动获得正确 reaction scheduling。
+新协议 async 消息已有持久 delivery/批次及安全启动恢复，但 SSE sequence、通知缓冲和 scheduler 投影仍在进程内。因此当前仍不承诺多个 Character Runtime app workers 的完整调度与通知一致性。
 
-进程重启会丢失尚未完成的 reaction 工作及 transient image/frame payload；启动时没有自动扫描旧 User Event 并重新入队的恢复步骤。已接受的 User Event 仍可通过 history 查询，不能将 durable accept 理解为 restart-safe reaction job。当前 `Last-Event-ID` 重连可以补保留的通知，但不会重新执行丢失的 reaction。
+重启只扫描新协议待办及可安全领取的过期批次；不扫描旧 User Event 猜测工作。已进入 Provider 的未知调用不能盲重放。Visual Capture 的 transient image/frame payload 与未接入 delivery 的旧调用仍不具备此恢复保证。`Last-Event-ID` 不会重新调用模型，丢失通知仍通过 durable history 对账。
 
 真正需要 multi-worker/remote deployment 时，再设计：
 
-- durable queue
+- 跨 worker 的完整调度与 lease/通知语义
 - shared pub/sub
 - idempotent reaction jobs
 - cross-process watermark ownership

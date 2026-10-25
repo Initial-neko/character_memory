@@ -649,7 +649,7 @@ class PersonRuntime:
 
         stage = time.perf_counter()
         try:
-            with self.store.transaction():
+            with self.store.transaction(immediate=True):
                 # The guard is deliberately evaluated *inside* the SQLiteStore
                 # transaction lock. New user events cannot slip between this check
                 # and the derived-state commit. A stale model result therefore

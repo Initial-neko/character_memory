@@ -833,13 +833,9 @@ class WorldActivityService:
 
     @staticmethod
     def _memory_text(context, limit: int = 8) -> str:
+        from character_memory.runtime.prompt_parts import render_memory_lines
         memories = list(context.memories)[:limit]
-        if not memories:
-            return "- 无"
-        return "\n".join(
-            f"- [{item.memory_type}] {item.content}"
-            for item in memories
-        )
+        return render_memory_lines(memories)
 
     def refresh_pulse(self, *, now: datetime | None = None) -> dict:
         now = now or datetime.now().astimezone()

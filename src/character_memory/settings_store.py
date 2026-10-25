@@ -147,6 +147,7 @@ SETTING_LEVELS = ("common", "advanced", "diagnostic")
 DEFAULT_SETTING_LEVEL = "diagnostic"
 
 SETTING_HELP: dict[str, str] = {
+    "reaction_preparation_lease_seconds": "模型前准备的服务器时间租约，范围1–3600秒；只回收过期PREPARING，不重跑CALLING/UNKNOWN。重启运行时生效。",
     "base_url": "OpenAI-compatible LLM API 根地址。只有切换兼容服务或排查网络路由时才需要修改。",
     "chat_model": "主要文本模型 ID；Direct、Group、Space、World 等普通 LLM 调用默认使用它。",
     "vision_model": "视觉模型 ID。留空时复用 Chat Model；只有 Provider 要求独立视觉模型时才填写。",

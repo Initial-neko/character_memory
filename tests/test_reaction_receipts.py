@@ -308,7 +308,8 @@ def test_equal_core_and_group_ids_keep_distinct_cognition_receipts(tmp_path):
     store.close()
 
 
-def test_two_real_processes_cannot_call_provider_twice_for_one_fact(tmp_path):
+@pytest.mark.parametrize("expired_preparation", [False, True])
+def test_two_real_processes_cannot_call_provider_twice_for_one_fact(tmp_path, expired_preparation):
     import os
     from pathlib import Path
     import subprocess
@@ -317,6 +318,11 @@ def test_two_real_processes_cannot_call_provider_twice_for_one_fact(tmp_path):
     path = tmp_path / "processes.db"
     store = SQLiteStore(path)
     event = source(store)
+    if expired_preparation:
+        from character_memory.domain.facts import FactRef
+        from character_memory.storage.message_receipts import ReactionExecutionRepository
+        ReactionExecutionRepository(store, clock=lambda: time.time() - 121).claim(
+            FactRef(kind="EVENT", id=event.id), "momo")
     marker = tmp_path / "provider-calls.txt"
     script = """
 import json,sys,time
@@ -416,4 +422,153 @@ def test_other_threads_transaction_does_not_look_like_callers_transaction(tmp_pa
             release.set()
         held.result(timeout=5)
         assert result.result(timeout=5).created_memory_ids
+    store.close()
+
+# B2a: only an explicitly expired pre-model preparation can be reclaimed.
+def receipt_owner(store, now):
+    from character_memory.storage.message_receipts import ReactionExecutionRepository
+    return ReactionExecutionRepository(store, preparation_lease_seconds=10, clock=lambda: now[0])
+
+
+def receipt_source(store):
+    from character_memory.domain.facts import FactRef
+    return FactRef(kind="EVENT", id=source(store).id)
+
+
+def test_expired_preparation_changes_owner_and_fences_old_worker(tmp_path):
+    from character_memory.storage.message_receipts import ExecutionUnavailable
+    store = SQLiteStore(tmp_path / "lease.db")
+    now = [100.0]
+    first_repo = receipt_owner(store, now)
+    ref = receipt_source(store)
+    old = first_repo.claim(ref, "momo")
+    other = SQLiteStore(tmp_path / "lease.db")
+    second_repo = receipt_owner(other, now)
+    with pytest.raises(ExecutionUnavailable, match="PREPARING"):
+        second_repo.claim(ref, "momo")
+    now[0] = 110.0
+    new = second_repo.claim(ref, "momo")
+    assert old.token != new.token
+    with pytest.raises(ExecutionUnavailable, match="LOST_OWNER"):
+        first_repo.begin_model(old)
+    first_repo.fail(old, RuntimeError("stale worker"))
+    second_repo.begin_model(new)
+    with pytest.raises(ExecutionUnavailable, match="LOST_OWNER"):
+        with store.transaction():
+            first_repo.commit(old, {"old": True})
+    with other.transaction():
+        second_repo.commit(new, {"new": True})
+    assert second_repo.claim(ref, "momo").result == {"new": True}
+    other.close()
+    store.close()
+
+
+def test_expired_original_owner_cannot_start_even_without_a_takeover(tmp_path):
+    from character_memory.storage.message_receipts import ExecutionUnavailable
+    store = SQLiteStore(tmp_path / "late.db")
+    now = [100.0]
+    repo = receipt_owner(store, now)
+    work = repo.claim(receipt_source(store), "momo")
+    now[0] = 110.0
+    with pytest.raises(ExecutionUnavailable, match="LOST_OWNER"):
+        repo.begin_model(work)
+    store.close()
+
+
+@pytest.mark.parametrize("state", ["CALLING", "UNKNOWN", "SUPERSEDED"])
+def test_expiry_never_reclaims_known_call_or_terminal_state(tmp_path, state):
+    from character_memory.storage.message_receipts import ExecutionUnavailable
+    store = SQLiteStore(tmp_path / "unknown.db")
+    now = [100.0]
+    repo = receipt_owner(store, now)
+    ref = receipt_source(store)
+    work = repo.claim(ref, "momo")
+    repo.begin_model(work)
+    if state != "CALLING":
+        repo.fail(work, RuntimeError("provider interrupted"), superseded=state == "SUPERSEDED")
+    now[0] = 10000.0
+    with pytest.raises(ExecutionUnavailable, match=state):
+        repo.claim(ref, "momo")
+    store.close()
+
+
+def test_legacy_preparation_without_deadline_requires_reconciliation(tmp_path):
+    from character_memory.storage.message_receipts import ExecutionUnavailable
+    store = SQLiteStore(tmp_path / "legacy-lease.db")
+    now = [100.0]
+    repo = receipt_owner(store, now)
+    ref = receipt_source(store)
+    repo.claim(ref, "momo")
+    with store.transaction():
+        store.conn.execute("UPDATE conversation_reaction_receipts SET preparation_deadline=NULL")
+    now[0] = 10000.0
+    with pytest.raises(ExecutionUnavailable, match="PREPARING"):
+        repo.claim(ref, "momo")
+    store.close()
+
+
+def test_server_clock_rollback_does_not_reclaim_preparation(tmp_path):
+    from character_memory.storage.message_receipts import ExecutionUnavailable
+    store = SQLiteStore(tmp_path / "clock.db")
+    now = [100.0]
+    repo = receipt_owner(store, now)
+    ref = receipt_source(store)
+    repo.claim(ref, "momo")
+    now[0] = 50.0
+    with pytest.raises(ExecutionUnavailable, match="PREPARING"):
+        repo.claim(ref, "momo")
+    store.close()
+
+
+def test_preparation_lease_has_formal_bounds_and_help():
+    from character_memory.config import Settings
+    from pydantic import ValidationError
+    field = Settings.model_fields["reaction_preparation_lease_seconds"]
+    assert field.description
+    assert Settings().reaction_preparation_lease_seconds == 120.0
+    for invalid in (0, -1, 3601, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            Settings(reaction_preparation_lease_seconds=invalid)
+
+
+def test_group_recovers_only_expired_preparation_then_reuses_commit(tmp_path):
+    from character_memory.domain.facts import FactRef
+    store = SQLiteStore(tmp_path / "group-lease.db")
+    model = CountedModel()
+    service = group_service(store, {"momo": model, "rin": CountedModel()})
+    group = service.create_group("recover", ["momo", "rin"], at=NOW)
+    event = service.persist_user_event(group.id, "recover once", at=NOW)
+    now = [100.0]
+    repo = receipt_owner(store, now)
+    ref = FactRef(kind="CONVERSATION_EVENT", id=event.id, conversation_id=group.id)
+    repo.claim(ref, "momo")
+    service.runtimes["momo"]._execution_receipts = repo
+    now[0] = 111.0
+    result = service.react_from_event(event)
+    replay = service.react_from_event(event)
+    assert model.calls == 1
+    assert len(result["decisions"]) == 2
+    assert replay["decisions"][0]["replayed"] is True
+    store.close()
+
+
+def test_preparation_migration_preserves_published_receipts_without_inventing_a_deadline(tmp_path):
+    store = SQLiteStore(tmp_path / "published-schema.db")
+    ref = receipt_source(store)
+    def old_schema():
+        store.conn.execute("CREATE TABLE conversation_reaction_receipts (source_ref_json TEXT NOT NULL, "
+            "character_id TEXT NOT NULL, reaction_version TEXT NOT NULL, state TEXT NOT NULL, "
+            "owner_token TEXT NOT NULL, result_json TEXT, error_kind TEXT, "
+            "PRIMARY KEY(source_ref_json,character_id,reaction_version))")
+        store.conn.execute("INSERT INTO conversation_reaction_receipts VALUES(?,?,?,?,?,?,?)",
+            (ref.model_dump_json(), "momo", "1", "PREPARING", "published-owner", None, None))
+    store.apply_schema_migration("conversation/002-reaction-execution", old_schema, immediate=True)
+    receipt_owner(store, [10000.0])
+    row = store.conn.execute("SELECT * FROM conversation_reaction_receipts").fetchone()
+    assert row["owner_token"] == "published-owner"
+    assert row["state"] == "PREPARING"
+    assert row["preparation_deadline"] is None
+    # Opening another runtime must not repeat ALTER TABLE or change old ownership.
+    receipt_owner(store, [10001.0])
+    assert store.conn.execute("SELECT COUNT(*) FROM conversation_reaction_receipts").fetchone()[0] == 1
     store.close()

@@ -655,8 +655,9 @@ work. Direct/Group claim per-Person execution through the shared conversation
 receipt owner, not a second Person loop. Preparation, model-call and committed
 cognition are separate durable stages. The model stage is entered before any
 reaction call; an interrupted/unknown call is not repeated automatically.
-Known pre-call failure permits explicit retry, while superseded work stays
-terminal. Cached committed cognition is returned without model/tool execution.
+Known pre-call failure permits explicit retry; an explicitly expired preparation
+lease can be reclaimed with a new owner token before model entry. Calls already
+entered are never reclaimed by time. Superseded work stays terminal. Cached committed cognition is returned without model/tool execution.
 
 The result receipt commits with Mental State, Memory, Intent, outward events and
 trace. The replay flag prevents a cached result from publishing new message or

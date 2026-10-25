@@ -174,15 +174,11 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         images = load_image_catalog(profile["persona_path"])
         recall = VectorRecall(current.store, current.embeddings, limit=getattr(settings, "recall_limit", 8))
         runtime = PersonRuntime(
-            current.store,
-            recall,
-            current.embeddings,
-            current.model,
-            persona,
-            stickers,
-            images,
+            current.store, recall, current.embeddings, current.model,
+            persona, stickers, images,
             intent_policy=IntentPolicy.from_settings(settings),
             call_policy=CallInvitationPolicy.from_settings(settings),
+            reaction_preparation_lease_seconds=getattr(settings, "reaction_preparation_lease_seconds", 120.0),
         )
         current.runtimes[character_id] = runtime
         from character_memory.runtime.direct_research import DirectResearchService

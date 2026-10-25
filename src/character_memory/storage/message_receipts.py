@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
+import time
 
 from character_memory.domain.facts import FactRef
 
@@ -91,11 +93,16 @@ class ReactionClaim:
 class ReactionExecutionRepository:
     """Per-Person cognition receipts owned beside message acceptance receipts.
 
-    PREPARING is distinct from the irreversible model-call boundary. B1 does
-    not reclaim an abandoned owner; durable handoff/recovery is the next layer.
+    Only explicitly expired PREPARING owners may be replaced. CALLING and
+    unknown outcomes are never reclaimed by time; queue recovery is separate.
     """
-    def __init__(self, store):
+    def __init__(self, store, *, preparation_lease_seconds=120.0, clock=None):
+        lease = float(preparation_lease_seconds)
+        if not math.isfinite(lease) or not 1 <= lease <= 3600:
+            raise ValueError("preparation lease must be between 1 and 3600 seconds")
         self.store = store
+        self.preparation_lease_seconds = lease
+        self._clock = clock or time.time
         def migrate():
             store.conn.execute("""CREATE TABLE conversation_reaction_receipts(
                 source_ref_json TEXT NOT NULL, character_id TEXT NOT NULL,
@@ -103,6 +110,15 @@ class ReactionExecutionRepository:
                 owner_token TEXT NOT NULL, result_json TEXT, error_kind TEXT,
                 PRIMARY KEY(source_ref_json,character_id,reaction_version))""")
         store.apply_schema_migration("conversation/002-reaction-execution", migrate, immediate=True)
+        def add_preparation_deadline():
+            store.conn.execute("ALTER TABLE conversation_reaction_receipts ADD COLUMN preparation_deadline REAL")
+        store.apply_schema_migration("conversation/003-preparation-lease", add_preparation_deadline, immediate=True)
+
+    def _now(self):
+        now = float(self._clock())
+        if not math.isfinite(now) or now < 0:
+            raise ValueError("preparation clock must return finite server epoch seconds")
+        return now
 
     @staticmethod
     def require_independent_boundary(store):
@@ -121,6 +137,7 @@ class ReactionExecutionRepository:
         from uuid import uuid4
         work = ReactionClaim(source, character_id, version, uuid4().hex)
         with self.store.transaction(immediate=True):
+            now = self._now()
             row = self.store.conn.execute("SELECT * FROM conversation_reaction_receipts "
                 "WHERE source_ref_json=? AND character_id=? AND reaction_version=?", self._key(work)).fetchone()
             if row is not None:
@@ -132,24 +149,31 @@ class ReactionExecutionRepository:
                     except (ValueError, TypeError) as exc:
                         raise ExecutionUnavailable("CORRUPT_RESULT") from exc
                     return ReactionClaim(source, character_id, version, None, result)
-                if row["state"] != "FAILED_BEFORE_CALL":
+                expired_preparation = (row["state"] == "PREPARING"
+                    and row["preparation_deadline"] is not None
+                    and row["preparation_deadline"] <= now)
+                if row["state"] != "FAILED_BEFORE_CALL" and not expired_preparation:
                     raise ExecutionUnavailable(row["state"])
                 self.store.conn.execute("UPDATE conversation_reaction_receipts SET state='PREPARING', "
-                    "owner_token=?,error_kind=NULL WHERE source_ref_json=? AND character_id=? AND reaction_version=?",
-                    (work.token, *self._key(work)))
+                    "owner_token=?,error_kind=NULL,preparation_deadline=? "
+                    "WHERE source_ref_json=? AND character_id=? AND reaction_version=?",
+                    (work.token, now + self.preparation_lease_seconds, *self._key(work)))
             else:
                 if legacy_check is not None and legacy_check():
                     raise ExecutionUnavailable("LEGACY_TRACE_REQUIRES_RECONCILIATION")
-                self.store.conn.execute("INSERT INTO conversation_reaction_receipts VALUES(?,?,?,?,?,?,?)",
-                    (*self._key(work), "PREPARING", work.token, None, None))
+                self.store.conn.execute("INSERT INTO conversation_reaction_receipts "
+                    "(source_ref_json,character_id,reaction_version,state,owner_token,result_json,error_kind,preparation_deadline) "
+                    "VALUES(?,?,?,?,?,?,?,?)",
+                    (*self._key(work), "PREPARING", work.token, None, None, now + self.preparation_lease_seconds))
         return work
 
     def begin_model(self, work):
         self.require_independent_boundary(self.store)
         with self.store.transaction(immediate=True):
             changed = self.store.conn.execute("UPDATE conversation_reaction_receipts SET state='CALLING' "
-                "WHERE source_ref_json=? AND character_id=? AND reaction_version=? AND owner_token=? AND state='PREPARING'",
-                (*self._key(work), work.token)).rowcount
+                "WHERE source_ref_json=? AND character_id=? AND reaction_version=? AND owner_token=? AND state='PREPARING' "
+                "AND preparation_deadline > ?",
+                (*self._key(work), work.token, self._now())).rowcount
             if changed != 1:
                 raise ExecutionUnavailable("LOST_OWNER")
 

@@ -29,6 +29,9 @@ chat_temperature: 0.7
 # Maximum HTTP/model attempts for one logical LLM call, including retry/repair.
 llm_attempts: 2
 
+# 模型调用前准备的所有权期限（真实服务器秒，1–3600）；到期可重新领取，CALLING/UNKNOWN 永不因超时重跑。重启生效。
+reaction_preparation_lease_seconds: 120.0
+
 # Embedding backend. "sentence-transformers" is local/offline after model setup.
 embedding_provider: "sentence-transformers"
 

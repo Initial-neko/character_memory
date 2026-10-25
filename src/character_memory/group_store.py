@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from character_memory.domain.experience_scope import real_experience_sql
+
 from dataclasses import dataclass
 import json
 import re
@@ -544,10 +546,10 @@ class GroupRepository:
             ).fetchone()
             return GroupRepository._event_from_row(row) if row is not None else None
 
-    def list_events(self, conversation_id: str, limit: int = 160, *, source_event: GroupEvent | None = None, character_id: str | None = None) -> list[GroupEvent]:
+    def list_events(self, conversation_id: str, limit: int = 160, *, source_event: GroupEvent | None = None, character_id: str | None = None, real_experience_only: bool = False) -> list[GroupEvent]:
         limit = max(1, min(int(limit), 500))
         with self.store._lock:
-            boundary = ""
+            boundary = " AND " + real_experience_sql("metadata_json") if real_experience_only else ""
             args: list = [conversation_id]
             if source_event is not None:
                 boundary += " AND event_time_epoch<=? AND (id<=? OR (turn_id=? AND actor_type='CHARACTER'))"
@@ -593,6 +595,7 @@ class GroupRepository:
                 WHERE conversation_id=? AND event_time_epoch<=? AND id<=?
                 AND actor_type IN ('USER','CHARACTER') AND event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE')
                 AND coalesce(json_extract({metadata}, '$.hidden'),0)=0{excluded}
+                AND {real_experience_sql("metadata_json")}
                 AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id=conversation_events.conversation_id
                     AND m.actor_type='CHARACTER' AND m.actor_id=? AND m.joined_at_epoch<=conversation_events.event_time_epoch)
             ), ranked AS (SELECT *, ({score}) AS relevance FROM candidates)

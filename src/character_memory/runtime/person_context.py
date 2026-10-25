@@ -5,6 +5,7 @@ from datetime import datetime
 
 from character_memory.domain.models import Event, EventType, Memory
 from character_memory.time_utils import epoch_us
+from character_memory.domain.experience_scope import is_real_experience
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class PersonContextBuilder:
         if recent_events is None:
             recent = self.store.list_events(
                 character_id, limit=max(1, recent_limit + 2), before=at,
-                exclude_reaction_receipts=True,
+                exclude_reaction_receipts=True, real_experience_only=True,
             )
             if exclude_event_id is not None:
                 recent = [item for item in recent if item.id != exclude_event_id]
@@ -57,6 +58,7 @@ class PersonContextBuilder:
                     and item.metadata.get("trace_id") is not None
                     and item.metadata.get("fact_kind") != "ROLE_COLLABORATION_MESSAGE"
                 )
+                and is_real_experience(item.metadata)
                 and epoch_us(item.event_time) <= epoch_us(at)
                 and (exclude_event_id is None or item.id != exclude_event_id)
             ][-recent_limit:]
@@ -64,7 +66,7 @@ class PersonContextBuilder:
         return PersonContextSnapshot(
             persona=self.persona,
             mental_state=self.store.get_mental_state(character_id, at=at),
-            memories=memories,
+            memories=[m for m in memories if is_real_experience(m.metadata)],
             recent_events=recent,
-            observed_events=observed,
+            observed_events=[e for e in observed if is_real_experience(e.metadata)],
         )

@@ -314,7 +314,7 @@ class SpaceMediaExecutor:
 
     @staticmethod
     def _recent_dialogue(runtime, character_id: str, before: datetime) -> list[str]:
-        events = runtime.store.list_events(character_id, limit=10, before=before)[-8:]
+        events = runtime.store.list_events(character_id, limit=10, before=before, real_experience_only=True)[-8:]
         lines: list[str] = []
         for item in events:
             if item.event_type == EventType.USER_MESSAGE:

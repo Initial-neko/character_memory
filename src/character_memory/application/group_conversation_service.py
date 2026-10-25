@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from character_memory.domain.experience_scope import require_real_experience
+
 from datetime import datetime
 import logging
 import threading
@@ -235,7 +237,7 @@ class GroupConversationService:
 
     def _recent_as_events(self, group_id: str, *, limit: int = 14, source_event: GroupEvent | None = None, character_id: str | None = None) -> list[Event]:
         result = []
-        for item in self.repo.list_events(group_id, limit=limit, source_event=source_event, character_id=character_id):
+        for item in self.repo.list_events(group_id, limit=limit, source_event=source_event, character_id=character_id, real_experience_only=True):
             if item.actor_type not in {"USER", "CHARACTER"}:
                 continue
             actor = self._name(item.actor_id)
@@ -256,7 +258,7 @@ class GroupConversationService:
                     event_type=event_type,
                     event_time=item.event_time,
                     content=f"{actor}: {content}",
-                    metadata={"group_event_id": item.id, "conversation_id": group_id, "mentions": item.metadata.get("mentions", [])},
+                    metadata={**({"experience_scope": item.metadata["experience_scope"]} if "experience_scope" in item.metadata else {}), "group_event_id": item.id, "conversation_id": group_id, "mentions": item.metadata.get("mentions", [])},
                 )
             )
         return result
@@ -387,7 +389,10 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                       commit_guard=None, mentioned_ids=None, autonomous=False, autonomous_phase=""):
         ReactionExecutionRepository.require_independent_boundary(self.store)
         source_ref = FactRef(kind="CONVERSATION_EVENT", id=source_event.id, conversation_id=group.id)
+        require_real_experience(source_event.metadata)
         actual = self.repo.get_event(group.id, source_ref.id)
+        if actual is not None:
+            require_real_experience(actual.metadata)
         if (actual is None or actual.turn_id != source_event.turn_id or actual.content != source_event.content
                 or actual.actor_type != source_event.actor_type or actual.actor_id != source_event.actor_id
                 or actual.event_type != source_event.event_type
@@ -551,6 +556,10 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
                     raise SupersededGroupReaction(
                         f"group reaction for source event {source_event.id} was superseded"
                     )
+                authoritative = self.repo.get_event(group.id, source_event.id)
+                if authoritative is None:
+                    raise ValueError("reaction source disappeared")
+                require_real_experience(authoritative.metadata)
                 if state_after:
                     self.store.set_mental_state(character_id, state_after, now, None)
                 for candidate, embedding, decision in accepted_memories:
@@ -707,6 +716,10 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         commit_guard: Callable[[], bool] | None = None,
         on_member: Callable[[dict], None] | None = None,
     ) -> dict:
+        require_real_experience(source_event.metadata)
+        actual = self.repo.get_event(source_event.conversation_id, source_event.id)
+        if actual is not None:
+            require_real_experience(actual.metadata)
         group = self.repo.get_group(source_event.conversation_id)
         if group is None:
             raise KeyError(f"unknown group: {source_event.conversation_id}")
@@ -824,6 +837,10 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         }
 
     def plan_reaction(self, source_event, *, mention_order=None, max_speakers=None):
+        require_real_experience(source_event.metadata)
+        actual = self.repo.get_event(source_event.conversation_id, source_event.id)
+        if actual is not None:
+            require_real_experience(actual.metadata)
         group = self.repo.get_group(source_event.conversation_id)
         if group is None:
             raise KeyError(f"unknown group: {source_event.conversation_id}")
@@ -869,6 +886,10 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
         frozen_plan: dict | None = None,
         member_guard: Callable[[str], bool] | None = None,
     ) -> dict:
+        require_real_experience(source_event.metadata)
+        actual = self.repo.get_event(source_event.conversation_id, source_event.id)
+        if actual is not None:
+            require_real_experience(actual.metadata)
         group = self.repo.get_group(source_event.conversation_id)
         if group is None:
             raise KeyError(f"unknown group: {source_event.conversation_id}")

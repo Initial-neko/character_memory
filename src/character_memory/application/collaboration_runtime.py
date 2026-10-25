@@ -92,11 +92,11 @@ def build_role_collaboration(access) -> RoleCollaborationService:
         if runtime is None:
             return None
         if context.channel == 'GROUP':
-            facts = groups.list_events(context.channel_id, limit=16, character_id=recipient)
+            facts = groups.list_events(context.channel_id, limit=16, character_id=recipient, real_experience_only=True)
             recent = [Event(character_id=f.actor_id,
                 event_type=EventType.USER_MESSAGE if f.actor_type == 'USER' else EventType.CHARACTER_MESSAGE,
                 event_time=f.event_time, content=f'{f.actor_id}: {f.content}',
-                metadata={'conversation_id':context.channel_id, 'group_event_id':f.id}) for f in facts if f.actor_type in {'USER', 'CHARACTER'}]
+                metadata={**({'experience_scope':f.metadata['experience_scope']} if 'experience_scope' in f.metadata else {}), 'conversation_id':context.channel_id, 'group_event_id':f.id}) for f in facts if f.actor_type in {'USER', 'CHARACTER'}]
         else:
             post = space.get_post(int(context.channel_id))
             if post is None or post.visibility != 'ACTIVE_CHARACTERS':
@@ -112,7 +112,7 @@ def build_role_collaboration(access) -> RoleCollaborationService:
         person = runtime.context_builder.build(recipient, query=topic, at=context.now,
             recent_events=recent, recent_limit=16, observed_projection='PUBLIC')
         memory = '\n'.join(f'- [{m.memory_type}] {m.content}' for m in person.memories[:8])
-        shared = '\n'.join(f'- {f.content}' for f in recent)
+        shared = '\n'.join(f'- {f.content}' for f in getattr(person, 'recent_events', ()))
         # Preserve executor outcome separately from bounded, untrusted provider
         # text. A partial result can exist even when research failed or timed out.
         result_receipt = {

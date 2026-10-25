@@ -82,7 +82,7 @@ class ChatService:
         Keep original reading scope/counts: a feed excerpt is never upgraded to
         a fetched original. The snapshot belongs to this opportunity's trace.
         """
-        recent = self.store.list_events(character_id, limit=32, before=at)
+        recent = self.store.list_events(character_id, limit=32, before=at, real_experience_only=True)
         candidates = []
         for item in reversed(recent):
             channel = item.metadata.get("channel")
@@ -101,6 +101,7 @@ class ChatService:
                        and isinstance(value, (str, int, bool))}
             reading = {key: value[:180] if isinstance(value, str) else value for key, value in reading.items()}
             candidates.append({
+                **({"experience_scope": item.metadata["experience_scope"]} if "experience_scope" in item.metadata else {}),
                 "event_id": item.id,
                 "observed_at": item.event_time.isoformat(),
                 "channel": channel,

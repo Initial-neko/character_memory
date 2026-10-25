@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from character_memory.domain.models import Event, EventType, Memory
+from character_memory.domain.experience_scope import real_experience_sql
 from character_memory.media import MediaAsset
 from character_memory.time_utils import epoch_us, epoch_us_from_iso, parse_datetime
 
@@ -739,6 +740,7 @@ class SQLiteStore:
                 "SELECT * FROM memories WHERE character_id=? AND active=1 "
                 "AND event_time_epoch IS NOT NULL AND memory_text_key(content)=?"
             )
+            sql += " AND " + real_experience_sql("metadata_json")
             args: list = [character_id, normalized]
             if at is not None:
                 sql += " AND event_time_epoch<=?"
@@ -772,6 +774,7 @@ class SQLiteStore:
         relationship_limit = max(0, int(relationship_limit))
         with self._lock:
             where = "character_id=? AND active=1 AND event_time_epoch IS NOT NULL"
+            where += " AND " + real_experience_sql("metadata_json")
             args: list = [character_id]
             if at is not None:
                 where += " AND event_time_epoch<=?"
@@ -809,7 +812,7 @@ class SQLiteStore:
 
     def list_events(
         self, character_id: str, limit: int = 50, event_type: str | None = None,
-        before: datetime | None = None, *, exclude_reaction_receipts: bool = False,
+        before: datetime | None = None, *, exclude_reaction_receipts: bool = False, real_experience_only: bool = False,
     ) -> list[Event]:
         with self._lock:
             sql = "SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL"
@@ -820,6 +823,8 @@ class SQLiteStore:
             if before:
                 sql += " AND event_time_epoch<=?"
                 args.append(epoch_us(before))
+            if real_experience_only:
+                sql += " AND " + real_experience_sql("metadata_json")
             if exclude_reaction_receipts:
                 # Apply before LIMIT: receipts must not consume actual experience slots.
                 # Collaboration ACTION projections are durable shared facts, not receipts.
@@ -871,7 +876,7 @@ class SQLiteStore:
                     public = f" AND ({pulse})"
             sql = f"""WITH candidates AS (
                 SELECT *, {text} AS search_text FROM events
-                WHERE character_id=? AND event_type=? AND event_time_epoch<=?{public}
+                WHERE character_id=? AND event_type=? AND event_time_epoch<=?{public} AND {real_experience_sql("metadata_json")}
             ), ranked AS (SELECT *, ({score}) AS relevance FROM candidates)
             SELECT * FROM ranked WHERE relevance>0
             ORDER BY relevance DESC,event_time_epoch DESC,id DESC LIMIT ?"""

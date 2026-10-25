@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from character_memory.memory.embedding import EmbeddingProvider
+from character_memory.domain.experience_scope import is_real_experience
 
 
 class VectorRecall:
@@ -31,7 +32,7 @@ class VectorRecall:
         else:
             source_memories = self.store.list_memories(character_id)
         for memory in source_memories:
-            if not memory.embedding:
+            if not is_real_experience(memory.metadata) or not memory.embedding:
                 continue
             t = memory.event_time if memory.event_time.tzinfo else memory.event_time.replace(tzinfo=timezone.utc)
             if t > n:  # simulated future memories must never leak backward in time

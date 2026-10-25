@@ -251,7 +251,7 @@ Memory v1  ──纠正──> Memory v2
 ```
 
 Memory API 的每个记忆响应还包含独立的 `provenance`：
-`ref / status / fact`。`FactRef` 使用严格正整数 ID 与 `EVENT` 或
+`ref / status / fact`。`FactRef` 使用 SQLite signed int64 范围内的严格正整数 ID 与 `EVENT` 或
 `CONVERSATION_EVENT` 类型；后者必须带 `conversation_id`。当前从原有
 `source_event_id` / GROUP metadata 解析，不新增事实副本、不改表或回填历史。
 状态为 `UNRECORDED`（无来源）、`INVALID`（引用格式无效）、`UNRESOLVED`

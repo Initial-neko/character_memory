@@ -123,6 +123,9 @@ def validate(output):
             "source_conversation_event_id": event.id, "turn_id": event.turn_id}), (other.id, {})]:
             ids.append(store.add_memory(Memory(character_id="momo", content="fixture memory", event_time=now,
                 source_event_id=source_id, metadata=metadata, embedding=[1.0, 0.0])).id)
+        ids.append(store.add_memory(Memory(character_id="momo", content="invalid source fixture",
+            event_time=now, metadata={"origin": "GROUP", "conversation_id": group.id,
+            "source_conversation_event_id": 2**64}, embedding=[1.0, 0.0])).id)
         store.close()
         db = folder / "acceptance.db"
         baseline = fact_snapshot(db)
@@ -133,6 +136,9 @@ def validate(output):
             first = request(origin, f"/v1/characters/momo/memories/{ids[0]}")["memory"]
             shared = request(origin, f"/v1/characters/momo/memories/{ids[1]}")["memory"]
             blocked = request(origin, f"/v1/characters/momo/memories/{ids[2]}")["memory"]
+            oversized = request(origin, f"/v1/characters/momo/memories/{ids[3]}")["memory"]
+            assert oversized["provenance"]["status"] == "INVALID"
+            assert len(request(origin, "/v1/characters/momo/memories")["memories"]) == 4
             assert first["provenance"]["ref"]["kind"] == "EVENT"
             assert shared["provenance"]["ref"]["kind"] == "CONVERSATION_EVENT"
             assert shared["provenance"]["fact"]["content"] == event.content

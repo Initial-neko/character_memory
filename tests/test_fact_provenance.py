@@ -260,3 +260,20 @@ def test_group_fields_without_discriminator_do_not_fall_back_to_direct(store):
         metadata={"source_conversation_event_id": event.id, "conversation_id": "untyped"}))
     assert result["status"] == "INVALID"
     assert result["fact"] is None
+
+
+@pytest.mark.parametrize("event_id", [2**63, 2**64, 10**100])
+def test_oversized_group_id_cannot_overflow_sqlite_or_break_api(store, event_id):
+    _, group, shared = group_source(store)
+    memory = remember(store, metadata={**group_metadata(group, shared),
+        "source_conversation_event_id": event_id})
+    assert provenance(store, memory)["status"] == "INVALID"
+
+
+def test_fact_ref_rejects_values_above_sqlite_integer_domain():
+    from pydantic import ValidationError
+    from character_memory.domain.facts import FactRef
+
+    assert FactRef(kind="EVENT", id=2**63 - 1).id == 2**63 - 1
+    with pytest.raises(ValidationError):
+        FactRef(kind="EVENT", id=2**63)

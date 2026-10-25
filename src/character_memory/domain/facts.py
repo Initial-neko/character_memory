@@ -10,7 +10,7 @@ class FactRef(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["EVENT", "CONVERSATION_EVENT"]
-    id: int = Field(strict=True, gt=0)
+    id: int = Field(strict=True, gt=0, le=2**63 - 1)
     conversation_id: str | None = Field(default=None, strict=True, min_length=1)
 
     @model_validator(mode="after")

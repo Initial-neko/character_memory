@@ -646,3 +646,24 @@ remain distinct. See [SOCIAL_WORLD.md](SOCIAL_WORLD.md#optional-bounded-world-co
 for configuration, local-only recovery and nested collaboration cost boundaries.
 
 World continuation also renders the existing bounded PersonContextSnapshot.recent_events with original channel, participants and shared-fact provenance. This includes real collaboration ACTION projections after restart, without treating them as webpage observations or automatically admitting Memory. Nonparticipants receive no projection.
+
+
+## Cognition replay boundary
+
+A persisted source is validated against its authoritative fact before reaction
+work. Direct/Group claim per-Person execution through the shared conversation
+receipt owner, not a second Person loop. Preparation, model-call and committed
+cognition are separate durable stages. The model stage is entered before any
+reaction call; an interrupted/unknown call is not repeated automatically.
+Known pre-call failure permits explicit retry, while superseded work stays
+terminal. Cached committed cognition is returned without model/tool execution.
+
+The result receipt commits with Mental State, Memory, Intent, outward events and
+trace. The replay flag prevents a cached result from publishing new message or
+voice work. Source/history remain immutable. Lazy receipt initialization keeps
+ordinary Person construction and empty Memory admission free of new DB work.
+Optional post-commit effects retain their own lifecycle; committed cognition is
+not a claim that an image/voice task finished. Durable queue recovery and client
+retry integration remain separate work. See
+[Conversation Runtime](CONVERSATION_RUNTIME.md#per-person-cognition-execution-receipts)
+for states, legacy reconciliation and repeatable real-process validation.

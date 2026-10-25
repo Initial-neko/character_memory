@@ -117,6 +117,12 @@ Embedding 与第一轮 exact/near-duplicate 判断在事务外执行，避免远
 
 事务内的提交重查以当前 active Memory 集合为准，不受来源 `event_time` 上限限制：较新来源先提交、较旧来源迟到提交时，迟到候选也能看到已提交的新条目并记为 `SKIP_DUPLICATE_AT_COMMIT`。Context / Recall 仍保留各自的 `event_time <= at` 未来屏障；提交去重不复用该读取边界。
 
+Direct/Group 的本轮认知执行回执与 Memory / Mental State / Intent、可见事件和
+Trace 在同一事务中完成提交。已知 COMMITTED 的来源重放只读取原结果，不再
+更新认知或调用模型；事务失败保留原始事实并记录保守执行状态。UNKNOWN /
+调用中断不自动重做，不能靠 Memory 近似去重代替整轮执行幂等。回执及恢复
+边界见 [Conversation Runtime](CONVERSATION_RUNTIME.md#per-person-cognition-execution-receipts)。
+
 这些是 Eval baseline，不是永久产品定律。
 
 Trace 记录：

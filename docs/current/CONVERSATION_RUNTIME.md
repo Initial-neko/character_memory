@@ -78,10 +78,11 @@ re-enqueue or call a provider, including across restarts. A receipt with a missi
 source fails rather than creating a replacement. These stages do not prove
 model completion or restart recovery; a RECORDED/UNKNOWN task is not auto-retried.
 
-This is W2 A only. Durable dispatch recovery, per-character execution/derived
-commit receipts and client retry-key integration remain W2 B/C. A crash during
-attachment staging can still leave an orphan file; this is not an exactly-once
-external-effects claim. No key is claimed for Visual Capture or legacy sync APIs.
+This acceptance surface is W2 A. The per-Person cognition receipt below is
+W2 B1; durable dispatch recovery and client retry-key integration remain B2/C.
+A crash during attachment staging can still leave an orphan file; this is not
+an exactly-once external-effects claim. No acceptance key is claimed for Visual
+Capture or legacy sync APIs.
 
 Repeat real isolated HTTP checks with
 `python scripts/validate_message_receipts.py --output <evidence.json>`.
@@ -89,6 +90,47 @@ It uses production Direct/Group routes, temporary personas/SQLite, a local fixed
 provider and two API processes; text/image retries keep four facts, two media
 assets and six known provider calls. This checks acceptance counts, not model
 quality, durable execution recovery or visual acceptance.
+
+
+### Per-Person cognition execution receipts
+
+Direct `PersonRuntime.handle` and Group member reactions claim the same receipt
+owner by authoritative `FactRef + character_id + reaction_version` (currently
+server version `1`). They validate the real source before model work. Receipt
+storage is lazy: constructing a Person does not initialize another schema.
+Group facts stay in their own table and the same numeric core/group IDs differ.
+
+States are PREPARING, CALLING, COMMITTED, FAILED_BEFORE_CALL, UNKNOWN and
+SUPERSEDED. The model-call boundary changes PREPARING to CALLING before the
+provider is invoked. Execution/claim/model entry reject a caller-owned DB
+transaction, so this stage cannot remain uncommitted during a provider call.
+Only a confirmed pre-call failure can be explicitly retried;
+an existing PREPARING/CALLING owner or UNKNOWN result is not automatically
+reclaimed. This layer has no abandoned-owner lease takeover yet. Newer user
+watermarks are checked before the call and at commit; stale work is SUPERSEDED.
+
+Mental State, Memory/Intent, visible events, trace and COMMITTED result receipt
+share one transaction. Failure rolls back all cognition effects while retaining
+the original source and a conservative execution outcome. Replays of COMMITTED
+validate the cached identity/result and return it without model/tool calls or
+new writes. `RuntimeResult.replayed` and Group decision `replayed` suppress new
+SSE message/voice publication; historical events remain available from history.
+Malformed caches fail instead of becoming successful silence. A legacy trace
+without this receipt requires reconciliation and is never treated as permission
+to execute again. Mixed old/new runtime writers are unsupported; a future
+approved rollout must stop old writers before enabling this boundary.
+
+COMMITTED describes cognition, not completion of optional post-commit image,
+voice or other executor work. Their existing lifecycle/receipts still own those
+effects. Public acceptance receipts still report execution=NOT_TRACKED until
+B2 adds durable delivery and aggregate status; B1 alone does not close W2.
+
+`python scripts/validate_reaction_receipts.py --output <evidence.json>` runs
+production HTTP Direct/Group text/image reactions with a local fixed provider,
+then terminates an actual API process while one provider response is withheld.
+A fresh process reuses committed cognition and refuses the interrupted call;
+counts and core-state hashes must not change. Paid models and formal data are
+not used; this proves execution boundaries, not model quality or queue recovery.
 
 
 Character reaction 由 `ReactionScheduler` 异步处理，通过 SSE 推给前端。

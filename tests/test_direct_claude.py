@@ -251,7 +251,8 @@ def test_completed_same_event_receipt_remains_readable_after_quota_or_runner_los
     assert store.conn.total_changes == before
     model.prompts.clear()
     repeated = runtime.handle(result.event, persist_event=False)
-    assert len(runner.calls) == 1 and len(model.prompts) == 2
+    assert len(runner.calls) == 1 and len(model.prompts) == 0
+    assert repeated.replayed is True
     assert repeated.reaction.actions[0].type == ActionType.MESSAGE
     assert store.conn.execute('SELECT count(*) FROM capability_executions').fetchone()[0] == 1
     assert store.conn.execute("SELECT count(*) FROM events WHERE json_extract(metadata_json,'$.fact_kind')='CLAUDE_TASK_RESULT'").fetchone()[0] == 1
@@ -271,9 +272,20 @@ def test_cached_execution_still_requires_current_role_and_identical_payload(tmp_
             return ModelCallResult(PersonReaction(actions=[ActionDecision(type='DELEGATE_TASK', task='另一个公开问题')]), response.trace)
         return response
     model.react_call_for_session = changed
-    runtime.handle(result.event, persist_event=False)
+    # Exercise the capability boundary directly: a completed whole-turn replay
+    # now returns its cognition receipt without buying two new model calls.
+    from character_memory.runtime.reaction_engine import evaluate_reaction
+    evaluation = evaluate_reaction(runtime, event=result.event, exclude_event_id=result.event.id)
+    _, info = runtime.research_service.resolve(runtime, result.event, evaluation)
     assert len(runner.calls) == 1
+    assert info['reason'] == 'REQUEST_ID_CONFLICT'
     assert 'REQUEST_ID_CONFLICT' in model.prompts[1]
+    before = len(model.prompts)
+    repeated = runtime.handle(result.event, persist_event=False)
+    assert repeated.replayed and len(model.prompts) == before
     (tmp_path/'personas/echo/capabilities.yaml').write_text('capabilities: []\n', encoding='utf-8')
     assert runtime.research_service.capabilities(result.event) == ()
+    _, denied = runtime.research_service.resolve(runtime, result.event, evaluation)
+    assert denied['reason'] == 'ROLE_CAPABILITY_DENIED'
+    assert len(runner.calls) == 1 and len(model.prompts) == before
     store.close()

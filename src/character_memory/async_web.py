@@ -6,6 +6,9 @@ from datetime import datetime
 from typing import Annotated
 from pydantic import Field
 from character_memory.storage.message_receipts import MessageReceiptRepository, ReceiptConflict
+from character_memory.storage.reaction_delivery import ReactionDeliveryRepository
+from character_memory.domain.facts import FactRef
+from character_memory.application.reaction_delivery import DurableReactionDelivery
 import json
 import os
 import logging
@@ -117,6 +120,9 @@ def attach_async_routes(app):
         media_base=os.getenv("CHARACTER_MEDIA_BASE", "http://127.0.0.1:8001"),
     )
     scheduler = ReactionScheduler(access.get_bundle, access.character_profiles, hub, voice_materializer=materializer)
+    deliveries = ReactionDeliveryRepository(access.store())
+    delivery = DurableReactionDelivery(deliveries, access.media_storage, scheduler, access.character_profiles)
+    scheduler.delivery = delivery
     access.stream_hub = hub
     access.reaction_scheduler = scheduler
 
@@ -240,6 +246,8 @@ def attach_async_routes(app):
                 if rollback_callbacks is not None:
                     rollback_callbacks.append(lambda: access.media_storage.delete(asset))
                 store.add_media_asset(asset)
+                if rollback_callbacks is not None:
+                    rollback_callbacks.append(lambda: store.delete_media_asset(asset.id))
                 selected_image = asset.model_dump(mode="json")
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -257,11 +265,14 @@ def attach_async_routes(app):
         presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, [req.character_id])
         if presentation:
             event.metadata["live2d"] = presentation
-        with store._lock:
+        with store.transaction(immediate=True):
             if reference:
                 event.content, reference = prepare_life_message(store, req.life_reference, req.message, character_id=req.character_id, conversation_id=req.conversation_id)
                 event.metadata["life_reference"] = reference
             event = store.append_event(event)
+            deliveries.record(FactRef(kind="EVENT", id=event.id), direct_channel(req.character_id, req.conversation_id),
+                character_id=req.character_id, conversation_id=req.conversation_id,
+                media_ids=[event.metadata["media_id"]] if event.metadata.get("media_id") else [])
         response = {
             "accepted": True,
             "event_id": event.id,
@@ -318,6 +329,8 @@ def attach_async_routes(app):
                 if rollback_callbacks is not None:
                     rollback_callbacks.append(lambda: access.media_storage.delete(asset))
                 store.add_media_asset(asset)
+                if rollback_callbacks is not None:
+                    rollback_callbacks.append(lambda: store.delete_media_asset(asset.id))
                 selected_image = asset.model_dump(mode="json")
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -334,11 +347,14 @@ def attach_async_routes(app):
             presentation = bind_presentation(getattr(app.state, "live2d_root", None), req.live2d, group.member_ids)
             if presentation:
                 event.metadata["live2d"] = presentation
-            with store._lock:
+            with store.transaction(immediate=True):
                 if reference:
                     event.content, reference = prepare_life_message(store, req.life_reference, req.message, conversation_id=conversation_id)
                     event.metadata["life_reference"] = reference
                 event = repository.append_user_event(event)
+                deliveries.record(FactRef(kind="CONVERSATION_EVENT", id=event.id, conversation_id=conversation_id),
+                    group_channel(conversation_id), conversation_id=conversation_id,
+                    media_ids=[event.metadata["media_id"]] if event.metadata.get("media_id") else [], mentions=mentions)
         except KeyError as exc:
             if selected_image is not None:
                 store.delete_media_asset(asset.id)
@@ -358,7 +374,13 @@ def attach_async_routes(app):
 
     def accept_message(scope, req, persist, *, source_kind, conversation_id=None):
         if req.request_id is None:
-            response, dispatch = persist(None)
+            cleanup = []
+            try:
+                response, dispatch = persist(cleanup)
+            except BaseException:
+                for rollback in cleanup:
+                    rollback()
+                raise
             dispatch()
             return response
         store = active_store()
@@ -392,7 +414,8 @@ def attach_async_routes(app):
         return {**accepted.response, "request_receipt": {
             "request_id": req.request_id, "replayed": not accepted.created,
             "acceptance": "ACCEPTED", "dispatch": accepted.dispatch,
-            "execution": "NOT_TRACKED",
+            "execution": deliveries.status(FactRef(kind=source_kind, id=accepted.response["event_id"],
+                conversation_id=conversation_id)),
         }}
 
     @app.post("/v1/chat/messages", status_code=202)
@@ -465,5 +488,6 @@ def attach_async_routes(app):
     # only has an end. Registering here, before wake_web attaches, is what puts
     # the wake producer ahead of this hub in the stop order.
     background_services(app).register("async_reactions", stop=_shutdown_async_runtime)
+    background_services(app).register("reaction_delivery", start=delivery.start, stop=delivery.stop)
 
     return app

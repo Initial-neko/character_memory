@@ -664,7 +664,7 @@ trace. The replay flag prevents a cached result from publishing new message or
 voice work. Source/history remain immutable. Lazy receipt initialization keeps
 ordinary Person construction and empty Memory admission free of new DB work.
 Optional post-commit effects retain their own lifecycle; committed cognition is
-not a claim that an image/voice task finished. Durable queue recovery and client
-retry integration remain separate work. See
+not a claim that an image/voice task finished. Async delivery freezes input/member batches and owns safe startup recovery;
+client retry integration remains separate work. See
 [Conversation Runtime](CONVERSATION_RUNTIME.md#per-person-cognition-execution-receipts)
 for states, legacy reconciliation and repeatable real-process validation.

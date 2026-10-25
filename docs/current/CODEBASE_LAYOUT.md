@@ -38,6 +38,7 @@ src/character_memory/
 - `chat_service.py` — direct application service / per-character lock。
 - `voice_message_materializer.py` / `voice_message_service.py` — durable Voice Message 的正式 TTS 请求、ready/failed 状态和事件更新。
 - `async_conversation.py` — ReactionScheduler、watermark、SSE hub。
+- `reaction_delivery.py` — 持久批次与既有 scheduler、媒体、启动扫描和安全关停接线。
 - `group_conversation_service.py` — group member ordering、shared-room reaction、member fault isolation、autonomous channel contract。
 - `action_materialization.py` — Direct/Group 共用：模型 action → 持久化事件（MESSAGE / EMOJI / VOICE_MESSAGE / STICKER / IMAGE 的唯一物料化门禁）。
 - `incoming_message.py` — Direct/Group 共用：text/sticker/image 用户输入 → canonical runtime content + common metadata。
@@ -71,6 +72,7 @@ src/character_memory/
 ### `storage/`
 
 - `message_receipts.py` — Direct/Group async接受及逐人物认知执行回执；认知提交与队列交接分别记录，不声明可选外部效果完成。
+- `reaction_delivery.py` — async 来源待交接记录、冻结批次、owner/租约与持久认知交付状态；只引用现有事实和媒体。
 - `sqlite.py` — core tables、migration ledger、Event/Memory/Trace/Intent/Media persistence。
 - `chat_history.py` — direct history read model。
 - `message_search.py` — direct/group durable message search repository helpers。

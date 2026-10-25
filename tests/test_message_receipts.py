@@ -69,7 +69,7 @@ def test_keyed_acceptance_reuses_fact_media_and_dispatch_after_restart(acceptanc
     assert first.status_code == second.status_code == 202
     assert first.json()["event_id"] == second.json()["event_id"]
     assert second.json()["request_receipt"]["replayed"] is True
-    assert second.json()["request_receipt"]["execution"] == "NOT_TRACKED"
+    assert second.json()["request_receipt"]["execution"] == "PENDING"
     restarted, _ = open_app()
     third = restarted.post(url, json=data)
     assert third.status_code == 202
@@ -130,7 +130,7 @@ def test_failed_queue_handoff_is_unknown_and_replay_does_not_execute_again(accep
     replay = client.post(endpoint(group, "DIRECT"), json=body("DIRECT"))
     assert replay.status_code == 202
     assert replay.json()["request_receipt"]["dispatch"] == "UNKNOWN"
-    assert replay.json()["request_receipt"]["execution"] == "NOT_TRACKED"
+    assert replay.json()["request_receipt"]["execution"] == "PENDING"
     assert calls == ["attempt"]
     assert store.conn.execute("SELECT COUNT(*) FROM events WHERE event_type='USER_MESSAGE'").fetchone()[0] == 1
 

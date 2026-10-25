@@ -99,6 +99,8 @@ def test_group_image_lost_ack_keeps_final_payload_mentions_and_media(page,realti
     if width==390:page.locator('#sidebarMobileButton').click()
     page.locator('[data-group="'+target['id']+'"]').click()
     expect(card).to_be_visible();assert len(sent)==1
+    expect(page.locator('.message-row.user[data-client-request-id="'+sent[0]['request_id']+'"]')).to_be_visible()
+    expect(page.locator('[data-client-pending]')).to_have_count(0)
     _capture(page,tmp_path,f'group-{width}-unknown')
     card.get_by_role('button',name='重试原发送',exact=True).click()
     expect(page.locator('.client-send-record[data-state="accepted"]')).to_be_visible()

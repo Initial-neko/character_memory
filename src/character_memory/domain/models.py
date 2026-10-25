@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 import math
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, Field, ValidationError, model_validator
 
@@ -210,9 +210,21 @@ class ActionDecision(BaseModel):
         return self
 
 
+MEMORY_TYPE_DESCRIPTIONS = {
+    "USER": "关于真实用户的偏好、背景、目标或经历；他人或文章案例不能冒认为用户本人",
+    "SELF": "人物本人有来源的经历、判断或持续变化；不能把用户经历、Persona兴趣或自己刚编的故事当成亲历",
+    "SHARED": "人物与用户实际共同参与的经历或双方已达成的约定；计划不代表已执行，讨论也不代表现实行动已完成",
+    "LIFE": "人物本人有真实来源的生活事件；不虚构生活活动",
+    "DIARY": "基于真实经历的日记式总结；不凭空补齐一天",
+    "EPISODIC": "其他事件性记忆或暂时无法确定归属的内容；保留原本主体与不确定性",
+}
+
+
 class MemoryCandidate(BaseModel):
     content: str
-    memory_type: str = "EPISODIC"
+    memory_type: Literal["USER", "SELF", "SHARED", "LIFE", "DIARY", "EPISODIC"] = Field(
+        default="EPISODIC", description="记忆内容的语义归属；类型不证明事实真实或授予权限。",
+    )
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
 
     @model_validator(mode="before")
@@ -226,8 +238,9 @@ class MemoryCandidate(BaseModel):
             return {"content": value}
         if isinstance(value, dict):
             normalized = dict(value)
-            if not str(normalized.get("memory_type") or "").strip():
-                normalized["memory_type"] = "EPISODIC"
+            raw_type = normalized.get("memory_type")
+            kind = raw_type.strip().upper() if isinstance(raw_type, str) else ""
+            normalized["memory_type"] = kind if kind in MEMORY_TYPE_DESCRIPTIONS else "EPISODIC"
             normalized["importance"] = _bounded_float(
                 normalized.get("importance", 0.5),
                 default=0.5,

@@ -41,6 +41,11 @@ Memory / Mental State / Diary / Summary = derived cognition
 
 重要原则：人物不只“记用户”，也要能记得自己的经历和共同历史。
 
+正常 PersonReaction（含视觉与可选展示子契约）在同一次模型反应中接收上述六类的简短语义说明，候选用 `content` / `memory_type` / `importance` 表达。按内容主体、真实来源与参与关系分类，而非把 USER_MESSAGE 一律当 USER 或把 TIME_TICK 当已发生生活。SHARED 可以记录实际共同讨论或达成的约定，但计划不代表已执行，讨论不代表现实行动已完成；SELF/LIFE 不能冒认用户、第三方或文章里的经历。类型只是语义注释，不是事实证明或权限。
+
+新 MemoryCandidate 的类型限定为上述六类；合法字符串去除首尾空白并转大写。未知、缺失、空或非字符串类型保守归为 EPISODIC，保留其他有效候选字段，不因此重试或丢弃有效回复。已持久化 Memory 保持既有字符串读取兼容，不回填历史类型。来源 Event ID、事件时间和准入/去重逻辑不变；分类不增加模型调用。模型仍可能误分类，不能用类型合法替代来源核验或真实体验验收。
+
+
 ## 3. Embedding path
 
 正式路径：

@@ -296,6 +296,8 @@ Memory recall 不再为每一轮把整个历史 Memory 全部解包并做 NumPy 
 
 结构化 PersonReaction 调用使用 JSON object contract + Pydantic validation + repair retry。
 
+结构化 Provider 调用的连接建立失败（`httpx.ConnectError / ConnectTimeout`）可在现有 `llm_attempts` 总预算内重试，与 JSON/schema 修复共享次数上限。连接重试保留原消息、会话及 logical call id，各次真实请求分别记录 attempt 和用量结果；不会关闭或替换其他并发调用使用的共享 Client。读写阶段错误、HTTP 错误不因该策略自动重放。纯文本直出及远端探测不使用此结构化重试循环。此策略提供瞬态连接失败恢复，不承诺修复所有休眠、代理或持续网络故障。
+
 纯文本默认使用 `chat_model`。`vision_model` 留空时复用 `chat_model`；只有 Provider 需要单独视觉模型时才配置 override。
 
 ## 9. Visual input: file vs live capture

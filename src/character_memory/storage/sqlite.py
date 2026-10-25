@@ -797,7 +797,10 @@ class SQLiteStore:
             )
             return [self._memory_from_row(row) for row in ordered]
 
-    def list_events(self, character_id: str, limit: int = 50, event_type: str | None = None, before: datetime | None = None) -> list[Event]:
+    def list_events(
+        self, character_id: str, limit: int = 50, event_type: str | None = None,
+        before: datetime | None = None, *, exclude_reaction_receipts: bool = False,
+    ) -> list[Event]:
         with self._lock:
             sql = "SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL"
             args: list = [character_id]
@@ -807,6 +810,13 @@ class SQLiteStore:
             if before:
                 sql += " AND event_time_epoch<=?"
                 args.append(epoch_us(before))
+            if exclude_reaction_receipts:
+                # Apply before LIMIT: receipts must not consume actual experience slots.
+                # Collaboration ACTION projections are durable shared facts, not receipts.
+                metadata = "CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END"
+                sql += (f" AND NOT (event_type=? AND json_extract({metadata},'$.trace_id') IS NOT NULL"
+                        f" AND COALESCE(json_extract({metadata},'$.fact_kind'),'')!=?)")
+                args.extend([EventType.ACTION.value, "ROLE_COLLABORATION_MESSAGE"])
             sql += " ORDER BY event_time_epoch DESC,id DESC LIMIT ?"
             args.append(limit)
             rows = list(reversed(self.conn.execute(sql, args).fetchall()))

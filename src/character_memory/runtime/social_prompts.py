@@ -1,4 +1,5 @@
 """Pure World/Space prompt fragments; services retain all decisions and execution."""
+from character_memory.domain.experience_profile import render_experience_profile
 import json
 
 from character_memory.runtime.context import render_observed_experiences
@@ -9,6 +10,7 @@ def space_post_prompt(person_context, *, memory_text, event_text, now,
                       video_instruction, video_max_duration, media_instruction,
                       capabilities=()) -> str:
     return PromptParts(
+        experience=render_experience_profile(getattr(person_context, "experience_profile", None)),
         persona=f"""# Persona
 {person_context.persona}""",
         state_memory=f"""# Current Mental State
@@ -67,6 +69,7 @@ expression_angle 只在需要 EXPRESS 时填写，描述人物自然会从什么
 
 def world_browse_prompt(context, memory_text, *, capabilities=()) -> str:
     return PromptParts(
+        experience=render_experience_profile(getattr(context, "experience_profile", None)),
         persona=f"""# Persona
 {context.persona}""",
         state_memory=f"""# Current Mental State
@@ -103,6 +106,7 @@ personal_note 写“这次浏览对我有什么意义”，不是复制新闻标
 
 def world_topic_prompt(context, memory_text, topic) -> str:
     return PromptParts(
+        experience=render_experience_profile(getattr(context, "experience_profile", None)),
         persona=f"""# Persona
 {context.persona}""",
         state_memory=f"""# Current Mental State

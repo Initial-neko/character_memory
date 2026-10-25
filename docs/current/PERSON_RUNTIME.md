@@ -688,3 +688,47 @@ contract; explicit malformed scope in an object does not become legacy REAL.
 No historical mental-state repair, new public scope input, schema migration or
 Activity execution is implied. Run `scripts/validate_experience_scope.py` for an
 isolated actual HTTP/restart check using a deterministic local model.
+
+## Explicit user experience profile
+
+The local operator's explicit tone (NATURAL/CUTE), energy (QUIET/LIVELY) and
+verbosity (BRIEF/BALANCED/DETAILED) belong to the experience profile, independently
+of Persona, MentalState and Memory. Unset/null fields supply no inferred preference.
+No choice is inferred from silence, ignored suggestions or model output.
+
+`GET/PATCH/DELETE /v2/me/experience-profile` reads, changes or clears that profile.
+PATCH accepts only `expected_version` and `changes`; DELETE requires an
+`expected_version` query parameter. The server chooses the current local operator;
+HTTP callers cannot provide an owner, user or character identity. This is the
+existing local single-operator deployment, not multi-user authentication or a DSH
+grant. Unknown fields and invalid enum/version values return 422; stale revisions
+return 409. Reads never load a model or initialize an embedding provider.
+
+The existing SQLite migration ledger owns the head/revision tables. Changes use
+one immediate transaction across connections, increment a monotonic version and
+record only explicit structured changes. `/versions` returns at most 100 recent
+versions. `POST /restore` takes `expected_version` and `target_version`; restoration
+creates a new revision rather than moving the version backwards. DELETE removes
+old preference snapshots and keeps an empty CLEAR revision; earlier versions then
+return 404 on restoration. Existing model traces/backups are not rewritten by
+this profile operation; no free-text/private-feedback history is introduced.
+
+PersonContextBuilder reads the current profile on each build without a cache or
+read-side schema writes. Missing feature tables mean the legacy empty profile;
+explicit API startup/changes own initialization. A corrupt stored profile fails
+closed rather than turning arbitrary text into prompt instructions.
+
+Ordinary Direct/Group reactions, Space/World planning, World continuation and
+role collaboration receive a separate explicit-preference prompt section. Persona
+bytes and role opinions/refusal/silence remain independent. Preferences affect
+communication with the user, not permission, external tools, real experiences or
+the character's interests. A new build observes corrections, withdrawal, clearing
+and restored revisions; an already running model call retains its input snapshot.
+With no active choices the prompt section is absent.
+
+Run `scripts/validate_experience_profile.py` for isolated real HTTP, two-process
+CAS, Direct/Group context use and restart/clear checks. It uses a deterministic
+provider; model quality/human experience, free-text feedback, reply suggestions,
+learning and Activity-specific integration remain separate work. There is no new
+frontend in this backend slice; new profile/suggestion screens require approved
+desktop/mobile references and their own visual acceptance.

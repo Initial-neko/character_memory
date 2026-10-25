@@ -28,10 +28,11 @@ class PromptParts:
     perception: str = ''
     capabilities: str = ''
     runtime_policy: str = ''
+    experience: str = ''
 
     def render(self) -> str:
         return '\n\n'.join(part.strip() for part in (
-            self.persona, self.state_memory, self.perception,
+            self.persona, self.experience, self.state_memory, self.perception,
             self.capabilities, self.runtime_policy) if part.strip()) + '\n'
 
 

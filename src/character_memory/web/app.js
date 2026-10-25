@@ -64,6 +64,7 @@
   };
 
   CM.api = async (path, options = {}) => {
+    if (CM.clientSends?.handles(path, options)) return CM.clientSends.send(path, options);
     const started = performance.now();
     const response = await fetch(path, {headers:{"Content-Type":"application/json", ...(options.headers || {})}, ...options});
     const elapsed = performance.now() - started;
@@ -136,6 +137,7 @@
     const row = document.createElement("article");
     row.className = `message-row ${message.role}`;
     row.dataset.messageId = message.id ?? "";
+    if (message.client_request_id) row.dataset.clientRequestId = message.client_request_id;
     const avatar = message.role === "assistant" ? CM.initialFor(CM.currentProfile()) : "";
     const thought = message.role === "assistant" && message.has_trace && message.source_event_id
       ? `<button class="detail-button" type="button" data-thought="${message.source_event_id}" title="查看安全的思考摘要">想法</button>` : "";
@@ -542,6 +544,7 @@
       await CM.sendDirectPayload({message});
     }
     catch (error) {
+      if (error.clientSendId) return;
       const box = document.createElement("div");
       box.className = "error";
       box.textContent = `发送失败：${error.message}`;

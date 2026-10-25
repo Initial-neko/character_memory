@@ -25,6 +25,12 @@ def upload_caption(original_name: str | None) -> str | None:
     return None
 
 
+def client_request_fields(metadata: dict[str, Any]) -> dict[str, str]:
+    """Optional source identity for pairing a local send with durable history."""
+    identity = metadata.get("client_request_id")
+    return {"client_request_id": identity} if isinstance(identity, str) and identity.strip() else {}
+
+
 def common_chat_message_fields(
     metadata: dict[str, Any],
     *,
@@ -34,6 +40,7 @@ def common_chat_message_fields(
     """Canonical resource/voice fields shared by every chat projection."""
 
     return {
+        **client_request_fields(metadata),
         "action": metadata.get("action"),
         "action_index": metadata.get("action_index"),
         "sticker_id": metadata.get("sticker_id"),

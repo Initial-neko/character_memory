@@ -14,6 +14,7 @@ from character_memory.config import Settings, discover_character_profiles, load_
 from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
 from character_memory.group_web import attach_group_routes
 from character_memory.group_autonomy_web import attach_group_autonomy_routes
+from character_memory.character_life_web import attach_character_life_routes
 from character_memory.history_web import attach_history_routes
 from character_memory.images import load_image_catalog
 from character_memory.llm.client import PersonModel
@@ -130,6 +131,7 @@ app = create_api(bundle=bundle)
 # rely on can never be clean, which is the one thing that makes it useful.
 attach_avatar_routes(app)
 attach_history_routes(app)
+attach_character_life_routes(app, app.state.character_memory)
 attach_group_routes(app, str(ROOT / "config.example.yaml"))
 attach_search_routes(app)
 attach_async_routes(app)

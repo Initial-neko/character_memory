@@ -147,6 +147,17 @@ appropriate acknowledgement of an explicit user report.
 
 ## 3. Engineering regression layers
 
+CI's Linux browser job selects `pytest -m browser`, rather than maintaining a
+file whitelist. New marked cases are discovered automatically. A collection
+contract compares the workflow selection with all collected browser node IDs;
+it proves routing, not actual browser success or visual acceptance.
+
+The Windows smoke job also installs the existing browser extra and Chromium,
+sets `RUN_PLAYWRIGHT=1`, and executes the native Job Object process-tree cleanup
+case. Its Linux platform skip is not counted as Windows verification. JUnit
+artifacts retain actual pass/failure/skip outcomes; optional hardware/model and
+human-quality validation remain separate from these isolated CI fixtures.
+
 ### Pytest
 
 ```bash

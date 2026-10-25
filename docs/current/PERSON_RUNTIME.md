@@ -668,3 +668,23 @@ not a claim that an image/voice task finished. Async delivery freezes input/memb
 client retry integration remains separate work. See
 [Conversation Runtime](CONVERSATION_RUNTIME.md#per-person-cognition-execution-receipts)
 for states, legacy reconciliation and repeatable real-process validation.
+
+## Real experience boundary
+
+The existing Person runtime accepts legacy facts without `experience_scope` and
+explicit metadata `experience_scope: {schema_version: 1, reality: REAL}` only.
+The version must be an integer; extra scope fields, unknown versions, null and
+SIMULATED scopes fail closed before real cognition. This guard does not execute
+simulations or supply an Activity/branch overlay. Direct and Group check both
+the supplied event and authoritative source, then recheck inside the derived
+commit transaction. A scope changed after model entry prevents real state,
+Memory and visible output commit; the existing receipt retains the failed/unknown
+execution, without automatically repeating the provider.
+
+Shared Person context filters recent, observed and recalled experiences to this
+boundary. SQL filters precede candidate limits; raw audit queries retain records.
+Malformed legacy metadata keeps the existing INVALID-provenance readable-fact
+contract; explicit malformed scope in an object does not become legacy REAL.
+No historical mental-state repair, new public scope input, schema migration or
+Activity execution is implied. Run `scripts/validate_experience_scope.py` for an
+isolated actual HTTP/restart check using a deterministic local model.

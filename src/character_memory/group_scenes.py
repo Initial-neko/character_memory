@@ -2,6 +2,7 @@
 from datetime import datetime
 import json
 
+from character_memory.domain.experience_scope import real_experience_sql
 from character_memory.group_store import GroupEvent, GroupRepository
 
 
@@ -25,7 +26,7 @@ class GroupScenes:
                 bound=' AND id<=?'
                 args.append(max_event_id)
             row=self.store.conn.execute("SELECT id,metadata_json FROM conversation_events WHERE conversation_id=? "
-                "AND event_type='SCENE_DAY_ADVANCED'"+bound+' ORDER BY id DESC LIMIT 1',args).fetchone()
+                "AND event_type='SCENE_DAY_ADVANCED' AND "+real_experience_sql("metadata_json")+bound+' ORDER BY id DESC LIMIT 1',args).fetchone()
             data=json.loads(row['metadata_json']) if row else {}
             day=int(data.get('to_day',1))
             return {'template_id':template,'story_day':day,'phase':'EVENING' if day==1 else 'MORNING',
@@ -50,7 +51,7 @@ class GroupScenes:
             group=GroupRepository(self.store).get_group(group_id)
             if state is None or group is None: raise KeyError('active scene group not found')
             previous=self.store.conn.execute("SELECT metadata_json FROM conversation_events WHERE conversation_id=? "
-                "AND event_type='SCENE_DAY_ADVANCED' AND json_extract(metadata_json,'$.request_id')=?",(group_id,request_id)).fetchone()
+                "AND event_type='SCENE_DAY_ADVANCED' AND "+real_experience_sql("metadata_json")+" AND json_extract(metadata_json,'$.request_id')=?",(group_id,request_id)).fetchone()
             if previous:
                 if json.loads(previous['metadata_json']).get('from_day')!=expected_day: raise ValueError('request_id conflict')
                 return state

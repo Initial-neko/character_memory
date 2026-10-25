@@ -11,6 +11,7 @@ import numpy as np
 from character_memory.call_invitations import CallInvitationPolicy, CallInvitationRepository
 from character_memory.application.action_materialization import materialize_expressive_action
 from character_memory.domain.facts import FactRef
+from character_memory.domain.experience_scope import require_real_experience
 from character_memory.storage.message_receipts import ReactionExecutionRepository, ExecutionUnavailable
 from character_memory.time_utils import epoch_us
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
@@ -155,7 +156,7 @@ class PersonRuntime:
     def _last_chat_before(self, character_id: str, event_time, *, exclude_event_id: int | None = None):
         candidates = []
         for event_type in (EventType.USER_MESSAGE, EventType.CHARACTER_MESSAGE):
-            rows = self.store.list_events(character_id, limit=4, event_type=event_type.value, before=event_time)
+            rows = self.store.list_events(character_id, limit=4, event_type=event_type.value, before=event_time, real_experience_only=True)
             rows = [item for item in rows if exclude_event_id is None or item.id != exclude_event_id]
             if rows:
                 candidates.append(rows[-1])
@@ -493,6 +494,7 @@ class PersonRuntime:
         return reaction.model_copy(update={"actions":kept,"action":kept[0] if kept else ActionDecision(type=ActionType.NO_REPLY)}), decisions
 
     def handle(self, event: Event, *, image_data_urls=None, persist_event=True, commit_guard=None):
+        require_real_experience(event.metadata)
         ReactionExecutionRepository.require_independent_boundary(self.store)
         if persist_event:
             event = self.store.append_event(event)
@@ -500,6 +502,8 @@ class PersonRuntime:
             raise ValueError("persist_event=False requires an already persisted event id")
         source_ref = FactRef(kind="EVENT", id=event.id)
         actual = self.store.get_event(source_ref.id)
+        if actual is not None:
+            require_real_experience(actual.metadata)
         if (actual is None or actual.character_id != event.character_id
                 or actual.event_type != event.event_type or actual.content != event.content
                 or epoch_us(actual.event_time) != epoch_us(event.event_time)
@@ -657,6 +661,10 @@ class PersonRuntime:
                 if commit_guard is not None and not commit_guard():
                     raise SupersededReaction(f"reaction for source event {event.id} was superseded")
 
+                authoritative = self.store.get_event(event.id)
+                if authoritative is None:
+                    raise ValueError("reaction source disappeared")
+                require_real_experience(authoritative.metadata)
                 if state_after:
                     self.store.set_mental_state(event.character_id, state_after, event.event_time, event.id)
 

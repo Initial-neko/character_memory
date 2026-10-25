@@ -5,6 +5,7 @@ import time
 from typing import Any, Callable
 
 from character_memory.domain.models import Event, EventType
+from character_memory.domain.experience_scope import require_real_experience
 from character_memory.llm.usage import llm_usage_scope
 from character_memory.runtime.context import compile_context
 from character_memory.live2d_behavior import presentation_scope, presentation_prompt
@@ -53,6 +54,7 @@ def evaluate_reaction(
 ) -> ReactionEvaluation:
     """Run the shared Recall -> Context -> Model -> resource-sanitize pipeline."""
 
+    require_real_experience(event.metadata)
     timings: dict[str, float] = {}
 
     stage = time.perf_counter()

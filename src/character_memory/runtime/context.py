@@ -4,6 +4,7 @@ from datetime import timezone
 import json
 
 from character_memory.domain.models import Event, EventType
+from character_memory.domain.experience_scope import is_real_experience
 from character_memory.runtime.prompt_parts import PromptParts, render_capabilities, render_memory_lines
 
 
@@ -123,10 +124,12 @@ def compile_context_parts(
     sharing = ""
     if event.event_type in {EventType.TIME_TICK, EventType.PROACTIVE_INTENT} and _event_channel(event) == "DIRECT":
         for item in event.metadata.get("sharing_observations", [])[:4]:
+            if not is_real_experience(item):
+                continue
             sharing_events.append(Event(
                 id=item["event_id"], character_id=event.character_id,
                 event_type=EventType.WORLD_OBSERVATION, event_time=item["observed_at"],
-                content=item["content"], metadata={"sources": item["sources"], "rss_reading": item["rss_reading"]},
+                content=item["content"], metadata={**({"experience_scope": item["experience_scope"]} if "experience_scope" in item else {}), "sources": item["sources"], "rss_reading": item["rss_reading"]},
             ))
         sharing = "\n# Personal Sharing Observations\n" + render_observed_experiences(sharing_events, budget=3200)
         sharing += "\n这是本人真实观察的有限上下文节选，不是已发送内容，不代表用户在场或已读；来源和阅读范围保留原义。"

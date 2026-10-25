@@ -35,7 +35,7 @@ def _profile_name(character_id: str) -> str:
 
 
 def _group_recent_dialogue(store, conversation_id: str) -> list[str]:
-    events = GroupRepository(store).list_events(conversation_id, limit=10)[-8:]
+    events = GroupRepository(store).list_events(conversation_id, limit=10, real_experience_only=True)[-8:]
     lines: list[str] = []
     for item in events:
         if item.actor_type == "USER":

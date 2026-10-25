@@ -405,3 +405,14 @@ are not currently displayed. Assistant prose is not original webpage text or
 proof that a character adopted it. Memory/state links refer only to persisted
 cognition effects. Executor configuration and retention ownership belong to
 [Architecture](ARCHITECTURE.md), not to Memory admission.
+
+## Real-scope recall and admission
+
+Real Person candidate queries exclude explicit simulated/unknown/malformed
+`experience_scope` metadata before recent/importance/pinned/type limits; vector
+recall also filters before ranking. Exact duplicate checks use the same boundary
+so a simulated memory cannot suppress admission of a real one. Raw Memory
+Inspector/audit storage remains intact. Scope rules and runtime source/commit
+guards belong to [Person Runtime](PERSON_RUNTIME.md#real-experience-boundary).
+This is a read/admission guard, not a branch-local memory store or a simulation
+reflection-publishing API.

@@ -50,6 +50,7 @@ src/character_memory/
 ### `domain/`
 
 - `facts.py` — 不同权威事实域的不可变FactRef身份契约。
+- `experience_profile.py` — 显式用户底色枚举、版本请求及独立Prompt区块；不属于人物Persona。
 - `models.py` — `Event / Memory / PersonReaction / ActionDecision / ...`。
 
 `llm/usage.py` 拥有调用归因 scope 与 durable request 计量；Runtime Trace 保留模型 I/O，两者通过 logical call id 关联。
@@ -71,6 +72,7 @@ src/character_memory/
 
 ### `storage/`
 
+- `experience_profiles.py` — 本地用户底色head/version、CAS、清除与恢复；无模型调用。
 - `message_receipts.py` — Direct/Group async接受及逐人物认知执行回执；认知提交与队列交接分别记录，不声明可选外部效果完成。
 - `reaction_delivery.py` — async 来源待交接记录、冻结批次、owner/租约与持久认知交付状态；只引用现有事实和媒体。
 - `sqlite.py` — core tables、migration ledger、Event/Memory/Trace/Intent/Media persistence。
@@ -83,6 +85,7 @@ src/character_memory/
 
 ```text
 api.py                  Character Runtime composition root + lifecycle only
+experience_profile_web.py Local operator explicit profile HTTP routes; server-owned identity
 background_services.py  shared worker start/rollback/stop ownership and ordering
 web_lifecycle.py        feature-route adapter to the shared lifecycle owner
 api_contracts.py        legacy/core HTTP request + character-capacity contracts
@@ -313,6 +316,7 @@ CLI 不提供 `day` / `simulate` / `tick`，AppBundle 不装配生活模拟器�
 | Autonomous Group Chat | `group_store.py` → `application/group_autonomy.py` → `group_autonomy_web.py` → existing Group SSE/UI |
 | Character Space | `space_store.py` → `space_autonomy.py` → `space_media_executor.py` / `world_observation.py` → `space_web.py` → `web/space.js` |
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
+| 显式用户底色 | `domain/experience_profile.py` → `storage/experience_profiles.py` → `experience_profile_web.py` → `runtime/person_context.py`；契约见 [Person Runtime](PERSON_RUNTIME.md) |
 | Memory/Recall/Governance | `runtime/person_context.py` → `memory/recall.py` → `storage/sqlite.py` → `memory_web.py` → `web/app.js` |
 | Formal TTS registry/routing | `tts_registry.py` → `settings_server.py` / `media_server.py` → `tts_lab.py` |
 | Character GSV voice | `voices.py` → `gsv_tts_runtime.py` → `tts_lab.py` VoiceDesign freeze |

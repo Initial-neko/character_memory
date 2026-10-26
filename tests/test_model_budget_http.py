@@ -1,6 +1,7 @@
 """Real HTTP, SQLite persistence and two owned application processes."""
 from contextlib import contextmanager
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -100,8 +101,16 @@ def test_actual_http_budget_survives_restart_and_does_not_block_chat(tmp_path):
     assert all(item['external_calls']==0 for item in calls)
     dest=Path(os.getenv('MODEL_BUDGET_EVIDENCE_DIR',str(tmp_path)))
     dest.mkdir(parents=True,exist_ok=True)
+    sources=['src/character_memory/runtime/model_execution.py',
+             'src/character_memory/world_activity.py','src/character_memory/world_continuation.py',
+             'src/character_memory/world_web.py','src/character_memory/config.py']
+    source_diff=subprocess.run(['git','diff','--quiet','HEAD','--',*sources],cwd=ROOT)
+    assert source_diff.returncode==0, 'served runtime sources differ from the recorded commit'
+    porcelain=subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).splitlines()
     evidence={'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
-              'dirty':bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip()),
+              'dirty':bool(porcelain),'git_status_porcelain':porcelain,
+              'runtime_sources_match_commit':True,
+              'runtime_sources_sha256':{name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in sources},
               'pids':pids,'first_status':first_status,'final_status':final_status,
               'actual_model_invocations':calls,'external_calls':0,'owned_ports_closed':True}
     (dest/'model-budget-http-restart.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf-8')

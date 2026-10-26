@@ -1,5 +1,6 @@
 """One Core SQLite owner for Goal state, stage acceptances and mutation receipts."""
 from datetime import datetime,timezone
+from contextlib import contextmanager
 import hashlib
 import json
 from uuid import uuid4
@@ -21,11 +22,26 @@ class GoalRepository:
         self.store.conn.execute('CREATE TABLE person_goal_stages(goal_id TEXT NOT NULL,stage_index INTEGER NOT NULL,evidence_json TEXT NOT NULL,note TEXT,confirmation TEXT NOT NULL,accepted_at TEXT NOT NULL,PRIMARY KEY(goal_id,stage_index))')
         self.store.conn.execute('CREATE TABLE person_goal_receipts(character_id TEXT NOT NULL,request_id TEXT NOT NULL,request_hash TEXT NOT NULL,goal_id TEXT NOT NULL,operation TEXT NOT NULL,version_applied INTEGER NOT NULL,PRIMARY KEY(character_id,request_id))')
 
+    @contextmanager
+    def _snapshot(self):
+        # Keep state, stages and source statuses on one WAL read snapshot. A
+        # caller-owned transaction must never be committed or rolled back here.
+        with self.store._lock:
+            owned=not self.store.conn.in_transaction
+            if owned:self.store.conn.execute('BEGIN')
+            try:
+                yield
+            except BaseException:
+                if owned:self.store.conn.rollback()
+                raise
+            else:
+                if owned:self.store.conn.commit()
+
     def _exists(self):
         return self.store.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='person_goals'").fetchone() is not None
 
     def get(self,character_id,goal_id):
-        with self.store._lock:
+        with self._snapshot():
             if not self._exists():raise GoalMissing('GOAL_NOT_FOUND')
             row=self.store.conn.execute('SELECT * FROM person_goals WHERE id=? AND character_id=?',(goal_id,character_id)).fetchone()
             if row is None:raise GoalMissing('GOAL_NOT_FOUND')
@@ -43,7 +59,7 @@ class GoalRepository:
 
     def list(self,character_id,*,limit=50):
         if type(limit) is not int or not 1<=limit<=100:raise ValueError('invalid goal limit')
-        with self.store._lock:
+        with self._snapshot():
             if not self._exists():return []
             ids=self.store.conn.execute('SELECT id FROM person_goals WHERE character_id=? ORDER BY updated_at DESC,id LIMIT ?',(character_id,limit)).fetchall()
             return [self.get(character_id,row['id']) for row in ids]

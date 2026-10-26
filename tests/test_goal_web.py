@@ -56,3 +56,49 @@ def test_optional_operator_note_cannot_be_blank():
     for note in ('','   ','\n\t'):
         with pytest.raises(ValidationError):
             GoalAction(request_id='blank-note',expected_version=1,operation='COMPLETE_STAGE',confirmation='OPERATOR_ACCEPTED',evidence=[{'kind':'EVENT','id':1}],note=note)
+
+def test_goal_read_is_one_sqlite_snapshot_across_independent_writer(tmp_path):
+    from character_memory.storage.person_goals import GoalRepository
+    from test_person_goals import create_request,source,complete
+    stores=[SQLiteStore(tmp_path/'snapshot.sqlite') for _ in range(2)]
+    reader,writer=[GoalRepository(s) for s in stores]
+    goal=reader.create('rin',create_request())['goal'];ref=source(stores[0]);fired=[]
+    def interleave(sql):
+        if 'SELECT * FROM person_goal_stages' in sql and not fired:
+            fired.append(True);writer.act('rin',goal['id'],complete(1,[ref]))
+    stores[0].conn.set_trace_callback(interleave)
+    try:
+        observed=reader.get('rin',goal['id'])
+        assert fired and writer.get('rin',goal['id'])['version']==2
+        assert observed['version']==1 and observed['current_stage']==0 and observed['completions']==[]
+    finally:
+        stores[0].conn.set_trace_callback(None)
+        for s in stores:s.close()
+
+
+def test_invalid_raw_fact_metadata_cannot_become_real_goal_evidence(tmp_path):
+    import pytest
+    from character_memory.storage.person_goals import GoalRepository,EvidenceUnavailable
+    from test_person_goals import create_request,source,complete
+    store=SQLiteStore(tmp_path/'metadata.sqlite');repo=GoalRepository(store)
+    try:
+        ref=source(store);goal=repo.create('rin',create_request())['goal']
+        store.conn.execute("UPDATE events SET metadata_json='not-json' WHERE id=?",(ref.id,));store.conn.commit()
+        with pytest.raises(EvidenceUnavailable):repo.act('rin',goal['id'],complete(1,[ref]))
+        assert repo.get('rin',goal['id'])['version']==1
+    finally:store.close()
+
+
+def test_goal_get_does_not_commit_or_rollback_callers_raw_transaction(tmp_path):
+    from character_memory.storage.person_goals import GoalRepository
+    from test_person_goals import create_request
+    store=SQLiteStore(tmp_path/'rawtx.sqlite');repo=GoalRepository(store)
+    try:
+        goal=repo.create('rin',create_request())['goal']
+        store.conn.execute("UPDATE person_goals SET title='Uncommitted caller value' WHERE id=?",(goal['id'],))
+        assert store.conn.in_transaction
+        assert repo.get('rin',goal['id'])['title']=='Uncommitted caller value'
+        assert store.conn.in_transaction
+        store.conn.rollback()
+        assert repo.get('rin',goal['id'])['title']==goal['title']
+    finally:store.close()

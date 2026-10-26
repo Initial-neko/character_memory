@@ -714,8 +714,10 @@ expected version). One immediate transaction owns source revalidation, stage
 acceptance, state CAS and mutation receipt. Two connections cannot accept the
 same version twice. Reusing the identity with different payload/goal conflicts;
 a legitimate retry returns its original acknowledgement plus the current goal,
-not an old active state that revives an archived goal. Reads do not migrate or
-write state; schema initialization is an explicit composition action.
+not an old active state that revives an archived goal. Reads use one deferred
+SQLite snapshot for state, stages and source statuses, preserving any caller-owned
+transaction without commit/rollback. They do not migrate or write state; schema
+initialization is an explicit composition action.
 
 COMPLETE_STAGE requires `confirmation=OPERATOR_ACCEPTED` and 1-8 distinct
 FactRefs. EVENT evidence belongs to this Person; CONVERSATION_EVENT evidence
@@ -723,6 +725,8 @@ must be authored by the Person or have its actual runtime witness trace, not
 merely current group membership. Both must currently pass the existing REAL
 experience boundary. The same checks run inside the commit transaction; missing,
 foreign, simulated or malformed sources return only `EVIDENCE_UNAVAILABLE`.
+Legacy invalid-metadata markers are not accepted as real Goal evidence; the
+existing Memory provenance audit behavior is unchanged.
 Operational database errors remain errors, not a fabricated missing source.
 
 Stage acceptances store references, source hashes, optional bounded operator

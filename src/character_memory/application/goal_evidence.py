@@ -18,6 +18,8 @@ def evidence_digest(store,character_id,reference):
         else:
             fact=GroupRepository.read_source_fact(store,reference.conversation_id,reference.id,character_id)
             if fact is None:raise EvidenceUnavailable('EVIDENCE_UNAVAILABLE')
+        if fact.metadata.get('metadata_status')=='INVALID':
+            raise EvidenceUnavailable('EVIDENCE_UNAVAILABLE')
         require_real_experience(fact.metadata)
         raw=json.dumps(fact.model_dump(mode='json'),sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False)
         return hashlib.sha256(raw.encode('utf-8')).hexdigest()

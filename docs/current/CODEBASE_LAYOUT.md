@@ -258,6 +258,7 @@ src/character_memory/web/
 ```text
 app.js                  conversation/composer core
 experience_profile.js/css local operator preference dialog, CAS draft reconciliation, versions/clear
+reply_suggestions.js/css explicit draft generation, composer attribution and authored feedback UI
 frontend_v2.js/css      shared user-page navigation, chat visual shell and click-only experience entry
 profile_v2.js/css       read-only character profile, sourced daily posts and user interactions
 world_v2.js/css         World discovery presentation over the existing Encounter feature

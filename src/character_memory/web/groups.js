@@ -533,7 +533,7 @@
     }
   }
 
-  async function sendText(message) {
+  async function sendText(message, replySuggestion) {
     const groupId = activeId();
     if (!groupId || !message.trim()) return;
     CM.dom.input.value = "";
@@ -548,7 +548,7 @@
       CM.dom.chat.appendChild(box);
       throw error;
     }
-    return commitSend(groupId, {message});
+    return commitSend(groupId, {message,...(replySuggestion?{reply_suggestion:replySuggestion}:{})});
   }
 
   async function sendSticker(sticker) {
@@ -678,7 +678,7 @@
     if (button) showTurn(button.dataset.groupTurn).catch(console.error);
   });
 
-  CM.registerFeature("groups", {loadGroups,loadArchivedGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,current,applyHeader,applyComposerState,sendText,sendSticker,sendImage,archiveGroup,restoreArchivedGroup,showArchivedGroups,renderList,closeStream});
+  CM.registerFeature("groups", {loadGroups,loadArchivedGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,current,applyHeader,applyComposerState,sendText,sendSticker,sendImage,latestMessage:()=>historyState.messages.at(-1),archiveGroup,restoreArchivedGroup,showArchivedGroups,renderList,closeStream});
   CM.on("ready", loadGroups);
   window.addEventListener("beforeunload", closeStream);
 })();

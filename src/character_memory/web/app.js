@@ -534,14 +534,14 @@
     return result;
   };
 
-  CM.sendDirectText = async message => {
+  CM.sendDirectText = async (message, replySuggestion) => {
     if (!message) return;
     CM.dom.input.value = "";
     CM.dom.input.style.height = "auto";
     try {
       const visual = await CM.features.voice?.sendTextWithVisual?.(message);
       if (visual?.handled) return visual.result;
-      await CM.sendDirectPayload({message});
+      await CM.sendDirectPayload({message,...(replySuggestion?{reply_suggestion:replySuggestion}:{})});
     }
     catch (error) {
       if (error.clientSendId) return;
@@ -573,8 +573,9 @@
       finally {CM.state.lifeSending=false;CM.updateComposerState();}
       return;
     }
-    if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message);
-    return CM.sendDirectText(message);
+    const attribution=CM.features.replySuggestions?.capture?.();
+    if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message,attribution);
+    return CM.sendDirectText(message,attribution);
   };
 
   CM.timingHtml = timings => {

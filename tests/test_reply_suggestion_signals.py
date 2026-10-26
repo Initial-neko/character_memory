@@ -144,3 +144,28 @@ def test_concurrent_explicit_feedback_has_one_profile_cas_winner(tmp_path):
     assert sorted(map(str,results))==['1','CONFLICT']
     assert stores[0].conn.execute('SELECT COUNT(*) FROM reply_suggestion_signals').fetchone()[0]==1
     for store in stores:store.close()
+
+
+def test_authored_note_after_real_send_does_not_revive_stale_batch(acceptance):
+    client,store,group,calls,_=acceptance
+    batch=batch_for(client,store,group,'DIRECT')
+    payload={**body('DIRECT'),'message':batch['suggestions'][0]['text']}
+    payload['reply_suggestion']={'batch_id':batch['batch_id'],'suggestion_id':batch['suggestions'][0]['id']}
+    accepted=client.post(endpoint(group,'DIRECT'),json=payload)
+    assert accepted.status_code==202,accepted.text
+    note={'request_id':str(uuid4()),'batch_id':batch['batch_id'],'kind':'EXPLICIT_FEEDBACK','comment':'这个方向对我有帮助'}
+    saved=client.post('/v2/reply-suggestions/feedback',json=note)
+    assert saved.status_code==200,saved.text
+    assert saved.json()['comment']==note['comment']
+    assert client.get('/v2/reply-suggestions/'+batch['batch_id']).status_code==409
+    assert client.post('/v2/reply-suggestions/feedback',json={'request_id':str(uuid4()),'batch_id':batch['batch_id'],'kind':'IGNORE'}).status_code==409
+    assert client.post('/v2/reply-suggestions/feedback',json={**note,'request_id':str(uuid4()),'preference_changes':{'tone':'CUTE'},'expected_profile_version':0}).status_code==409
+    assert ExperienceProfileRepository(store).get()['version']==0
+
+
+def test_unadopted_stale_batch_cannot_gain_historical_note(acceptance):
+    client,store,group,calls,_=acceptance
+    batch=batch_for(client,store,group,'DIRECT')
+    ExperienceProfileRepository(store).patch(0,{'tone':'CUTE'})
+    note={'request_id':str(uuid4()),'batch_id':batch['batch_id'],'kind':'EXPLICIT_FEEDBACK','comment':'not adopted'}
+    assert client.post('/v2/reply-suggestions/feedback',json=note).status_code==409

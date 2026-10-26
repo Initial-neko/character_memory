@@ -119,6 +119,7 @@
       if(currentScope()===selected&&!CM.dom.input.value)CM.dom.input.value=String(payload.message||'');
       throw Error('无法保存发送记录，本次未发送；请检查浏览器存储空间');
     }
+    CM.features.replySuggestions?.recorded?.(record);
     return dispatch(record,{fresh:true});
   }
   async function retry(id){

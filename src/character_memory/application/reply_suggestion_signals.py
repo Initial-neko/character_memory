@@ -63,8 +63,20 @@ def record_feedback(service,request):
     with store.transaction(immediate=True):
         existing=repo.existing(key,digest)
         if existing is not None:return existing
-        batch=service.get(str(request.batch_id))
-        if batch['status']!='READY':raise SuggestionStale('suggestions are not ready')
+        try:
+            batch=service.get(str(request.batch_id))
+            if batch['status']!='READY':raise SuggestionStale('suggestions are not ready')
+        except SuggestionStale:
+            # A real accepted send makes its batch stale; authored notes about
+            # that use remain possible without reviving choices or preferences.
+            row=service.batches.get(str(request.batch_id))
+            if (row is None or request.kind!='EXPLICIT_FEEDBACK'
+                    or request.preference_changes is not None
+                    or not repo.has_accepted_source(str(request.batch_id))):
+                raise
+            original=SuggestionRequest.model_validate_json(row['request_json'])
+            batch={'batch_id':row['id'],'profile_version':original.expected_profile_version}
+
         applied=None
         if request.preference_changes is not None:
             applied=ExperienceProfileRepository(store).patch(request.expected_profile_version,request.preference_changes.model_dump(exclude_unset=True))['version']

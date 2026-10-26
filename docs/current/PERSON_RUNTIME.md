@@ -854,4 +854,34 @@ after confirmation as a new revision. Clear confirmation deletes current choices
 and old snapshots, rather than offering recovery of deleted preferences. Both
 operations use the same CAS boundary; in-flight model turns keep their snapshot.
 The dialog supports Escape/focus return and internal scrolling on narrow screens.
-This panel does not yet provide reply suggestion selection or feedback governance.
+The Profile panel remains distinct from the chat reply-suggestion and feedback UI.
+
+
+### User-controlled reply drafts and authored feedback
+
+The ordinary Direct/Group composer offers an explicit 帮我想想 action. Page load,
+conversation changes and message arrival never trigger generation. It uses the
+latest public message FactRef and current Profile version. A 202 result offers
+an explicit GET check; unknown POST results can retry the same generation request
+identity. Known failures require an explicit new generation, never an automatic
+paid loop. Suggestion buttons only fill an editable draft, confirming replacement
+of existing text. They never submit chat or create SELECT signals.
+
+Only the ordinary composer submit adds its selected suggestion/batch attribution
+to existing text sends. W2 persists it with the immutable request payload; the
+client consumes the draft association after durable local recording, and retry
+continues that original identity. Accepted public text determines SELECT/EDIT or
+explicitly associated FREE_INPUT on the server. New context, Profile or target
+invalidates choices while leaving typed text. Calls, visual sends and life-reference
+messages keep their existing paths and do not acquire ordinary-text attribution.
+
+Explicit 不用这些 records IGNORE without inferring a preference. 建议反馈 reads the
+last batch's authored notes; users can submit, correct and withdraw them with the
+existing UUID/revision contracts. Text is recorded without automatic semantic
+interpretation or Profile mutation; Profile adjustments have their separate panel.
+An unknown feedback write keeps its request identity for explicit retry. After an
+actual accepted SELECT/EDIT/FREE_INPUT, a pure authored text note remains allowed
+for that now-stale batch. This exception requires a server-owned accepted-source
+signal, not a click or client assertion. It does not revive suggestions; IGNORE and
+feedback carrying preference changes still require current READY validation.
+Historical source facts stay unchanged when feedback is corrected or withdrawn.

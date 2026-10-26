@@ -140,6 +140,7 @@ jobs:
           GROUP_ENTRY_EVIDENCE_DIR: artifacts/core-visual-evidence/group-entry-sse
           CLIENT_SEND_EVIDENCE_DIR: artifacts/core-visual-evidence/client-sends
           EXPERIENCE_UI_EVIDENCE_DIR: artifacts/core-visual-evidence/experience-profile
+          REPLY_SUGGESTION_UI_EVIDENCE_DIR: artifacts/core-visual-evidence/reply-suggestions
         run: uv run pytest -q -m browser --browser chromium --junitxml=artifacts/core-visual-evidence/junit-browser-smoke.xml
 
       - name: Upload browser visual evidence and test results

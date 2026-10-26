@@ -51,6 +51,12 @@ class ReplySuggestionSignalRepository:
             if row['request_hash']!=request_hash:raise SuggestionConflict('signal identity already belongs to a different payload')
             return self.public(row)
 
+    def has_accepted_source(self,batch_id):
+        with self.store._lock:
+            return self.store.conn.execute(
+                "SELECT 1 FROM reply_suggestion_signals WHERE owner_id=? AND batch_id=? AND kind IN ('SELECT','EDIT','FREE_INPUT') AND source_ref_json IS NOT NULL LIMIT 1",
+                (LOCAL_OPERATOR,str(batch_id))).fetchone() is not None
+
     def record(self,*,request_key,request_hash,batch_id,kind,profile_version,source_ref=None,suggestion_id=None,comment=None,applied_profile_version=None):
         with self.store.transaction(immediate=True):
             existing=self.existing(request_key,request_hash)

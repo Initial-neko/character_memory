@@ -688,3 +688,52 @@ contract; explicit malformed scope in an object does not become legacy REAL.
 No historical mental-state repair, new public scope input, schema migration or
 Activity execution is implied. Run `scripts/validate_experience_scope.py` for an
 isolated actual HTTP/restart check using a deterministic local model.
+
+## Operator-confirmed long-term Person goals
+
+Goals are durable per-`character_id` metadata in the same Core SQLite database,
+separate from Intent (the next action), Persona and Memory. No new scheduler,
+model call, automatic Intent dispatch or prompt/context change is implied.
+Current APIs are local operator management, not an external Agent grant.
+
+`POST/GET /v1/characters/{character_id}/goals`, `GET /{goal_id}` and
+`POST /{goal_id}/actions` create/read or advance a bounded ordered goal.
+Creation validates a known Person without initializing the model. Historical
+reads use the durable Person association; a different Person or missing goal
+returns 404. Strict request fields reject malformed input with 422; state,
+version, evidence and request-identity conflicts return 409.
+
+Creation is ACTIVE at stage zero/version one. PAUSE and RESUME switch ACTIVE
+and PAUSED; only ACTIVE can COMPLETE_STAGE. A non-final acceptance advances one
+stage, and the final acceptance makes the goal COMPLETED. ARCHIVE preserves
+history and cannot be undone by a new request or old retry. Editing/reopening,
+shared goals, autonomous completion and growth-version rollback remain separate.
+
+Each mutation has a bounded `request_id` and expected version (creation has no
+expected version). One immediate transaction owns source revalidation, stage
+acceptance, state CAS and mutation receipt. Two connections cannot accept the
+same version twice. Reusing the identity with different payload/goal conflicts;
+a legitimate retry returns its original acknowledgement plus the current goal,
+not an old active state that revives an archived goal. Reads use one deferred
+SQLite snapshot for state, stages and source statuses, preserving any caller-owned
+transaction without commit/rollback. They do not migrate or write state; schema
+initialization is an explicit composition action.
+
+COMPLETE_STAGE requires `confirmation=OPERATOR_ACCEPTED` and 1-8 distinct
+FactRefs. EVENT evidence belongs to this Person; CONVERSATION_EVENT evidence
+must be authored by the Person or have its actual runtime witness trace, not
+merely current group membership. Both must currently pass the existing REAL
+experience boundary. The same checks run inside the commit transaction; missing,
+foreign, simulated or malformed sources return only `EVIDENCE_UNAVAILABLE`.
+Legacy invalid-metadata markers are not accepted as real Goal evidence; the
+existing Memory provenance audit behavior is unchanged.
+Operational database errors remain errors, not a fabricated missing source.
+
+Stage acceptances store references, source hashes, optional bounded operator
+notes and actual UTC acceptance time, never copied source text or new facts.
+GET resolves current evidence as CURRENT, CHANGED or UNAVAILABLE without returning
+source bodies. Source deletion, scope changes or loss of witness trace must not
+leak cached text. Historical completion means the operator accepted that stage;
+a source containing a claim is not proof of real-world completion, and the model
+cannot auto-accept it. Changed/unavailable evidence is visible separately and
+does not silently rewrite that historical acceptance or its source facts.

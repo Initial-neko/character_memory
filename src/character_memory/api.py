@@ -36,6 +36,7 @@ from character_memory.domain.models import EventType
 from character_memory.images import load_image_catalog
 from character_memory.core_character_web import attach_core_character_routes
 from character_memory.core_direct_web import attach_core_direct_routes
+from character_memory.goal_web import attach_goal_routes
 from character_memory.core_resource_web import attach_core_resource_routes
 from character_memory.logging_utils import configure_logging
 from character_memory.live2d_web import attach_live2d_routes
@@ -490,6 +491,7 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     attach_live2d_routes(app, resolve_media_dir(settings) / "live2d", character_profiles)
     attach_core_direct_routes(app, route_access)
     attach_character_life_routes(app, route_access)
+    attach_goal_routes(app)
     attach_rss_runtime(app, web_dir, read_store, background, settings, own_bundle=own_bundle)
 
     return app

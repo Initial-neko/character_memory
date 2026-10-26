@@ -246,6 +246,7 @@ SETTING_HELP: dict[str, str] = {
     "world_browse_interval_minutes": "同一角色两次 Personal Browse Opportunity 的间隔。",
     "world_browse_max_pages": "一次 Personal Browse 最多打开并读取的公网页面数。",
     "world_browse_daily_max": "每个角色每天最多执行多少次 Personal Browse；0 = 不限。",
+    "autonomous_model_daily_max": "每人物每实际UTC日的受控structured外层模型调用次数；当前Personal Browse规划、网页/RSS评估和continuation共用。默认30，0禁用；失败/超时/未知也占用，重启不重置。不是token/美元或provider内部重试上限；不含普通聊天、World Pulse、Space。需重启。",
     "world_activity_poll_seconds": "World Scheduler 检查 Pulse/Browse 是否到期的轮询延迟。",
     "group_autonomy_enabled": "是否允许已有群聊按周期获得自主交流机会。",
     "group_autonomy_interval_minutes": "同一群两次自主交流 Opportunity 的间隔。",

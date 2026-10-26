@@ -110,7 +110,13 @@ def attach_world_routes(app) -> None:
 
     @app.get("/v1/world/activity/status")
     def world_activity_status():
-        return activity_scheduler.status()
+        from character_memory.runtime.model_execution import model_budget_status
+        result = activity_scheduler.status()
+        result['model_invocation_budget'] = model_budget_status(
+            access.read_store,
+            daily_max=getattr(access.settings, 'autonomous_model_daily_max', 30),
+        )
+        return result
 
     @app.post("/v1/world/pulse/dev/refresh")
     def world_pulse_refresh():

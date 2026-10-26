@@ -159,7 +159,8 @@ def test_authored_note_after_real_send_does_not_revive_stale_batch(acceptance):
     assert saved.json()['comment']==note['comment']
     assert client.get('/v2/reply-suggestions/'+batch['batch_id']).status_code==409
     assert client.post('/v2/reply-suggestions/feedback',json={'request_id':str(uuid4()),'batch_id':batch['batch_id'],'kind':'IGNORE'}).status_code==409
-    assert client.post('/v2/reply-suggestions/feedback',json={**note,'request_id':str(uuid4()),'preference_changes':{'tone':'CUTE'},'expected_profile_version':0}).status_code==409
+    # Historical explicit choices still require the CURRENT Profile CAS (here 0).
+    assert client.post('/v2/reply-suggestions/feedback',json={**note,'request_id':str(uuid4()),'preference_changes':{'tone':'CUTE'},'expected_profile_version':1}).status_code==409
     assert ExperienceProfileRepository(store).get()['version']==0
 
 

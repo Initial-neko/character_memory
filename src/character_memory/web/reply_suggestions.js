@@ -7,7 +7,9 @@
   const dialog=document.createElement('dialog');dialog.className='cm-experience cm-reply-feedback';dialog.setAttribute('aria-labelledby','replyFeedbackTitle');document.body.append(dialog);
   let epoch=0, active=null, selected=null, lastBatch=null, busy=false, notice='', pendingGeneration=null, scopeSeen='';
   let feedbackEpoch=0, feedbackBatch=null, feedbackBusy=false, editing=null, rows=[], feedbackNotice='';
+  let feedbackProfile=null, preferenceDraft={}, preferenceConflict=false, preferenceOpen=false;
   const pendingFeedback=new Map();
+  const preferenceFields=[['tone','反馈表达风格',[['NATURAL','自然'],['CUTE','可爱']]],['energy','反馈相处节奏',[['QUIET','安静'],['LIVELY','活泼']]],['verbosity','反馈回答长度',[['BRIEF','简短'],['BALANCED','适中'],['DETAILED','详细']]]];
   const scope=()=>CM.isGroupConversation()?`GROUP:${CM.state.conversation.groupId}`:`DIRECT:${CM.state.characterId}`;
   const latest=()=>CM.isGroupConversation()?CM.features.groups?.latestMessage?.():CM.state.directHistory.messages.at(-1);
   const ref=()=>{const m=latest();return m?.id?{kind:CM.isGroupConversation()?'CONVERSATION_EVENT':'EVENT',id:Number(m.id),...(CM.isGroupConversation()?{conversation_id:CM.state.conversation.groupId}:{})}:null;};
@@ -119,17 +121,30 @@
     const field=textarea(),restoreFocus=document.activeElement===field;
     const selection=restoreFocus?[field.selectionStart,field.selectionEnd]:null;
     const pending=pendingFeedback.get(feedbackBatch);
-    dialog.innerHTML=`<header><div><h2 id="replyFeedbackTitle">建议反馈</h2><p>文字反馈仅记录，不会自动解读成偏好。需要改变相处方式，可使用相处偏好面板。</p></div><button type="button" data-feedback-close class="cm-experience-close" aria-label="关闭建议反馈" title="关闭不会提交尚未发送的文字">×</button></header><div class="cm-experience-body"><p role="status">${esc(feedbackNotice)}</p><label for="replyFeedbackText">反馈内容</label><textarea id="replyFeedbackText" data-feedback-text maxlength="2000" rows="3" ${pending?'disabled':''}></textarea><button type="button" data-feedback-submit>${pending?'重试原提交':editing?'保存更正':'提交反馈'}</button>${editing?'<button type="button" data-feedback-cancel>取消更正</button>':''}<div data-feedback-records></div></div>`;
+    dialog.innerHTML=`<header><div><h2 id="replyFeedbackTitle">建议反馈</h2><p>文字反馈仅记录；下方明确选择的相处偏好才会保存，供下次回复使用。</p></div><button type="button" data-feedback-close class="cm-experience-close" aria-label="关闭建议反馈" title="关闭不会提交尚未发送的文字">×</button></header><div class="cm-experience-body"><p role="status">${esc(feedbackNotice)}</p><label for="replyFeedbackText">反馈内容</label><textarea id="replyFeedbackText" data-feedback-text maxlength="2000" rows="3" ${pending?'disabled':''}></textarea>${!editing?`<details data-feedback-preferences ${preferenceOpen?'open':''}><summary>同时调整相处偏好（可选）</summary><p>未选择的项目保持原样；撤销仅清除该项明确偏好。</p>${preferenceFields.map(([key,label,options])=>`<label>${label}<select aria-label="${label}" data-feedback-pref="${key}" ${feedbackBusy||pending||!feedbackProfile?'disabled':''}><option value="_KEEP">保持原样</option>${options.map(([value,name])=>`<option value="${value}">${name}</option>`).join('')}<option value="_CLEAR">撤销这项偏好</option></select></label>`).join('')}<p>当前偏好版本：${feedbackProfile?esc(feedbackProfile.version):'未读取'}</p><button type="button" data-feedback-latest ${feedbackBusy||pending?'disabled':''}>读取最新偏好</button></details>`:''}<button type="button" data-feedback-profile>查看或恢复相处偏好</button><button type="button" data-feedback-submit>${pending?'重试原提交':editing?'保存更正':'提交反馈'}</button>${editing?'<button type="button" data-feedback-cancel>取消更正</button>':''}<div data-feedback-records></div></div>`;
     textarea().value=pending?.body?.comment||text;
     if(restoreFocus&&!textarea().disabled){textarea().focus({preventScroll:true});textarea().setSelectionRange(...selection);}
     dialog.querySelector('[data-feedback-close]').onclick=()=>dialog.close();
-    dialog.querySelector('[data-feedback-submit]').disabled=feedbackBusy;
+    const changes=pending?.body?.preference_changes||preferenceDraft;
+    dialog.querySelectorAll('[data-feedback-pref]').forEach(field=>{
+      field.value=Object.hasOwn(changes,field.dataset.feedbackPref)?changes[field.dataset.feedbackPref]??'_CLEAR':'_KEEP';
+      field.onchange=()=>{const key=field.dataset.feedbackPref;if(field.value==='_KEEP')delete preferenceDraft[key];else preferenceDraft[key]=field.value==='_CLEAR'?null:field.value;};
+    });
+    const details=dialog.querySelector('[data-feedback-preferences]');if(details)details.ontoggle=()=>{preferenceOpen=details.open;};
+    dialog.querySelector('[data-feedback-latest]')?.addEventListener('click',refreshPreference);
+    dialog.querySelector('[data-feedback-profile]').onclick=()=>{
+      if(pending||feedbackBusy)return;
+      if((textarea().value.trim()||Object.keys(preferenceDraft).length)&&!confirm('离开未提交的反馈草稿，查看或恢复相处偏好？'))return;
+      dialog.close();CM.features.experienceProfile.open();
+    };
+    dialog.querySelector('[data-feedback-profile]').disabled=feedbackBusy||Boolean(pending);
+    dialog.querySelector('[data-feedback-submit]').disabled=feedbackBusy||(!pending&&preferenceConflict&&!editing);
     dialog.querySelector('[data-feedback-submit]').onclick=()=>submitFeedback();
     dialog.querySelector('[data-feedback-cancel]')?.addEventListener('click',()=>{editing=null;feedbackRender(textarea().value);});
     const list=dialog.querySelector('[data-feedback-records]');
     for(const item of rows.filter(x=>x.kind==='EXPLICIT_FEEDBACK')){
       const row=document.createElement('section');row.className='cm-experience-version';row.dataset.signalId=item.id;
-      row.innerHTML=`<div><strong>${item.withdrawn?'已撤回':esc(item.comment||'无文字')}</strong><p>版本 ${esc(item.revision)}</p></div>`;
+      row.innerHTML=`<div><strong>${item.withdrawn?'已撤回':esc(item.comment||'无文字')}</strong><p>版本 ${esc(item.revision)}${item.applied_profile_version!=null?' · 当时同时保存过偏好；当前以最新选择为准':''}</p></div>`;
       if(!item.withdrawn){
         for(const [action,label]of [['correct','更正'],['withdraw','撤回']]){
           const button=document.createElement('button');button.type='button';button.textContent=label;button.disabled=feedbackBusy||Boolean(pending);
@@ -140,37 +155,63 @@
     }
     if(!list.children.length)list.textContent='还没有明确的文字反馈。选择、编辑与自由输入的发送记录由服务器保存。';
   }
-  async function loadFeedback({keepText=''}={}){
+  async function loadFeedback({keepText='',successNotice=''}={}){
     const token=++feedbackEpoch, batch=feedbackBatch;feedbackBusy=true;feedbackNotice='正在读取反馈记录…';feedbackRender(keepText);
-    try{const result=await request(`${api}/${batch}/signals`);if(token!==feedbackEpoch||!dialog.open)return;rows=result.data.signals;feedbackNotice='记录可以更正或撤回；已撤回的文字不会再次显示。';}
+    try{
+      const results=await Promise.allSettled([request(`${api}/${batch}/signals`),request('/v2/me/experience-profile')]);
+      if(token!==feedbackEpoch||!dialog.open)return;
+      if(results[0].status==='fulfilled')rows=results[0].value.data.signals;
+      feedbackProfile=results[1].status==='fulfilled'?results[1].value.data:null;
+      feedbackNotice=successNotice||(results.every(x=>x.status==='fulfilled')?'记录可更正或撤回；文字更正和撤回不会回滚独立保存的偏好。':'部分记录未读到；偏好读取失败时不可提交偏好修改。');
+    }
     catch(error){if(token!==feedbackEpoch)return;feedbackNotice='暂时无法读取记录；未修改任何反馈。';}
     finally{if(token===feedbackEpoch&&dialog.open){const liveText=textarea()?.value??keepText;feedbackBusy=false;feedbackRender(liveText);}}
   }
+  async function refreshPreference(){
+    if(feedbackBusy||pendingFeedback.has(feedbackBatch))return;
+    const token=++feedbackEpoch,text=textarea().value;feedbackBusy=true;feedbackRender(text);
+    try{
+      const result=await request('/v2/me/experience-profile');
+      if(token!==feedbackEpoch||!dialog.open)return;
+      if(Object.keys(preferenceDraft).length&&!confirm('已读取最新偏好。保留本次明确选择，以最新版本重新确认？尚未提交任何修改。'))return;
+      feedbackProfile=result.data;preferenceConflict=false;feedbackNotice='已读取最新偏好；请确认草稿后再次提交，未自动保存。';
+    }catch{if(token===feedbackEpoch)feedbackNotice='暂时无法读取最新偏好，未修改草稿或保存。';}
+    finally{if(token===feedbackEpoch&&dialog.open){feedbackBusy=false;feedbackRender(textarea()?.value??text);}}
+  }
   function openFeedback(){
     if(!lastBatch)return;
-    feedbackBatch=lastBatch;rows=[];editing=null;feedbackBusy=false;feedbackNotice='';feedbackRender();dialog.showModal();loadFeedback();
+    feedbackBatch=lastBatch;rows=[];editing=null;feedbackBusy=false;feedbackNotice='';feedbackProfile=null;preferenceDraft={};preferenceConflict=false;preferenceOpen=false;feedbackRender();dialog.showModal();loadFeedback();
   }
   function submitFeedback(){
     if(feedbackBusy)return;
     const pending=pendingFeedback.get(feedbackBatch);if(pending){sendFeedback(pending);return;}
-    const text=textarea().value.trim();if(!text){feedbackNotice='请先写下想反馈的内容。';feedbackRender();return;}
-    sendFeedback(editing?{path:`${api}/feedback/${editing.id}`,method:'PATCH',body:{request_id:crypto.randomUUID(),expected_revision:editing.revision,comment:text}}:{path:api+'/feedback',method:'POST',body:{request_id:crypto.randomUUID(),batch_id:feedbackBatch,kind:'EXPLICIT_FEEDBACK',comment:text}});
+    const text=textarea().value.trim(),hasChanges=!editing&&Object.keys(preferenceDraft).length>0;if(preferenceConflict&&!editing)return;if(hasChanges&&!feedbackProfile)return;if(!text&&!hasChanges){feedbackNotice='请先写下想反馈的内容。';feedbackRender();return;}
+    sendFeedback(editing?{path:`${api}/feedback/${editing.id}`,method:'PATCH',body:{request_id:crypto.randomUUID(),expected_revision:editing.revision,comment:text}}:{path:api+'/feedback',method:'POST',body:{request_id:crypto.randomUUID(),batch_id:feedbackBatch,kind:'EXPLICIT_FEEDBACK',comment:text||null,...(hasChanges?{preference_changes:{...preferenceDraft},expected_profile_version:feedbackProfile.version}:{})}});
   }
   async function sendFeedback(operation){
     if(feedbackBusy)return;
     const batch=feedbackBatch,token=++feedbackEpoch,text=textarea()?.value||'';
     pendingFeedback.set(batch,operation);feedbackBusy=true;feedbackNotice='正在提交…';feedbackRender(text);
     try{
-      await request(operation.path,operation.method,operation.body);
+      const result=await request(operation.path,operation.method,operation.body);
       // A closed/reopened dialog may still show this pending identity. Keep it
       // until that view explicitly reconciles it, rather than creating a new note.
       if(token!==feedbackEpoch||!dialog.open)return;
       pendingFeedback.delete(batch);
-      editing=null;feedbackBusy=false;await loadFeedback();
+      editing=null;preferenceDraft={};preferenceConflict=false;feedbackBusy=false;
+      let successNotice='反馈已保存。文字更正和撤回不会回滚独立保存的偏好。';
+      if(result.data.applied_profile_version!=null){
+        const current=await request('/v2/me/experience-profile').catch(()=>null);
+        if(token!==feedbackEpoch||!dialog.open)return;
+        successNotice=current?.data.version===result.data.applied_profile_version?'已保存明确选择，供下次回复使用。':'偏好已有后续更改或暂未确认，未重复应用旧选择；以最新偏好为准。';
+        CM.emit('experienceProfileChanged').catch(console.error);
+      }
+      await loadFeedback({successNotice});
     }catch(error){
       if(token!==feedbackEpoch)return;
       if(error.status)pendingFeedback.delete(batch);
-      feedbackBusy=false;feedbackNotice=error.status===409?'记录或上下文已变化，未覆盖新内容。请关闭后查看最新记录再决定。':error.status?'未能提交反馈，文字仍保留。':'提交结果尚未确认，重试原提交会沿用同一身份。';feedbackRender(text);
+      if(error.status===409&&operation.body.preference_changes)preferenceConflict=true;
+      feedbackBusy=false;feedbackNotice=error.status===409?'记录或偏好已变化，未覆盖新内容。偏好修改请先读取最新偏好，再确认提交；反馈更正请重新查看记录。':error.status?'未能提交反馈，文字仍保留。':'提交结果尚未确认，重试原提交会沿用同一身份。';feedbackRender(text);
     }
   }
   dialog.addEventListener('close',()=>{feedbackEpoch++;feedbackBusy=false;});

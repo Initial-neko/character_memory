@@ -831,9 +831,9 @@ message-acceptance replay refreshes its signal view after verifying the same
 source identity. Neither route revives an old note or reports a withdrawn signal
 as currently active; neither creates another send or signal.
 
-This backend boundary does not implement Activity, automatic interpretation or
-periodic learning from free text, or a frontend suggestion strip. Those and
-real-model/user quality acceptance remain separate.
+This boundary does not implement Activity, automatic interpretation or periodic
+learning from free text. The frontend draft and feedback controls below use these
+APIs; real-model semantics and final user quality acceptance remain separate.
 
 
 ### Explicit preference Web panel
@@ -878,10 +878,23 @@ messages keep their existing paths and do not acquire ordinary-text attribution.
 Explicit 不用这些 records IGNORE without inferring a preference. 建议反馈 reads the
 last batch's authored notes; users can submit, correct and withdraw them with the
 existing UUID/revision contracts. Text is recorded without automatic semantic
-interpretation or Profile mutation; Profile adjustments have their separate panel.
-An unknown feedback write keeps its request identity for explicit retry. After an
-actual accepted SELECT/EDIT/FREE_INPUT, a pure authored text note remains allowed
-for that now-stale batch. This exception requires a server-owned accepted-source
-signal, not a click or client assertion. It does not revive suggestions; IGNORE and
-feedback carrying preference changes still require current READY validation.
-Historical source facts stay unchanged when feedback is corrected or withdrawn.
+interpretation. Optional explicit tone/energy/verbosity choices in the same dialog
+apply only selected fields; KEEP sends no field, and withdrawal sends null for
+that dimension. A blank note is allowed with an explicit change. These choices
+use the current Profile version, atomically with the authored feedback, and affect
+the next context. Conflicts preserve text and choices without overwriting another
+revision; an explicit latest read and confirmation are required before submitting
+on a new version. Viewing or restoring preferences reuses the separate Profile panel.
+
+An unknown feedback write keeps its exact request identity and body for retry.
+A historical applied version is not presented as currently effective after a later
+clear, restore or edit. After actual accepted SELECT/EDIT/FREE_INPUT, an authored
+note and explicit Profile choices remain allowed for that now-stale batch. This
+exception requires a local-operator-owned batch and server-owned accepted-source
+signal, not a click or client assertion. It neither reads an archived/left group's
+context nor revives suggestions; new choices, generation and IGNORE still require
+current READY validation. Source profile_version stays historical while
+applied_profile_version identifies the actual current-CAS result. Replays return
+the original outcome without reapplying choices, even after clear or restore.
+Historical source facts stay unchanged when feedback is corrected or withdrawn;
+text correction/withdrawal does not undo independently saved Profile choices.

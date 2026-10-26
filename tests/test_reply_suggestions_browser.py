@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def suggestions_server(tmp_path):
     for name in ('rin', 'momo'):
         dest = tmp_path / 'personas' / name
-        dest.mkdir(parents=True)
+        dest.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / 'personas' / name / 'persona.yaml', dest / 'persona.yaml')
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))

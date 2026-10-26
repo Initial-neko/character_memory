@@ -3,7 +3,6 @@ import json
 from character_memory.config import load_persona,resolve_persona_path
 from character_memory.application.reply_suggestions import ReplySuggestionService,SuggestionStale
 from character_memory.storage.reply_suggestion_signals import ReplySuggestionSignalRepository,fingerprint
-from character_memory.storage.experience_profiles import ExperienceProfileRepository
 from character_memory.domain.reply_suggestions import SuggestionRequest
 from character_memory.message_projection import project_direct_message,project_group_message
 from character_memory.group_store import GroupRepository
@@ -63,22 +62,21 @@ def record_feedback(service,request):
     with store.transaction(immediate=True):
         existing=repo.existing(key,digest)
         if existing is not None:return existing
-        try:
-            batch=service.get(str(request.batch_id))
-            if batch['status']!='READY':raise SuggestionStale('suggestions are not ready')
-        except SuggestionStale:
-            # A real accepted send makes its batch stale; authored notes about
-            # that use remain possible without reviving choices or preferences.
+        historical=(request.kind=='EXPLICIT_FEEDBACK' and repo.has_accepted_source(str(request.batch_id)))
+        if historical:
+            # This local author's accepted source is provenance, not a fresh
+            # grant to read or revive the old conversation. Only explicit global
+            # Profile fields may change, guarded by the CURRENT Profile CAS.
             row=service.batches.get(str(request.batch_id))
-            if (row is None or request.kind!='EXPLICIT_FEEDBACK'
-                    or request.preference_changes is not None
-                    or not repo.has_accepted_source(str(request.batch_id))):
-                raise
+            if row is None:raise KeyError(str(request.batch_id))
             original=SuggestionRequest.model_validate_json(row['request_json'])
             batch={'batch_id':row['id'],'profile_version':original.expected_profile_version}
+        else:
+            batch=service.get(str(request.batch_id))
+            if batch['status']!='READY':raise SuggestionStale('suggestions are not ready')
 
         applied=None
         if request.preference_changes is not None:
-            applied=ExperienceProfileRepository(store).patch(request.expected_profile_version,request.preference_changes.model_dump(exclude_unset=True))['version']
+            applied=service.profiles.patch(request.expected_profile_version,request.preference_changes.model_dump(exclude_unset=True))['version']
         return repo.record(request_key=key,request_hash=digest,batch_id=batch['batch_id'],kind=request.kind,
                            profile_version=batch['profile_version'],applied_profile_version=applied,comment=request.comment)

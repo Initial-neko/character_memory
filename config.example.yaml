@@ -415,6 +415,14 @@ world_browse_max_pages: 2
 # Maximum Personal Browse runs per active character per local day. 0 = unlimited.
 world_browse_daily_max: 10
 
+# Per-person outer structured model invocations per actual UTC day, currently
+# shared by Personal Browse planning, Web/RSS appraisal and continuation/vision.
+# 0 disables these calls. Failed/unknown attempts consume slots across restarts;
+# simulated/business timestamps cannot change this budget day. Not a token/USD
+# or provider-internal retry limit; ordinary chat, World Pulse and Space excluded.
+# Restart Character Runtime after changing. Independent of tool/Claude budgets.
+autonomous_model_daily_max: 30
+
 # World scheduler polling latency only; it does not change browse/pulse cadence.
 world_activity_poll_seconds: 60
 

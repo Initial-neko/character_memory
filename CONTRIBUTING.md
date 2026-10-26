@@ -6,6 +6,8 @@ Character Memory is an experimental project under active development. Contributi
 
 Follow [AI Development Loop V1.0](.agents/skills/ai-development-loop/SKILL.md) for requirement evaluation, reuse research, planning, implementation and acceptance. Complete the rationale and open-source investigation before an implementation Plan and Ready Issue. Issues own the plan, scope and acceptance evidence; PRs own the implementation and verification results. Applicable real-runtime frontend interaction/visual checks, backend API checks and unit tests must all pass before delivery; human experience acceptance remains separate.
 
+Project goals remain open until their product acceptance criteria are met. Keep a rolling current/next/fallback queue in the existing Goal Issue or stage Plan, not in new task-ledger files. A PR passing CI is engineering evidence, not project completion. Follow the skill's dual-window modes: below 30% remaining, prepare the next-stage Plan; at or below 15%, close out; at or below 10%, stop.
+
 ## Development setup
 
 Requirements:

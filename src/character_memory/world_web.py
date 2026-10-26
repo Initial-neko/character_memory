@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, StrictStr
 
 from character_memory.config import runtime_setting
 from character_memory.web_lifecycle import background_services
-from character_memory.world_activity import WorldActivityScheduler, WorldPulseRepository
+from character_memory.world_activity import WorldActivityScheduler, WorldPulseRepository, WorldBrowseCancelled
 
+
+
+class WorldCancelRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    character_id: StrictStr = Field(min_length=1, max_length=200, pattern=r'^\S+$')
 
 
 class WorldFetchRequest(BaseModel):
@@ -110,7 +115,13 @@ def attach_world_routes(app) -> None:
 
     @app.get("/v1/world/activity/status")
     def world_activity_status():
-        return activity_scheduler.status()
+        from character_memory.runtime.model_execution import model_budget_status
+        result = activity_scheduler.status()
+        result['model_invocation_budget'] = model_budget_status(
+            access.read_store,
+            daily_max=getattr(access.settings, 'autonomous_model_daily_max', 30),
+        )
+        return result
 
     @app.post("/v1/world/pulse/dev/refresh")
     def world_pulse_refresh():
@@ -143,10 +154,19 @@ def attach_world_routes(app) -> None:
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/v1/world/activity/cancel/{opportunity_id:path}")
+    def world_opportunity_cancel(opportunity_id: str, body: WorldCancelRequest):
+        try:
+            return pulse_repository.cancel_browse(opportunity_id, body.character_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail='unknown browse opportunity') from exc
+
     @app.post("/v1/world/dev/browse/{character_id}")
     def world_personal_browse(character_id: str):
         try:
             return activity_scheduler.service.browse_character(character_id)
+        except WorldBrowseCancelled as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:

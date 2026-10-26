@@ -41,6 +41,7 @@ jobs:
           PYTHONFAULTHANDLER: "1"
           # Keep pre-crash output in the archived log ordered with that dump.
           PYTHONUNBUFFERED: "1"
+          MODEL_BUDGET_EVIDENCE_DIR: artifacts/core-visual-evidence/model-budget
         run: |
           set -o pipefail
           set +e

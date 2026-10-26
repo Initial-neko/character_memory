@@ -7,7 +7,7 @@ Keep it short and stable. Detailed architecture, feature behavior, task state, a
 ## Core rules
 
 - For project development requests, follow [AI Development Loop V1.0](.agents/skills/ai-development-loop/SKILL.md); scale its six stages to the task and keep Issue/PR as the task record.
-- Before each task and phase, check both Codex 5-hour and weekly remaining usage. If either is at or below 10%, stop task execution; do not start work, tests, model calls, CI polling or merges. Start winding down near 15% remaining. Missing usage data does not permit automatic work; never spend reset credits automatically. See the AI Development Loop skill.
+- Before each task and phase, check both Codex 5-hour and weekly remaining usage. Use the lower remaining percentage: at or below 20%, stop all project work and wait; resume only when both windows are at or above 30%. Before entering that wait, 20–30% may be used for bounded next-stage planning, never a new implementation. Reserve the final 10% for the user’s drawing and urgent work. Missing usage data means wait; never spend reset credits automatically. See the AI Development Loop skill.
 - `main` is the integration source of truth.
 - Extend the existing Person runtime, durable event model, Memory model, and shared services instead of creating parallel systems.
 - Check `docs/current/TECH_DEBT.md` before proposing a refactor. A recorded entry means the trade-off was already decided.

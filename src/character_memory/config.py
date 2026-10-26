@@ -286,6 +286,10 @@ class Settings(BaseModel):
     # interval is not a sufficient bound on its own. 0 means no ceiling. It
     # never forces a browse -- a character that is not due does not consume it.
     world_browse_daily_max: int = Field(default=10, ge=0, le=200)
+    autonomous_model_daily_max: int = Field(
+        default=30, ge=0, le=2000,
+        description="每人物每个实际UTC日的受控structured模型调用次数；当前覆盖Personal Browse规划、网页/RSS评估与continuation。0禁用；失败和未知结果占用，非token/美元或provider内部重试次数。重启生效。",
+    )
     world_activity_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
 
     # Autonomous Group Chat is intentionally sparse: an opportunity only asks

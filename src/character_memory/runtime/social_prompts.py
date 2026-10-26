@@ -104,6 +104,21 @@ personal_note 写“这次浏览对我有什么意义”，不是复制新闻标
 
 
 
+def world_pages_appraisal_prompt(persona, query, observations) -> str:
+    """Preserve the live Web appraisal text for receipt verification as well."""
+    blocks = []
+    for index, item in enumerate(observations, start=1):
+        blocks.append(f"""[Page {index}]
+Title: {item.title}
+URL: {item.url}
+Source: {item.source_domain}
+Snippet: {item.snippet}
+Rendered text:
+{item.content}
+""")
+    return world_appraisal_prompt(persona, query, chr(10).join(blocks))
+
+
 def world_topic_prompt(context, memory_text, topic) -> str:
     return PromptParts(
         experience=render_experience_profile(getattr(context, "experience_profile", None)),

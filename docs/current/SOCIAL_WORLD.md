@@ -831,8 +831,8 @@ Zero-LLM idle deferrals are only scheduler state transitions: they do not create
 Personal Browse uses the existing `PersonalBrowsePlan` and appraisal schemas.
 A server-issued `world-run:<run_id>` identifies each opportunity; separate
 manual clicks have separate `BROWSE_MANUAL` runs even in the same minute.
-Manual browsing retains its existing limits and does not consume the background
-`BROWSE` daily ceiling. The scheduler atomically reserves its next clock and
+Manual browsing does not consume the background `BROWSE` daily ceiling, but
+shares the structured model-invocation ceiling below. The scheduler atomically reserves its next clock and
 quota before planning, including across independent SQLite connections.
 
 `world_browse_decisions` records planning, execution feedback and appraisal.
@@ -852,6 +852,48 @@ it is not automatically replayed or presented as a successful encounter.
 This is local effect idempotence, not an exactly-once promise for external
 providers. A process death can leave a run `RUNNING`; the reserved future clock
 prevents immediate catch-up, and the unfinished receipt requires investigation.
+
+#### Shared structured model-invocation budget
+
+`runtime/model_execution.py` adds a reservation/receipt gate on the same Core
+SQLite store, not another worker or planning loop. `autonomous_model_daily_max`
+(default 30; 0 disables these calls; restart required) counts each person's outer
+structured calls per **actual UTC calendar day**. Currently all Personal Browse
+Web/RSS planning, appraisal and continuation decisions, including their existing
+vision path, use it. Manual and scheduled runs share the ceiling. Business or
+simulated `at` timestamps never select this budget day. Ordinary chat, World
+Pulse, Space, embedding calls and future reflection are not claimed as covered.
+The unit is an outer invocation, not tokens, invoice USD or provider-internal
+retry attempts. Existing tool-opportunity limits and Claude monetary reservations
+remain independent; this gate buys no additional model or tool permission.
+
+Migration `execution/001-model-invocations` owns `model_invocation_receipts`.
+Server-owned character/opportunity/step identities bind hashes of the prompt,
+schema, model/provider configuration, vision inputs and policy. A short immediate
+transaction checks the day's allowance and commits STARTED before a provider
+call outside the transaction. A caller-owned outer transaction is rejected so
+rollback cannot erase a paid reservation. Denial creates no model claim; failure,
+timeout and unknown outcomes consume their admitted slots. Success stores at
+most 64 KiB of validated structured JSON before the existing World owner applies
+it. Original prompts/images and provider error text are not stored by this gate.
+
+An identical SUCCESS returns its receipt without a provider call, even after
+restart or later limit changes. A changed payload/schema conflicts without
+revealing that result. FAILED never retries automatically; STARTED without a
+result means in-progress/unknown and is never reset because of a new date or
+expired wait. Receipt-write failure deliberately leaves STARTED. This is not an
+exactly-once provider guarantee, lease takeover, automatic cancellation, or a
+new Profile/Memory owner. Existing World phase guards and APPRAISED local recovery
+still govern application; this does not promise recovery of every interrupted
+phase from a model receipt alone.
+
+`GET /v1/world/activity/status` includes `model_invocation_budget`: UTC day,
+configured ceiling, counts/remaining per character and at most 30 unfinished
+identity/status records. This projection only reads existing tables, does not
+initialize a model or migrate a schema, and omits prompt, image, result body and
+request hash. Status can therefore show an interrupted reservation without
+replaying it. Controlled feedback learning and daily/weekly/monthly reflection
+remain separate work with their own input watermarks and application permissions.
 
 `world_cost_saving_enabled` defaults to false. When enabled it doubles only the
 background Personal Browse interval, retaining the original page budget and
@@ -997,7 +1039,31 @@ publication, long-term Memory admission or second character decision model.
 
 #### Local appraisal recovery
 
-`GET /v1/world/activity/recovery` inspects APPRAISED opportunities without a model, fetch, runtime initialization or schema write. `POST /v1/world/activity/recovery/{opportunity_id}` applies only a complete, identity-matched successful execution plus appraisal receipt. Recovery verifies a genuine reading decision, all snapshot request parameters/constraints and RSS selection/source generations. Invalid receipts expose only `INVALID_RECOVERY_RECEIPT`, never provider inputs. It uses the same local commit helpers as normal browsing. Missing/malformed receipts remain unresolved with an explicit reason; PLANNING and APPRAISING are not replayed. Original observation time and request identity remain, while lifecycle metadata records the later persistence time.
+`GET /v1/world/activity/recovery` inspects APPRAISED and APPRAISING opportunities without a model, fetch, runtime initialization or schema write. Candidates expose their phase and `requires_explicit`; an APPRAISING candidate always requires an explicit POST. `POST /v1/world/activity/recovery/{opportunity_id}` applies only a complete, identity-matched successful execution plus proven appraisal. Recovery verifies a genuine reading decision, all snapshot request parameters/constraints and RSS selection/source generations. Invalid receipts expose only `INVALID_RECOVERY_RECEIPT`, never provider inputs. Missing/malformed receipts remain unresolved; PLANNING, continuation and visual decisions are not recovered or replayed. Original observation time and request identity remain, while lifecycle metadata records the later persistence time.
+
+For Web/RSS APPRAISING, migration `execution/002-model-invocation-bindings`
+adds nullable `binding_json` to the existing model receipt table. New calls through
+the fixed structured adapter store only prompt/image/model/schema/session hashes
+and the policy version, with a result hash committed alongside SUCCESS. Arbitrary
+generic invocation input is never copied into this proof. Old rows remain NULL:
+the migration does not invent provenance or backfill missing model outcomes.
+
+Local verification reconstructs the exact Web prompt from the saved persona,
+query and successful reading pages in their original order; RSS reuses its saved
+items, identities, generations and STARTED reading snapshots. The original
+schema/session, empty-image hash, scoped identity, original model-configuration
+hash and complete request hash must match. The bounded canonical result must
+match its result hash and schema, followed by the normal business checks (including
+exact nonduplicated RSS item coverage). Current Persona/provider configuration
+is not consulted: this is an original completed result, not a new model decision.
+No prompt, image, result body or private exception text is exposed by inspection.
+
+Only explicit recovery promotes a proven APPRAISING row to APPRAISED. Proof
+validation, promotion, retained events/RSS completion and APPLIED receipt commit
+in the same immediate Core transaction; any failure rolls back that entire local
+effect. Repetition and competing connections return one applied result without
+another model claim or provider call. A missing binding, failed/unknown model
+receipt or mismatched source stays unresolved, never retried to manufacture proof.
 
 For a Claude-backed WEB_SEARCH, expected constraints include the original
 `execution_policy` stored with the plan (backend, limits, model and reservations).
@@ -1007,7 +1073,36 @@ appraisal can be committed after a restart without initializing Claude, purchasi
 another appraisal or enlarging permissions. RSS recovery continues to use its
 existing item/generation contract even when the configured web backend is Claude.
 
-The enabled World scheduler recovers at most two eligible appraisals per tick before new paid opportunities and independent of exhausted browse quotas. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.
+The enabled World scheduler still recovers at most two eligible APPRAISED appraisals per tick before new paid opportunities and independent of exhausted browse quotas. It excludes explicit APPRAISING rows in SQL before the candidate limit, so an unknown backlog neither auto-recovers nor starves the original eligible queue. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.
+
+#### Durable single-opportunity cancellation
+
+`POST /v1/world/activity/cancel/{opportunity_id}` accepts only a strict
+`character_id` body in the same local operator scope as recovery. Unknown or
+mismatched identities return 404; extra fields or malformed identities return
+422. The first accepted request stores an immutable `OPERATOR_REQUEST` receipt
+with its actual timestamp; repeated requests return that receipt. If local
+application already committed, it returns `ALREADY_APPLIED` and preserves all
+facts. Cancellation cannot be undone or used to withdraw an existing Event.
+
+The World owner retains a separate cancellation fence without rewriting the
+original phase or model/tool receipts. Model and capability admission check it
+inside the same immediate transaction as their claim, before cached returns or
+new reservations; their optional trusted guards do not give Core a World
+ownership dependency. Already admitted providers may still finish and consume
+budget; their SUCCESS/FAILED/UNKNOWN receipts remain durable. Cancellation is
+not a provider-kill or refund promise. Later phase changes, Web/RSS/continuation
+local application and explicit recovery refuse with
+`WORLD_OPPORTUNITY_CANCELLED`. RSS reading receipts are not changed to FAILED
+by cancellation and therefore do not become retry candidates. Automatic
+recovery filters cancellations before its query limit.
+
+Inspection remains read-only and reports the stable cancellation reason without
+prompt/provider text. The fence survives process restarts and budget-day changes.
+It applies to manual and scheduled Personal Browse and continuation opportunities;
+it does not cancel Pulse, Space, ordinary chat or published facts. Scheduler
+`stop()` remains a process lifecycle signal, not a bulk durable cancellation or
+a lease takeover. No new frontend control or remote authorization is introduced.
 
 ### Social prompt compilation
 
@@ -1018,4 +1113,3 @@ claims and execution. RSS text never implies reading the linked original. Space
 video descriptions follow the current Persona's style. The shared composition
 contract and ownership audit live in
 [Person Runtime](PERSON_RUNTIME.md#prompt-composition-ownership).
-

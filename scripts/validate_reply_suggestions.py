@@ -1,5 +1,5 @@
 """Real isolated Direct/Group HTTP and restart checks; no external model requests."""
-import argparse,json,os,shutil,socket,subprocess,sys,tempfile,threading,time
+import argparse,json,os,shutil,socket,subprocess,sys,tempfile,threading,time,re
 from pathlib import Path
 from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +23,13 @@ def serve(port):
             {'intent':'feeling','text':'我有点紧张，想慢慢来。'},
             {'intent':'plan','text':'我们先试一个开场吧。'}]}))
     fixture.model.structured_call_for_session=structured
+    original_reaction=fixture.model._reaction
+    def reaction(context):
+        match=re.search(r'profile_version=(\d+)',context)
+        row={'pid':os.getpid(),'profile_version':int(match.group(1)) if match else None,'brief':'verbosity=BRIEF' in context}
+        with Path(os.environ['SUGGESTION_CALL_LOG']).with_name('normal-contexts.jsonl').open('a',encoding='utf-8') as stream:stream.write(json.dumps(row)+'\n')
+        return original_reaction(context)
+    fixture.model._reaction=reaction
     Path(os.environ['SUGGESTION_CALL_LOG']).with_name(f'api-{port}.json').write_text(json.dumps({'pid':os.getpid(),'port':port}),encoding='utf-8')
     uvicorn.run(fixture.app,host='127.0.0.1',port=port,log_level='warning')
 
@@ -126,6 +133,8 @@ def validate(output):
             assert request(base,f'/v1/groups/{group}/archive','POST',{})[0]==200
             assert request(base,'/v2/reply-suggestions/'+archive_batch['batch_id'])[0]==409
             assert request(base,'/v1/chat','POST',{'character_id':'rin','message':'FAIL_SUGGESTION'})[0]==200
+            normal_rows=[json.loads(line) for line in (root/'normal-contexts.jsonl').read_text().splitlines()]
+            assert normal_rows[-1]['profile_version']==2 and normal_rows[-1]['brief'] is True
             ref,_=latest_direct(base);failed={'request_id':str(uuid4()),'context_ref':ref,'expected_profile_version':2}
             assert request(base,'/v2/reply-suggestions','POST',failed)[0]==502 and len(calls())==6
             stop();base=start()
@@ -133,14 +142,18 @@ def validate(output):
             assert request(base,'/v2/me/experience-profile?expected_version=2','DELETE')[1]['version']==3
             assert request(base,'/v2/reply-suggestions/feedback','POST',feedback)[1]==feedback_result[1]
             profile=request(base,'/v2/me/experience-profile')[1];assert profile['version']==3 and profile['preferences']=={}
+            assert request(base,'/v1/chat','POST',{'character_id':'rin','message':'after clear'})[0]==200
+            normal_rows=[json.loads(line) for line in (root/'normal-contexts.jsonl').read_text().splitlines()]
+            assert normal_rows[-1]['profile_version'] is None and normal_rows[-1]['brief'] is False
             signals=request(base,'/v2/reply-suggestions/'+feedback_batch['batch_id']+'/signals')[1]['signals'];assert len(signals)==2
             assert all(row['pid'] in pids for row in calls())
+            assert all(row['pid'] in pids for row in normal_rows)
             assert all(p.read_bytes()==(ROOT/'personas'/p.parent.name/'persona.yaml').read_bytes() for p in personas.glob('*/persona.yaml'))
             stop()
             report={'schema_version':1,'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                     'dirty':bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip()),'status':'PASS','api_pids':pids,'launcher_pids':launchers,
-                    'race_http_statuses':statuses,'suggestion_calls':calls(),'external_model_calls':0,'message_count_unchanged':True,
-                    'profile_and_archive_invalidation':True,'choice_signals':[direct_signal,edit_signal,free_signal],'explicit_feedback_signals':signals,'cleared_profile_not_resurrected':True,'restarted_cache_and_failure_no_replay':True,'owned_ports_closed':True,'persona_files_unchanged':True,
+                    'race_http_statuses':statuses,'suggestion_calls':calls(),'external_model_calls':0,'generation_message_count_unchanged':True,'local_model_calls':len(calls())+len(normal_rows),
+                    'profile_and_archive_invalidation':True,'choice_signals':[direct_signal,edit_signal,free_signal],'explicit_feedback_signals':signals,'cleared_profile_not_resurrected':True,'normal_contexts':normal_rows,'restarted_cache_and_failure_no_replay':True,'owned_ports_closed':True,'persona_files_unchanged':True,
                     'scope':'deterministic provider proves engineering only; no semantic quality or human acceptance'}
             if output:Path(output).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
             print(json.dumps(report))

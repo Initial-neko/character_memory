@@ -10,8 +10,17 @@ base.fixture.store.conn.commit()
 entered=threading.Event();release=threading.Event()
 original=base.fixture.model.structured_for_session
 stage=os.getenv('CANCEL_STAGE','PLAN')
+if stage=='CONTINUATION':base.fixture.settings.world_continuation_enabled=True
 if not base.NO_PROVIDERS:
     def blocked(prompt,schema,session):
+        if schema.__name__=='WorldContinuationDecision':
+            if session.endswith(':2'):
+                entered.set()
+                if not release.wait(10):raise RuntimeError('local continuation gate timeout')
+            with base.Path(os.environ['MODEL_BUDGET_CALL_LOG']).open('a',encoding='utf-8') as stream:
+                stream.write(base.json.dumps({'pid':os.getpid(),'schema':schema.__name__,'external_calls':0})+'\n')
+            return (schema(action='STOP',keep=True,summary='Actual local read',personal_note='A useful detail')
+                    if session.endswith(':2') else schema(action='CALL',capability='WEB_SEARCH',arguments={'query':'bounded reading'}))
         target=('PersonalWorldReadPlan','PersonalBrowsePlan') if stage=='PLAN' else ('PersonalBrowseAppraisal','RssBatchAppraisal')
         if schema.__name__ in target:
             entered.set()
@@ -33,4 +42,5 @@ def state():
 @app.post('/__e2e/cancel-release')
 def unblock():
     release.set();return {'released':True}
+
 

@@ -6,8 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from test_model_budget_http import server
 
-@pytest.mark.parametrize('kind',['WEB','RSS'])
-@pytest.mark.parametrize('stage',['PLAN','APPRAISAL'])
+@pytest.mark.parametrize('kind,stage',[('WEB','PLAN'),('RSS','PLAN'),('WEB','APPRAISAL'),('RSS','APPRAISAL'),('WEB','CONTINUATION')])
 def test_actual_http_cancel_fences_late_result_and_survives_restart(tmp_path,kind,stage):
     env={'RECOVERY_KIND':kind,'CANCEL_STAGE':stage}
     with server(tmp_path,app_module='e2e_world_cancel_app',extra_env=env) as client:
@@ -33,7 +32,7 @@ def test_actual_http_cancel_fences_late_result_and_survives_restart(tmp_path,kin
         after=client.get('/__e2e/cancel-state').json()
         assert after['events']==[] and len(after['models'])==(1 if stage=='PLAN' else 2)
         assert all(x['status']=='SUCCESS' for x in after['models'])
-        assert after['world'][0]['phase']==('PLANNING' if stage=='PLAN' else 'APPRAISING')
+        assert after['world'][0]['phase']==('PLANNING' if stage=='PLAN' else 'CONT_MODEL:2' if stage=='CONTINUATION' else 'APPRAISING')
         assert client.post('/v1/world/activity/recovery/'+opportunity).status_code==409
     with server(tmp_path,app_module='e2e_world_cancel_app',extra_env={**env,'RECOVERY_NO_PROVIDERS':'1'}) as client:
         assert client.post(url,json={'character_id':'rin'}).json()==cancellation.json()
@@ -47,3 +46,4 @@ def test_actual_http_cancel_fences_late_result_and_survives_restart(tmp_path,kin
     dest=Path(os.getenv('MODEL_BUDGET_EVIDENCE_DIR',str(tmp_path)));dest.mkdir(parents=True,exist_ok=True)
     (dest/f'world-cancel-{kind}-{stage}.json').write_text(json.dumps({'before':before,'after':after,'restarted':restarted,
         'cancellation':cancellation.json(),'late_status':late.status_code,'actual_local_calls':calls,'external_calls':0,'owned_ports_closed':True},indent=2),encoding='utf-8')
+

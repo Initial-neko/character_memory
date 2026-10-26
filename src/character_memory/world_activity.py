@@ -21,6 +21,7 @@ from character_memory.vocation import read_vocation, render_vocation
 from character_memory.character_capabilities import select_role_research
 from character_memory.world_observation import observation_lifecycle, retain_world_observation
 from character_memory.runtime.capability_execution import CapabilityExecutor, CapabilityRequest, adapt_browse_decision
+from character_memory.runtime.model_execution import budgeted_structured
 from character_memory.runtime.capability_discovery import CapabilityAvailability, available_capabilities, runner_available
 from character_memory.domain.models import Event, EventType, WorldObservation
 from character_memory.group_store import GroupRepository
@@ -1263,10 +1264,9 @@ Rendered text:
                     conversation_id=plan_session,
                     override=True,
                 ):
-                    plan = bundle.model.structured_for_session(
-                        plan_prompt,
-                        plan_schema,
-                        plan_session,
+                    plan = budgeted_structured(
+                        self.access, bundle.model, plan_prompt, plan_schema, plan_session,
+                        character_id=character_id, opportunity_id=opportunity_id, step='PLAN',
                     )
                 chosen = (plan.choice if isinstance(plan, PersonalWorldReadPlan)
                           else "WEB_SEARCH" if plan.browse else "NO_ACTION")
@@ -1389,10 +1389,9 @@ Rendered text:
                     conversation_id=appraisal_session,
                     override=True,
                 ):
-                    appraisal = bundle.model.structured_for_session(
-                        appraisal_prompt,
-                        PersonalBrowseAppraisal,
-                        appraisal_session,
+                    appraisal = budgeted_structured(
+                        self.access, bundle.model, appraisal_prompt, PersonalBrowseAppraisal, appraisal_session,
+                        character_id=character_id, opportunity_id=opportunity_id, step='WEB_APPRAISAL',
                     )
             except Exception as error:
                 result = self._browse_unfinished(character_id, opportunity_id, execution_status="SUCCESS", error=str(error))
@@ -1472,7 +1471,10 @@ Rendered text:
                 session = f"personal-rss-appraise:{character_id}:{opportunity_id}"
                 with llm_usage_scope(feature="WORLD", purpose="WORLD_BROWSE_APPRAISAL", character_id=character_id,
                                      conversation_id=session, override=True):
-                    appraisal = bundle.model.structured_for_session(prompt, RssBatchAppraisal, session)
+                    appraisal = budgeted_structured(
+                        self.access, bundle.model, prompt, RssBatchAppraisal, session,
+                        character_id=character_id, opportunity_id=opportunity_id, step='RSS_APPRAISAL',
+                    )
                 returned = [item.item_id for item in appraisal.items]
                 if len(returned) != len(set(returned)) or set(returned) != {item["item_id"] for item in items}:
                     raise ValueError("INVALID_RSS_APPRAISAL_IDENTITIES")

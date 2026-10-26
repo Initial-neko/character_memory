@@ -831,8 +831,8 @@ Zero-LLM idle deferrals are only scheduler state transitions: they do not create
 Personal Browse uses the existing `PersonalBrowsePlan` and appraisal schemas.
 A server-issued `world-run:<run_id>` identifies each opportunity; separate
 manual clicks have separate `BROWSE_MANUAL` runs even in the same minute.
-Manual browsing retains its existing limits and does not consume the background
-`BROWSE` daily ceiling. The scheduler atomically reserves its next clock and
+Manual browsing does not consume the background `BROWSE` daily ceiling, but
+shares the structured model-invocation ceiling below. The scheduler atomically reserves its next clock and
 quota before planning, including across independent SQLite connections.
 
 `world_browse_decisions` records planning, execution feedback and appraisal.
@@ -852,6 +852,48 @@ it is not automatically replayed or presented as a successful encounter.
 This is local effect idempotence, not an exactly-once promise for external
 providers. A process death can leave a run `RUNNING`; the reserved future clock
 prevents immediate catch-up, and the unfinished receipt requires investigation.
+
+#### Shared structured model-invocation budget
+
+`runtime/model_execution.py` adds a reservation/receipt gate on the same Core
+SQLite store, not another worker or planning loop. `autonomous_model_daily_max`
+(default 30; 0 disables these calls; restart required) counts each person's outer
+structured calls per **actual UTC calendar day**. Currently all Personal Browse
+Web/RSS planning, appraisal and continuation decisions, including their existing
+vision path, use it. Manual and scheduled runs share the ceiling. Business or
+simulated `at` timestamps never select this budget day. Ordinary chat, World
+Pulse, Space, embedding calls and future reflection are not claimed as covered.
+The unit is an outer invocation, not tokens, invoice USD or provider-internal
+retry attempts. Existing tool-opportunity limits and Claude monetary reservations
+remain independent; this gate buys no additional model or tool permission.
+
+Migration `execution/001-model-invocations` owns `model_invocation_receipts`.
+Server-owned character/opportunity/step identities bind hashes of the prompt,
+schema, model/provider configuration, vision inputs and policy. A short immediate
+transaction checks the day's allowance and commits STARTED before a provider
+call outside the transaction. A caller-owned outer transaction is rejected so
+rollback cannot erase a paid reservation. Denial creates no model claim; failure,
+timeout and unknown outcomes consume their admitted slots. Success stores at
+most 64 KiB of validated structured JSON before the existing World owner applies
+it. Original prompts/images and provider error text are not stored by this gate.
+
+An identical SUCCESS returns its receipt without a provider call, even after
+restart or later limit changes. A changed payload/schema conflicts without
+revealing that result. FAILED never retries automatically; STARTED without a
+result means in-progress/unknown and is never reset because of a new date or
+expired wait. Receipt-write failure deliberately leaves STARTED. This is not an
+exactly-once provider guarantee, lease takeover, automatic cancellation, or a
+new Profile/Memory owner. Existing World phase guards and APPRAISED local recovery
+still govern application; this does not promise recovery of every interrupted
+phase from a model receipt alone.
+
+`GET /v1/world/activity/status` includes `model_invocation_budget`: UTC day,
+configured ceiling, counts/remaining per character and at most 30 unfinished
+identity/status records. This projection only reads existing tables, does not
+initialize a model or migrate a schema, and omits prompt, image, result body and
+request hash. Status can therefore show an interrupted reservation without
+replaying it. Controlled feedback learning and daily/weekly/monthly reflection
+remain separate work with their own input watermarks and application permissions.
 
 `world_cost_saving_enabled` defaults to false. When enabled it doubles only the
 background Personal Browse interval, retaining the original page budget and

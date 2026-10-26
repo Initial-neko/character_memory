@@ -1039,7 +1039,31 @@ publication, long-term Memory admission or second character decision model.
 
 #### Local appraisal recovery
 
-`GET /v1/world/activity/recovery` inspects APPRAISED opportunities without a model, fetch, runtime initialization or schema write. `POST /v1/world/activity/recovery/{opportunity_id}` applies only a complete, identity-matched successful execution plus appraisal receipt. Recovery verifies a genuine reading decision, all snapshot request parameters/constraints and RSS selection/source generations. Invalid receipts expose only `INVALID_RECOVERY_RECEIPT`, never provider inputs. It uses the same local commit helpers as normal browsing. Missing/malformed receipts remain unresolved with an explicit reason; PLANNING and APPRAISING are not replayed. Original observation time and request identity remain, while lifecycle metadata records the later persistence time.
+`GET /v1/world/activity/recovery` inspects APPRAISED and APPRAISING opportunities without a model, fetch, runtime initialization or schema write. Candidates expose their phase and `requires_explicit`; an APPRAISING candidate always requires an explicit POST. `POST /v1/world/activity/recovery/{opportunity_id}` applies only a complete, identity-matched successful execution plus proven appraisal. Recovery verifies a genuine reading decision, all snapshot request parameters/constraints and RSS selection/source generations. Invalid receipts expose only `INVALID_RECOVERY_RECEIPT`, never provider inputs. Missing/malformed receipts remain unresolved; PLANNING, continuation and visual decisions are not recovered or replayed. Original observation time and request identity remain, while lifecycle metadata records the later persistence time.
+
+For Web/RSS APPRAISING, migration `execution/002-model-invocation-bindings`
+adds nullable `binding_json` to the existing model receipt table. New calls through
+the fixed structured adapter store only prompt/image/model/schema/session hashes
+and the policy version, with a result hash committed alongside SUCCESS. Arbitrary
+generic invocation input is never copied into this proof. Old rows remain NULL:
+the migration does not invent provenance or backfill missing model outcomes.
+
+Local verification reconstructs the exact Web prompt from the saved persona,
+query and successful reading pages in their original order; RSS reuses its saved
+items, identities, generations and STARTED reading snapshots. The original
+schema/session, empty-image hash, scoped identity, original model-configuration
+hash and complete request hash must match. The bounded canonical result must
+match its result hash and schema, followed by the normal business checks (including
+exact nonduplicated RSS item coverage). Current Persona/provider configuration
+is not consulted: this is an original completed result, not a new model decision.
+No prompt, image, result body or private exception text is exposed by inspection.
+
+Only explicit recovery promotes a proven APPRAISING row to APPRAISED. Proof
+validation, promotion, retained events/RSS completion and APPLIED receipt commit
+in the same immediate Core transaction; any failure rolls back that entire local
+effect. Repetition and competing connections return one applied result without
+another model claim or provider call. A missing binding, failed/unknown model
+receipt or mismatched source stays unresolved, never retried to manufacture proof.
 
 For a Claude-backed WEB_SEARCH, expected constraints include the original
 `execution_policy` stored with the plan (backend, limits, model and reservations).
@@ -1049,7 +1073,7 @@ appraisal can be committed after a restart without initializing Claude, purchasi
 another appraisal or enlarging permissions. RSS recovery continues to use its
 existing item/generation contract even when the configured web backend is Claude.
 
-The enabled World scheduler recovers at most two eligible appraisals per tick before new paid opportunities and independent of exhausted browse quotas. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.
+The enabled World scheduler still recovers at most two eligible APPRAISED appraisals per tick before new paid opportunities and independent of exhausted browse quotas. It excludes explicit APPRAISING rows in SQL before the candidate limit, so an unknown backlog neither auto-recovers nor starves the original eligible queue. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.
 
 ### Social prompt compilation
 

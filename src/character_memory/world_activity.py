@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from character_memory.runtime.social_prompts import (
-    world_browse_prompt, world_appraisal_prompt, world_topic_prompt, rss_appraisal_prompt,
+    world_browse_prompt, world_pages_appraisal_prompt, world_topic_prompt, rss_appraisal_prompt,
 )
 
 from datetime import datetime, timedelta
@@ -1367,20 +1367,7 @@ Rendered text:
                 current = self.repository.get_browse_decision(opportunity_id)
                 return current["result"] or self._browse_unfinished(character_id, opportunity_id, execution_status="SUCCESS")
             try:
-                blocks = []
-                for index, item in enumerate(observations, start=1):
-                    blocks.append(
-                        f"""[Page {index}]
-Title: {item.title}
-URL: {item.url}
-Source: {item.source_domain}
-Snippet: {item.snippet}
-Rendered text:
-{item.content}
-"""
-                    )
-                appraisal_prompt = world_appraisal_prompt(snapshot["persona"],
-                    plan.query, chr(10).join(blocks))
+                appraisal_prompt = world_pages_appraisal_prompt(snapshot["persona"], plan.query, observations)
                 appraisal_session = f"personal-browse-appraise:{character_id}:{opportunity_id}"
                 with llm_usage_scope(
                     feature="WORLD",
@@ -1772,7 +1759,8 @@ class WorldActivityScheduler:
         outcomes = []
         from character_memory.world_recovery import WorldBrowseRecovery
         recovery = WorldBrowseRecovery(self.repository.store)
-        ready = [item for item in recovery.inspect(limit=200)['candidates'] if item['recoverable']][:2]
+        ready = [item for item in recovery.inspect(limit=200, include_explicit=False)['candidates']
+                 if item['recoverable'] and not item.get('requires_explicit', False)][:2]
         for item in ready:
             try:
                 result = recovery.apply(item['opportunity_id'])

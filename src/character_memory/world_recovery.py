@@ -24,6 +24,26 @@ class WorldBrowseRecovery:
         except Exception as error:
             raise ValueError("INVALID_RECOVERY_RECEIPT") from error
 
+    def _appraisal(self, row, snapshot, request, content, schema):
+        if row['phase'] != 'APPRAISING':
+            return json.loads(row['appraisal_json'])
+        if row['appraisal_json'] is not None:
+            raise ValueError('UNEXPECTED_PARTIAL_APPRAISAL')
+        from character_memory.runtime.model_execution import verified_structured_receipt
+        from character_memory.runtime.social_prompts import world_pages_appraisal_prompt, rss_appraisal_prompt
+        if request.capability == 'WEB_SEARCH':
+            prompt = world_pages_appraisal_prompt(snapshot['persona'], snapshot['decision']['query'], content)
+            session = f"personal-browse-appraise:{row['character_id']}:{row['opportunity_id']}"
+            step = 'WEB_APPRAISAL'
+        else:
+            prompt = rss_appraisal_prompt(snapshot['persona'], content)
+            session = f"personal-rss-appraise:{row['character_id']}:{row['opportunity_id']}"
+            step = 'RSS_APPRAISAL'
+        return verified_structured_receipt(
+            self.store, character_id=row['character_id'], opportunity_id=row['opportunity_id'],
+            step=step, prompt=prompt, schema=schema, session_id=session,
+        ).model_dump(mode='json')
+
     def _validated_receipt(self, row):
         from character_memory.world_activity import PersonalBrowseAppraisal, RssBatchAppraisal, PersonalBrowsePlan, PersonalWorldReadPlan
         now = parse_datetime(row['started_at'])
@@ -71,7 +91,6 @@ class WorldBrowseRecovery:
         result = CapabilityResult(**json.loads(execution['result_json']))
         if result.request_id != request_id or result.status != 'SUCCESS' or not isinstance(result.data,dict):
             raise ValueError('INVALID_EXECUTION_RESULT')
-        appraisal = json.loads(row['appraisal_json'])
         if capability == 'WEB_SEARCH':
             if request.arguments['query'] != snapshot['decision']['query']:
                 raise ValueError('QUERY_MISMATCH')
@@ -79,10 +98,10 @@ class WorldBrowseRecovery:
             if len(pages) > request.constraints['max_pages']:
                 raise ValueError('PAGE_LIMIT_MISMATCH')
             if not pages:raise ValueError('MISSING_READ_CONTENT')
-            parsed = PersonalBrowseAppraisal.model_validate(appraisal)
-            return now,snapshot,request,result,pages,int(parsed.keep)
-        parsed = RssBatchAppraisal.model_validate(appraisal)
+            parsed = PersonalBrowseAppraisal.model_validate(self._appraisal(row,snapshot,request,pages,PersonalBrowseAppraisal))
+            return now,snapshot,request,result,pages,int(parsed.keep),parsed.model_dump(mode='json')
         items = result.data['items']
+        parsed = RssBatchAppraisal.model_validate(self._appraisal(row,snapshot,request,items,RssBatchAppraisal))
         expected = {item['item_id'] for item in request.arguments['items']}
         if not items or {item['item_id'] for item in items} != expected or len(items) != len(expected):
             raise ValueError('RSS_ITEM_MISMATCH')
@@ -100,20 +119,22 @@ class WorldBrowseRecovery:
             ).fetchone()
             if reading is None or reading['status'] != 'STARTED' or json.loads(reading['snapshot_json']) != item:
                 raise ValueError('RSS_READING_RECEIPT_MISMATCH')
-        return now,snapshot,request,result,items,sum(item.keep for item in parsed.items)
+        return now,snapshot,request,result,items,sum(item.keep for item in parsed.items),parsed.model_dump(mode='json')
 
-    def inspect(self, *, limit=100):
+    def inspect(self, *, limit=100, include_explicit=True):
         with self.store._lock:
             if 'world_browse_decisions' not in self._tables():return {'candidates':[],'read_only':True}
+            phases = "phase IN ('APPRAISED','APPRAISING')" if include_explicit else "phase='APPRAISED'"
             rows = self.store.conn.execute(
-                "SELECT * FROM world_browse_decisions WHERE phase='APPRAISED' ORDER BY started_at,opportunity_id LIMIT ?",
+                f"SELECT * FROM world_browse_decisions WHERE {phases} ORDER BY started_at,opportunity_id LIMIT ?",
                 (max(1,min(200,limit)),),
             ).fetchall()
             candidates=[]
             for row in rows:
-                entry={'opportunity_id':row['opportunity_id'],'character_id':row['character_id'],'observed_at':row['started_at']}
+                entry={'opportunity_id':row['opportunity_id'],'character_id':row['character_id'],'observed_at':row['started_at'],
+                       'phase':row['phase'],'requires_explicit':row['phase']=='APPRAISING'}
                 try:
-                    *_,kept=self._prepare(row)
+                    *_,kept,_appraisal=self._prepare(row)
                     entry.update(recoverable=True,kept_items=kept)
                 except Exception as error:
                     entry.update(recoverable=False,reason='INVALID_RECOVERY_RECEIPT')
@@ -127,8 +148,14 @@ class WorldBrowseRecovery:
             row = self.store.conn.execute('SELECT * FROM world_browse_decisions WHERE opportunity_id=?',(opportunity_id,)).fetchone()
             if row is None:raise KeyError('unknown browse opportunity')
             if row['phase']=='APPLIED':return json.loads(row['result_json'])
-            if row['phase']!='APPRAISED':raise ValueError('ONLY_APPRAISED_IS_LOCALLY_RECOVERABLE')
-            now,snapshot,request,executed,content,_=self._prepare(row)
+            if row['phase'] not in {'APPRAISED','APPRAISING'}:raise ValueError('ONLY_APPRAISED_IS_LOCALLY_RECOVERABLE')
+            now,snapshot,request,executed,content,_,appraisal=self._prepare(row)
+            if row['phase']=='APPRAISING':
+                self.store.conn.execute(
+                    "UPDATE world_browse_decisions SET phase='APPRAISED',appraisal_json=? "
+                    "WHERE opportunity_id=? AND character_id=? AND phase='APPRAISING'",
+                    (json.dumps(appraisal,ensure_ascii=False),opportunity_id,row['character_id']),
+                )
             service = WorldActivityService(SimpleNamespace(store=lambda:self.store),WorldPulseRepository(self.store))
             if request.capability=='WEB_SEARCH':
                 return service._apply_web_receipt(row['character_id'],opportunity_id,now=now,

@@ -834,3 +834,24 @@ as currently active; neither creates another send or signal.
 This backend boundary does not implement Activity, automatic interpretation or
 periodic learning from free text, or a frontend suggestion strip. Those and
 real-model/user quality acceptance remain separate.
+
+
+### Explicit preference Web panel
+
+The chat topbar's 相处偏好 entry opens a native modal dialog over the existing
+conversation. `web/experience_profile.js/css` owns this UI; it calls only the
+local operator Profile API, never a model or a Persona mutation. Choosing a radio
+option edits a local draft; only explicit save submits changed fields with the
+read version. Unspecified sends null to withdraw that dimension. All characters
+share these explicit choices; the panel does not configure proactive notifications.
+
+Loading failures leave chat usable. Version conflict or unknown save outcome
+preserves the draft and blocks another mutation until an explicit latest read;
+the previous draft summary remains visible for manual reselection. Late requests
+cannot overwrite a later opening. A closed panel does not cancel an already
+submitted write; reopening reads the actual server state. Versions restore only
+after confirmation as a new revision. Clear confirmation deletes current choices
+and old snapshots, rather than offering recovery of deleted preferences. Both
+operations use the same CAS boundary; in-flight model turns keep their snapshot.
+The dialog supports Escape/focus return and internal scrolling on narrow screens.
+This panel does not yet provide reply suggestion selection or feedback governance.

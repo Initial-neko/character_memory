@@ -1,0 +1,115 @@
+"""Real isolated Direct/Group HTTP and restart checks; no external model requests."""
+import argparse,json,os,shutil,socket,subprocess,sys,tempfile,threading,time
+from pathlib import Path
+from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor
+from validate_experience_profile import request
+ROOT=Path(__file__).resolve().parents[1]
+
+def serve(port):
+    import uvicorn
+    from types import SimpleNamespace
+    sys.path.insert(0,str(ROOT/'tests'))
+    import e2e_realtime_app as fixture
+    fixture.app.state.character_memory.reaction_scheduler.quiet_seconds=60
+    fixture.app.state.character_memory.reaction_scheduler.max_burst_seconds=60
+    def structured(prompt,schema,session):
+        row={'pid':os.getpid(),'channel':'GROUP' if '"type": "GROUP"' in prompt else 'DIRECT','failed':'FAIL_SUGGESTION' in prompt}
+        with Path(os.environ['SUGGESTION_CALL_LOG']).open('a',encoding='utf-8') as stream:stream.write(json.dumps(row)+'\n')
+        time.sleep(.3)
+        if row['failed']:raise RuntimeError('fixed local provider failure')
+        return SimpleNamespace(value=schema.model_validate({'suggestions':[
+            {'intent':'clarify','text':'你更在意哪一部分？'},
+            {'intent':'feeling','text':'我有点紧张，想慢慢来。'},
+            {'intent':'plan','text':'我们先试一个开场吧。'}]}))
+    fixture.model.structured_call_for_session=structured
+    Path(os.environ['SUGGESTION_CALL_LOG']).with_name(f'api-{port}.json').write_text(json.dumps({'pid':os.getpid(),'port':port}),encoding='utf-8')
+    uvicorn.run(fixture.app,host='127.0.0.1',port=port,log_level='warning')
+
+def validate(output):
+    with tempfile.TemporaryDirectory(prefix='cm-suggestions-') as folder:
+        root=Path(folder);personas=root/'personas'
+        for name in ('rin','momo'):
+            (personas/name).mkdir(parents=True);shutil.copyfile(ROOT/'personas'/name/'persona.yaml',personas/name/'persona.yaml')
+        env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONIOENCODING':'utf-8','CHARACTER_MEMORY_E2E_DB':str(root/'test.db'),
+             'CHARACTER_MEMORY_E2E_MEDIA':str(root/'media'),'CHARACTER_MEMORY_E2E_PERSONA_ROOT':str(personas),'SUGGESTION_CALL_LOG':str(root/'calls.jsonl')}
+        processes=[];pids=[];launchers=[]
+        def start():
+            with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+            log=(root/f'server-{port}.log').open('ab');tree=None;options={}
+            if os.name=='nt':
+                from character_memory.runtime.process_tree import WindowsProcessTree
+                tree=WindowsProcessTree();options['creationflags']=0x00000004|0x08000000
+            proc=subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--serve','--port',str(port)],cwd=ROOT,env=env,stdout=log,stderr=log,**options)
+            processes.append((proc,log,tree,port));launchers.append(proc.pid)
+            if tree:tree.attach_and_resume(proc)
+            origin=f'http://127.0.0.1:{port}'
+            for _ in range(150):
+                if proc.poll() is not None:raise RuntimeError('isolated API exited: '+(root/f'server-{port}.log').read_text(errors='replace')[-2000:])
+                try:
+                    if request(origin,'/v2/me/experience-profile')[0]==200:
+                        pids.append(json.loads((root/f'api-{port}.json').read_text())['pid']);return origin
+                except Exception:time.sleep(.1)
+            raise RuntimeError('isolated API readiness timeout')
+        def stop():
+            for proc,log,tree,port in processes:
+                if tree:tree.close()
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:proc.kill();proc.wait(timeout=5)
+                log.close()
+                for _ in range(50):
+                    with socket.socket() as probe:
+                        if probe.connect_ex(('127.0.0.1',port))!=0:break
+                    time.sleep(.02)
+                else:raise AssertionError('owned API port remains open')
+            processes.clear()
+        def calls():return [json.loads(line) for line in (root/'calls.jsonl').read_text().splitlines()]
+        def latest_direct(base):
+            rows=request(base,'/v1/chat/history?character_id=rin')[1]['messages'];return {'kind':'EVENT','id':rows[-1]['id']},len(rows)
+        try:
+            origins=[start(),start()];base=origins[0]
+            assert request(base,'/v1/chat','POST',{'character_id':'rin','message':'suggestion fixture'})[0]==200
+            ref,before=latest_direct(base);payload={'request_id':str(uuid4()),'context_ref':ref,'expected_profile_version':0}
+            gate=threading.Barrier(2)
+            def race(index):gate.wait();return request(origins[index],'/v2/reply-suggestions','POST',payload)
+            with ThreadPoolExecutor(2) as pool:results=list(pool.map(race,[0,1]))
+            statuses=[r[0] for r in results];assert sorted(statuses)==[200,202],results
+            batch=next(r[1] for r in results if r[0]==200)
+            assert len(batch['suggestions'])==3 and len(calls())==1
+            assert request(base,'/v2/reply-suggestions','POST',payload)[1]==batch
+            assert latest_direct(base)[1]==before
+            assert request(base,'/v2/me/experience-profile','PATCH',{'expected_version':0,'changes':{'tone':'CUTE'}})[0]==200
+            assert request(base,'/v2/reply-suggestions/'+batch['batch_id'])[0]==409
+            group=request(base,'/v1/groups','POST',{'name':'Suggestions','member_ids':['rin','momo']})[1]['group']['id']
+            sent=request(base,f'/v1/groups/{group}/messages','POST',{'message':'group suggestion fixture','request_id':str(uuid4())});assert sent[0]==202,sent
+            # The real accepted group fact is the explicit context anchor.
+            ref={'kind':'CONVERSATION_EVENT','conversation_id':group,'id':sent[1]['event_id']}
+            group_payload={'request_id':str(uuid4()),'context_ref':ref,'expected_profile_version':1}
+            made=request(base,'/v2/reply-suggestions','POST',group_payload);assert made[0]==200,made
+            group_batch=made[1];assert len(calls())==2
+            stop();base=start()
+            assert request(base,'/v2/reply-suggestions/'+group_batch['batch_id'])[1]==group_batch and len(calls())==2
+            assert request(base,f'/v1/groups/{group}/archive','POST',{})[0]==200
+            assert request(base,'/v2/reply-suggestions/'+group_batch['batch_id'])[0]==409
+            assert request(base,'/v1/chat','POST',{'character_id':'rin','message':'FAIL_SUGGESTION'})[0]==200
+            ref,_=latest_direct(base);failed={'request_id':str(uuid4()),'context_ref':ref,'expected_profile_version':1}
+            assert request(base,'/v2/reply-suggestions','POST',failed)[0]==502 and len(calls())==3
+            stop();base=start()
+            assert request(base,'/v2/reply-suggestions','POST',failed)[0]==502 and len(calls())==3
+            assert all(row['pid'] in pids for row in calls())
+            assert all(p.read_bytes()==(ROOT/'personas'/p.parent.name/'persona.yaml').read_bytes() for p in personas.glob('*/persona.yaml'))
+            stop()
+            report={'schema_version':1,'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+                    'dirty':bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip()),'status':'PASS','api_pids':pids,'launcher_pids':launchers,
+                    'race_http_statuses':statuses,'suggestion_calls':calls(),'external_model_calls':0,'message_count_unchanged':True,
+                    'profile_and_archive_invalidation':True,'restarted_cache_and_failure_no_replay':True,'owned_ports_closed':True,'persona_files_unchanged':True,
+                    'scope':'deterministic provider proves engineering only; no semantic quality or human acceptance'}
+            if output:Path(output).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            print(json.dumps(report))
+        finally:stop()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--serve',action='store_true');parser.add_argument('--port',type=int);parser.add_argument('--output');args=parser.parse_args()
+    if args.serve:serve(args.port)
+    else:validate(args.output)

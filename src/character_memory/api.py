@@ -491,6 +491,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     attach_core_direct_routes(app, route_access)
     from character_memory.experience_profile_web import attach_experience_profile_routes
     attach_experience_profile_routes(app, read_store)
+    from character_memory.reply_suggestions_web import attach_reply_suggestion_routes
+    attach_reply_suggestion_routes(app, route_access)
     attach_character_life_routes(app, route_access)
     attach_rss_runtime(app, web_dir, read_store, background, settings, own_bundle=own_bundle)
 

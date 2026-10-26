@@ -732,3 +732,53 @@ provider; model quality/human experience, free-text feedback, reply suggestions,
 learning and Activity-specific integration remain separate work. There is no new
 frontend in this backend slice; new profile/suggestion screens require approved
 desktop/mobile references and their own visual acceptance.
+
+
+## User reply suggestions
+
+`application/reply_suggestions.py` helps the local operator draft the next user
+message. It does not run a second Character Runtime, submit messages, or update
+Persona, Mental State or Memory. `POST /v2/reply-suggestions` accepts only a UUID
+`request_id`, an existing typed `context_ref`, and `expected_profile_version`.
+Direct follows the current per-character visible history; Group keeps its existing
+conversation identity and requires an active conversation with the local `user`
+still a member. This does not perform the future Direct conversation migration.
+
+The source must be the latest visible, non-future, REAL message. The bounded
+snapshot uses up to 12 visible messages, their existing FactRefs, participant
+Persona and explicit experience preferences. It never recalls private memories,
+Mental State or runtime traces for user drafts. Message text reuses the public
+Direct/Group projection, including `display_text` for user messages. Internal
+image instructions and upload filenames are excluded; public attachment IDs may
+be referenced, but no image is supplied to this text-only generation, and the
+prompt explicitly forbids guessing attachment content.
+
+The shared model adapter produces 3–5 drafts with distinct nonempty intent labels
+and texts. Suggestion IDs are server-assigned. Structural distinctness does not
+prove different semantic intentions, preference match, naturalness or quality;
+these require bounded real-model evaluation and separate human acceptance.
+Generation is on explicit request only, uses the existing configured bounded
+adapter attempts and records `REPLY_SUGGESTIONS / USER_REPLY_DRAFTS` usage. It
+neither adds an automatic cron nor an automatic send/reaction.
+
+`storage/reply_suggestions.py` owns feature migration
+`experience/002-reply-suggestions`. A batch claim and its immutable request are
+committed before model work, without holding a database transaction across that
+work. The same request returns its batch; another payload with that identity is
+409. `PENDING` returns 202 and is not replayed after restart or an unknown process
+outcome. Failed attempts remain `FAILED`/502, with available rejected provider
+text retained for diagnosis; retrying the same identity does not call again.
+An explicit new request identity is a new generation, not an assertion that an
+unknown former attempt completed. No automatic recovery is inferred from age.
+
+A `READY` batch binds its visible-context digest and profile version. Generation
+checks again before publishing; reads recheck current context and membership.
+New messages, visible-text/attachment changes, membership changes, archival,
+Persona changes, or profile edits/clear invalidate the old batch (409/`STALE`)
+and remove its active suggestion payload. `GET /v2/reply-suggestions/{batch_id}`
+never initializes/calls a model. Generating or reading a batch never appends a
+chat fact. Drafts are not selections or user commitments: actual SELECT/EDIT/
+FREE_INPUT attribution must be linked to durable accepted-message facts by the
+later sending integration; IGNORE and explicit feedback are separate signals.
+This generation boundary does not implement that feedback integration, Activity,
+or a frontend suggestion strip.

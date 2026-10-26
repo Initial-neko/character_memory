@@ -34,6 +34,8 @@ src/character_memory/
 
 ### `application/`
 
+- `reply_suggestions.py` — 从用户可见Direct/Group事实生成草稿；画像/上下文失效，不读取私有Person记忆。
+
 - `fact_provenance.py` — Memory旧字段到严格FactRef的只读来源解析；不初始化schema或复制事实。
 - `chat_service.py` — direct application service / per-character lock。
 - `voice_message_materializer.py` / `voice_message_service.py` — durable Voice Message 的正式 TTS 请求、ready/failed 状态和事件更新。
@@ -48,6 +50,8 @@ src/character_memory/
 - `clock.py` — RealClock / FixedClock。
 
 ### `domain/`
+
+- `reply_suggestions.py` — 建议请求、3–5项结构与差异约束。
 
 - `facts.py` — 不同权威事实域的不可变FactRef身份契约。
 - `experience_profile.py` — 显式用户底色枚举、版本请求及独立Prompt区块；不属于人物Persona。
@@ -72,6 +76,8 @@ src/character_memory/
 
 ### `storage/`
 
+- `reply_suggestions.py` — 用户建议批次的持久领取、缓存与失败/陈旧状态。
+
 - `experience_profiles.py` — 本地用户底色head/version、CAS、清除与恢复；无模型调用。
 - `message_receipts.py` — Direct/Group async接受及逐人物认知执行回执；认知提交与队列交接分别记录，不声明可选外部效果完成。
 - `reaction_delivery.py` — async 来源待交接记录、冻结批次、owner/租约与持久认知交付状态；只引用现有事实和媒体。
@@ -86,6 +92,7 @@ src/character_memory/
 ```text
 api.py                  Character Runtime composition root + lifecycle only
 experience_profile_web.py Local operator explicit profile HTTP routes; server-owned identity
+reply_suggestions_web.py  User draft generation/read HTTP routes; no implicit chat send
 background_services.py  shared worker start/rollback/stop ownership and ordering
 web_lifecycle.py        feature-route adapter to the shared lifecycle owner
 api_contracts.py        legacy/core HTTP request + character-capacity contracts

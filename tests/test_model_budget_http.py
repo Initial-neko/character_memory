@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @contextmanager
-def server(root):
+def server(root, *, app_module='e2e_model_budget_app', extra_env=None):
     for name in ('rin','momo'):
         target=root/'personas'/name
         target.mkdir(parents=True,exist_ok=True)
@@ -30,7 +30,7 @@ def server(root):
          'CHARACTER_MEMORY_E2E_DB':str(root/'budget.db'),
          'CHARACTER_MEMORY_E2E_MEDIA':str(root/'media'),
          'CHARACTER_MEMORY_E2E_PERSONA_ROOT':str(root/'personas'),
-         'MODEL_BUDGET_CALL_LOG':str(root/'model-calls.jsonl')}
+         'MODEL_BUDGET_CALL_LOG':str(root/'model-calls.jsonl'), **(extra_env or {})}
     tree=None
     options={}
     if os.name=='nt':
@@ -38,7 +38,7 @@ def server(root):
         tree=WindowsProcessTree()
         options['creationflags']=0x00000004|0x08000000
     with (root/f'api-{port}.log').open('wb') as log:
-        proc=subprocess.Popen([sys.executable,'-m','uvicorn','e2e_model_budget_app:app',
+        proc=subprocess.Popen([sys.executable,'-m','uvicorn',app_module+':app',
             '--app-dir',str(ROOT/'tests'),'--host','127.0.0.1','--port',str(port),
             '--log-level','warning'],cwd=ROOT,env=env,stdout=log,stderr=log,**options)
         try:

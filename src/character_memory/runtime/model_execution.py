@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 
 from pydantic import BaseModel
 
@@ -26,6 +27,24 @@ def _digest(value):
     return hashlib.sha256(_json(value).encode('utf-8')).hexdigest()
 
 
+STRUCTURED_POLICY = 'personal-browse-structured-v1'
+
+
+def _safe_binding(identity, schema):
+    # Never persist arbitrary caller input; only the structured adapter's fixed
+    # hash-only proof is eligible for later local reconciliation.
+    if set(identity) != {'prompt_sha256', 'images_sha256', 'model_sha256', 'policy', 'session_id'}:
+        return None
+    if identity['policy'] != STRUCTURED_POLICY or not isinstance(identity['session_id'], str):
+        return None
+    hashes = {name: identity[name] for name in ('prompt_sha256', 'images_sha256', 'model_sha256')}
+    if any(not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value) for value in hashes.values()):
+        return None
+    return {**hashes, 'policy': STRUCTURED_POLICY,
+            'schema_sha256': _digest(schema.model_json_schema()),
+            'session_sha256': _digest(identity['session_id'])}
+
+
 class ModelInvocationBudget:
     MIGRATION = 'execution/001-model-invocations'
     MAX_RESULT_BYTES = 65536
@@ -37,6 +56,10 @@ class ModelInvocationBudget:
         self.daily_max = daily_max
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         store.apply_schema_migration(self.MIGRATION, self._create_schema, immediate=True)
+        store.apply_schema_migration('execution/002-model-invocation-bindings', self._add_binding, immediate=True)
+
+    def _add_binding(self):
+        self.store._ensure_column_locked('model_invocation_receipts', 'binding_json', 'TEXT')
 
     def _create_schema(self):
         self.store.conn.execute(
@@ -67,6 +90,7 @@ class ModelInvocationBudget:
             raise ValueError('invalid model result schema')
         key = _digest([character_id, opportunity_id, step])
         request_hash = _digest({'identity': identity, 'schema': schema.model_json_schema()})
+        binding = _safe_binding(identity, schema)
         now = self._now()
         day = now.date().isoformat()
         with self.store.transaction(immediate=True):
@@ -91,9 +115,10 @@ class ModelInvocationBudget:
                 raise InvocationDenied('BUDGET_EXHAUSTED')
             self.store.conn.execute(
                 'INSERT INTO model_invocation_receipts('
-                'identity_key,character_id,opportunity_id,step,request_hash,budget_day,status,claimed_at) '
-                "VALUES(?,?,?,?,?,?,'STARTED',?)",
-                (key, character_id, opportunity_id, step, request_hash, day, now.isoformat()),
+                'identity_key,character_id,opportunity_id,step,request_hash,budget_day,status,claimed_at,binding_json) '
+                "VALUES(?,?,?,?,?,?,'STARTED',?,?)",
+                (key, character_id, opportunity_id, step, request_hash, day, now.isoformat(),
+                 _json(binding) if binding is not None else None),
             )
         # Only this newly admitted attempt can call the provider. In particular,
         # a timeout or process death never makes a STARTED reservation reusable.
@@ -114,11 +139,46 @@ class ModelInvocationBudget:
         # its budget. Do not call the provider again to reconstruct a lost result.
         with self.store.transaction(immediate=True):
             self.store.conn.execute(
-                "UPDATE model_invocation_receipts SET status='SUCCESS',result_json=?,completed_at=? "
+                "UPDATE model_invocation_receipts SET status='SUCCESS',result_json=?,completed_at=?,binding_json=? "
                 "WHERE identity_key=? AND status='STARTED'",
-                (payload, self._now().isoformat(), key),
+                (payload, self._now().isoformat(),
+                 _json({**binding, 'result_sha256': _digest(result.model_dump(mode='json'))}) if binding is not None else None,
+                 key),
             )
         return result
+
+
+def verified_structured_receipt(store, *, character_id, opportunity_id, step,
+                                prompt, schema, session_id):
+    """Read an original Web/RSS result proof without migrations or a provider."""
+    if 'binding_json' not in {row[1] for row in store.conn.execute('PRAGMA table_info(model_invocation_receipts)')}:
+        raise ValueError('MISSING_MODEL_BINDING')
+    key = _digest([character_id, opportunity_id, step])
+    row = store.conn.execute('SELECT * FROM model_invocation_receipts WHERE identity_key=?', (key,)).fetchone()
+    if row is None or row['status'] != 'SUCCESS' or not row['binding_json'] or not row['result_json']:
+        raise ValueError('MISSING_SUCCESSFUL_MODEL_RECEIPT')
+    if (row['character_id'], row['opportunity_id'], row['step']) != (character_id, opportunity_id, step):
+        raise ValueError('MODEL_IDENTITY_MISMATCH')
+    binding = json.loads(row['binding_json'])
+    fields = {'prompt_sha256', 'images_sha256', 'model_sha256', 'schema_sha256', 'session_sha256', 'result_sha256'}
+    if not isinstance(binding, dict) or set(binding) != fields | {'policy'}:
+        raise ValueError('INVALID_MODEL_BINDING')
+    if any(not isinstance(binding[name], str) or not re.fullmatch('[0-9a-f]{64}', binding[name]) for name in fields):
+        raise ValueError('INVALID_MODEL_BINDING')
+    expected = {'prompt_sha256': hashlib.sha256(prompt.encode('utf-8')).hexdigest(),
+                'images_sha256': _digest([]), 'model_sha256': binding['model_sha256'],
+                'policy': STRUCTURED_POLICY, 'session_id': session_id}
+    if any(binding[name] != value for name, value in _safe_binding(expected, schema).items()):
+        raise ValueError('MODEL_INPUT_MISMATCH')
+    if row['request_hash'] != _digest({'identity': expected, 'schema': schema.model_json_schema()}):
+        raise ValueError('MODEL_REQUEST_MISMATCH')
+    if len(row['result_json'].encode('utf-8')) > ModelInvocationBudget.MAX_RESULT_BYTES:
+        raise ValueError('MODEL_RESULT_OVERSIZE')
+    parsed = schema.model_validate_json(row['result_json'])
+    content = parsed.model_dump(mode='json')
+    if _json(content) != row['result_json'] or _digest(content) != binding['result_sha256']:
+        raise ValueError('MODEL_RESULT_MISMATCH')
+    return parsed
 
 
 def model_budget_status(store, *, daily_max, now=None):
@@ -165,7 +225,7 @@ def budgeted_structured(access, model, prompt, schema, session_id, *,
             'temperature': getattr(model, 'temperature', None),
             'attempts': getattr(model, 'attempts', None),
         }),
-        'policy': 'personal-browse-structured-v1',
+        'policy': STRUCTURED_POLICY,
         'session_id': session_id,
     }
     def call():

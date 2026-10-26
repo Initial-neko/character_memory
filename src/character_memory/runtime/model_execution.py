@@ -80,7 +80,7 @@ class ModelInvocationBudget:
             raise ValueError('model budget requires an aware real clock')
         return value.astimezone(timezone.utc)
 
-    def invoke(self, *, character_id, opportunity_id, step, identity, schema, call):
+    def invoke(self, *, character_id, opportunity_id, step, identity, schema, call, admission_guard=None):
         for value in (character_id, opportunity_id, step):
             if not isinstance(value, str) or not value.strip() or len(value) > 256:
                 raise ValueError('invalid model invocation identity')
@@ -98,6 +98,8 @@ class ModelInvocationBudget:
             # a caller-owned transaction could otherwise roll paid work away.
             if self.store._tx_depth != 1:
                 raise ValueError('model invocation cannot run inside an outer transaction')
+            if admission_guard is not None:
+                admission_guard(character_id, opportunity_id)
             row = self.store.conn.execute(
                 'SELECT * FROM model_invocation_receipts WHERE identity_key=?', (key,)
             ).fetchone()
@@ -211,7 +213,7 @@ def model_budget_status(store, *, daily_max, now=None):
 
 
 def budgeted_structured(access, model, prompt, schema, session_id, *,
-                        character_id, opportunity_id, step, images=None):
+                        character_id, opportunity_id, step, images=None, admission_guard=None):
     """Adapt an existing trusted World call without changing its prompt/model."""
     images = list(images or [])
     identity = {
@@ -235,4 +237,4 @@ def budgeted_structured(access, model, prompt, schema, session_id, *,
     return ModelInvocationBudget(
         access.store(), daily_max=getattr(access.settings, 'autonomous_model_daily_max', 30),
     ).invoke(character_id=character_id, opportunity_id=opportunity_id, step=step,
-             identity=identity, schema=schema, call=call)
+             identity=identity, schema=schema, call=call, admission_guard=admission_guard)

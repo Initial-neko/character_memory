@@ -80,8 +80,9 @@ class CapabilityExecutor:
     MIGRATION = "world/004-capability-executions"
 
     def __init__(self, store, web_observer, *, rss_reader=None, claude_runner=None,
-                 adapters: Mapping[str, CapabilityAdapter] | None = None):
+                 adapters: Mapping[str, CapabilityAdapter] | None = None, admission_guard=None):
         self.store = store
+        self.admission_guard = admission_guard
         self.web_observer = web_observer
         self.rss_reader = rss_reader
         self.claude_runner = claude_runner
@@ -266,6 +267,8 @@ class CapabilityExecutor:
         # Reserve before any external call; failed/time-out attempts consume the
         # opportunity's finite allowance just like successful attempts.
         with self.store.transaction(immediate=True):
+            if self.admission_guard is not None:
+                self.admission_guard(request.character_id, request.opportunity_id)
             row = self.store.conn.execute(
                 "SELECT * FROM capability_executions WHERE request_id=?", (request.request_id,)
             ).fetchone()

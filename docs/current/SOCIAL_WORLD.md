@@ -1075,6 +1075,35 @@ existing item/generation contract even when the configured web backend is Claude
 
 The enabled World scheduler still recovers at most two eligible APPRAISED appraisals per tick before new paid opportunities and independent of exhausted browse quotas. It excludes explicit APPRAISING rows in SQL before the candidate limit, so an unknown backlog neither auto-recovers nor starves the original eligible queue. Recovery does not reset quotas or purchase decision, search, browser or appraisal calls. Repeated applications return the durable result, and event plus final receipt commit atomically on one Core connection. Existing production backlog should be inspected and backed up before deploying this recovery path.
 
+#### Durable single-opportunity cancellation
+
+`POST /v1/world/activity/cancel/{opportunity_id}` accepts only a strict
+`character_id` body in the same local operator scope as recovery. Unknown or
+mismatched identities return 404; extra fields or malformed identities return
+422. The first accepted request stores an immutable `OPERATOR_REQUEST` receipt
+with its actual timestamp; repeated requests return that receipt. If local
+application already committed, it returns `ALREADY_APPLIED` and preserves all
+facts. Cancellation cannot be undone or used to withdraw an existing Event.
+
+The World owner retains a separate cancellation fence without rewriting the
+original phase or model/tool receipts. Model and capability admission check it
+inside the same immediate transaction as their claim, before cached returns or
+new reservations; their optional trusted guards do not give Core a World
+ownership dependency. Already admitted providers may still finish and consume
+budget; their SUCCESS/FAILED/UNKNOWN receipts remain durable. Cancellation is
+not a provider-kill or refund promise. Later phase changes, Web/RSS/continuation
+local application and explicit recovery refuse with
+`WORLD_OPPORTUNITY_CANCELLED`. RSS reading receipts are not changed to FAILED
+by cancellation and therefore do not become retry candidates. Automatic
+recovery filters cancellations before its query limit.
+
+Inspection remains read-only and reports the stable cancellation reason without
+prompt/provider text. The fence survives process restarts and budget-day changes.
+It applies to manual and scheduled Personal Browse and continuation opportunities;
+it does not cancel Pulse, Space, ordinary chat or published facts. Scheduler
+`stop()` remains a process lifecycle signal, not a bulk durable cancellation or
+a lease takeover. No new frontend control or remote authorization is introduced.
+
 ### Social prompt compilation
 
 World browsing/Pulse/appraisal and Space post/appraisal prompts are rendered by
@@ -1084,4 +1113,3 @@ claims and execution. RSS text never implies reading the linked original. Space
 video descriptions follow the current Persona's style. The shared composition
 contract and ownership audit live in
 [Person Runtime](PERSON_RUNTIME.md#prompt-composition-ownership).
-

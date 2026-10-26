@@ -190,6 +190,23 @@ class PersonalBrowseAppraisal(BaseModel):
         return self
 
 
+class WorldBrowseCancelled(ValueError):
+    """A durable local fence; it makes no provider cancellation promise."""
+
+
+def assert_world_browse_active(store, character_id, opportunity_id):
+    # Pure read, including on legacy databases inspected before initialization.
+    if store.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_browse_cancellations'").fetchone():
+        row = store.conn.execute(
+            'SELECT character_id FROM world_browse_cancellations WHERE opportunity_id=?',
+            (opportunity_id,),
+        ).fetchone()
+        if row is not None:
+            if row['character_id'] != character_id:
+                raise ValueError('browse opportunity belongs to another character')
+            raise WorldBrowseCancelled('WORLD_OPPORTUNITY_CANCELLED')
+
+
 class WorldPulseRepository:
     """Durable World Pulse topics/comments plus restart-safe activity clocks."""
 
@@ -202,6 +219,35 @@ class WorldPulseRepository:
         self.store.apply_schema_migration(self.SCHEDULE_MIGRATION, self._add_schedule_config)
         self.store.apply_schema_migration("world/005-browse-receipts", self._create_browse_receipts, immediate=True)
         self.store.apply_schema_migration("world/006-pulse-source-excerpts", self._add_source_excerpts, immediate=True)
+        self.store.apply_schema_migration("world/007-browse-cancellations", self._create_cancellations, immediate=True)
+
+    def _create_cancellations(self):
+        self.store.conn.execute(
+            'CREATE TABLE IF NOT EXISTS world_browse_cancellations('
+            'opportunity_id TEXT PRIMARY KEY,character_id TEXT NOT NULL,requested_at TEXT NOT NULL,'
+            "reason TEXT NOT NULL CHECK(reason='OPERATOR_REQUEST'))"
+        )
+
+    def assert_browse_active(self, character_id, opportunity_id):
+        assert_world_browse_active(self.store, character_id, opportunity_id)
+
+    def cancel_browse(self, opportunity_id, character_id):
+        with self.store.transaction(immediate=True):
+            row = self.get_browse_decision(opportunity_id)
+            if row is None or row['character_id'] != character_id:
+                raise KeyError('unknown browse opportunity')
+            if row['phase'] == 'APPLIED':
+                return {'opportunity_id':opportunity_id,'character_id':character_id,
+                        'status':'ALREADY_APPLIED','cancelled':False}
+            self.store.conn.execute(
+                'INSERT INTO world_browse_cancellations(opportunity_id,character_id,requested_at,reason) '
+                "VALUES(?,?,?,'OPERATOR_REQUEST') ON CONFLICT DO NOTHING",
+                (opportunity_id,character_id,datetime.now().astimezone().isoformat()),
+            )
+            cancellation = self.store.conn.execute(
+                'SELECT * FROM world_browse_cancellations WHERE opportunity_id=?', (opportunity_id,),
+            ).fetchone()
+            return {**dict(cancellation),'status':'CANCELLED','cancelled':True}
 
     def _add_source_excerpts(self):
         self.store._ensure_column_locked("world_pulse_topics", "evidence_json", "TEXT NOT NULL DEFAULT '[]'")
@@ -245,6 +291,9 @@ class WorldPulseRepository:
     def update_browse_decision(self, opportunity_id: str, *, expected_phase: str, phase: str,
                                plan=None, appraisal=None, result=None, source_event_id=None, error="") -> bool:
         with self.store.transaction(immediate=True):
+            row = self.get_browse_decision(opportunity_id)
+            if row is not None:
+                self.assert_browse_active(row["character_id"], opportunity_id)
             cursor = self.store.conn.execute(
                 "UPDATE world_browse_decisions SET phase=?,plan_json=coalesce(?,plan_json),"
                 "appraisal_json=coalesce(?,appraisal_json),result_json=coalesce(?,result_json),"
@@ -1186,6 +1235,8 @@ Rendered text:
 
     def _browse_character(self, character_id: str, *, now: datetime, opportunity_id: str) -> dict:
         previous = self.repository.get_browse_decision(opportunity_id)
+        if previous is not None and previous["character_id"] == character_id:
+            self.repository.assert_browse_active(character_id, opportunity_id)
         continuation = bool(previous and (previous.get('plan') or {}).get('mode') == 'CONTINUATION')
         if continuation or (previous is None and getattr(self.access.settings, 'world_continuation_enabled', False)):
             from character_memory.world_continuation import WorldContinuation
@@ -1267,6 +1318,7 @@ Rendered text:
                     plan = budgeted_structured(
                         self.access, bundle.model, plan_prompt, plan_schema, plan_session,
                         character_id=character_id, opportunity_id=opportunity_id, step='PLAN',
+                        admission_guard=self.repository.assert_browse_active,
                     )
                 chosen = (plan.choice if isinstance(plan, PersonalWorldReadPlan)
                           else "WEB_SEARCH" if plan.browse else "NO_ACTION")
@@ -1278,6 +1330,8 @@ Rendered text:
                             or len(set(plan.item_ids)) != len(plan.item_ids)
                             or any(item not in eligible for item in plan.item_ids)):
                         raise ValueError("INVALID_RSS_SELECTION")
+            except WorldBrowseCancelled:
+                raise
             except Exception as error:
                 failed = self._browse_unfinished(character_id, opportunity_id, error=str(error))
                 failed["opportunity_status"] = "FAILED"
@@ -1347,7 +1401,8 @@ Rendered text:
             request = replace(request, constraints={**request.constraints, **snapshot["execution_policy"]})
         services = getattr(self.access, "services", None)
         executed = CapabilityExecutor(self.access.store(), self.access.world_observer,
-                                      claude_runner=getattr(services, "claude_runner", None)).execute(request, now=now)
+                                      claude_runner=getattr(services, "claude_runner", None),
+                                      admission_guard=self.repository.assert_browse_active).execute(request, now=now)
         if executed.status == "SKIPPED":
             return self._browse_unfinished(character_id, opportunity_id, error=executed.reason)
         observed = executed.data
@@ -1379,7 +1434,10 @@ Rendered text:
                     appraisal = budgeted_structured(
                         self.access, bundle.model, appraisal_prompt, PersonalBrowseAppraisal, appraisal_session,
                         character_id=character_id, opportunity_id=opportunity_id, step='WEB_APPRAISAL',
+                        admission_guard=self.repository.assert_browse_active,
                     )
+            except WorldBrowseCancelled:
+                raise
             except Exception as error:
                 result = self._browse_unfinished(character_id, opportunity_id, execution_status="SUCCESS", error=str(error))
                 result.update(opportunity_status="FAILED", browsed=True, query=plan.query, appraisal_status="FAILED", capability_request_id=request.request_id)
@@ -1396,6 +1454,7 @@ Rendered text:
             row = self.repository.get_browse_decision(opportunity_id)
             if row["phase"] == "APPLIED":
                 return row["result"]
+            self.repository.assert_browse_active(character_id, opportunity_id)
             if row["phase"] != "APPRAISED":
                 return self._browse_unfinished(character_id, opportunity_id, execution_status="SUCCESS")
             appraisal = PersonalBrowseAppraisal.model_validate(row["appraisal"])
@@ -1437,7 +1496,8 @@ Rendered text:
                        for item in snapshot["rss_candidates"]]},
             {"max_items": snapshot["rss_max_items"], "max_chars": 12000, "max_calls": 1},
         )
-        executed = CapabilityExecutor(self.access.store(), self.access.world_observer, rss_reader=reading).execute(request, now=now)
+        executed = CapabilityExecutor(self.access.store(), self.access.world_observer, rss_reader=reading,
+                                      admission_guard=self.repository.assert_browse_active).execute(request, now=now)
         if executed.status == "SKIPPED":
             return self._browse_unfinished(character_id, opportunity_id, error=executed.reason)
         result = {"character_id": character_id, "opportunity_id": opportunity_id,
@@ -1461,10 +1521,13 @@ Rendered text:
                     appraisal = budgeted_structured(
                         self.access, bundle.model, prompt, RssBatchAppraisal, session,
                         character_id=character_id, opportunity_id=opportunity_id, step='RSS_APPRAISAL',
+                        admission_guard=self.repository.assert_browse_active,
                     )
                 returned = [item.item_id for item in appraisal.items]
                 if len(returned) != len(set(returned)) or set(returned) != {item["item_id"] for item in items}:
                     raise ValueError("INVALID_RSS_APPRAISAL_IDENTITIES")
+            except WorldBrowseCancelled:
+                raise
             except Exception as error:
                 result.update(opportunity_status="FAILED", appraisal_status="FAILED", errors=[{"stage": "appraisal", "error": str(error)[:800]}])
                 with self.access.store().transaction(immediate=True):
@@ -1483,6 +1546,7 @@ Rendered text:
             row = self.repository.get_browse_decision(opportunity_id)
             if row["phase"] == "APPLIED":
                 return row["result"]
+            self.repository.assert_browse_active(character_id, opportunity_id)
             if row["phase"] != "APPRAISED":
                 return self._browse_unfinished(character_id, opportunity_id, execution_status="SUCCESS")
             appraisals = {item.item_id: item for item in RssBatchAppraisal.model_validate(row["appraisal"]).items}

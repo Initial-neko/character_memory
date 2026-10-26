@@ -18,6 +18,8 @@ class WorldBrowseRecovery:
         return {row[0] for row in self.store.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
     def _prepare(self, row):
+        from character_memory.world_activity import assert_world_browse_active
+        assert_world_browse_active(self.store, row["character_id"], row["opportunity_id"])
         # Exceptions may contain private provider payloads. Export only a stable code.
         try:
             return self._validated_receipt(row)
@@ -125,6 +127,8 @@ class WorldBrowseRecovery:
         with self.store._lock:
             if 'world_browse_decisions' not in self._tables():return {'candidates':[],'read_only':True}
             phases = "phase IN ('APPRAISED','APPRAISING')" if include_explicit else "phase='APPRAISED'"
+            if not include_explicit and 'world_browse_cancellations' in self._tables():
+                phases += ' AND NOT EXISTS (SELECT 1 FROM world_browse_cancellations c WHERE c.opportunity_id=world_browse_decisions.opportunity_id)'
             rows = self.store.conn.execute(
                 f"SELECT * FROM world_browse_decisions WHERE {phases} ORDER BY started_at,opportunity_id LIMIT ?",
                 (max(1,min(200,limit)),),
@@ -137,7 +141,8 @@ class WorldBrowseRecovery:
                     *_,kept,_appraisal=self._prepare(row)
                     entry.update(recoverable=True,kept_items=kept)
                 except Exception as error:
-                    entry.update(recoverable=False,reason='INVALID_RECOVERY_RECEIPT')
+                    from character_memory.world_activity import WorldBrowseCancelled
+                    entry.update(recoverable=False,reason='WORLD_OPPORTUNITY_CANCELLED' if isinstance(error,WorldBrowseCancelled) else 'INVALID_RECOVERY_RECEIPT')
                 candidates.append(entry)
             return {'candidates':candidates,'read_only':True}
 
@@ -148,6 +153,8 @@ class WorldBrowseRecovery:
             row = self.store.conn.execute('SELECT * FROM world_browse_decisions WHERE opportunity_id=?',(opportunity_id,)).fetchone()
             if row is None:raise KeyError('unknown browse opportunity')
             if row['phase']=='APPLIED':return json.loads(row['result_json'])
+            from character_memory.world_activity import assert_world_browse_active
+            assert_world_browse_active(self.store,row['character_id'],opportunity_id)
             if row['phase'] not in {'APPRAISED','APPRAISING'}:raise ValueError('ONLY_APPRAISED_IS_LOCALLY_RECOVERABLE')
             now,snapshot,request,executed,content,_,appraisal=self._prepare(row)
             if row['phase']=='APPRAISING':

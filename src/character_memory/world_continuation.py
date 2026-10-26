@@ -259,7 +259,7 @@ Return only one JSON object using action/capability/arguments/keep/summary/perso
                         return budgeted_structured(
                             self.access, bundle.model, prompt, WorldContinuationDecision, session_id,
                             character_id=character_id, opportunity_id=opportunity_id,
-                            step=f'CONTINUATION:{step}', images=images,
+                            step=f'CONTINUATION:{step}', images=images, admission_guard=self.repository.assert_browse_active,
                         )
                 decision = _bounded_call(model_call, self.deadline, _MODEL_SLOTS)
                 if not isinstance(decision, WorldContinuationDecision):
@@ -289,7 +289,7 @@ Return only one JSON object using action/capability/arguments/keep/summary/perso
                 else:
                     request = self._request(character_id, opportunity_id, source_event_id, step, decision, selected)
                     services = getattr(self.access, 'services', None)
-                    executor = CapabilityExecutor(self.access.store(), getattr(self.access, 'world_observer', None), rss_reader=reading, claude_runner=getattr(services, 'claude_runner', None), adapters=adapters)
+                    executor = CapabilityExecutor(self.access.store(), getattr(self.access, 'world_observer', None), rss_reader=reading, claude_runner=getattr(services, 'claude_runner', None), adapters=adapters, admission_guard=self.repository.assert_browse_active)
                     if decision.capability.startswith('BROWSER_'):
                         result = executor.execute(request, now=now)
                     else:
@@ -312,6 +312,9 @@ Return only one JSON object using action/capability/arguments/keep/summary/perso
             phase = 'CONT_APPRAISED'
             return self._apply(character_id, opportunity_id, now)
         except Exception as exc:
+            from character_memory.world_activity import WorldBrowseCancelled
+            if isinstance(exc, WorldBrowseCancelled):
+                raise
             # No paid retry on an uncertain outcome. A failed local apply keeps
             # CONT_APPRAISED so only that local transaction may be retried.
             if phase == 'CONT_APPRAISED':
@@ -335,6 +338,7 @@ Return only one JSON object using action/capability/arguments/keep/summary/perso
             row = self.repository.get_browse_decision(opportunity_id)
             if row['phase'] == 'APPLIED':
                 return row['result']
+            self.repository.assert_browse_active(character_id, opportunity_id)
             if row['phase'] != 'CONT_APPRAISED' or row['character_id'] != character_id:
                 raise ValueError('INVALID_CONTINUATION_RECEIPT')
             now = parse_datetime(row['started_at'])

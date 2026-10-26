@@ -80,6 +80,11 @@ def validate(output):
             assert len(batch['suggestions'])==3 and len(calls())==1
             assert request(base,'/v2/reply-suggestions','POST',payload)[1]==batch
             assert latest_direct(base)[1]==before
+            direct_send={'request_id':str(uuid4()),'character_id':'rin','message':batch['suggestions'][0]['text'],
+                         'reply_suggestion':{'batch_id':batch['batch_id'],'suggestion_id':batch['suggestions'][0]['id']}}
+            accepted=request(base,'/v1/chat/messages','POST',direct_send);assert accepted[0]==202,accepted
+            direct_signal=accepted[1]['reply_suggestion_signal'];assert direct_signal['kind']=='SELECT' and direct_signal['source_ref']['id']==accepted[1]['event_id']
+            assert request(base,'/v1/chat/messages','POST',direct_send)[1]['reply_suggestion_signal']==direct_signal and len(calls())==1
             assert request(base,'/v2/me/experience-profile','PATCH',{'expected_version':0,'changes':{'tone':'CUTE'}})[0]==200
             assert request(base,'/v2/reply-suggestions/'+batch['batch_id'])[0]==409
             group=request(base,'/v1/groups','POST',{'name':'Suggestions','member_ids':['rin','momo']})[1]['group']['id']
@@ -91,20 +96,51 @@ def validate(output):
             group_batch=made[1];assert len(calls())==2
             stop();base=start()
             assert request(base,'/v2/reply-suggestions/'+group_batch['batch_id'])[1]==group_batch and len(calls())==2
+            group_send={'request_id':str(uuid4()),'message':'我想修改建议后再说。',
+                        'reply_suggestion':{'batch_id':group_batch['batch_id'],'suggestion_id':group_batch['suggestions'][0]['id']}}
+            accepted=request(base,f'/v1/groups/{group}/messages','POST',group_send);assert accepted[0]==202,accepted
+            edit_signal=accepted[1]['reply_suggestion_signal'];assert edit_signal['kind']=='EDIT' and edit_signal['source_ref']['conversation_id']==group
+            assert request(base,f'/v1/groups/{group}/messages','POST',group_send)[1]['reply_suggestion_signal']==edit_signal
+            next_ref={'kind':'CONVERSATION_EVENT','conversation_id':group,'id':accepted[1]['event_id']}
+            def make_group(ref,version):
+                made=request(base,'/v2/reply-suggestions','POST',{'request_id':str(uuid4()),'context_ref':ref,'expected_profile_version':version})
+                assert made[0]==200,made
+                return made[1]
+            free_batch=make_group(next_ref,1)
+            free_send={'request_id':str(uuid4()),'message':'这次我想完全自由输入。','reply_suggestion':{'batch_id':free_batch['batch_id']}}
+            accepted=request(base,f'/v1/groups/{group}/messages','POST',free_send);assert accepted[0]==202,accepted
+            free_signal=accepted[1]['reply_suggestion_signal'];assert free_signal['kind']=='FREE_INPUT'
+            next_ref={'kind':'CONVERSATION_EVENT','conversation_id':group,'id':accepted[1]['event_id']}
+            feedback_batch=make_group(next_ref,1)
+            ignored={'request_id':str(uuid4()),'batch_id':feedback_batch['batch_id'],'kind':'IGNORE'}
+            ignore_result=request(base,'/v2/reply-suggestions/feedback','POST',ignored);assert ignore_result[0]==200,ignore_result
+            assert request(base,'/v2/reply-suggestions/feedback','POST',ignored)[1]==ignore_result[1]
+            assert request(base,'/v2/me/experience-profile')[1]['version']==1
+            feedback={'request_id':str(uuid4()),'batch_id':feedback_batch['batch_id'],'kind':'EXPLICIT_FEEDBACK','comment':'希望简短一点',
+                      'expected_profile_version':1,'preference_changes':{'verbosity':'BRIEF'}}
+            feedback_result=request(base,'/v2/reply-suggestions/feedback','POST',feedback);assert feedback_result[0]==200,feedback_result
+            assert feedback_result[1]['applied_profile_version']==2
+            assert request(base,'/v2/reply-suggestions/feedback','POST',feedback)[1]==feedback_result[1]
+            assert request(base,'/v2/me/experience-profile')[1]['version']==2
+            archive_batch=make_group(next_ref,2)
             assert request(base,f'/v1/groups/{group}/archive','POST',{})[0]==200
-            assert request(base,'/v2/reply-suggestions/'+group_batch['batch_id'])[0]==409
+            assert request(base,'/v2/reply-suggestions/'+archive_batch['batch_id'])[0]==409
             assert request(base,'/v1/chat','POST',{'character_id':'rin','message':'FAIL_SUGGESTION'})[0]==200
-            ref,_=latest_direct(base);failed={'request_id':str(uuid4()),'context_ref':ref,'expected_profile_version':1}
-            assert request(base,'/v2/reply-suggestions','POST',failed)[0]==502 and len(calls())==3
+            ref,_=latest_direct(base);failed={'request_id':str(uuid4()),'context_ref':ref,'expected_profile_version':2}
+            assert request(base,'/v2/reply-suggestions','POST',failed)[0]==502 and len(calls())==6
             stop();base=start()
-            assert request(base,'/v2/reply-suggestions','POST',failed)[0]==502 and len(calls())==3
+            assert request(base,'/v2/reply-suggestions','POST',failed)[0]==502 and len(calls())==6
+            assert request(base,'/v2/me/experience-profile?expected_version=2','DELETE')[1]['version']==3
+            assert request(base,'/v2/reply-suggestions/feedback','POST',feedback)[1]==feedback_result[1]
+            profile=request(base,'/v2/me/experience-profile')[1];assert profile['version']==3 and profile['preferences']=={}
+            signals=request(base,'/v2/reply-suggestions/'+feedback_batch['batch_id']+'/signals')[1]['signals'];assert len(signals)==2
             assert all(row['pid'] in pids for row in calls())
             assert all(p.read_bytes()==(ROOT/'personas'/p.parent.name/'persona.yaml').read_bytes() for p in personas.glob('*/persona.yaml'))
             stop()
             report={'schema_version':1,'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                     'dirty':bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip()),'status':'PASS','api_pids':pids,'launcher_pids':launchers,
                     'race_http_statuses':statuses,'suggestion_calls':calls(),'external_model_calls':0,'message_count_unchanged':True,
-                    'profile_and_archive_invalidation':True,'restarted_cache_and_failure_no_replay':True,'owned_ports_closed':True,'persona_files_unchanged':True,
+                    'profile_and_archive_invalidation':True,'choice_signals':[direct_signal,edit_signal,free_signal],'explicit_feedback_signals':signals,'cleared_profile_not_resurrected':True,'restarted_cache_and_failure_no_replay':True,'owned_ports_closed':True,'persona_files_unchanged':True,
                     'scope':'deterministic provider proves engineering only; no semantic quality or human acceptance'}
             if output:Path(output).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
             print(json.dumps(report))

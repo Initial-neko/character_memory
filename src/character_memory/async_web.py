@@ -4,7 +4,12 @@ from character_memory.live2d_behavior import bind_presentation
 import asyncio
 from datetime import datetime
 from typing import Annotated
-from pydantic import Field
+from pydantic import Field, model_validator
+from character_memory.domain.reply_suggestions import SuggestionAttribution
+from character_memory.application.reply_suggestion_signals import prepare_choice, record_choice
+from character_memory.application.reply_suggestions import SuggestionStale
+from character_memory.storage.reply_suggestions import SuggestionConflict
+from character_memory.storage.reply_suggestion_signals import ReplySuggestionSignalRepository
 from character_memory.storage.message_receipts import MessageReceiptRepository, ReceiptConflict
 from character_memory.storage.reaction_delivery import ReactionDeliveryRepository
 from character_memory.domain.facts import FactRef
@@ -35,10 +40,24 @@ MessageRequestId = Annotated[str, Field(strict=True, min_length=1, max_length=12
 
 class AsyncChatRequest(ChatRequest):
     request_id: MessageRequestId | None = None
+    reply_suggestion: SuggestionAttribution | None = None
+
+    @model_validator(mode="after")
+    def attribution_needs_identity(self):
+        if self.reply_suggestion is not None and self.request_id is None:
+            raise ValueError("reply suggestion attribution requires request_id")
+        return self
 
 
 class AsyncGroupChatRequest(GroupChatRequest):
     request_id: MessageRequestId | None = None
+    reply_suggestion: SuggestionAttribution | None = None
+
+    @model_validator(mode="after")
+    def attribution_needs_identity(self):
+        if self.reply_suggestion is not None and self.request_id is None:
+            raise ValueError("reply suggestion attribution requires request_id")
+        return self
 
 
 logger = logging.getLogger("character_memory.async_web")
@@ -121,6 +140,7 @@ def attach_async_routes(app):
     )
     scheduler = ReactionScheduler(access.get_bundle, access.character_profiles, hub, voice_materializer=materializer)
     deliveries = ReactionDeliveryRepository(access.store())
+    ReplySuggestionSignalRepository(access.store())
     delivery = DurableReactionDelivery(deliveries, access.media_storage, scheduler, access.character_profiles)
     scheduler.delivery = delivery
     access.stream_hub = hub
@@ -393,20 +413,29 @@ def attach_async_routes(app):
         repository = MessageReceiptRepository(store)
         cleanup, dispatches = [], []
         def create():
+            prepared = prepare_choice(store, access, req.reply_suggestion, scope) if req.reply_suggestion is not None else None
             response, dispatch = persist(cleanup)
+            if prepared is not None:
+                source = FactRef(kind=source_kind, id=response["event_id"], conversation_id=conversation_id)
+                response["reply_suggestion_signal"] = record_choice(store, prepared, source, scope, req.request_id)
             dispatches.append(dispatch)
             return response
+        payload = req.model_dump(mode="json", exclude={"request_id"})
+        if req.reply_suggestion is None:
+            # Preserve fingerprints of receipts accepted before this optional field existed.
+            payload.pop("reply_suggestion", None)
         try:
             accepted = repository.accept(scope, req.request_id,
-                req.model_dump(mode="json", exclude={"request_id"}), create,
-                source_kind=source_kind, conversation_id=conversation_id)
+                payload, create, source_kind=source_kind, conversation_id=conversation_id)
         except BaseException as exc:
             for rollback in cleanup:
                 try:
                     rollback()
                 except OSError:
                     logger.exception("async.accept media rollback failed")
-            if isinstance(exc, ReceiptConflict):
+            if isinstance(exc, KeyError) and req.reply_suggestion is not None:
+                raise HTTPException(404, "suggestion batch not found") from exc
+            if isinstance(exc, (ReceiptConflict, SuggestionStale, SuggestionConflict)):
                 raise HTTPException(409, str(exc)) from exc
             raise
         if accepted.created:

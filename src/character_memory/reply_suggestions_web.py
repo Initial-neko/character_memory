@@ -4,8 +4,10 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from character_memory.application.reply_suggestions import ReplySuggestionService, SuggestionStale, SuggestionUnavailable
 from character_memory.storage.reply_suggestions import SuggestionConflict
-from character_memory.storage.experience_profiles import ProfileCorrupt
-from character_memory.domain.reply_suggestions import SuggestionRequest
+from character_memory.storage.experience_profiles import ProfileCorrupt, ProfileConflict
+from character_memory.domain.reply_suggestions import SuggestionRequest, SuggestionFeedback
+from character_memory.application.reply_suggestion_signals import record_feedback
+from character_memory.storage.reply_suggestion_signals import ReplySuggestionSignalRepository
 from character_memory.config import load_persona, resolve_persona_path
 
 
@@ -18,7 +20,7 @@ def attach_reply_suggestion_routes(app, access, *, persona_for=None):
     def call(operation, *args):
         try:
             result = operation(*args)
-        except (SuggestionStale, SuggestionConflict) as exc:
+        except (SuggestionStale, SuggestionConflict, ProfileConflict) as exc:
             raise HTTPException(409,str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(404,'suggestion batch not found') from exc
@@ -26,11 +28,21 @@ def attach_reply_suggestion_routes(app, access, *, persona_for=None):
             raise HTTPException(502,str(exc)) from exc
         except ProfileCorrupt as exc:
             raise HTTPException(503,str(exc)) from exc
-        return JSONResponse(result,status_code=202 if result['status']=='PENDING' else 200)
+        return JSONResponse(result,status_code=202 if result.get('status')=='PENDING' else 200)
 
     @app.post('/v2/reply-suggestions')
     def generate_suggestions(request:SuggestionRequest):
         return call(service.generate,request)
+
+    @app.post('/v2/reply-suggestions/feedback')
+    def feedback(request:SuggestionFeedback):
+        return call(record_feedback,service,request)
+
+    @app.get('/v2/reply-suggestions/{batch_id}/signals')
+    def signals(batch_id:UUID):
+        if service.batches.get(str(batch_id)) is None:
+            raise HTTPException(404,'suggestion batch not found')
+        return {'signals':ReplySuggestionSignalRepository(service.store).for_batch(str(batch_id))}
 
     @app.get('/v2/reply-suggestions/{batch_id}')
     def read_suggestions(batch_id:UUID):

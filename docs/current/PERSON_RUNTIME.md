@@ -777,8 +777,36 @@ New messages, visible-text/attachment changes, membership changes, archival,
 Persona changes, or profile edits/clear invalidate the old batch (409/`STALE`)
 and remove its active suggestion payload. `GET /v2/reply-suggestions/{batch_id}`
 never initializes/calls a model. Generating or reading a batch never appends a
-chat fact. Drafts are not selections or user commitments: actual SELECT/EDIT/
-FREE_INPUT attribution must be linked to durable accepted-message facts by the
-later sending integration; IGNORE and explicit feedback are separate signals.
-This generation boundary does not implement that feedback integration, Activity,
-or a frontend suggestion strip.
+chat fact. Drafts are not selections or user commitments. The asynchronous Direct/Group
+message endpoints accept optional `reply_suggestion={batch_id,suggestion_id?}`
+only with a request identity. During the existing acceptance transaction's first
+create, the current READY batch and target are checked; the actual persisted
+public user text is compared with the stored draft. Matching text is SELECT,
+changed text is EDIT; an explicitly associated batch without a suggestion ID is
+FREE_INPUT. The client cannot self-report these modes. Unattributed legacy input
+is not inferred as a choice. Source fact, signal, durable delivery and acceptance
+receipt commit or roll back together. A replay returns the original receipt
+before revalidating a batch made stale by that very send. When attribution is
+absent, its field is excluded from the acceptance fingerprint to preserve older
+receipts. Draft clicks alone create none of these signals.
+
+`storage/reply_suggestion_signals.py` owns migration
+`experience/003-suggestion-signals`. Sent text remains in the existing fact;
+signals reference it by FactRef and do not duplicate its body. Explicit signal
+reads at `GET /v2/reply-suggestions/{batch_id}/signals` do not call a model and can
+show the operator's recorded feedback after the draft batch has become stale.
+`POST /v2/reply-suggestions/feedback` records only explicit IGNORE or
+EXPLICIT_FEEDBACK, with its own durable request identity. Free text is retained
+as authored feedback without inferring personality, mood or long-term choices.
+Optional explicit enum `preference_changes` requires `expected_profile_version`;
+feedback and the existing Profile CAS update commit atomically, changing the next
+context. Retrying the same feedback returns its original recorded outcome even
+if the batch is now stale, without applying preferences twice. A different
+payload with that identity conflicts. Ignoring does not change preferences.
+Signals store applied version references, not restorable preference snapshots.
+Clearing Profile removes its choices/history as above; it neither deletes
+independent authored feedback/source facts nor replays them into preferences.
+
+This backend boundary does not implement Activity, automatic interpretation or
+periodic learning from free text, feedback withdrawal governance, or a frontend
+suggestion strip. Those and real-model/user quality acceptance remain separate.

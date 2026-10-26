@@ -34,6 +34,8 @@ src/character_memory/
 
 ### `application/`
 
+- `reply_suggestion_signals.py` — 首次消息接受内校验并按真实文本记录选改写；显式反馈与Profile CAS共事务。
+
 - `reply_suggestions.py` — 从用户可见Direct/Group事实生成草稿；画像/上下文失效，不读取私有Person记忆。
 
 - `fact_provenance.py` — Memory旧字段到严格FactRef的只读来源解析；不初始化schema或复制事实。
@@ -75,6 +77,8 @@ src/character_memory/
 - `recall.py` — VectorRecall ranking。
 
 ### `storage/`
+
+- `reply_suggestion_signals.py` — FactRef关联的明确用户信号与请求去重；不复制发送正文。
 
 - `reply_suggestions.py` — 用户建议批次的持久领取、缓存与失败/陈旧状态。
 

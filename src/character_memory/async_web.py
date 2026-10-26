@@ -446,7 +446,16 @@ def attach_async_routes(app):
                 raise
             repository.mark_dispatch(scope, req.request_id, "ENQUEUED")
             accepted.dispatch = "ENQUEUED"
-        return {**accepted.response, "request_receipt": {
+        response = dict(accepted.response)
+        if not accepted.created and "reply_suggestion_signal" in response:
+            original = response["reply_suggestion_signal"]
+            current = ReplySuggestionSignalRepository(store).get(original.get("id")) if isinstance(original, dict) else None
+            source = FactRef(kind=source_kind, id=response["event_id"], conversation_id=conversation_id)
+            if current is None or current["source_ref"] != source.model_dump():
+                raise HTTPException(409, "accepted signal is unavailable; do not repeat the send")
+            # Keep acceptance identity/classification, but never revive an old governance view.
+            response["reply_suggestion_signal"] = current
+        return {**response, "request_receipt": {
             "request_id": req.request_id, "replayed": not accepted.created,
             "acceptance": "ACCEPTED", "dispatch": accepted.dispatch,
             "execution": deliveries.status(FactRef(kind=source_kind, id=accepted.response["event_id"],

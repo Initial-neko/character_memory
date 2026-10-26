@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from character_memory.application.reply_suggestions import ReplySuggestionService, SuggestionStale, SuggestionUnavailable
 from character_memory.storage.reply_suggestions import SuggestionConflict
 from character_memory.storage.experience_profiles import ProfileCorrupt, ProfileConflict
-from character_memory.domain.reply_suggestions import SuggestionRequest, SuggestionFeedback
+from character_memory.domain.reply_suggestions import SuggestionRequest, SuggestionFeedback, FeedbackCorrection, FeedbackWithdrawal
 from character_memory.application.reply_suggestion_signals import record_feedback
 from character_memory.storage.reply_suggestion_signals import ReplySuggestionSignalRepository
 from character_memory.config import load_persona, resolve_persona_path
@@ -38,11 +38,19 @@ def attach_reply_suggestion_routes(app, access, *, persona_for=None):
     def feedback(request:SuggestionFeedback):
         return call(record_feedback,service,request)
 
+    @app.patch('/v2/reply-suggestions/feedback/{signal_id}')
+    def correct_feedback(signal_id:UUID,request:FeedbackCorrection):
+        return call(ReplySuggestionSignalRepository(service.store).change,str(signal_id),'CORRECT',request)
+
+    @app.post('/v2/reply-suggestions/feedback/{signal_id}/withdraw')
+    def withdraw_feedback(signal_id:UUID,request:FeedbackWithdrawal):
+        return call(ReplySuggestionSignalRepository(service.store).change,str(signal_id),'WITHDRAW',request)
+
     @app.get('/v2/reply-suggestions/{batch_id}/signals')
-    def signals(batch_id:UUID):
+    def signals(batch_id:UUID,active_only:bool=False):
         if service.batches.get(str(batch_id)) is None:
             raise HTTPException(404,'suggestion batch not found')
-        return {'signals':ReplySuggestionSignalRepository(service.store).for_batch(str(batch_id))}
+        return {'signals':ReplySuggestionSignalRepository(service.store).for_batch(str(batch_id),active_only=active_only)}
 
     @app.get('/v2/reply-suggestions/{batch_id}')
     def read_suggestions(batch_id:UUID):

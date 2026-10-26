@@ -54,3 +54,14 @@ class SuggestionFeedback(BaseModel):
         if self.preference_changes is not None and self.expected_profile_version is None:
             raise ValueError("preference changes require expected_profile_version")
         return self
+
+
+class FeedbackWithdrawal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    expected_revision: int = Field(strict=True, ge=1, le=2**63-2)
+
+
+class FeedbackCorrection(FeedbackWithdrawal):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    comment: str = Field(min_length=1, max_length=2000)

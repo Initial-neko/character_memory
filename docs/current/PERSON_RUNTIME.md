@@ -807,6 +807,30 @@ Signals store applied version references, not restorable preference snapshots.
 Clearing Profile removes its choices/history as above; it neither deletes
 independent authored feedback/source facts nor replays them into preferences.
 
+Signal author governance uses feature migration `experience/004-signal-governance`.
+Existing signals start at revision 1. A strict UUID request identity and
+`expected_revision` protect PATCH `/v2/reply-suggestions/feedback/{signal_id}`
+(authored EXPLICIT_FEEDBACK text only) and POST at the same path plus `/withdraw`
+(any operator-owned signal). The signal change and its metadata-only idempotency
+receipt commit together; stale versions/different payload reuse conflict (409),
+unknown/other-owner signals are not found (404), and invalid fields are 422.
+Withdrawn signals cannot be revived by a new correction. A successful mutation
+returns only its identity, operation and applied revision, never an old text copy.
+Replaying it after a later change returns that metadata without restoring text.
+
+Correction replaces the current authored note; withdrawal clears it and marks the
+signal withdrawn. Audit receipts retain hashes and version metadata rather than
+prior plaintext snapshots. This is a logical projection change, not secure erasure
+of SQLite history pages or external backups. Signal reads expose revision and
+withdrawal state; `?active_only=true` filters withdrawn records. The historical
+kind, source FactRef and accepted message remain unchanged. Correcting or
+withdrawing a signal does not silently undo a separately applied Profile choice;
+current preferences remain governed by their explicit CAS/clear/restore API.
+The original feedback POST replay returns the current governance view, and a
+message-acceptance replay refreshes its signal view after verifying the same
+source identity. Neither route revives an old note or reports a withdrawn signal
+as currently active; neither creates another send or signal.
+
 This backend boundary does not implement Activity, automatic interpretation or
-periodic learning from free text, feedback withdrawal governance, or a frontend
-suggestion strip. Those and real-model/user quality acceptance remain separate.
+periodic learning from free text, or a frontend suggestion strip. Those and
+real-model/user quality acceptance remain separate.

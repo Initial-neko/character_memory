@@ -78,7 +78,7 @@ src/character_memory/
 
 ### `storage/`
 
-- `reply_suggestion_signals.py` — FactRef关联的明确用户信号与请求去重；不复制发送正文。
+- `reply_suggestion_signals.py` — FactRef关联的明确用户信号、作者更正/撤回CAS与元数据收据；不复制发送正文或旧反馈快照。
 
 - `reply_suggestions.py` — 用户建议批次的持久领取、缓存与失败/陈旧状态。
 

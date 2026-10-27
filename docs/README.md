@@ -28,6 +28,7 @@ Historical material never overrides current code or `docs/current/`.
 | [PERSON_RUNTIME](current/PERSON_RUNTIME.md) | Character cognition/action contract. |
 | [MEMORY](current/MEMORY.md) | Durable facts, admission, recall and provenance. |
 | [CONVERSATION_RUNTIME](current/CONVERSATION_RUNTIME.md) | Direct/Group delivery, SSE, durable Voice Messages and Stickers. |
+| [CONVERSATION_FACT_MIGRATION](current/CONVERSATION_FACT_MIGRATION.md) | W3 ADR: Direct conversation facts → `conversation_events`, compatibility reads, cutover and rollback boundaries (design frozen, not executed). |
 | [SOCIAL_WORLD](current/SOCIAL_WORLD.md) | Character Space, World Pulse and Personal Browse. |
 | [RSS_SOURCES](current/RSS_SOURCES.md) | RSS/Atom external-source ingestion, storage and UI boundary. |
 | [VISUAL](current/VISUAL.md) | Camera/Screen capture, ImageGen and Avatar sources. |

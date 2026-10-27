@@ -26,7 +26,7 @@ class Settings(BaseModel):
     api_key: str = ""
     github_issue_token: str = Field(default="", repr=False, description="GitHub Issue API token loaded from GITHUB_ISSUE_TOKEN in .env; never persist to config.yaml.")
     base_url: str = "https://opencode.ai/zen/go/v1"
-    chat_model: str = "deepseek-flash"
+    chat_model: str = Field(default="deepseek-v4.1-flash", description="Chat model ID. On official OpenCode Zen/Go endpoints, retired deepseek-flash resolves to deepseek-v4.1-flash before sending; other provider IDs are unchanged.")
     # Optional compatibility override for providers that still require a
     # dedicated vision model. Empty/None means image turns reuse chat_model.
     vision_model: str | None = None

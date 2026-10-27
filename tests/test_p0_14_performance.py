@@ -44,7 +44,7 @@ def test_shared_provider_allows_overlapping_character_calls(monkeypatch):
     assert not right.is_alive()
     assert len(results) == 2
     assert max_active == 2
-    assert all(result.trace.model == "deepseek-flash" for result in results)
+    assert all(result.trace.model == "deepseek-v4.1-flash" for result in results)
 
 
 def test_empty_memory_candidates_do_not_scan_long_term_memory():

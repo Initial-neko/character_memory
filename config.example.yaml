@@ -17,8 +17,8 @@
 # OpenAI-compatible API root used for chat/vision requests.
 base_url: "https://opencode.ai/zen/go/v1"
 
-# Main text model id used by Direct, Group, Space, World and other LLM features.
-chat_model: "deepseek-flash"
+# Main text model id used by Direct, Group, Space, World and other LLM features. On official OpenCode endpoints, retired deepseek-flash resolves to this replacement without an extra request.
+chat_model: "deepseek-v4.1-flash"
 
 # Optional dedicated vision model. Empty means reuse chat_model for image turns.
 vision_model: ""

@@ -2,13 +2,16 @@
 import json
 import os
 import re
+import hashlib
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 import e2e_realtime_app as fixture
 
 app = fixture.app
-app.state.character_memory.reaction_scheduler.quiet_seconds = 60
-app.state.character_memory.reaction_scheduler.max_burst_seconds = 60
+STORY = os.getenv('M2_FULL_LOOP_STORY') == '1'
+app.state.character_memory.reaction_scheduler.quiet_seconds = .05 if STORY else 60
+app.state.character_memory.reaction_scheduler.max_burst_seconds = .1 if STORY else 60
 
 
 def structured(prompt, schema, session):
@@ -30,7 +33,12 @@ fixture.model.structured_call_for_session = structured
 
 @app.get('/__e2e/suggestions-runtime')
 def suggestions_runtime():
-    return {'pid': os.getpid(), 'external_model_calls': 0}
+    result = {'pid': os.getpid(), 'external_model_calls': 0}
+    if STORY:
+        root = Path(__file__).resolve().parents[1]
+        paths = ['tests/e2e_suggestions_ui_app.py', 'tests/e2e_realtime_app.py', 'src/character_memory/application/reply_suggestion_signals.py', 'src/character_memory/application/reply_suggestions.py', 'src/character_memory/storage/experience_profiles.py', 'src/character_memory/runtime/person_context.py', 'src/character_memory/web/app.js', 'src/character_memory/web/experience_profile.js', 'src/character_memory/web/reply_suggestions.js']
+        result.update(story=True, git_status_porcelain=subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).splitlines(), commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(), source_sha256={name: hashlib.sha256((root/name).read_bytes()).hexdigest() for name in paths})
+    return result
 
 
 _original_reaction = fixture.model._reaction

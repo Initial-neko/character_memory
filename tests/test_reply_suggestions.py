@@ -179,3 +179,18 @@ def test_visible_text_tail_change_invalidates_bounded_prompt_batch(tmp_path):
     store.conn.execute('UPDATE events SET content=? WHERE id=?',('a'*4100+' changed visible tail',source.id));store.conn.commit()
     with pytest.raises(SuggestionStale):service.get(batch['batch_id'])
     store.close()
+
+def test_actual_generation_prompt_contains_the_output_schema(tmp_path):
+    from character_memory.domain.reply_suggestions import SuggestionOutput
+    store=SQLiteStore(tmp_path/'schema-contract.db');model=Model();service=setup(store,model)
+    try:
+        source=event(store,'我想练习一个开场')
+        service.generate(request(source))
+        prompt=model.prompts[0]
+        assert 'Output JSON Schema:\n' in prompt
+        actual=json.loads(prompt.split('Output JSON Schema:\n',1)[1].splitlines()[0])
+        assert actual==SuggestionOutput.model_json_schema()
+        assert actual['required']==['suggestions'] and actual['additionalProperties'] is False
+        assert actual['properties']['suggestions']['minItems']==3
+        assert actual['properties']['suggestions']['maxItems']==5
+    finally:store.close()

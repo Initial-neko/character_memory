@@ -95,6 +95,15 @@
         {once:true},
       );
     });
+    // A failed image keeps the bubble's shape and says so in words, instead
+    // of leaving Chromium's broken-image glyph in the transcript.
+    row.querySelectorAll(".image-bubble img").forEach(img => {
+      img.addEventListener(
+        "error",
+        () => img.closest(".image-bubble")?.classList.add("broken"),
+        {once:true},
+      );
+    });
     CM.bindVoiceMessage(row);
   };
 })();

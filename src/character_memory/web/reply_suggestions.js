@@ -6,6 +6,7 @@
   CM.dom.composer.parentElement.prepend(host);
   const dialog=document.createElement('dialog');dialog.className='cm-experience cm-reply-feedback';dialog.setAttribute('aria-labelledby','replyFeedbackTitle');document.body.append(dialog);
   let epoch=0, active=null, selected=null, lastBatch=null, busy=false, notice='', pendingGeneration=null, scopeSeen='';
+  let collapsed=window.matchMedia('(max-width: 620px)').matches;
   let feedbackEpoch=0, feedbackBatch=null, feedbackBusy=false, editing=null, rows=[], feedbackNotice='';
   let feedbackProfile=null, preferenceDraft={}, preferenceConflict=false, preferenceOpen=false;
   const pendingFeedback=new Map();
@@ -30,7 +31,7 @@
   }
   function sync(){
     if(scopeSeen!==scope()){
-      scopeSeen=scope();lastBatch=null;try{lastBatch=sessionStorage.getItem(storageKey());}catch{}
+      scopeSeen=scope();lastBatch=null;collapsed=window.matchMedia('(max-width: 620px)').matches;try{lastBatch=sessionStorage.getItem(storageKey());}catch{}
       if(dialog.open)dialog.close();invalidate('');return;
     }
     if((active&&active.context!==contextKey())||(pendingGeneration&&pendingGeneration.context!==contextKey()))invalidate();
@@ -39,11 +40,15 @@
   function render(){
     const held=active?.data?.status==='PENDING';
     const label=held?'查看生成结果':pendingGeneration?.unknown?'重试原生成':'帮我想想';
-    host.innerHTML=`<div class="cm-replies-head"><button type="button" data-reply-generate title="明确点击才生成回复草稿；不会自动发消息">${label}</button>${lastBatch?'<button type="button" data-reply-feedback title="查看、记录、更正或撤回明确文字反馈">建议反馈</button>':''}<span role="status">${esc(busy?'正在准备建议…':notice)}</span></div>${active?.data.status==='READY'?`<div class="cm-replies-options">${active.data.suggestions.map(item=>`<button type="button" data-suggestion-id="${esc(item.id)}" ${selected===item.id?'aria-pressed="true"':'aria-pressed="false"'}><small>${esc(item.intent)}</small><span>${esc(item.text)}</span></button>`).join('')}</div><div class="cm-replies-foot"><span>点击仅填入草稿，可编辑或直接写自己的话。</span><button type="button" data-reply-ignore>不用这些</button></div>`:''}`;
+    const ready=active?.data?.status==='READY';
+    const count=ready?active.data.suggestions.length:0;
+    const toggle=ready?`<button type="button" class="cm-replies-toggle" data-reply-toggle aria-expanded="${collapsed?'false':'true'}" title="${collapsed?'展开这几条回复草稿':'收起建议，输入框和聊天保持清爽'}">${collapsed?`展开建议 · ${count}`:'收起建议'}</button>`:'';
+    host.innerHTML=`<div class="cm-replies-head"><button type="button" data-reply-generate title="明确点击才生成回复草稿；不会自动发消息">${label}</button>${lastBatch?'<button type="button" data-reply-feedback title="查看、记录、更正或撤回明确文字反馈">建议反馈</button>':''}${toggle}<span role="status">${esc(busy?'正在准备建议…':notice)}</span></div>${ready&&!collapsed?`<div class="cm-replies-options">${active.data.suggestions.map(item=>`<button type="button" data-suggestion-id="${esc(item.id)}" ${selected===item.id?'aria-pressed="true"':'aria-pressed="false"'}><small>${esc(item.intent)}</small><span>${esc(item.text)}</span></button>`).join('')}</div><div class="cm-replies-foot"><span>点击仅填入草稿，可编辑或直接写自己的话。</span><button type="button" data-reply-ignore>不用这些</button></div>`:''}`;
     const generate=host.querySelector('[data-reply-generate]');generate.disabled=busy||blocked()||!ref();
     if(blocked())generate.title='建议归因目前仅用于普通文本聊天；通话或生活引用期间请直接输入';
     else if(!ref())generate.title='先聊一句，有真实上下文后再生成建议';
     generate.onclick=()=>generateSuggestions();
+    host.querySelector('[data-reply-toggle]')?.addEventListener('click',()=>{collapsed=!collapsed;render();});
     host.querySelector('[data-reply-feedback]')?.addEventListener('click',openFeedback);
     host.querySelectorAll('[data-suggestion-id]').forEach(button=>button.onclick=async()=>{
       if(busy||!active||active.context!==contextKey()||blocked()){if(!busy)invalidate();return;}
@@ -86,7 +91,7 @@
       }
       if(token!==epoch||target!==contextKey())return;
       if(!result.data.batch_id||!['READY','PENDING'].includes(result.data.status))throw Error('invalid batch');
-      active={context:target,data:result.data};selected=null;remember(result.data.batch_id);pendingGeneration=null;
+      active={context:target,data:result.data};selected=null;remember(result.data.batch_id);pendingGeneration=null;collapsed=false;
       notice=result.data.status==='PENDING'?'生成尚未完成；可继续输入，稍后点查看。':'你来决定怎么说，不必选其中一条。';
     }catch(error){
       if(token!==epoch)return;
@@ -220,6 +225,9 @@
   CM.on('experienceProfileChanged',()=>invalidate('相处偏好已更新，原草稿仍保留；需要时重新生成。'));
   new MutationObserver(sync).observe(CM.dom.chat,{childList:true,subtree:true});
   const wrap=CM.dom.composer.parentElement;
-  new ResizeObserver(()=>{CM.dom.chat.style.paddingBottom=`${Math.ceil(wrap.getBoundingClientRect().height)+20}px`;}).observe(wrap);
+  const reserveComposerSpace=()=>{const inset=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cm-keyboard-inset'))||0;CM.dom.chat.style.paddingBottom=`${Math.ceil(wrap.getBoundingClientRect().height)+inset+20}px`;};
+  new ResizeObserver(reserveComposerSpace).observe(wrap);
+  window.visualViewport?.addEventListener('resize',reserveComposerSpace,{passive:true});
+  window.visualViewport?.addEventListener('scroll',reserveComposerSpace,{passive:true});
   sync();
 })();

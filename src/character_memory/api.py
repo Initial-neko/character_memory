@@ -198,9 +198,6 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         group_store=read_store,
     )
     character_profiles = characters.profiles
-    public_profile = characters.public_profile
-    refresh_character_cache = characters.refresh_cache
-    _set_archived = characters.set_archived
     ensure_character = characters.ensure
     check_character_capacity = characters.check_capacity
     create_character_from_draft = characters.create_from_draft
@@ -469,8 +466,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         runtime_status=runtime_status,
         proactive_poll_seconds=float(getattr(settings, "proactive_poll_seconds", 30.0)),
         character_profiles=character_profiles,
-        public_profile=public_profile,
-        set_archived=_set_archived,
+        public_profile=characters.public_profile,
+        set_archived=characters.set_archived,
         refresh_voice_registry=refresh_voice_registry,
         character_summary=character_summary,
         ensure_character=ensure_character,
@@ -490,6 +487,10 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
     attach_core_resource_routes(app, route_access)
     attach_live2d_routes(app, resolve_media_dir(settings) / "live2d", character_profiles)
     attach_core_direct_routes(app, route_access)
+    from character_memory.experience_profile_web import attach_experience_profile_routes
+    attach_experience_profile_routes(app, read_store)
+    from character_memory.reply_suggestions_web import attach_reply_suggestion_routes
+    attach_reply_suggestion_routes(app, route_access)
     attach_character_life_routes(app, route_access)
     attach_goal_routes(app)
     attach_rss_runtime(app, web_dir, read_store, background, settings, own_bundle=own_bundle)

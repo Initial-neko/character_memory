@@ -323,7 +323,7 @@ def test_web_composer_stays_enabled_and_direct_group_use_async_message_routes():
     images_js = (WEB / "images.js").read_text(encoding="utf-8")
 
     assert 'CM.dom.input.disabled = false' in app_js
-    assert 'CM.dom.sendButton.disabled = false' in app_js
+    assert 'CM.dom.sendButton.disabled = CM.state.sendingCount > 0' in app_js
     assert '/v1/chat/messages' in app_js
     assert 'new EventSource(' in app_js
     assert 'CM.state.pendingCharacters.has(sentCharacter)) return' not in app_js

@@ -15,6 +15,7 @@ class PersonContextSnapshot:
     memories: list[Memory]
     recent_events: list[Event]
     observed_events: list[Event] = field(default_factory=list)
+    experience_profile: dict = field(default_factory=lambda: {"version":0,"preferences":{}})
 
 
 class PersonContextBuilder:
@@ -25,10 +26,14 @@ class PersonContextBuilder:
     inventing a different way to read the same Person.
     """
 
-    def __init__(self, store, recall, persona: str):
+    def __init__(self, store, recall, persona: str, *, experience_profiles=None):
         self.store = store
         self.recall = recall
         self.persona = persona
+        self.experience_profiles = experience_profiles
+        if experience_profiles is None and callable(getattr(store, "apply_schema_migration", None)):
+            from character_memory.storage.experience_profiles import ExperienceProfileRepository
+            self.experience_profiles = ExperienceProfileRepository(store, initialize=False)
 
     def build(
         self,
@@ -65,6 +70,7 @@ class PersonContextBuilder:
         observed = self.store.recall_observed_events(character_id, query, at=at, projection=observed_projection)
         return PersonContextSnapshot(
             persona=self.persona,
+            experience_profile=self.experience_profiles.get() if self.experience_profiles is not None else {"version":0,"preferences":{}},
             mental_state=self.store.get_mental_state(character_id, at=at),
             memories=[m for m in memories if is_real_experience(m.metadata)],
             recent_events=recent,

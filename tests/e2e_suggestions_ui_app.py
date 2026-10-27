@@ -1,0 +1,52 @@
+"""Deterministic suggestions over the existing real HTTP application."""
+import json
+import os
+import re
+import hashlib
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+import e2e_realtime_app as fixture
+
+app = fixture.app
+STORY = os.getenv('M2_FULL_LOOP_STORY') == '1'
+app.state.character_memory.reaction_scheduler.quiet_seconds = .05 if STORY else 60
+app.state.character_memory.reaction_scheduler.max_burst_seconds = .1 if STORY else 60
+
+
+def structured(prompt, schema, session):
+    context = json.loads(prompt.split('Visible conversation JSON:\n', 1)[1])
+    entry = {'session': session, 'external_calls': 0, 'profile_version': context['profile']['version'], 'preferences': context['profile']['preferences']}
+    with Path(os.environ['SUGGESTION_CALL_LOG']).open('a', encoding='utf-8') as stream:
+        stream.write(json.dumps(entry) + '\n')
+    if 'FAIL_SUGGESTION' in prompt:
+        raise RuntimeError('deterministic suggestion provider failure')
+    return SimpleNamespace(value=schema.model_validate({'suggestions': [
+        {'intent': '澄清', 'text': '你更在意哪一部分？'},
+        {'intent': '感受', 'text': '我有点紧张，想慢慢来。'},
+        {'intent': '计划', 'text': '我们先试一个开场吧。'},
+    ]}))
+
+
+fixture.model.structured_call_for_session = structured
+
+
+@app.get('/__e2e/suggestions-runtime')
+def suggestions_runtime():
+    result = {'pid': os.getpid(), 'external_model_calls': 0}
+    if STORY:
+        root = Path(__file__).resolve().parents[1]
+        paths = ['tests/e2e_suggestions_ui_app.py', 'tests/e2e_realtime_app.py', 'src/character_memory/application/reply_suggestion_signals.py', 'src/character_memory/application/reply_suggestions.py', 'src/character_memory/storage/experience_profiles.py', 'src/character_memory/runtime/person_context.py', 'src/character_memory/web/app.js', 'src/character_memory/web/experience_profile.js', 'src/character_memory/web/reply_suggestions.js']
+        result.update(story=True, git_status_porcelain=subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).splitlines(), commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(), source_sha256={name: hashlib.sha256((root/name).read_bytes()).hexdigest() for name in paths})
+    return result
+
+
+_original_reaction = fixture.model._reaction
+def logged_reaction(context):
+    match = re.search(r'profile_version=(\d+)', context)
+    entry = {'profile_version': int(match.group(1)) if match else None,
+             'brief': 'verbosity=BRIEF' in context, 'group': '# Group Conversation Contract' in context, 'pid': os.getpid(), 'external_calls': 0}
+    with Path(os.environ['SUGGESTION_CALL_LOG']).with_name('profile-contexts.jsonl').open('a', encoding='utf-8') as stream:
+        stream.write(json.dumps(entry) + '\n')
+    return _original_reaction(context)
+fixture.model._reaction = logged_reaction

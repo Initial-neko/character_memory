@@ -48,7 +48,7 @@ def test_group_error_survives_idle_and_history_redraw(page, realtime_server):
     }""")
     error = page.locator('.group-reaction-error')
     expect(error).to_be_visible()
-    expect(error).to_have_text('群聊生成失败：provider unavailable')
+    expect(error).to_contain_text('这一轮没有等到回应')
     expect(page.locator('.group-pending-note')).to_have_count(0)
     page.evaluate("async id => CM.features.groups.reconcileLatest(id)", group_id)
     expect(error).to_be_visible()

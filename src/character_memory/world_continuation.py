@@ -1,6 +1,8 @@
 """Bounded reconsideration inside an existing durable World Browse opportunity."""
 from __future__ import annotations
 
+from character_memory.domain.experience_profile import render_experience_profile
+
 import base64
 from dataclasses import asdict
 from datetime import datetime
@@ -182,6 +184,7 @@ class WorldContinuation:
                   for event in list(getattr(context, 'recent_events', ()))[-12:]]
         return f'''# Persona
 {context.persona}
+{render_experience_profile(getattr(context, "experience_profile", None))}
 # Current Mental State
 {context.mental_state or ''}
 # Relevant Memories

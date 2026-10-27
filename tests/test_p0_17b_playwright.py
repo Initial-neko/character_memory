@@ -236,15 +236,15 @@ def test_direct_generation_error_survives_idle_and_history_reconcile(page, realt
     page.locator("#sendButton").click()
     expect(page.locator(".message-row.user .bubble", has_text="E2E_FAIL_DIRECT:")).to_be_visible()
     page.wait_for_function("() => !CM.state.pendingCharacters.has(CM.state.characterId)")
-    expect(page.locator("#chat .error", has_text="E2E direct provider failure")).to_be_visible()
+    expect(page.locator("#chat [data-direct-error]", has_text="这一轮没有收到回应")).to_be_visible()
     page.evaluate("CM.features.realtimeReconcile.reconcileDirectLatest(CM.state.characterId)")
-    expect(page.locator("#chat .error", has_text="E2E direct provider failure")).to_be_visible()
+    expect(page.locator("#chat [data-direct-error]", has_text="这一轮没有收到回应")).to_be_visible()
 
     # A new accepted turn replaces the failed attempt and must recover normally.
     page.locator("#messageInput").fill("recover after failure")
     page.locator("#sendButton").click()
     expect(page.locator(".message-row.assistant .bubble", has_text="E2E reply: recover after failure")).to_be_visible()
-    expect(page.locator("#chat .error")).to_have_count(0)
+    expect(page.locator("#chat [data-direct-error]")).to_have_count(0)
 
 
 

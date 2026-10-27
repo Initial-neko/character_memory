@@ -15,6 +15,7 @@
       directStreamKey: null,
       runtimeMemories: [],
       characterCapacity: {activeTotal:0, softLimit:10, hardLimit:20},
+      sendingCount: 0,
     },
     features: {},
     listeners: new Map(),
@@ -50,6 +51,63 @@
   CM.fmtMs = value => { const n = Number(value || 0); return n >= 1000 ? `${(n / 1000).toFixed(2)}s` : `${n.toFixed(0)}ms`; };
   CM.hiddenIfEmpty = value => String(value ?? "").trim() || hiddenText;
   CM.initialFor = profile => (profile?.name || profile?.id || "AI").trim().slice(0, 1).toUpperCase();
+  // The first screen of a new relationship. A grey sentence told the user the
+  // transcript was empty but not that anyone was there; this puts the person
+  // (avatar, name, an invitation) in the room and offers editable openers.
+  // Clicking an opener only fills the composer -- the user still chooses to send.
+  CM.emptyChatHtml = profile => {
+    const name = profile?.name || profile?.id || "Ta";
+    const initial = CM.initialFor(profile);
+    const avatar = profile?.avatar_url
+      ? `<img class="character-avatar-image" src="${CM.escapeHtml(profile.avatar_url)}" alt="" loading="lazy">`
+      : `<span class="avatar-initial" aria-hidden="true">${CM.escapeHtml(initial)}</span>`;
+    const prompts = [
+      [`和 ${name} 打个招呼`, `嗨，${name}，今天过得怎么样？`],
+      ["说说刚想到的事", "我刚想到一件事，想讲给你听。"],
+      ["安静地待一会儿", "我想先安静待一会儿，有你陪着就好。"],
+    ];
+    return `<div class="chat-empty" data-avatar-character="${CM.escapeHtml(profile?.id || "")}">
+      <div class="chat-empty-avatar ${profile?.avatar_url ? "has-avatar-image" : "avatar-fallback"}">${avatar}</div>
+      <div class="chat-empty-copy">
+        <span class="chat-empty-kicker">${CM.escapeHtml(name)} 在这里</span>
+        <h2>${CM.escapeHtml(name)} 在等你开口</h2>
+        <p>还没有说过话。可以聊聊今天、心里的事，或者只是打个招呼——${CM.escapeHtml(name)} 会记得。</p>
+      </div>
+      <div class="chat-empty-prompts" role="group" aria-label="开场提示">${prompts.map(([label, text]) => `<button type="button" class="chat-empty-prompt" data-empty-prompt="${CM.escapeHtml(text)}">${CM.escapeHtml(label)}</button>`).join("")}</div>
+      <p class="chat-empty-note">点一下只是放进输入框，你可以改，也可以直接写自己的话。</p>
+    </div>`;
+  };
+  // Sending has a visible middle state. The counter (not a boolean) keeps a
+  // quick sequence of sends from re-enabling the button between two requests.
+  CM.beginSending = () => {
+    CM.state.sendingCount += 1;
+    CM.dom.composer.classList.add("is-sending");
+    CM.dom.sendButton.setAttribute("aria-busy", "true");
+    CM.updateComposerState();
+  };
+  CM.endSending = () => {
+    CM.state.sendingCount = Math.max(0, CM.state.sendingCount - 1);
+    if (!CM.state.sendingCount) {
+      CM.dom.composer.classList.remove("is-sending");
+      CM.dom.sendButton.removeAttribute("aria-busy");
+    }
+    CM.updateComposerState();
+  };
+  // A rejected send keeps its content in IndexedDB. Put it back in the
+  // composer so the retry path is the sentence the user already wrote, not an
+  // empty box. An uncertain send is deliberately not restored: the original
+  // request may still land, and a restored draft invites a duplicate.
+  CM.recoverRejectedDraft = async (error, fallback = "") => {
+    if (!error?.clientSendId || CM.dom.input.value.trim()) return;
+    try {
+      const record = await CM.clientSends?.storage?.get?.(error.clientSendId);
+      if (record?.state !== "rejected") return;
+      const draft = record.preview || fallback;
+      if (!draft || CM.dom.input.value.trim()) return;
+      CM.dom.input.value = draft;
+      CM.dom.input.dispatchEvent(new Event("input", {bubbles:true}));
+    } catch { /* the send card still offers 编辑为新消息 */ }
+  };
   CM.currentProfile = () => CM.state.characters.find(item => item.id === CM.state.characterId) || {id: CM.state.characterId, name: CM.state.characterId, identity:"", tagline:""};
   CM.isGroupConversation = () => CM.state.conversation.type === "GROUP" && Boolean(CM.state.conversation.groupId);
   CM.registerFeature = (name, feature) => { CM.features[name] = feature; return feature; };
@@ -171,7 +229,7 @@
     }
     d.chat.innerHTML = "";
     if (!messages.length) {
-      d.chat.innerHTML = `<div class="empty">还没有和 ${CM.escapeHtml(CM.currentProfile().name || CM.state.characterId)} 的聊天记录。<br>从第一句话开始认识彼此。</div>`;
+      d.chat.innerHTML = CM.emptyChatHtml(CM.currentProfile());
       CM.state.lastRenderedSignature = signature;
       CM.syncDirectEphemeralUi();
       return;
@@ -188,7 +246,7 @@
       if (date !== lastDate) {
         const sep = document.createElement("div");
         sep.className = "date-separator";
-        sep.textContent = `── ${date} ──`;
+        sep.textContent = date;
         d.chat.appendChild(sep);
         lastDate = date;
       }
@@ -209,10 +267,15 @@
   CM.renderDirectError = () => {
     const error = CM.state.directErrors.get(CM.state.characterId);
     if (!error) return;
+    // A failed generation is a machine fact, not something the person said.
+    // It keeps its own quiet card instead of a red paragraph carrying the
+    // provider's status line; the raw detail stays in the console.
     const box = document.createElement("div");
-    box.className = "error";
+    box.className = "chat-note is-warn";
     box.dataset.directError = "true";
-    box.textContent = `生成失败：${error.message || "未知错误"}`;
+    box.dataset.watermark = String(error.watermark ?? "");
+    box.setAttribute("role", "status");
+    box.innerHTML = `<strong>这一轮没有收到回应</strong><span>对方暂时没能接上话。可以继续发一条，或稍后再试。</span>`;
     CM.dom.chat.appendChild(box);
   };
 
@@ -249,7 +312,7 @@
     if (nextDate !== previousDate) {
       const separator = document.createElement("div");
       separator.className = "date-separator";
-      separator.textContent = `── ${nextDate} ──`;
+      separator.textContent = nextDate;
       CM.dom.chat.appendChild(separator);
     }
     CM.addMessage(message);
@@ -314,7 +377,7 @@
 
   CM.updateComposerState = () => {
     if (CM.isGroupConversation() && CM.features.groups?.applyComposerState?.()) return;
-    CM.dom.sendButton.disabled = false;
+    CM.dom.sendButton.disabled = CM.state.sendingCount > 0;
     CM.dom.input.disabled = false;
     CM.features.stickers?.setDisabled?.(false);
     CM.features.images?.setDisabled?.(false);
@@ -528,26 +591,34 @@
     const sentCharacter = CM.state.characterId;
     const conversationId = CM.conversationIdFor(sentCharacter);
     CM.connectDirectStream();
-    const live2d = CM.features.voice?.requestLive2dContext?.("direct", conversationId, sentCharacter);
-    const result = await CM.api("/v1/chat/messages", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, ...payload, ...(live2d ? {live2d} : {})})});
-    if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) CM.mergeDirectMessage(result.message);
-    return result;
+    CM.beginSending();
+    try {
+      const live2d = CM.features.voice?.requestLive2dContext?.("direct", conversationId, sentCharacter);
+      const result = await CM.api("/v1/chat/messages", {method:"POST", body:JSON.stringify({character_id:sentCharacter, conversation_id:conversationId, ...payload, ...(live2d ? {live2d} : {})})});
+      if (!CM.isGroupConversation() && sentCharacter === CM.state.characterId) CM.mergeDirectMessage(result.message);
+      return result;
+    } finally {
+      CM.endSending();
+    }
   };
 
-  CM.sendDirectText = async message => {
+  CM.sendDirectText = async (message, replySuggestion) => {
     if (!message) return;
     CM.dom.input.value = "";
     CM.dom.input.style.height = "auto";
     try {
       const visual = await CM.features.voice?.sendTextWithVisual?.(message);
       if (visual?.handled) return visual.result;
-      await CM.sendDirectPayload({message});
+      await CM.sendDirectPayload({message,...(replySuggestion?{reply_suggestion:replySuggestion}:{})});
     }
     catch (error) {
-      if (error.clientSendId) return;
+      // The client-send card owns the failure UI and its retry identity. A
+      // rejected send also gets its text back in the composer.
+      if (error.clientSendId) { await CM.recoverRejectedDraft(error, message); return; }
+      if (!CM.dom.input.value.trim()) CM.dom.input.value = message;
       const box = document.createElement("div");
-      box.className = "error";
-      box.textContent = `发送失败：${error.message}`;
+      box.className = "error chat-send-error";
+      box.textContent = "消息没有发出去，草稿已放回输入框。可以再试一次。";
       CM.dom.chat.appendChild(box);
     }
   };
@@ -569,12 +640,13 @@
         if(target.type==="DIRECT") await CM.sendDirectPayload({message,life_reference:ref});
         else await CM.api(`/v1/groups/${encodeURIComponent(target.id)}/messages`, {method:"POST",body:JSON.stringify({message,life_reference:ref})});
         if(CM.state.lifeReference===ref){CM.dom.input.value="";CM.clearLifeReference();await CM.loadHistory();}
-      } catch(error){if(CM.state.lifeReference===ref)CM.state.lifeNotice.textContent=`发送失败：${error.message}；草稿已保留。`;}
+      } catch(error){if(CM.state.lifeReference===ref)CM.state.lifeNotice.textContent="发送失败，草稿已保留。可以再试一次。";}
       finally {CM.state.lifeSending=false;CM.updateComposerState();}
       return;
     }
-    if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message);
-    return CM.sendDirectText(message);
+    const attribution=CM.features.replySuggestions?.capture?.();
+    if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message,attribution);
+    return CM.sendDirectText(message,attribution);
   };
 
   CM.timingHtml = timings => {
@@ -847,6 +919,13 @@
       }
     });
     d.chat.addEventListener("click", event => {
+      const prompt = event.target.closest("[data-empty-prompt]");
+      if (prompt) {
+        d.input.value = prompt.dataset.emptyPrompt || "";
+        d.input.dispatchEvent(new Event("input", {bubbles:true}));
+        d.input.focus();
+        return;
+      }
       const older = event.target.closest("[data-load-older-direct]");
       if (older) { CM.loadOlderDirectHistory().catch(console.error); return; }
       const thought = event.target.closest("[data-thought]");
@@ -867,6 +946,45 @@
     const updateNow = () => { d.nowText.textContent = new Date().toLocaleString([], {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}); };
     updateNow();
     setInterval(updateNow, 30000);
+
+    // A soft keyboard shrinks the visual viewport without moving the fixed
+    // composer, which used to leave the input and suggestions under the keys.
+    // Publish the keyboard inset once, so CSS moves the composer and the
+    // transcript's bottom padding by the same amount on every device.
+    const syncViewport = () => {
+      const viewport = window.visualViewport;
+      const visible = viewport?.height || window.innerHeight;
+      const offset = viewport?.offsetTop || 0;
+      const inset = Math.max(0, Math.round(window.innerHeight - visible - offset));
+      // A shrinking visual viewport is not always a keyboard: URL-bar and
+      // pinch-zoom changes are small. Only a keyboard-sized inset lifts the
+      // fixed composer; everything else stays on the layout viewport.
+      const keyboardInset = inset > 120 ? inset : 0;
+      document.documentElement.style.setProperty("--cm-keyboard-inset", `${keyboardInset}px`);
+      const open = keyboardInset > 0;
+      if (document.body.classList.contains("cm-keyboard-open") !== open) {
+        document.body.classList.toggle("cm-keyboard-open", open);
+      }
+    };
+    window.visualViewport?.addEventListener("resize", syncViewport, {passive:true});
+    window.visualViewport?.addEventListener("scroll", syncViewport, {passive:true});
+    window.addEventListener("orientationchange", () => setTimeout(syncViewport, 120));
+    syncViewport();
+    d.input.addEventListener("focus", () => {
+      if (!window.matchMedia("(max-width: 820px)").matches) return;
+      setTimeout(() => CM.scrollToBottom(false), 280);
+    });
+
+    // The client-owned send card appears before any server message exists. The
+    // invitation must leave the room as soon as a send attempt is on screen,
+    // or a rejected message renders underneath "Rin 在等你开口".
+    const clearEmptyOnSend = () => {
+      if (!d.chat.querySelector(".chat-empty")) return;
+      if (d.chat.querySelector(".message-row, .client-send-record, .client-pending, .chat-send-error, [data-direct-error]")) {
+        d.chat.querySelector(".chat-empty")?.remove();
+      }
+    };
+    new MutationObserver(clearEmptyOnSend).observe(d.chat, {childList:true, subtree:true});
 
     try {
       await CM.loadCharacters();

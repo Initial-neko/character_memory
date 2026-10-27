@@ -15,13 +15,53 @@
     return `<img class="character-avatar-image ${CM.escapeHtml(className)}" src="${CM.escapeHtml(profile.avatar_url)}" alt="${CM.escapeHtml(profile.name || profile.id || "头像")}" loading="lazy">`;
   }
 
+  // A missing or failed avatar is a person-shaped placeholder, not an empty
+  // grey circle or a browser broken-image glyph. The initial survives every
+  // later render because the broken URL is remembered on the host.
+  function fallbackHtml(profile) {
+    return `<span class="avatar-initial" aria-hidden="true">${CM.escapeHtml(CM.initialFor(profile || {id:"AI", name:"AI"}))}</span>`;
+  }
+
+  function setFallback(container, profile, brokenUrl = "") {
+    container.classList.remove("has-avatar-image");
+    container.classList.add("avatar-fallback");
+    container.dataset.avatarState = "fallback";
+    if (profile) container.dataset.avatarMarker = `${profile.id}|${profile.avatar_url || ""}`;
+    if (brokenUrl) container.dataset.avatarBroken = brokenUrl;
+    container.innerHTML = fallbackHtml(profile);
+  }
+
+  function wireAvatarImage(img) {
+    if (!img || img.dataset.avatarWired) return;
+    img.dataset.avatarWired = "1";
+    img.addEventListener("error", () => {
+      const host = img.parentElement;
+      if (!host) return;
+      const id = host.closest("[data-avatar-character]")?.dataset.avatarCharacter
+        || host.closest("[data-character]")?.dataset.character
+        || (CM.isGroupConversation() ? "" : CM.state.characterId);
+      const profile = profileById(id);
+      if (profile) { setFallback(host, profile, profile.avatar_url || "broken"); return; }
+      // Group portraits arrive as a 2x2 mosaic. Drop only the failed frame;
+      // if no portrait survives, fall back to the group's initial.
+      img.remove();
+      if (host.classList.contains("group-avatar") && !host.querySelector("img")) {
+        host.classList.add("avatar-fallback");
+        host.textContent = host.dataset.groupInitial || "群";
+      } else if (!host.textContent.trim()) {
+        host.classList.add("avatar-fallback");
+        host.textContent = "AI";
+      }
+    }, {once:true});
+  }
+
   function setAvatar(container, profile) {
     if (!container || !profile) return;
     const url = profile.avatar_url || "";
     const marker = `${profile.id}|${url}`;
     if (url && container.dataset.avatarBroken === url) {
       container.dataset.avatarMarker = marker;
-      if (container.querySelector("img")) container.textContent = CM.initialFor(profile);
+      if (container.querySelector("img")) setFallback(container, profile, url);
       return;
     }
     const existingImage = container.querySelector("img.character-avatar-image");
@@ -29,7 +69,12 @@
     if (container.dataset.avatarMarker === marker && imageMatches) return;
     container.dataset.avatarMarker = marker;
     if (container.dataset.avatarBroken && container.dataset.avatarBroken !== url) delete container.dataset.avatarBroken;
-    container.innerHTML = imageHtml(profile) || CM.escapeHtml(CM.initialFor(profile));
+    if (!url) { setFallback(container, profile); return; }
+    container.classList.remove("avatar-fallback");
+    container.classList.add("has-avatar-image");
+    container.dataset.avatarState = "image";
+    container.innerHTML = imageHtml(profile);
+    wireAvatarImage(container.querySelector("img.character-avatar-image"));
   }
 
   function applyAvatars() {
@@ -50,19 +95,13 @@
         const profile = profileByName(name);
         if (profile) setAvatar(row.querySelector(".avatar"), profile);
       });
-      document.querySelectorAll(".character-avatar-image:not([data-avatar-wired])").forEach(img => {
-        img.dataset.avatarWired = "1";
-        img.addEventListener("error", () => {
-          const host = img.parentElement;
-          const id = host?.closest("[data-character]")?.dataset.character || (CM.isGroupConversation() ? "" : CM.state.characterId);
-          const profile = profileById(id);
-          if (host && profile) {
-            host.dataset.avatarMarker = `${profile.id}|${profile.avatar_url || ""}`;
-            host.dataset.avatarBroken = profile.avatar_url || "broken";
-            host.textContent = CM.initialFor(profile);
-          }
-        }, {once:true});
+      // The empty transcript owns an avatar too; without this branch the first
+      // screen of a conversation never gets the person's image.
+      CM.dom.chat.querySelectorAll(".chat-empty-avatar").forEach(node => {
+        const id = node.closest("[data-avatar-character]")?.dataset.avatarCharacter;
+        setAvatar(node, profileById(id));
       });
+      document.querySelectorAll(".character-avatar-image, .group-avatar img, .chat-empty-avatar img, .header-avatar img, .avatar img").forEach(wireAvatarImage);
     } finally {
       applying = false;
     }

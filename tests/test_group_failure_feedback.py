@@ -13,6 +13,8 @@ const assert = require('assert/strict');
 class Element {
   constructor() { this.children = []; this.dataset = {}; this.slots = new Map();
     this.classList = {add(){},remove(){},toggle(){},contains(){return false;}}; }
+  setAttribute(name, value) { (this.attributes ??= {})[name] = String(value); }
+  removeAttribute(name) { if (this.attributes) delete this.attributes[name]; }
   set innerHTML(value) { this.html = value; this.children = []; }
   get innerHTML() { return this.html || ''; }
   appendChild(child) { this.children.push(child); }
@@ -53,26 +55,28 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], 'utf8'));
 (async () => {
   await CM.features.groups.loadGroups();
   await CM.features.groups.enter('g1');
-  const hasError = text => CM.dom.chat.children.some(row=>row.className?.split(' ').includes('error') && row.textContent?.includes(text));
+  const errorRows = () => CM.dom.chat.children.filter(row=>row.className?.split(' ').includes('group-reaction-error'));
+  const hasError = text => errorRows().some(row=>((row.html||'')+(row.textContent||'')).includes(text));
+  const FAILURE = '这一轮没有等到回应';
   source.emit('reaction_status', {state:'typing',watermark:10});
   source.emit('reaction_error', {watermark:10,message:'provider unavailable'});
-  assert(hasError('provider unavailable'));
+  assert(hasError(FAILURE));
   source.emit('reaction_status', {state:'idle',watermark:10});
-  assert(hasError('provider unavailable'), 'terminal idle must retain the Group failure');
+  assert(hasError(FAILURE), 'terminal idle must retain the Group failure');
   await CM.features.groups.reconcileLatest('g1');
-  assert(hasError('provider unavailable'), 'history reconciliation must retain the Group failure');
+  assert(hasError(FAILURE), 'history reconciliation must retain the Group failure');
   CM.messageContentHtml = message=>message.content;
   CM.api = async()=>({group,messages:[{id:1,role:'user',turn_id:'t1',content:'hello',event_time:'2026-09-22T12:00:00Z'}]});
   await CM.features.groups.reconcileLatest('g1');
-  assert(hasError('provider unavailable'), 'populated history must retain the Group failure');
+  assert(hasError(FAILURE), 'populated history must retain the Group failure');
   source.emit('reaction_status', {state:'queued',watermark:11});
-  assert(!hasError('provider unavailable'), 'a newer attempt clears the old failure');
+  assert(!hasError(FAILURE), 'a newer attempt clears the old failure');
   source.emit('reaction_error', {watermark:10,message:'late old failure'});
   source.emit('reaction_status', {state:'typing',watermark:11});
-  assert(!hasError('late old failure'), 'older failure must not replace newer attempt feedback');
+  assert(!errorRows().some(row=>row.dataset.watermark==='10'), 'older failure must not replace newer attempt feedback');
   source.emit('reaction_error', {watermark:11,message:'newer provider failed'});
   source.emit('reaction_status', {state:'idle',watermark:11});
-  assert(hasError('newer provider failed'));
+  assert(errorRows().some(row=>row.dataset.watermark==='11'));
 })().catch(error=>{ console.error(error); process.exitCode=1; });
 '''
 

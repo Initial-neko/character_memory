@@ -681,6 +681,17 @@ commit transaction. A scope changed after model entry prevents real state,
 Memory and visible output commit; the existing receipt retains the failed/unknown
 execution, without automatically repeating the provider.
 
+Proactive Intent dispatch is not exempt. The persisted intent is only a pointer;
+before dispatch, `intent.source_event_id` is refetched and must still be an
+existing real fact. A missing source, a source relabelled SIMULATED, or scope that
+cannot be decided suppresses the intent with an auditable reason instead of
+producing a real turn. The new `PROACTIVE_INTENT` event carries explicit
+`{schema_version: 1, reality: REAL}` scope rather than omitting it as legacy REAL,
+and the same source check runs again inside the derived commit transaction, so a
+late relabel cannot publish Memory, Intent, Mental State or visible output. A wake
+has no intent source; it is an independent real tick and states REAL explicitly.
+No prompt, model call or schema change is added by this recheck.
+
 Shared Person context filters recent, observed and recalled experiences to this
 boundary. SQL filters precede candidate limits; raw audit queries retain records.
 Malformed legacy metadata keeps the existing INVALID-provenance readable-fact
@@ -689,6 +700,217 @@ No historical mental-state repair, new public scope input, schema migration or
 Activity execution is implied. Run `scripts/validate_experience_scope.py` for an
 isolated actual HTTP/restart check using a deterministic local model.
 
+## Explicit user experience profile
+
+The local operator's explicit tone (NATURAL/CUTE), energy (QUIET/LIVELY) and
+verbosity (BRIEF/BALANCED/DETAILED) belong to the experience profile, independently
+of Persona, MentalState and Memory. Unset/null fields supply no inferred preference.
+No choice is inferred from silence, ignored suggestions or model output.
+
+`GET/PATCH/DELETE /v2/me/experience-profile` reads, changes or clears that profile.
+PATCH accepts only `expected_version` and `changes`; DELETE requires an
+`expected_version` query parameter. The server chooses the current local operator;
+HTTP callers cannot provide an owner, user or character identity. This is the
+existing local single-operator deployment, not multi-user authentication or a DSH
+grant. Unknown fields and invalid enum/version values return 422; stale revisions
+return 409. Reads never load a model or initialize an embedding provider.
+
+The existing SQLite migration ledger owns the head/revision tables. Changes use
+one immediate transaction across connections, increment a monotonic version and
+record only explicit structured changes. `/versions` returns at most 100 recent
+versions. `POST /restore` takes `expected_version` and `target_version`; restoration
+creates a new revision rather than moving the version backwards. DELETE removes
+old preference snapshots and keeps an empty CLEAR revision; earlier versions then
+return 404 on restoration. Existing model traces/backups are not rewritten by
+this profile operation; no free-text/private-feedback history is introduced.
+
+PersonContextBuilder reads the current profile on each build without a cache or
+read-side schema writes. Missing feature tables mean the legacy empty profile;
+explicit API startup/changes own initialization. A corrupt stored profile fails
+closed rather than turning arbitrary text into prompt instructions.
+
+Ordinary Direct/Group reactions, Space/World planning, World continuation and
+role collaboration receive a separate explicit-preference prompt section. Persona
+bytes and role opinions/refusal/silence remain independent. Preferences affect
+communication with the user, not permission, external tools, real experiences or
+the character's interests. A new build observes corrections, withdrawal, clearing
+and restored revisions; an already running model call retains its input snapshot.
+With no active choices the prompt section is absent.
+
+Run `scripts/validate_experience_profile.py` for isolated real HTTP, two-process
+CAS, Direct/Group context use and restart/clear checks. It uses a deterministic
+provider; model quality/human experience, free-text feedback, reply suggestions,
+learning and Activity-specific integration remain separate work. There is no new
+frontend in this backend slice; new profile/suggestion screens require approved
+desktop/mobile references and their own visual acceptance.
+
+
+## User reply suggestions
+
+`application/reply_suggestions.py` helps the local operator draft the next user
+message. It does not run a second Character Runtime, submit messages, or update
+Persona, Mental State or Memory. `POST /v2/reply-suggestions` accepts only a UUID
+`request_id`, an existing typed `context_ref`, and `expected_profile_version`.
+Direct follows the current per-character visible history; Group keeps its existing
+conversation identity and requires an active conversation with the local `user`
+still a member. This does not perform the future Direct conversation migration.
+
+The source must be the latest visible, non-future, REAL message. The bounded
+snapshot uses up to 12 visible messages, their existing FactRefs, participant
+Persona and explicit experience preferences. It never recalls private memories,
+Mental State or runtime traces for user drafts. Message text reuses the public
+Direct/Group projection, including `display_text` for user messages. Internal
+image instructions and upload filenames are excluded; public attachment IDs may
+be referenced, but no image is supplied to this text-only generation, and the
+prompt explicitly forbids guessing attachment content.
+
+The shared model adapter produces 3–5 drafts with distinct nonempty intent labels
+and texts. Suggestion IDs are server-assigned. Structural distinctness does not
+prove different semantic intentions, preference match, naturalness or quality;
+these require bounded real-model evaluation and separate human acceptance.
+Generation is on explicit request only, uses the existing configured bounded
+adapter attempts and records `REPLY_SUGGESTIONS / USER_REPLY_DRAFTS` usage. It
+neither adds an automatic cron nor an automatic send/reaction.
+
+`storage/reply_suggestions.py` owns feature migration
+`experience/002-reply-suggestions`. A batch claim and its immutable request are
+committed before model work, without holding a database transaction across that
+work. The same request returns its batch; another payload with that identity is
+409. `PENDING` returns 202 and is not replayed after restart or an unknown process
+outcome. Failed attempts remain `FAILED`/502, with available rejected provider
+text retained for diagnosis; retrying the same identity does not call again.
+An explicit new request identity is a new generation, not an assertion that an
+unknown former attempt completed. No automatic recovery is inferred from age.
+
+A `READY` batch binds its visible-context digest and profile version. Generation
+checks again before publishing; reads recheck current context and membership.
+New messages, visible-text/attachment changes, membership changes, archival,
+Persona changes, or profile edits/clear invalidate the old batch (409/`STALE`)
+and remove its active suggestion payload. `GET /v2/reply-suggestions/{batch_id}`
+never initializes/calls a model. Generating or reading a batch never appends a
+chat fact. Drafts are not selections or user commitments. The asynchronous Direct/Group
+message endpoints accept optional `reply_suggestion={batch_id,suggestion_id?}`
+only with a request identity. During the existing acceptance transaction's first
+create, the current READY batch and target are checked; the actual persisted
+public user text is compared with the stored draft. Matching text is SELECT,
+changed text is EDIT; an explicitly associated batch without a suggestion ID is
+FREE_INPUT. The client cannot self-report these modes. Unattributed legacy input
+is not inferred as a choice. Source fact, signal, durable delivery and acceptance
+receipt commit or roll back together. A replay returns the original receipt
+before revalidating a batch made stale by that very send. When attribution is
+absent, its field is excluded from the acceptance fingerprint to preserve older
+receipts. Draft clicks alone create none of these signals.
+
+`storage/reply_suggestion_signals.py` owns migration
+`experience/003-suggestion-signals`. Sent text remains in the existing fact;
+signals reference it by FactRef and do not duplicate its body. Explicit signal
+reads at `GET /v2/reply-suggestions/{batch_id}/signals` do not call a model and can
+show the operator's recorded feedback after the draft batch has become stale.
+Generation identifies the local USER as the draft author and uses a user-draft preference lens instead of the companion-reply instructions. Persona describes the companion, not undocumented user identity; messages, summaries and memory candidates must keep unspecified user gender/identity neutral. Generation supplies the current SuggestionOutput JSON Schema and its exact suggestions top-level field to the model before the untrusted visible-conversation material; schema validation remains strict and failed outputs are not renamed into valid batches.
+
+`POST /v2/reply-suggestions/feedback` records only explicit IGNORE or
+EXPLICIT_FEEDBACK, with its own durable request identity. Free text is retained
+as authored feedback without inferring personality, mood or long-term choices.
+Optional explicit enum `preference_changes` requires `expected_profile_version`;
+feedback and the existing Profile CAS update commit atomically, changing the next
+context. Retrying the same feedback returns its original recorded outcome even
+if the batch is now stale, without applying preferences twice. A different
+payload with that identity conflicts. Ignoring does not change preferences.
+Signals store applied version references, not restorable preference snapshots.
+Clearing Profile removes its choices/history as above; it neither deletes
+independent authored feedback/source facts nor replays them into preferences.
+
+Signal author governance uses feature migration `experience/004-signal-governance`.
+Existing signals start at revision 1. A strict UUID request identity and
+`expected_revision` protect PATCH `/v2/reply-suggestions/feedback/{signal_id}`
+(authored EXPLICIT_FEEDBACK text only) and POST at the same path plus `/withdraw`
+(any operator-owned signal). The signal change and its metadata-only idempotency
+receipt commit together; stale versions/different payload reuse conflict (409),
+unknown/other-owner signals are not found (404), and invalid fields are 422.
+Withdrawn signals cannot be revived by a new correction. A successful mutation
+returns only its identity, operation and applied revision, never an old text copy.
+Replaying it after a later change returns that metadata without restoring text.
+
+Correction replaces the current authored note; withdrawal clears it and marks the
+signal withdrawn. Audit receipts retain hashes and version metadata rather than
+prior plaintext snapshots. This is a logical projection change, not secure erasure
+of SQLite history pages or external backups. Signal reads expose revision and
+withdrawal state; `?active_only=true` filters withdrawn records. The historical
+kind, source FactRef and accepted message remain unchanged. Correcting or
+withdrawing a signal does not silently undo a separately applied Profile choice;
+current preferences remain governed by their explicit CAS/clear/restore API.
+The original feedback POST replay returns the current governance view, and a
+message-acceptance replay refreshes its signal view after verifying the same
+source identity. Neither route revives an old note or reports a withdrawn signal
+as currently active; neither creates another send or signal.
+
+This boundary does not implement Activity, automatic interpretation or periodic
+learning from free text. The frontend draft and feedback controls below use these
+APIs; real-model semantics and final user quality acceptance remain separate.
+
+
+### Explicit preference Web panel
+
+The chat topbar's 相处偏好 entry opens a native modal dialog over the existing
+conversation. `web/experience_profile.js/css` owns this UI; it calls only the
+local operator Profile API, never a model or a Persona mutation. Choosing a radio
+option edits a local draft; only explicit save submits changed fields with the
+read version. Unspecified sends null to withdraw that dimension. All characters
+share these explicit choices; the panel does not configure proactive notifications.
+
+Loading failures leave chat usable. Version conflict or unknown save outcome
+preserves the draft and blocks another mutation until an explicit latest read;
+the previous draft summary remains visible for manual reselection. Late requests
+cannot overwrite a later opening. A closed panel does not cancel an already
+submitted write; reopening reads the actual server state. Versions restore only
+after confirmation as a new revision. Clear confirmation deletes current choices
+and old snapshots, rather than offering recovery of deleted preferences. Both
+operations use the same CAS boundary; in-flight model turns keep their snapshot.
+The dialog supports Escape/focus return and internal scrolling on narrow screens.
+The Profile panel remains distinct from the chat reply-suggestion and feedback UI.
+
+
+### User-controlled reply drafts and authored feedback
+
+The ordinary Direct/Group composer offers an explicit 帮我想想 action. Page load,
+conversation changes and message arrival never trigger generation. It uses the
+latest public message FactRef and current Profile version. A 202 result offers
+an explicit GET check; unknown POST results can retry the same generation request
+identity. Known failures require an explicit new generation, never an automatic
+paid loop. Suggestion buttons only fill an editable draft, confirming replacement
+of existing text. They never submit chat or create SELECT signals.
+
+Only the ordinary composer submit adds its selected suggestion/batch attribution
+to existing text sends. W2 persists it with the immutable request payload; the
+client consumes the draft association after durable local recording, and retry
+continues that original identity. Accepted public text determines SELECT/EDIT or
+explicitly associated FREE_INPUT on the server. New context, Profile or target
+invalidates choices while leaving typed text. Calls, visual sends and life-reference
+messages keep their existing paths and do not acquire ordinary-text attribution.
+
+Explicit 不用这些 records IGNORE without inferring a preference. 建议反馈 reads the
+last batch's authored notes; users can submit, correct and withdraw them with the
+existing UUID/revision contracts. Text is recorded without automatic semantic
+interpretation. Optional explicit tone/energy/verbosity choices in the same dialog
+apply only selected fields; KEEP sends no field, and withdrawal sends null for
+that dimension. A blank note is allowed with an explicit change. These choices
+use the current Profile version, atomically with the authored feedback, and affect
+the next context. Conflicts preserve text and choices without overwriting another
+revision; an explicit latest read and confirmation are required before submitting
+on a new version. Viewing or restoring preferences reuses the separate Profile panel.
+
+An unknown feedback write keeps its exact request identity and body for retry.
+A historical applied version is not presented as currently effective after a later
+clear, restore or edit. After actual accepted SELECT/EDIT/FREE_INPUT, an authored
+note and explicit Profile choices remain allowed for that now-stale batch. This
+exception requires a local-operator-owned batch and server-owned accepted-source
+signal, not a click or client assertion. It neither reads an archived/left group's
+context nor revives suggestions; new choices, generation and IGNORE still require
+current READY validation. Source profile_version stays historical while
+applied_profile_version identifies the actual current-CAS result. Replays return
+the original outcome without reapplying choices, even after clear or restore.
+Historical source facts stay unchanged when feedback is corrected or withdrawn;
+text correction/withdrawal does not undo independently saved Profile choices.
 ## Operator-confirmed long-term Person goals
 
 Goals are durable per-`character_id` metadata in the same Core SQLite database,

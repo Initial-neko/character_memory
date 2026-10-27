@@ -4,6 +4,7 @@ from datetime import timezone
 import json
 
 from character_memory.domain.models import Event, EventType
+from character_memory.domain.experience_profile import render_experience_profile
 from character_memory.domain.experience_scope import is_real_experience
 from character_memory.runtime.prompt_parts import PromptParts, render_capabilities, render_memory_lines
 
@@ -111,6 +112,7 @@ def compile_context_parts(
     allow_call_invite: bool = False,
     observed_events=None,
     capabilities=(),
+    experience_profile=None,
 ) -> PromptParts:
     relationship = [m for m in memories if m.memory_type.upper() in {"USER", "SHARED"}]
     other = [m for m in memories if m not in relationship]
@@ -260,6 +262,7 @@ GENERATE_IMAGE 是一个内部视觉工具意图，不是已经生成的图片�
             "本轮新建的未来 intent_candidates 也只能是面向该用户的私聊意图。"
         )
     return PromptParts(
+        experience=render_experience_profile(experience_profile),
         persona=f"""# Identity / Persona
 {persona}""",
         state_memory=f"""# Current Mental State

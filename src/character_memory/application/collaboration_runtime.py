@@ -1,6 +1,8 @@
 """Production bindings for bounded role contact over existing shared channels."""
 from __future__ import annotations
 
+from character_memory.domain.experience_profile import render_experience_profile
+
 import json
 from pydantic import BaseModel, ConfigDict, Field
 import yaml
@@ -124,6 +126,7 @@ def build_role_collaboration(access) -> RoleCollaborationService:
         research_allowed = research_result is None and policy(recipient) is not None
         prompt = f'''# Persona
 {person.persona}
+{render_experience_profile(getattr(person, "experience_profile", None))}
 # Current Mental State
 {person.mental_state}
 # Personal Memory — PRIVATE reasoning only

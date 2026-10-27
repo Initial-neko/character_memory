@@ -55,7 +55,7 @@
       const id = CM.escapeHtml(group.id);
       const portraits = (group.members || []).map(member => CM.state.characters.find(profile => profile.id === (member.id || member.character_id))?.avatar_url).filter(Boolean).slice(0,4);
       const avatar = portraits.length ? portraits.map(url => `<img src="${CM.escapeHtml(url)}" alt="" loading="lazy">`).join("") : CM.escapeHtml(initial(group));
-      return `<div class="group-item-wrap" data-group-row="${id}"><button class="group-item ${active ? "active" : ""}" type="button" data-group="${id}"><span class="group-avatar">${avatar}</span><span class="group-copy"><span class="group-name">${CM.escapeHtml(group.name)}</span><span class="group-members">${CM.escapeHtml(names)}</span></span></button><button class="group-more-button" type="button" data-group-more="${id}" title="群聊操作" aria-label="群聊操作">···</button><div class="group-context-menu hidden" data-group-menu="${id}"><button type="button" data-group-archive="${id}">归档</button></div></div>`;
+      return `<div class="group-item-wrap" data-group-row="${id}"><button class="group-item ${active ? "active" : ""}" type="button" data-group="${id}"><span class="group-avatar ${portraits.length ? "" : "avatar-fallback"}" data-group-initial="${CM.escapeHtml(initial(group))}">${avatar}</span><span class="group-copy"><span class="group-name">${CM.escapeHtml(group.name)}</span><span class="group-members">${CM.escapeHtml(names)}</span></span></button><button class="group-more-button" type="button" data-group-more="${id}" title="群聊操作" aria-label="群聊操作">···</button><div class="group-context-menu hidden" data-group-menu="${id}"><button type="button" data-group-archive="${id}">归档</button></div></div>`;
     }).join("");
   }
 
@@ -230,6 +230,27 @@
     return `<section class="scene-toolbar" aria-label="灯溪镇故事进度"><figure class="scene-atmosphere"><img src="/static/artwork/ambient-window.webp" alt="雨后窗边与灯火的氛围插画"><figcaption>灯溪镇 · 氛围示意，非已发生经历</figcaption></figure><strong>灯溪镇 · 第 ${Number(scene.story_day)} 天${scene.phase === "EVENING" ? "傍晚" : "早晨"}</strong><span>虚构情景 · 只有你推进故事时间，不补写离开期间的共同经历。</span><button type="button" data-scene-advance title="进入下一天早晨，不调用模型、不自动生成期间经历" ${pending.has(group.id) ? "disabled" : ""}>推进到下一天早晨 →</button><p role="status" data-scene-status></p></section>`;
   }
 
+  function groupEmptyHtml(group) {
+    const name = group?.name || "群聊";
+    const members = (group?.members || []).map(member => member.name || member.id).filter(Boolean);
+    const memberLine = members.length ? members.join("、") : "大家";
+    const prompts = [
+      ["先打个招呼", `大家好，我是新来的，想认识一下你们。`],
+      ["聊聊今天", "今天过得怎么样？有什么想和我说的吗？"],
+      ["安静待一会儿", "我先坐一会儿，听听你们聊。"],
+    ];
+    return `<div class="chat-empty group-chat-empty">
+      <div class="chat-empty-avatar avatar-fallback"><span class="avatar-initial" aria-hidden="true">${CM.escapeHtml(initial(group))}</span></div>
+      <div class="chat-empty-copy">
+        <span class="chat-empty-kicker">群聊 · ${CM.escapeHtml(name)}</span>
+        <h2>「${CM.escapeHtml(name)}」在等你开口</h2>
+        <p>${CM.escapeHtml(memberLine)} 都在这儿。说第一句话，看看谁会接话。</p>
+      </div>
+      <div class="chat-empty-prompts" role="group" aria-label="开场提示">${prompts.map(([label, text]) => `<button type="button" class="chat-empty-prompt" data-group-empty-prompt="${CM.escapeHtml(text)}">${CM.escapeHtml(label)}</button>`).join("")}</div>
+      <p class="chat-empty-note">点一下只是放进输入框，你可以改，也可以直接写自己的话。</p>
+    </div>`;
+  }
+
   function renderHistory(messages, {preserveScroll = false} = {}) {
     const beforeHeight = document.body.scrollHeight;
     const beforeY = window.scrollY;
@@ -240,7 +261,7 @@
         ? `<section class="scene-opening"><small>开场设定，尚未发生对话</small><h2>${group.scene.story_day === 1 ? "雨后傍晚，你来到栖灯旅店" : "栖灯旅店的新一天"}</h2><p>这里有${CM.escapeHtml((group.members || []).map(member => member.name || member.id).join("、"))}。你可以打招呼、聊聊灯溪节，或只是坐一会儿。不必完成任务，也不用替自己决定感受。</p><button type="button" data-scene-say="我推开旅店的门，向大家打了个招呼。">进门打个招呼</button><button type="button" data-scene-say="我问大家灯溪节有什么有趣的事，想听听你们的介绍。">聊聊灯溪节</button><button type="button" data-scene-say="我想先安静坐一会儿，看看这里的大家。">先坐一会儿</button></section>`
         : group?.status === "BUILDING"
         ? `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」正在构建成员。<br>确认人物后就可以直接开始聊天。</div>`
-        : `<div class="empty">「${CM.escapeHtml(group?.name || "群聊")}」还没有消息。<br>说第一句话，看看谁会接话。</div>`);
+        : groupEmptyHtml(group));
       if (pending.has(activeId())) appendPending("群成员正在输入…");
       appendReactionError();
       return;
@@ -258,7 +279,7 @@
       if (date !== lastDate) {
         const sep = document.createElement("div");
         sep.className = "date-separator";
-        sep.textContent = `── ${date} ──`;
+        sep.textContent = date;
         CM.dom.chat.appendChild(sep);
         lastDate = date;
       }
@@ -286,8 +307,10 @@
     const failure = reactionErrors.get(activeId());
     if (!failure) return;
     const box = document.createElement("div");
-    box.className = "error group-reaction-error";
-    box.textContent = `群聊生成失败：${failure.message || "未知错误"}`;
+    box.className = "chat-note is-warn group-reaction-error";
+    box.dataset.watermark = String(failure.watermark ?? "");
+    box.setAttribute("role", "status");
+    box.innerHTML = `<strong>这一轮没有等到回应</strong><span>群成员暂时没能接上话。可以继续发一条，或稍后再试。</span>`;
     CM.dom.chat.appendChild(box);
   }
 
@@ -465,7 +488,7 @@
       CM.features.stickers?.setDisabled?.(true);
       CM.features.images?.setDisabled?.(true);
     } else {
-      CM.dom.sendButton.disabled = false;
+      CM.dom.sendButton.disabled = CM.state.sendingCount > 0;
       CM.dom.input.disabled = false;
       CM.features.stickers?.setDisabled?.(false);
       CM.features.images?.setDisabled?.(false);
@@ -513,8 +536,9 @@
   async function commitSend(groupId, payload) {
     if (!groupId) return;
     connectStream(groupId);
-    const live2d = CM.features.voice?.requestLive2dContext?.("group", groupId);
+    CM.beginSending();
     try {
+      const live2d = CM.features.voice?.requestLive2dContext?.("group", groupId);
       const result = await CM.api(`/v1/groups/${encodeURIComponent(groupId)}/messages`, {method:"POST", body:JSON.stringify({...payload, ...(live2d ? {live2d} : {})})});
       if (CM.isGroupConversation() && groupId === activeId()) {
         mergeMessage(result.message);
@@ -525,15 +549,17 @@
       console.error("[group message failed]", groupId, error);
       if (!error.clientSendId && CM.isGroupConversation() && groupId === activeId()) {
         const box = document.createElement("div");
-        box.className = "error";
-        box.textContent = `发送失败：${error.message}`;
+        box.className = "error chat-send-error";
+        box.textContent = "消息没有发出去，草稿已放回输入框。可以再试一次。";
         CM.dom.chat.appendChild(box);
       }
       throw error;
+    } finally {
+      CM.endSending();
     }
   }
 
-  async function sendText(message) {
+  async function sendText(message, replySuggestion) {
     const groupId = activeId();
     if (!groupId || !message.trim()) return;
     CM.dom.input.value = "";
@@ -542,13 +568,27 @@
       const visual = await CM.features.voice?.sendTextWithVisual?.(message);
       if (visual?.handled) return visual.result;
     } catch (error) {
+      if (!CM.dom.input.value.trim()) {
+        CM.dom.input.value = message;
+        CM.dom.input.dispatchEvent(new Event("input", {bubbles:true}));
+      }
       const box = document.createElement("div");
-      box.className = "error";
-      box.textContent = `发送失败：${error.message}`;
+      box.className = "error chat-send-error";
+      box.textContent = "消息没有发出去，草稿已放回输入框。可以再试一次。";
       CM.dom.chat.appendChild(box);
       throw error;
     }
-    return commitSend(groupId, {message});
+    try {
+      return await commitSend(groupId, {message,...(replySuggestion?{reply_suggestion:replySuggestion}:{})});
+    } catch (error) {
+      if (error.clientSendId) {
+        await CM.recoverRejectedDraft(error, message);
+      } else if (!CM.dom.input.value.trim()) {
+        CM.dom.input.value = message;
+        CM.dom.input.dispatchEvent(new Event("input", {bubbles:true}));
+      }
+      throw error;
+    }
   }
 
   async function sendSticker(sticker) {
@@ -645,6 +685,13 @@
   });
   CM.dom.chat.addEventListener("click", event => {
     if (!CM.isGroupConversation()) return;
+    const opener = event.target.closest("[data-group-empty-prompt]");
+    if (opener) {
+      CM.dom.input.value = opener.dataset.groupEmptyPrompt || "";
+      CM.dom.input.dispatchEvent(new Event("input", {bubbles:true}));
+      CM.dom.input.focus();
+      return;
+    }
     const sceneSay = event.target.closest("[data-scene-say]");
     if (sceneSay) { sendText(sceneSay.dataset.sceneSay).catch(console.error); return; }
     const advance = event.target.closest("[data-scene-advance]");
@@ -678,7 +725,7 @@
     if (button) showTurn(button.dataset.groupTurn).catch(console.error);
   });
 
-  CM.registerFeature("groups", {loadGroups,loadArchivedGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,current,applyHeader,applyComposerState,sendText,sendSticker,sendImage,archiveGroup,restoreArchivedGroup,showArchivedGroups,renderList,closeStream});
+  CM.registerFeature("groups", {loadGroups,loadArchivedGroups,loadHistory,loadOlderHistory,reconcileLatest,enter,leave,current,applyHeader,applyComposerState,sendText,sendSticker,sendImage,latestMessage:()=>historyState.messages.at(-1),archiveGroup,restoreArchivedGroup,showArchivedGroups,renderList,closeStream});
   CM.on("ready", loadGroups);
   window.addEventListener("beforeunload", closeStream);
 })();

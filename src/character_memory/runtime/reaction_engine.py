@@ -105,6 +105,7 @@ def evaluate_reaction(
         allow_call_invite=allow_call_invite,
         observed_events=person_context.observed_events,
         capabilities=capabilities,
+        experience_profile=getattr(person_context, "experience_profile", None),
     )
     if context_suffix:
         context += context_suffix

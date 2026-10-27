@@ -32,6 +32,16 @@ class Settings(BaseModel):
     vision_model: str | None = None
     chat_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     llm_attempts: int = Field(default=2, ge=1, le=4)
+    # Output ceiling sent as the OpenAI-compatible max_tokens. Leaving it to the
+    # provider default (~1000 tokens) truncated a detailed PersonReaction JSON
+    # until no parsable content was left at all (issue #662), so the ceiling is
+    # an explicit, configurable contract value instead of a provider default.
+    llm_max_output_tokens: int = Field(
+        default=4096,
+        ge=256,
+        le=32768,
+        description="每次模型请求的输出 token 上限（OpenAI 兼容 max_tokens）；默认 4096，避免详细 PersonReaction JSON 被截断。",
+    )
     reaction_preparation_lease_seconds: float = Field(default=120.0, ge=1.0, le=3600.0,
         description="Server-time lease for pre-model reaction preparation only; expiry permits ownership replacement, never replay of CALLING/UNKNOWN. Applies after runtime restart.")
 

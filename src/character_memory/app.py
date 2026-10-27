@@ -75,6 +75,7 @@ def build_model(settings: Settings):
         settings.base_url,
         temperature=settings.chat_temperature,
         attempts=settings.llm_attempts,
+        max_output_tokens=settings.llm_max_output_tokens,
         # Modern multimodal models can handle text and images through the same
         # model id. Keep a dedicated vision model only as an explicit provider
         # compatibility override.

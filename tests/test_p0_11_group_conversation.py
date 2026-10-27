@@ -195,7 +195,7 @@ def test_web_has_one_submit_owner_and_group_module_never_installs_competing_subm
     assert "/static/p0_11.js" not in index
     assert core.count('addEventListener("submit"') == 1
     assert "CM.submitCurrentText" in core
-    assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message);' in core
+    assert 'if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message,attribution);' in core
     assert 'addEventListener("submit"' not in groups
     assert "stopImmediatePropagation" not in core
     assert "stopImmediatePropagation" not in groups

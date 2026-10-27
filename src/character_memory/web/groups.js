@@ -308,6 +308,7 @@
     if (!failure) return;
     const box = document.createElement("div");
     box.className = "chat-note is-warn group-reaction-error";
+    box.dataset.watermark = String(failure.watermark ?? "");
     box.setAttribute("role", "status");
     box.innerHTML = `<strong>这一轮没有等到回应</strong><span>群成员暂时没能接上话。可以继续发一条，或稍后再试。</span>`;
     CM.dom.chat.appendChild(box);

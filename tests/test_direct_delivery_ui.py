@@ -13,6 +13,8 @@ const vm = require('vm');
 const assert = require('assert/strict');
 class Element {
   constructor() { this.children = []; this.dataset = {}; this.parent = null; this.className = ''; this.textContent = ''; }
+  setAttribute(name, value) { (this.attributes ??= {})[name] = String(value); }
+  removeAttribute(name) { if (this.attributes) delete this.attributes[name]; }
   set innerHTML(value) { this.html = value; this.children = []; }
   get innerHTML() { return this.html || ''; }
   appendChild(child) { child.parent = this; this.children.push(child); }
@@ -88,20 +90,22 @@ def test_reaction_failure_survives_idle_redraw_and_clears_on_newer_turn():
     run_js(r'''
 source.emit('reaction_error', {watermark:10, message:'provider unavailable'});
 source.emit('reaction_status', {state:'idle', watermark:10});
-assert(CM.dom.chat.children.some(row=>row.textContent?.includes('provider unavailable')),
+const errorRows = () => CM.dom.chat.children.filter(row=>row.dataset?.directError);
+const errorText = row => (row.html || '') + (row.textContent || '');
+assert(errorRows().length === 1 && errorText(errorRows()[0]).includes('这一轮没有收到回应'),
        'terminal idle must not erase the provider failure');
 CM.state.lastRenderedSignature = '';
 CM.renderHistory([]); // same redraw used by durable-history reconciliation
-assert(CM.dom.chat.children.some(row=>row.textContent?.includes('provider unavailable')));
+assert(errorRows().length === 1);
 source.emit('reaction_status', {state:'queued', watermark:11});
-assert(!CM.dom.chat.children.some(row=>row.textContent?.includes('provider unavailable')));
+assert(errorRows().length === 0);
 source.emit('reaction_status', {state:'idle', watermark:11});
 assert(!CM.state.pendingCharacters.has('rin'));
 // A newer user fact can queue before an older provider failure is reported.
 source.emit('reaction_status', {state:'queued', watermark:13});
 source.emit('reaction_error', {watermark:12, message:'older attempt failed'});
 source.emit('reaction_status', {state:'typing', watermark:13});
-assert(!CM.dom.chat.children.some(row=>row.textContent?.includes('older attempt failed')));
+assert(!errorRows().some(row=>row.dataset.watermark === '12'));
 ''')
 
 

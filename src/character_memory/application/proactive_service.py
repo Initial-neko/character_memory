@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 
+from character_memory.application.chat_service import (
+    ProactiveSourceScopeError,
+    resolve_real_intent_source,
+)
 from character_memory.domain.models import ActionType, EXPRESSIVE_ACTIONS, EventType, IntentResolutionKind
 from character_memory.time_utils import epoch_us
 
@@ -111,12 +115,41 @@ class ProactiveService:
             )
             for row in ([claimed] if claimed is not None else []):
                 intent_id = int(row["id"])
+                source_event_id = row["source_event_id"]
+                source, scope_reason = resolve_real_intent_source(self.store, source_event_id)
+                if source is None:
+                    # The intent is only a pointer. Its source can have been
+                    # relabelled or removed after admission; never turn that
+                    # into a real proactive turn.
+                    self.store.record_intent_resolution(
+                        intent_id, now=now, status="SUPPRESSED",
+                        decision=scope_reason, source_event_id=source_event_id,
+                    )
+                    self._note_dispatch(character_id, now, status="SUPPRESSED", intent_id=intent_id)
+                    logger.warning(
+                        "proactive.skip_scope intent_id=%s character=%s source_event_id=%s reason=%s",
+                        intent_id,
+                        character_id,
+                        source_event_id,
+                        scope_reason,
+                    )
+                    outcomes.append(
+                        {
+                            "intent_id": intent_id,
+                            "character_id": character_id,
+                            "status": "SUPPRESSED",
+                            "resolution_reason": scope_reason,
+                            "source_event_id": source_event_id,
+                        }
+                    )
+                    continue
                 try:
                     result = self.chat.dispatch_proactive_intent(
                         character_id=character_id,
                         intent_id=intent_id,
                         content=str(row["content"]),
                         at=now,
+                        source_event_id=source_event_id,
                         intent_deferral_policy={
                             "min_minutes": self.defer_min_minutes,
                             "max_hours": self.defer_max_hours,
@@ -180,6 +213,30 @@ class ProactiveService:
                         character_id,
                         status,
                         [action.type.value for action in result.reaction.actions],
+                    )
+                except ProactiveSourceScopeError as exc:
+                    # Rechecked again inside ChatService/Runtime. A source
+                    # relabelled mid-dispatch aborts the derived commit.
+                    self.store.record_intent_resolution(
+                        intent_id, now=now, status="SUPPRESSED",
+                        decision=exc.reason, source_event_id=exc.source_event_id,
+                    )
+                    self._note_dispatch(character_id, now, status="SUPPRESSED", intent_id=intent_id)
+                    logger.warning(
+                        "proactive.skip_scope intent_id=%s character=%s source_event_id=%s reason=%s",
+                        intent_id,
+                        character_id,
+                        exc.source_event_id,
+                        exc.reason,
+                    )
+                    outcomes.append(
+                        {
+                            "intent_id": intent_id,
+                            "character_id": character_id,
+                            "status": "SUPPRESSED",
+                            "resolution_reason": exc.reason,
+                            "source_event_id": exc.source_event_id,
+                        }
                     )
                 except Exception as exc:
                     self.store.set_intent_status(intent_id, "ERROR")

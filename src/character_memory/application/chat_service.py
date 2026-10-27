@@ -2,16 +2,57 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+import inspect
 import logging
 import threading
 
 from character_memory.application.clock import Clock
 from character_memory.application.incoming_message import normalize_user_fact
+from character_memory.domain.experience_scope import is_real_experience
 from character_memory.domain.models import Event, EventType
 from character_memory.message_projection import project_direct_message
 
 
 logger = logging.getLogger("character_memory.application.chat")
+
+REAL_EXPERIENCE_SCOPE = {"schema_version": 1, "reality": "REAL"}
+_UNSET = object()
+
+
+class ProactiveSourceScopeError(RuntimeError):
+    """A proactive intent's authoritative source is not a real experience."""
+
+    def __init__(self, reason: str, source_event_id: int | None = None):
+        self.reason = reason
+        self.source_event_id = source_event_id
+        super().__init__(f"proactive intent source is not real: {reason}")
+
+
+def resolve_real_intent_source(store, source_event_id):
+    """Refetch the intent's authoritative source and enforce the real boundary.
+
+    Returns (event, "") when the source is an existing real fact, otherwise
+    (None, reason). An absent source and a source relabelled SIMULATED or
+    malformed both fail closed; callers must not synthesize a legacy REAL fact.
+    """
+    if source_event_id is None:
+        return None, "SOURCE_MISSING"
+    try:
+        source = store.get_event(int(source_event_id))
+    except (TypeError, ValueError):
+        return None, "SOURCE_MISSING"
+    if source is None:
+        return None, "SOURCE_MISSING"
+    if not is_real_experience(source.metadata):
+        return None, "SOURCE_NOT_REAL"
+    return source, ""
+
+
+def _runtime_accepts_commit_guard(runtime) -> bool:
+    try:
+        return "commit_guard" in inspect.signature(runtime.handle).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def build_user_event(
@@ -190,35 +231,93 @@ class ChatService:
         content: str,
         at: datetime,
         intent_deferral_policy: dict | None = None,
+        source_event_id=_UNSET,
     ):
-        """Re-evaluate one due persisted intent as an ordinary Runtime event."""
+        """Re-evaluate one due persisted intent as an ordinary Runtime event.
+
+        The intent is only a pointer. Its authoritative source is refetched
+        before any write and again inside Runtime's derived commit transaction:
+        a source that disappeared, was relabelled SIMULATED or became malformed
+        cannot produce real Memory/Intent/message output. The new event carries
+        an explicit REAL scope rather than relying on legacy scope omission.
+        """
 
         runtime = self._runtime_for(character_id)
         with self._lock_for(character_id):
+            explicit_source = source_event_id is not _UNSET
+            if not explicit_source:
+                # Low-level callers may omit the argument; still use the stored
+                # pointer when it exists. A missing intent row keeps the legacy
+                # direct-call contract (tests and CLI call sites).
+                row = self.store.conn.execute(
+                    "SELECT source_event_id FROM intents WHERE id=? AND character_id=?",
+                    (intent_id, character_id),
+                ).fetchone()
+                source_event_id = None if row is None else row["source_event_id"]
+            elif source_event_id is not None:
+                source_event_id = int(source_event_id)
+
+            source = None
+            if source_event_id is None:
+                if explicit_source:
+                    logger.warning(
+                        "chat.proactive_scope_reject character=%s intent_id=%s reason=SOURCE_MISSING",
+                        character_id,
+                        intent_id,
+                    )
+                    raise ProactiveSourceScopeError("SOURCE_MISSING", None)
+            else:
+                source, scope_reason = resolve_real_intent_source(self.store, source_event_id)
+                if source is None:
+                    logger.warning(
+                        "chat.proactive_scope_reject character=%s intent_id=%s source_event_id=%s reason=%s",
+                        character_id,
+                        intent_id,
+                        source_event_id,
+                        scope_reason,
+                    )
+                    raise ProactiveSourceScopeError(scope_reason, source_event_id)
+
+            commit_guard = None
+            if source is not None:
+                guarded_source_id = int(source.id)
+                source_character_id = source.character_id
+
+                def commit_guard():
+                    current = self.store.get_event(guarded_source_id)
+                    if current is None or current.character_id != source_character_id:
+                        raise ProactiveSourceScopeError("SOURCE_MISSING", guarded_source_id)
+                    if not is_real_experience(current.metadata):
+                        raise ProactiveSourceScopeError("SOURCE_CHANGED", guarded_source_id)
+                    return True
+
             conversation_id = self._latest_conversation_id(character_id)
             self.store.set_world_time(character_id, at)
             logger.info(
-                "chat.proactive character=%s intent_id=%s conversation=%s at=%s",
+                "chat.proactive character=%s intent_id=%s conversation=%s at=%s source_event_id=%s",
                 character_id,
                 intent_id,
                 conversation_id,
                 at.isoformat(),
+                source_event_id if source_event_id is not None else "-",
             )
-            return runtime.handle(
-                Event(
-                    character_id=character_id,
-                    event_type=EventType.PROACTIVE_INTENT,
-                    event_time=at,
-                    content=f"之前留下的意图：{content}。现在重新判断是否自然执行、保持沉默或放弃。",
-                    metadata={
-                        "intent_id": intent_id,
-                        "sharing_observations": self._sharing_observations(character_id, at),
-                        "channel": "DIRECT",
-                        "intent_deferral_policy": intent_deferral_policy,
-                        "conversation_id": conversation_id,
-                    },
-                )
+            event = Event(
+                character_id=character_id,
+                event_type=EventType.PROACTIVE_INTENT,
+                event_time=at,
+                content=f"之前留下的意图：{content}。现在重新判断是否自然执行、保持沉默或放弃。",
+                metadata={
+                    "intent_id": intent_id,
+                    "sharing_observations": self._sharing_observations(character_id, at),
+                    "channel": "DIRECT",
+                    "intent_deferral_policy": intent_deferral_policy,
+                    "conversation_id": conversation_id,
+                    "experience_scope": dict(REAL_EXPERIENCE_SCOPE),
+                },
             )
+            if commit_guard is not None and _runtime_accepts_commit_guard(runtime):
+                return runtime.handle(event, commit_guard=commit_guard)
+            return runtime.handle(event)
 
     def dispatch_wake(
         self,
@@ -264,6 +363,10 @@ class ChatService:
                         "sharing_observations": self._sharing_observations(character_id, at),
                         "channel": "DIRECT",
                         "conversation_id": resolved_conversation,
+                        # A wake is an independent real-world tick with no intent
+                        # source; state that boundary explicitly instead of
+                        # relying on legacy scope omission.
+                        "experience_scope": dict(REAL_EXPERIENCE_SCOPE),
                     },
                 )
             )

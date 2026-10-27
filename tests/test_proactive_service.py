@@ -21,6 +21,17 @@ class FakeChat:
 
 
 def _intent(store, character_id: str, now: datetime, *, earliest_delta=-1, expires_delta=4):
+    # A persisted intent is only a pointer: dispatch now requires its source to
+    # still exist as a real fact, so the fixture records one.
+    source = store.append_event(
+        Event(
+            character_id=character_id,
+            event_type=EventType.USER_MESSAGE,
+            event_time=now - timedelta(hours=2),
+            content="来源事实",
+            metadata={"experience_scope": {"schema_version": 1, "reality": "REAL"}},
+        )
+    )
     return store.add_intent(
         character_id,
         "问问用户今天的汇报怎么样了",
@@ -28,6 +39,7 @@ def _intent(store, character_id: str, now: datetime, *, earliest_delta=-1, expir
         now - timedelta(hours=2),
         now + timedelta(hours=earliest_delta),
         now + timedelta(hours=expires_delta),
+        source_event_id=source.id,
     )
 
 

@@ -198,9 +198,6 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         group_store=read_store,
     )
     character_profiles = characters.profiles
-    public_profile = characters.public_profile
-    refresh_character_cache = characters.refresh_cache
-    _set_archived = characters.set_archived
     ensure_character = characters.ensure
     check_character_capacity = characters.check_capacity
     create_character_from_draft = characters.create_from_draft
@@ -469,8 +466,8 @@ def create_api(config_path: str = "config.yaml", *, bundle: AppBundle | None = N
         runtime_status=runtime_status,
         proactive_poll_seconds=float(getattr(settings, "proactive_poll_seconds", 30.0)),
         character_profiles=character_profiles,
-        public_profile=public_profile,
-        set_archived=_set_archived,
+        public_profile=characters.public_profile,
+        set_archived=characters.set_archived,
         refresh_voice_registry=refresh_voice_registry,
         character_summary=character_summary,
         ensure_character=ensure_character,

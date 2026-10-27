@@ -1,0 +1,136 @@
+{
+  "character_id": "a",
+  "peer": "b",
+  "read_only": true,
+  "window": {
+    "start": "2026-10-08T00:00:00+08:00",
+    "end": "2026-10-15T00:00:00+08:00",
+    "days": 7
+  },
+  "interactions": [],
+  "interactions_has_more": false,
+  "pending_intents": [],
+  "pending_has_more": false,
+  "pending_scope": "CURRENT_USER_DIRECT_PENDING_ALL_CREATION_DATES",
+  "cognition": {
+    "direction": "a->b",
+    "character_id": "a",
+    "peer": "b",
+    "read_only": true,
+    "asserted_count": 1,
+    "cognitions": [
+      {
+        "memory": {
+          "id": 1,
+          "content": "莉娅记得芙露说过星灯已经修好了",
+          "memory_type": "SHARED",
+          "importance": 0.82,
+          "event_time": "2026-10-27T14:01:20+00:00",
+          "event_time_epoch": 1793109680000000,
+          "active": true,
+          "superseded_by": null
+        },
+        "status": "ACTIVE",
+        "reason": null,
+        "asserted": true,
+        "attribution": "TRACE_INPUT",
+        "evidence": [
+          {
+            "kind": "CONVERSATION_EVENT",
+            "id": 2,
+            "conversation_id": "group-b81d5a8810fb",
+            "event_type": "CHARACTER_MESSAGE",
+            "actor_type": "CHARACTER",
+            "actor_id": "b",
+            "time": "2026-10-27T14:01:20+00:00",
+            "content": "星灯已经修好了",
+            "role": "WITNESSED_INPUT"
+          }
+        ]
+      },
+      {
+        "memory": {
+          "id": 3,
+          "content": "莉娅记得芙露说过旧的星灯说法",
+          "memory_type": "EPISODIC",
+          "importance": 0.5,
+          "event_time": "2026-10-27T11:01:20+00:00",
+          "event_time_epoch": 1793098880000000,
+          "active": true,
+          "superseded_by": null
+        },
+        "status": "INVALIDATED",
+        "reason": "SOURCE_WITHDRAWN",
+        "asserted": false,
+        "attribution": "WITHDRAWN_INPUT",
+        "evidence": [
+          {
+            "kind": "CONVERSATION_EVENT",
+            "id": 5,
+            "conversation_id": "group-b81d5a8810fb",
+            "event_type": "CHARACTER_MESSAGE",
+            "actor_type": "CHARACTER",
+            "actor_id": "b",
+            "time": "2026-10-27T11:01:20+00:00",
+            "content": "旧的星灯说法",
+            "role": "WITHDRAWN_INPUT"
+          }
+        ]
+      }
+    ],
+    "change_history": [
+      {
+        "kind": "MEMORY_CREATED",
+        "memory_id": 1,
+        "at": "2026-10-27T14:01:20+00:00",
+        "status": "ACTIVE"
+      },
+      {
+        "kind": "MEMORY_CREATED",
+        "memory_id": 3,
+        "at": "2026-10-27T11:01:20+00:00",
+        "status": "INVALIDATED"
+      }
+    ],
+    "boundaries": [
+      {
+        "code": "OWN_MEMORY_ONLY",
+        "text": "只展示该人物自己保存、且能回溯到真实事实的记忆；没有保存的内心想法不展示。"
+      },
+      {
+        "code": "DIRECTIONAL",
+        "text": "A 对 B 与 B 对 A 分开计算，不能从一方推断另一方。"
+      },
+      {
+        "code": "WITNESSED_ONLY",
+        "text": "同群不等于互动；只有该人物实际看到对方的真实消息或评论，才作为依据。"
+      },
+      {
+        "code": "INVALIDATION",
+        "text": "记忆或来源被更正、忘记、撤回或标为 SIMULATED 后，不再作为当前认知断言。"
+      },
+      {
+        "code": "NO_INFERENCE",
+        "text": "这里不推断好感、关系等级、隐藏态度或对方未表达的想法。"
+      },
+      {
+        "code": "INVALIDATED_PRESENT",
+        "text": "其中 1 条认知因来源失效而只保留为历史，不再作为当前断言。"
+      }
+    ],
+    "counts": {
+      "memories_scanned": 2,
+      "active": 1,
+      "invalidated": 1,
+      "superseded": 0,
+      "forgotten": 0,
+      "simulated_excluded": 0,
+      "unattributed": 0,
+      "truncated": false
+    },
+    "checked_at": "2026-10-27T16:01:50.173223+00:00",
+    "open_items": [],
+    "open_items_has_more": false
+  },
+  "checked_at": "2026-10-27T16:01:50.173223+00:00"
+}

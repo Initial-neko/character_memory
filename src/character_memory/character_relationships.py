@@ -1,8 +1,32 @@
-"""Bounded, read-only relationship review over existing facts and Intents."""
+"""Bounded, read-only relationship review and sourced directional cognition.
+
+The directional projection never creates relationship state. It reads the
+character's own Memories and the durable facts those Memories point at, then
+marks a Memory as this character's cognition of a peer only when the peer's
+real message (or the actual witnessed group input recorded by a Trace) is
+present. Corrections, forgetting, withdrawal and SIMULATED scope invalidate
+the cognition; none of them delete the underlying Memory or Event.
+"""
 from datetime import datetime, timedelta, timezone
+import json
 
 from character_memory.character_life import obj, text
+from character_memory.domain.experience_scope import is_real_experience
+from character_memory.group_store import GroupRepository
 from character_memory.time_utils import epoch_us
+
+MAX_COGNITION_MEMORIES = 400
+MAX_COGNITION_ENTRIES = 50
+MAX_COGNITION_TRACES = 600
+MAX_RECENT_GROUP_EVENTS = 14
+MAX_SHARED_HISTORY_EVENTS = 4
+COGNITION_BOUNDARIES = (
+    ("OWN_MEMORY_ONLY", "只展示该人物自己保存、且能回溯到真实事实的记忆；没有保存的内心想法不展示。"),
+    ("DIRECTIONAL", "A 对 B 与 B 对 A 分开计算，不能从一方推断另一方。"),
+    ("WITNESSED_ONLY", "同群不等于互动；只有该人物实际看到对方的真实消息或评论，才作为依据。"),
+    ("INVALIDATION", "记忆或来源被更正、忘记、撤回或标为 SIMULATED 后，不再作为当前认知断言。"),
+    ("NO_INFERENCE", "这里不推断好感、关系等级、隐藏态度或对方未表达的想法。"),
+)
 
 
 class CharacterRelationshipReader:
@@ -95,6 +119,15 @@ class CharacterRelationshipReader:
                         "source": {"kind": "intent", "id": row["id"], "event_id": row["source_event_id"]},
                         "source_known": row["source_event_id"] is not None,
                     })
+            cognition = self._cognition_locked(character_id, peer, tables, now)
+            cognition["open_items"] = [{
+                "kind": "PENDING_PROACTIVE_INTENT", "content": item["content"],
+                "earliest_at": item["earliest_at"], "expires_at": item["expires_at"],
+                "evidence": {"kind": "intent", "id": item["source"]["id"],
+                             "event_id": item["source"]["event_id"]},
+                "source_known": item["source_known"],
+            } for item in pending[:5]]
+            cognition["open_items_has_more"] = len(pending) > 5
         interactions.sort(key=lambda item: (item["_stamp"], item["key"]), reverse=True)
         facts = interactions[:10]
         for item in facts:
@@ -105,6 +138,7 @@ class CharacterRelationshipReader:
             "interactions": facts, "interactions_has_more": len(interactions) > 10,
             "pending_intents": pending[:5], "pending_has_more": len(pending) > 5,
             "pending_scope": "CURRENT_USER_DIRECT_PENDING_ALL_CREATION_DATES",
+            "cognition": cognition,
             "checked_at": now.isoformat(),
         }
 
@@ -117,3 +151,316 @@ class CharacterRelationshipReader:
             "source": {"kind": kind, "id": row["id"],
                        "conversation_id": row["conversation_id"] if "conversation_id" in row.keys() else metadata.get("conversation_id")},
         }
+
+    # --- directional cognition ------------------------------------------------
+
+    def _cognition_locked(self, character_id, peer, tables, now):
+        """Derive A→B cognition from A's own Memories and peer-authored facts."""
+        rows = self.store.conn.execute(
+            "SELECT * FROM memories WHERE character_id=? AND event_time_epoch IS NOT NULL "
+            "ORDER BY event_time_epoch DESC,id DESC LIMIT ?",
+            [character_id, MAX_COGNITION_MEMORIES + 1],
+        ).fetchall()
+        truncated = len(rows) > MAX_COGNITION_MEMORIES
+        rows = rows[:MAX_COGNITION_MEMORIES]
+        group_memory_ids = [
+            int(row["id"]) for row in rows
+            if str(obj(row["metadata_json"]).get("origin") or "").upper() == "GROUP"
+        ]
+        # A correction creates a new Memory with the same provenance. The trace
+        # still names the version it created, so include the corrected-from IDs
+        # when resolving witnessed input; the active replacement inherits it.
+        for row in rows:
+            if str(obj(row["metadata_json"]).get("origin") or "").upper() != "GROUP":
+                continue
+            predecessor = obj(row["metadata_json"]).get("corrects_memory_id")
+            if type(predecessor) is int and predecessor not in group_memory_ids:
+                group_memory_ids.append(predecessor)
+        trace_links = self._trace_links_locked(character_id, group_memory_ids, tables)
+        entries, history = [], []
+        counts = {
+            "memories_scanned": len(rows), "active": 0, "invalidated": 0,
+            "superseded": 0, "forgotten": 0, "simulated_excluded": 0,
+            "unattributed": 0, "truncated": truncated,
+        }
+        for row in rows:
+            outcome = self._cognition_entry_locked(row, character_id, peer, tables, trace_links, counts)
+            if outcome is None:
+                continue
+            entry, change = outcome
+            entries.append(entry)
+            history.extend(change)
+        total_entries = len(entries)
+        entries.sort(key=lambda item: (item["memory"]["event_time_epoch"] or 0, item["memory"]["id"]), reverse=True)
+        # Counts describe every attributed Memory the scan found; only the
+        # displayed list is bounded, so a truncated view never understates.
+        for entry in entries:
+            counts[entry["status"].lower()] = counts.get(entry["status"].lower(), 0) + 1
+        entries = entries[:MAX_COGNITION_ENTRIES]
+        if total_entries > MAX_COGNITION_ENTRIES:
+            counts["truncated"] = True
+        history.sort(key=lambda item: item["_stamp"] if item["_stamp"] is not None else -1, reverse=True)
+        for item in history:
+            item.pop("_stamp", None)
+        boundaries = [{"code": code, "text": value} for code, value in COGNITION_BOUNDARIES]
+        if counts["simulated_excluded"]:
+            boundaries.append({"code": "SIMULATED_EXCLUDED",
+                "text": f"另有 {counts['simulated_excluded']} 条记忆或其来源属于 SIMULATED，未进入真实关系认知。"})
+        if counts["invalidated"]:
+            boundaries.append({"code": "INVALIDATED_PRESENT",
+                "text": f"其中 {counts['invalidated']} 条认知因来源失效而只保留为历史，不再作为当前断言。"})
+        if counts["unattributed"]:
+            boundaries.append({"code": "UNATTRIBUTED_EXCLUDED",
+                "text": f"另有 {counts['unattributed']} 条记忆无法确认与该对象的真实消息关联，未计入。"})
+        return {
+            "direction": f"{character_id}->{peer}", "character_id": character_id, "peer": peer,
+            "read_only": True, "asserted_count": counts["active"],
+            "cognitions": entries, "change_history": history[:MAX_COGNITION_ENTRIES],
+            "boundaries": boundaries, "counts": counts, "checked_at": now.isoformat(),
+        }
+
+    def _cognition_entry_locked(self, row, character_id, peer, tables, trace_links, counts):
+        memory_id = int(row["id"])
+        meta = obj(row["metadata_json"])
+        if not is_real_experience(meta):
+            counts["simulated_excluded"] += 1
+            return None
+        origin_group = str(meta.get("origin") or "").upper() == "GROUP"
+        fact, source_state = self._source_fact_locked(row, meta, origin_group, tables)
+        if source_state == "SIMULATED":
+            counts["simulated_excluded"] += 1
+            return None
+        direct = source_state in ("REAL", "WITHDRAWN") and self._fact_authors_peer(fact, peer)
+        witnesses, withdrawn = [], []
+        if origin_group:
+            link = trace_links.get(memory_id)
+            predecessor = meta.get("corrects_memory_id")
+            seen = {memory_id}
+            while link is None and type(predecessor) is int and predecessor not in seen:
+                seen.add(predecessor)
+                link = trace_links.get(predecessor)
+                if link is None:
+                    previous = self.store.conn.execute(
+                        "SELECT metadata_json FROM memories WHERE id=?", (predecessor,)
+                    ).fetchone()
+                    predecessor = obj(previous["metadata_json"]).get("corrects_memory_id") if previous is not None else None
+            witnesses, withdrawn = self._trace_witnesses_locked(link, peer, tables)
+        attributed = direct or bool(witnesses) or bool(withdrawn)
+        if not attributed:
+            counts["unattributed"] += 1
+            return None
+        if row["superseded_by"] is not None:
+            status, reason = "SUPERSEDED", "MEMORY_CORRECTED"
+        elif not bool(row["active"]):
+            status, reason = "FORGOTTEN", "MEMORY_FORGOTTEN"
+        elif source_state != "REAL":
+            status, reason = "INVALIDATED", {"MISSING": "SOURCE_MISSING",
+                "WITHDRAWN": "SOURCE_WITHDRAWN", "INVALID": "SOURCE_INVALID"}.get(source_state, "SOURCE_INVALID")
+        elif origin_group and not direct and not witnesses and withdrawn:
+            status, reason = "INVALIDATED", "SOURCE_WITHDRAWN"
+        else:
+            status, reason = "ACTIVE", None
+        evidence = []
+        if fact is not None and source_state in ("REAL", "WITHDRAWN") and direct:
+            evidence.append({**self._fact_payload(fact),
+                "role": "DIRECT_SOURCE" if source_state == "REAL" else "WITHDRAWN_INPUT"})
+        for witness in witnesses:
+            evidence.append({**self._fact_payload(witness), "role": "WITNESSED_INPUT"})
+        for witness in withdrawn:
+            evidence.append({**self._fact_payload(witness), "role": "WITHDRAWN_INPUT"})
+        entry = {
+            "memory": {
+                "id": memory_id, "content": text(row["content"], 2000),
+                "memory_type": text(row["memory_type"], 40), "importance": row["importance"],
+                "event_time": row["event_time"], "event_time_epoch": row["event_time_epoch"],
+                "active": bool(row["active"]), "superseded_by": row["superseded_by"],
+            },
+            "status": status, "reason": reason, "asserted": status == "ACTIVE",
+            "attribution": "DIRECT_SOURCE" if direct else "TRACE_INPUT" if witnesses else "WITHDRAWN_INPUT",
+            "evidence": evidence,
+        }
+        change = [{
+            "kind": "MEMORY_CREATED", "memory_id": memory_id, "at": row["event_time"],
+            "_stamp": row["event_time_epoch"], "status": status,
+        }]
+        if row["superseded_by"] is not None:
+            replacement = self.store.conn.execute(
+                "SELECT id,content,event_time,event_time_epoch,metadata_json FROM memories WHERE id=?",
+                (int(row["superseded_by"]),),
+            ).fetchone()
+            corrected_at, corrected_stamp = None, None
+            if replacement is not None:
+                corrected_at = obj(replacement["metadata_json"]).get("corrected_at")
+                if isinstance(corrected_at, str):
+                    try:
+                        corrected_stamp = epoch_us(datetime.fromisoformat(corrected_at))
+                    except ValueError:
+                        corrected_at = None
+            change.append({
+                "kind": "MEMORY_CORRECTED", "memory_id": memory_id, "at": corrected_at,
+                "to_memory_id": int(row["superseded_by"]),
+                "to_content": text(replacement["content"], 2000) if replacement is not None else None,
+                "_stamp": corrected_stamp,
+            })
+        elif not bool(row["active"]):
+            change.append({
+                "kind": "MEMORY_FORGOTTEN", "memory_id": memory_id, "at": None,
+                "_stamp": None,
+            })
+        return entry, change
+
+    def _source_fact_locked(self, row, meta, origin_group, tables):
+        if origin_group:
+            if "conversation_events" not in tables:
+                return None, "MISSING"
+            conversation_id = meta.get("conversation_id")
+            source_id = meta.get("source_conversation_event_id")
+            if not isinstance(conversation_id, str) or type(source_id) is not int:
+                return None, "INVALID"
+            fact = self._group_event_locked(conversation_id, source_id)
+            if fact is None:
+                return None, "MISSING"
+            if not is_real_experience(fact["metadata"]):
+                return None, "SIMULATED"
+            if bool(fact["metadata"].get("hidden")) and fact["event"].event_type in ("USER_MESSAGE", "CHARACTER_MESSAGE"):
+                return fact, "WITHDRAWN"
+            return fact, "REAL"
+        if "source_conversation_event_id" in meta:
+            return None, "INVALID"
+        source_id = row["source_event_id"]
+        if source_id is None:
+            return None, "MISSING"
+        if type(source_id) is not int:
+            return None, "INVALID"
+        event = self.store.conn.execute(
+            "SELECT id,character_id,event_type,event_time,event_time_epoch,content,metadata_json "
+            "FROM events WHERE id=? AND character_id=?",
+            (source_id, row["character_id"]),
+        ).fetchone()
+        if event is None:
+            return None, "MISSING"
+        event_meta = obj(event["metadata_json"])
+        if not is_real_experience(event_meta):
+            return None, "SIMULATED"
+        fact = {"kind": "EVENT", "row": event, "metadata": event_meta}
+        if bool(event_meta.get("hidden")) and event["event_type"] in (
+                "USER_MESSAGE", "CHARACTER_MESSAGE", "SPACE_COMMENT_RECEIVED"):
+            return fact, "WITHDRAWN"
+        return fact, "REAL"
+
+    def _group_event_locked(self, conversation_id, event_id):
+        row = self.store.conn.execute(
+            "SELECT * FROM conversation_events WHERE id=? AND conversation_id=?",
+            (event_id, conversation_id),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            event = GroupRepository._event_from_row(row)
+        except (ValueError, TypeError, KeyError):
+            return None
+        return {
+            "kind": "CONVERSATION_EVENT", "row": row, "event": event,
+            "metadata": event.metadata, "conversation_id": conversation_id,
+        }
+
+    @staticmethod
+    def _fact_authors_peer(fact, peer):
+        if fact is None:
+            return False
+        if fact["kind"] == "CONVERSATION_EVENT":
+            event = fact["event"]
+            if peer == "user":
+                return event.actor_type == "USER" and event.event_type == "USER_MESSAGE"
+            return (event.actor_type == "CHARACTER" and event.actor_id == peer
+                    and event.event_type == "CHARACTER_MESSAGE")
+        row, meta = fact["row"], fact["metadata"]
+        if peer == "user":
+            if row["event_type"] != "USER_MESSAGE":
+                return False
+            channel = str(meta.get("channel") or "").upper()
+            origin = str(meta.get("origin") or "").upper()
+            return (channel in ("", "DIRECT") and origin != "GROUP"
+                    and meta.get("source_conversation_event_id") is None
+                    and meta.get("group_event_id") is None)
+        return (row["event_type"] == "SPACE_COMMENT_RECEIVED"
+                and meta.get("commenter_id") == peer)
+
+    @staticmethod
+    def _fact_payload(fact):
+        if fact["kind"] == "CONVERSATION_EVENT":
+            event = fact["event"]
+            return {
+                "kind": "CONVERSATION_EVENT", "id": event.id,
+                "conversation_id": event.conversation_id, "event_type": event.event_type,
+                "actor_type": event.actor_type, "actor_id": event.actor_id,
+                "time": event.event_time.isoformat(), "content": text(event.content, 300),
+            }
+        row = fact["row"]
+        actor_type = "USER" if row["event_type"] == "USER_MESSAGE" else "CHARACTER" if row["event_type"] == "CHARACTER_MESSAGE" else "UNKNOWN"
+        return {
+            "kind": "EVENT", "id": row["id"], "event_type": row["event_type"],
+            "actor_type": actor_type,
+            "actor_id": "user" if row["event_type"] == "USER_MESSAGE" else fact["metadata"].get("commenter_id"),
+            "time": row["event_time"], "content": text(row["content"], 300),
+        }
+
+    def _trace_links_locked(self, character_id, memory_ids, tables):
+        if not memory_ids or "conversation_runtime_traces" not in tables:
+            return {}
+        links = {}
+        for start in range(0, len(memory_ids), 300):
+            chunk = memory_ids[start:start + 300]
+            marks = ",".join("?" for _ in chunk)
+            rows = self.store.conn.execute(
+                f"""SELECT t.conversation_id,t.source_conversation_event_id,t.trace_json,t.created_at_epoch,
+                           j.value AS memory_id
+                    FROM conversation_runtime_traces t,
+                         json_each(CASE WHEN json_valid(t.trace_json) THEN t.trace_json ELSE '{{}}' END,'$.created_memory_ids') j
+                    WHERE t.character_id=? AND j.type='integer' AND j.value IN ({marks})
+                    ORDER BY t.created_at_epoch DESC,t.id DESC LIMIT ?""",
+                [character_id, *chunk, MAX_COGNITION_TRACES],
+            ).fetchall()
+            for row in rows:
+                links.setdefault(int(row["memory_id"]), row)
+        return links
+
+    def _trace_witnesses_locked(self, link, peer, tables):
+        if link is None or "conversation_events" not in tables:
+            return [], []
+        trace = obj(link["trace_json"])
+        if not isinstance(trace, dict):
+            return [], []
+        conversation_id = link["conversation_id"]
+        ids = []
+        raw_recent = trace.get("recent_group_event_ids")
+        if isinstance(raw_recent, list):
+            ids.extend(value for value in raw_recent[:MAX_RECENT_GROUP_EVENTS] if type(value) is int)
+        history = trace.get("shared_history_retrieval")
+        raw_history = history.get("events") if isinstance(history, dict) else None
+        if isinstance(raw_history, list):
+            for item in raw_history[:MAX_SHARED_HISTORY_EVENTS]:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("conversation_id") != conversation_id:
+                    continue
+                if type(item.get("source_conversation_event_id")) is int:
+                    ids.append(item["source_conversation_event_id"])
+        witnesses, withdrawn = [], []
+        seen = set()
+        for event_id in ids:
+            if event_id in seen:
+                continue
+            seen.add(event_id)
+            fact = self._group_event_locked(conversation_id, event_id)
+            if fact is None:
+                continue
+            event, meta = fact["event"], fact["metadata"]
+            if event.event_type not in ("USER_MESSAGE", "CHARACTER_MESSAGE"):
+                continue
+            if not is_real_experience(meta):
+                continue
+            if not self._fact_authors_peer(fact, peer):
+                continue
+            (withdrawn if bool(meta.get("hidden")) else witnesses).append(fact)
+        return witnesses, withdrawn

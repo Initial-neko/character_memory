@@ -6,7 +6,7 @@ from character_memory.storage.sqlite import SQLiteStore
 
 
 def test_default_model_is_deepseek_v41_flash():
-    assert Settings().chat_model == "deepseek-flash"
+    assert Settings().chat_model == "deepseek-v4.1-flash"
 
 
 def test_intent_records_source_event_id(tmp_path):

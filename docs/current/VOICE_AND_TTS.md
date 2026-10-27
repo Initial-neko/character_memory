@@ -1451,7 +1451,7 @@ Response:
 {
   "ok": true,
   "instruct": "年轻女性声线，音色清亮柔和，略带慵懒感……",
-  "model": "deepseek-flash",
+  "model": "deepseek-v4.1-flash",
   "total_ms": 1234.5
 }
 ```

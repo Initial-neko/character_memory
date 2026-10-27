@@ -133,6 +133,15 @@ def _model_call_record(stage: str, schema: type[BaseModel], *, trace=None, error
     return record
 
 
+def _source_scope_metadata(scope: dict | None) -> dict:
+    """Copy a Space source fact's scope onto the event derived from it.
+
+    Legacy facts carry no scope and must stay legacy-real, so an absent scope
+    adds no key at all instead of writing a default REAL scope.
+    """
+    return {} if scope is None else {"experience_scope": dict(scope)}
+
+
 def _summarize_model_calls(details: dict) -> dict:
     """Status-sized view of the ledger: never carries the raw model text.
 
@@ -827,6 +836,7 @@ Sources:
                             "explicitly_mentioned": explicitly_mentioned,
                             "mentions": list(source.mentions),
                             "conversation_id": f"space:{post.id}:thread:{root_id}:target:{target_id}",
+                            **_source_scope_metadata(source.experience_scope),
                         },
                     )
                 )
@@ -953,6 +963,7 @@ Sources:
                         "thread_root_comment_id": root_id,
                         "propagation_round": round_index + 1,
                         "conversation_id": f"space:{post.id}:thread:{root_id}:target:{target_id}",
+                        **_source_scope_metadata(source.experience_scope),
                     },
                 )
             )
@@ -1044,6 +1055,7 @@ Sources:
                         "post_id": post.id,
                         "author_id": post.character_id,
                         "conversation_id": f"space:{post.id}:viewer:{character_id}",
+                        **_source_scope_metadata(post.experience_scope),
                     },
                 )
             )

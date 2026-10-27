@@ -177,15 +177,18 @@ class PersonRuntime:
     def _memory_source_text(event: Event, recent: list[Event]) -> str:
         """The user's own words the reaction could have learned this fact from.
 
-        Only the source event and earlier USER_MESSAGE events count. The
-        person's own earlier messages are excluded on purpose: a previous guess
-        is not a source, and letting it count would let one fabrication license
-        the next one indefinitely.
+        Only user-authored turns count. The current event is included only when
+        it is a USER_MESSAGE: a TIME_TICK / PROACTIVE_INTENT carries system or
+        the person's own earlier wording, and a CHARACTER_MESSAGE is the
+        person's own earlier guess. Letting any of those count would let one
+        fabrication license the next one indefinitely.
         """
-        parts = [(event.content or "").strip()]
+        parts = []
+        if event.event_type == EventType.USER_MESSAGE:
+            parts.append((event.content or "").strip())
         for item in recent or []:
-            if item.event_type == EventType.USER_MESSAGE and (item.content or "").strip():
-                parts.append(item.content.strip())
+            if item.event_type == EventType.USER_MESSAGE:
+                parts.append((item.content or "").strip())
         return "\n".join(part for part in parts if part)
 
     def _prepare_memory_writes(self, character_id: str, event_time, candidates, *, source_text: str | None = None):

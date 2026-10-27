@@ -15,7 +15,10 @@ from character_memory.application.group_conversation_service import GroupConvers
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, MemoryCandidate, PersonReaction
 from character_memory.llm.client import PersonModel
 from character_memory.memory.embedding import DeterministicEmbedding
-from character_memory.memory.pronoun_fidelity import enforce_source_gender_fidelity
+from character_memory.memory.pronoun_fidelity import (
+    enforce_source_gender_fidelity,
+    has_gender_evidence,
+)
 from character_memory.memory.recall import VectorRecall
 from character_memory.runtime.person_runtime import PersonRuntime
 from character_memory.storage.sqlite import SQLiteStore
@@ -121,6 +124,99 @@ def test_guard_uses_persona_only_for_character_scoped_memory():
 def test_guard_is_idempotent_for_already_neutral_content():
     content, count = enforce_source_gender_fidelity("TA今天很开心", "USER", source_text="今天很开心")
     assert (content, count) == ("TA今天很开心", 0)
+
+
+# --- neutral compounds and Latin look-alikes -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "neutral",
+    ["其他", "吉他", "他乡", "他人", "他日", "他杀", "字母", "分母", "声母",
+     "韵母", "母语", "师父", "弟子", "螺母", "酵母", "航母", "航空母舰"],
+)
+def test_neutral_compounds_are_not_gender_evidence(neutral):
+    assert has_gender_evidence(neutral) is False
+
+
+@pytest.mark.parametrize("gendered", ["他说", "她是", "父母", "兄弟", "姐妹", "女生", "男朋友"])
+def test_real_gender_words_remain_evidence(gendered):
+    assert has_gender_evidence(gendered) is True
+
+
+def test_neutral_compounds_in_source_do_not_disable_the_guard():
+    # Before this fix, 其他 and 吉他 matched the bare 他 substring, so the source
+    # looked gendered and the unsupported 她 survived.
+    content, count = enforce_source_gender_fidelity(
+        "她今天在别的城市出差，晚上练了会儿吉他",
+        "USER",
+        source_text="今天在其他城市出差，晚上练了会儿吉他",
+    )
+    assert count == 1
+    assert content == "TA今天在别的城市出差，晚上练了会儿吉他"
+
+
+def test_neutral_compounds_in_candidate_are_not_rewritten():
+    # The replacement must not corrupt a neutral word either: 其他 is not 其TA.
+    content, count = enforce_source_gender_fidelity(
+        "用户其他时间都在练吉他，还背了字母表，她很喜欢",
+        "USER",
+        source_text="今天很忙",
+    )
+    assert count == 1
+    assert content == "用户其他时间都在练吉他，还背了字母表，TA很喜欢"
+
+
+def test_latin_ta_inside_english_words_is_not_evidence():
+    content, count = enforce_source_gender_fidelity(
+        "她今天把 data 和 start 时间都记下了",
+        "USER",
+        source_text="I checked the data and started early",
+    )
+    assert count == 1
+    assert content.startswith("TA今天")
+
+
+@pytest.mark.parametrize("neutral", ["data", "start", "table", "metadata", "status"])
+def test_english_words_containing_ta_are_not_evidence(neutral):
+    assert has_gender_evidence(neutral) is False
+
+
+@pytest.mark.parametrize("neutral_pronoun", ["TA", "ta", "Ta"])
+def test_standalone_latin_neutral_pronoun_is_evidence(neutral_pronoun):
+    assert has_gender_evidence(f"{neutral_pronoun}今天来了") is True
+
+
+def test_provenance_accepts_only_user_authored_turns():
+    """A tick, an intent or the person's own message is not gender evidence."""
+
+    user_turn = Event(
+        character_id="rin",
+        event_type=EventType.USER_MESSAGE,
+        event_time=NOW,
+        content="今天有点累",
+    )
+    character_turn = Event(
+        character_id="rin",
+        event_type=EventType.CHARACTER_MESSAGE,
+        event_time=NOW,
+        content="她今天好像很累。",
+    )
+    proactive = Event(
+        character_id="rin",
+        event_type=EventType.PROACTIVE_INTENT,
+        event_time=NOW,
+        content="之前留下的意图：她说最近很累。",
+    )
+    assert PersonRuntime._memory_source_text(proactive, [user_turn, character_turn]) == "今天有点累"
+    assert PersonRuntime._memory_source_text(user_turn, [character_turn]) == "今天有点累"
+    # With no user-authored turn there is nothing the reaction could have learned
+    # the gender from, so an unsupported pronoun is neutralized.
+    content, count = enforce_source_gender_fidelity(
+        "她很累",
+        "USER",
+        source_text=PersonRuntime._memory_source_text(proactive, [character_turn]),
+    )
+    assert (content, count) == ("TA很累", 1)
 
 
 # --- direct runtime path --------------------------------------------------------

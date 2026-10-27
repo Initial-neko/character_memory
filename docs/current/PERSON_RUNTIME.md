@@ -795,7 +795,7 @@ receipts. Draft clicks alone create none of these signals.
 signals reference it by FactRef and do not duplicate its body. Explicit signal
 reads at `GET /v2/reply-suggestions/{batch_id}/signals` do not call a model and can
 show the operator's recorded feedback after the draft batch has become stale.
-Generation supplies the current SuggestionOutput JSON Schema and its exact suggestions top-level field to the model before the untrusted visible-conversation material; schema validation remains strict and failed outputs are not renamed into valid batches.
+Generation identifies the local USER as the draft author and uses a user-draft preference lens instead of the companion-reply instructions. Persona describes the companion, not undocumented user identity; messages, summaries and memory candidates must keep unspecified user gender/identity neutral. Generation supplies the current SuggestionOutput JSON Schema and its exact suggestions top-level field to the model before the untrusted visible-conversation material; schema validation remains strict and failed outputs are not renamed into valid batches.
 
 `POST /v2/reply-suggestions/feedback` records only explicit IGNORE or
 EXPLICIT_FEEDBACK, with its own durable request identity. Free text is retained

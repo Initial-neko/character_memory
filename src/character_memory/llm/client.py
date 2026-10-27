@@ -30,6 +30,7 @@ logger = logging.getLogger("character_memory.llm")
 # Factual modality is a provider-system boundary; the runtime supplies the sources.
 _PERSON_SOURCE_FIDELITY = (
     '事实准确性优先于人物化修辞和叙事完整。'
+    'Persona只描述人物本人，不能推导用户的性别、年龄、身份或关系。来源未明确提供用户身份时，以用户或你中性指代对方；不要把人物性别转给用户。对外消息、安全摘要和记忆候选都遵守此边界，不把推测写成事实。'
     '对外消息与安全摘要必须共同保持来源中的主体、确定程度和行动状态：偏好或愿望不是已做过，约定不是已完成，未记录不是不存在；不要为自然感补造往事、引语、动机、准备细节或结果。'
     '明确报告已完成的事实可以承认，当前用户给出的原文可以引用，不以缺少旧记录否认当前输入。'
     '用户要求原样重复时，只重复原文，不增删字符、标点或额外回应。'

@@ -194,3 +194,22 @@ def test_actual_generation_prompt_contains_the_output_schema(tmp_path):
         assert actual['properties']['suggestions']['minItems']==3
         assert actual['properties']['suggestions']['maxItems']==5
     finally:store.close()
+def test_generation_declares_local_user_as_the_draft_author(tmp_path):
+    store=SQLiteStore(tmp_path/'draft-author.db');model=Model();service=setup(store,model)
+    try:
+        service.generate(request(event(store,'你想先练哪一句？')))
+        prompt=model.prompts[0]
+        assert 'Draft Author JSON:\n' in prompt
+        author=json.loads(prompt.split('Draft Author JSON:\n',1)[1].splitlines()[0])
+        assert author=={'actor_type':'USER','actor_id':'user','recipient':{'type':'DIRECT','character_id':'rin'}}
+        assert 'USER_MESSAGE' in prompt and '不是伙伴对用户的指导' in prompt
+    finally:store.close()
+def test_draft_preferences_do_not_turn_user_drafts_into_companion_replies():
+    from character_memory.domain.experience_profile import render_experience_profile
+    profile={'version':1,'preferences':{'tone':'CUTE','energy':'QUIET','verbosity':'BRIEF'}}
+    companion=render_experience_profile(profile)
+    draft=render_experience_profile(profile,user_draft=True)
+    assert '仅用于面向用户的表达' in companion
+    assert '草稿作者始终是用户' in draft
+    assert '仅用于面向用户的表达' not in draft
+    assert '保留人物自己的兴趣' not in draft

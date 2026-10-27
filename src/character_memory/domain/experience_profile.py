@@ -33,11 +33,14 @@ _HINTS={
     'BRIEF':'简短，先说重点。', 'BALANCED':'按问题需要给适量说明。', 'DETAILED':'需要时展开解释，避免重复。',
 }
 
-def render_experience_profile(profile) -> str:
+def render_experience_profile(profile, *, user_draft: bool = False) -> str:
     if not profile or not profile.get('preferences'):return ''
     preferences=ExperiencePreferences.model_validate(profile['preferences']).model_dump(exclude_none=True)
     if not preferences:return ''
     lines=['# Explicit User Experience Preferences',f"profile_version={profile['version']}"]
     lines.extend(f'- {key}={value}: {_HINTS[value]}' for key,value in preferences.items())
-    lines.append('这些是用户明确选择的相处/表达偏好，不是人物Persona、现实事实、用户心情或授权。仅用于面向用户的表达；保留人物自己的兴趣、观点、分歧、拒绝和沉默。不得把偏好当成必须执行的任务，或向外部工具公开。')
+    if user_draft:
+        lines.append('这些是用户明确选择的草稿表达偏好，不是人物Persona或事实。草稿作者始终是用户，接收者是当前对话中的伙伴；不要生成伙伴对用户的指导。候选由用户自行选择或改写，不替用户承诺，不把人物的身份或经历转给用户。')
+    else:
+        lines.append('这些是用户明确选择的相处/表达偏好，不是人物Persona、现实事实、用户心情或授权。仅用于面向用户的表达；保留人物自己的兴趣、观点、分歧、拒绝和沉默。不得把偏好当成必须执行的任务，或向外部工具公开。')
     return '\n'.join(lines)

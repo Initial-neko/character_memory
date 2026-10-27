@@ -200,3 +200,9 @@ def test_non_person_structured_system_does_not_gain_person_fidelity_policy():
         assert messages[1]['content']=='non-person contract'
     finally:
         model.close()
+
+def test_person_source_contract_keeps_unknown_user_identity_neutral():
+    system=OpenAICompatibleModel._system_prompt(PersonReaction)
+    assert 'Persona只描述人物本人' in system
+    assert '不能推导用户的性别' in system
+    assert '记忆候选' in system and '用户或你' in system

@@ -53,6 +53,8 @@ def test_m2_full_ui_story_survives_refresh_and_actual_restart(page, tmp_path, mo
     monkeypatch.setenv('M2_FULL_LOOP_STORY', '1')
     server = contextmanager(suggestions_server.__wrapped__)
     evidence = Path(os.getenv('M2_FULL_LOOP_EVIDENCE_DIR', str(tmp_path / 'story-evidence')))
+    if os.getenv('M2_PREVIEW_MODE') == '1':
+        evidence = evidence / 'isolated-preview'
     evidence.mkdir(parents=True, exist_ok=True)
     pngs, assets, runtimes, steps = [], {}, [], []
     def capture(label, base):
@@ -73,6 +75,10 @@ def test_m2_full_ui_story_survives_refresh_and_actual_restart(page, tmp_path, mo
         runtime = page.request.get(base + '/__e2e/suggestions-runtime').json()
         assert runtime['story'] is True
         runtimes.append(runtime)
+        if os.getenv('M2_PREVIEW_MODE') == '1':
+            assert page.request.get(base + '/v1/settings').status == 403
+            assert page.request.post(base + '/v1/chat/messages', headers={'Origin': 'https://foreign.invalid'}, data={}).status == 403
+            assert page.request.post(base + '/v1/groups', data={}).status == 403
         box = profile_dialog(page)
         box.get_by_label('可爱', exact=True).check()
         box.get_by_label('安静', exact=True).check()
@@ -107,6 +113,21 @@ def test_m2_full_ui_story_survives_refresh_and_actual_restart(page, tmp_path, mo
         assert applied['profile_version'] == 1 and applied['applied_profile_version'] == 2
         expect(feedback.get_by_role('status')).to_contain_text('下次回复')
         capture('feedback-applied', base)
+        authored = next(row for row in signals(page, base, batch) if row['kind'] == 'EXPLICIT_FEEDBACK')
+        feedback_row = feedback.locator('[data-signal-id=' + json.dumps(authored['id']) + ']')
+        feedback_row.get_by_role('button', name='更正', exact=True).click()
+        feedback.get_by_label('反馈内容', exact=True).fill('希望简短，具体细节需要时再展开')
+        with page.expect_response(lambda r: r.request.method == 'PATCH' and r.url.endswith('/feedback/' + authored['id'])) as corrected:
+            feedback.get_by_role('button', name='保存更正', exact=True).click()
+        assert corrected.value.status == 200, corrected.value.text()
+        expect(feedback_row).to_contain_text('希望简短，具体细节需要时再展开')
+        page.once('dialog', lambda dialog: dialog.accept())
+        with page.expect_response(lambda r: r.url.endswith('/feedback/' + authored['id'] + '/withdraw')) as withdrawn:
+            feedback_row.get_by_role('button', name='撤回', exact=True).click()
+        assert withdrawn.value.status == 200, withdrawn.value.text()
+        expect(feedback_row).to_contain_text('已撤回')
+        assert page.request.get(base + '/v2/me/experience-profile').json()['version'] == 2
+        capture('feedback-withdrawn-preference-retained', base)
         feedback.get_by_role('button', name='关闭建议反馈').click()
         steps.append(send_and_wait(page, base, '明确反馈之后继续聊'))
         changed = generate(page)
@@ -141,9 +162,18 @@ def test_m2_full_ui_story_survives_refresh_and_actual_restart(page, tmp_path, mo
         final = page.request.get(base + '/v2/me/experience-profile').json()
         assert final['version'] == 2 and final['preferences'] == calls[-1]['preferences']
         capture('restarted-and-answered', base)
+        if os.getenv('M2_PREVIEW_MODE') == '1':
+            page.goto(base + '/preview')
+            expect(page.get_by_text('隔离体验 · 固定本地回复', exact=True)).to_be_visible()
+            frame = page.frame_locator('iframe')
+            expect(frame.locator('#sendButton')).to_be_visible()
+            assert frame.locator('html').evaluate('(node) => node.scrollWidth <= innerWidth')
+            capture('isolated-preview', base)
         final_signals = signals(page, base, batch)
         assert len([row for row in final_signals if row['kind'] == 'EDIT']) == 1
         assert len([row for row in final_signals if row['kind'] == 'EXPLICIT_FEEDBACK']) == 1
+        governed = next(row for row in final_signals if row['kind'] == 'EXPLICIT_FEEDBACK')
+        assert governed['withdrawn'] and governed['revision'] == 3 and not governed['comment']
     assert all(row['external_calls'] == 0 for row in calls + contexts)
     record = {'captured_at': datetime.now(timezone.utc).isoformat(), 'viewport': {'width': width, 'height': height},
         'runtimes': runtimes, 'assets_sha256': assets, 'initial_profile': initial, 'final_profile': final,

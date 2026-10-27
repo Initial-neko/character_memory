@@ -33,7 +33,7 @@ def suggestions_server(tmp_path):
            'CHARACTER_MEMORY_E2E_DB': str(tmp_path / 'browser.db'),
            'CHARACTER_MEMORY_E2E_MEDIA': str(tmp_path / 'media'),
            'CHARACTER_MEMORY_E2E_PERSONA_ROOT': str(tmp_path / 'personas'),
-           'SUGGESTION_CALL_LOG': str(tmp_path / 'calls.jsonl')}
+           'SUGGESTION_CALL_LOG': str(tmp_path / 'calls.jsonl'), 'M2_PREVIEW_ROOT': str(tmp_path)}
     tree = None
     options = {}
     if os.name == 'nt':
@@ -42,7 +42,7 @@ def suggestions_server(tmp_path):
         options['creationflags'] = 0x00000004 | 0x08000000
     log_path = tmp_path / 'server.log'
     with log_path.open('wb') as log:
-        proc = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'e2e_suggestions_ui_app:app',
+        proc = subprocess.Popen([sys.executable, '-m', 'uvicorn', ('e2e_m2_preview_app:app' if os.getenv('M2_PREVIEW_MODE') == '1' else 'e2e_suggestions_ui_app:app'),
             '--app-dir', str(ROOT / 'tests'), '--host', '127.0.0.1', '--port', str(port),
             '--log-level', 'warning'], cwd=ROOT, env=env, stdout=log, stderr=log, **options)
         try:

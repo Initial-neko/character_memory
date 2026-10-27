@@ -70,3 +70,12 @@ artifacts/
 
 # Launcher state (stack.pid / stack.stop) and stack logs; local scratch.
 .debug-output/
+
+# Local agent/test scratch directories. These hold full repo copies, pytest
+# temp trees and one-off evidence; never commit them and never let a
+# `git add -A` sweep them into a commit.
+.tmp-runtime/
+.verify-m2/
+.pytest_tmp_scope_review/
+reviewmodalitytmp/
+debug.log

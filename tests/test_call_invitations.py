@@ -147,8 +147,8 @@ def test_proactive_invitation_is_only_proposed_in_audit(tmp_path):
     store=SQLiteStore(tmp_path/'intent.db');emb=DeterministicEmbedding();model=InviteModel()
     runtime=PersonRuntime(store,VectorRecall(store,emb),emb,model,'人物',call_policy=CallInvitationPolicy(enabled=True))
     chat=ChatService(store,runtime,FixedClock(NOW))
-    store.append_event(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=NOW-timedelta(hours=1),content='原有私聊',metadata={'channel':'DIRECT','conversation_id':'direct'}))
-    intent=store.add_intent('a','问问近况','PROACTIVE_MESSAGE',NOW-timedelta(hours=1),NOW-timedelta(minutes=1),NOW+timedelta(hours=1))
+    source=store.append_event(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=NOW-timedelta(hours=1),content='原有私聊',metadata={'channel':'DIRECT','conversation_id':'direct'}))
+    intent=store.add_intent('a','问问近况','PROACTIVE_MESSAGE',NOW-timedelta(hours=1),NOW-timedelta(minutes=1),NOW+timedelta(hours=1),source_event_id=source.id)
     outcomes=ProactiveService(store,chat).dispatch_due(['a'],NOW)
     assert outcomes[0]['status']=='EXECUTED' and outcomes[0]['resolution_reason']=='CALL_INVITATION_PROPOSED'
     assert len(model.contexts)==1

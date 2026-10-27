@@ -200,3 +200,35 @@ def test_non_person_structured_system_does_not_gain_person_fidelity_policy():
         assert messages[1]['content']=='non-person contract'
     finally:
         model.close()
+
+
+def test_retired_opencode_alias_is_canonical_before_the_only_request():
+    model=OpenAICompatibleModel('fixture-key',model='deepseek-flash',vision_model='deepseek-flash',attempts=1)
+    try:
+        assert model.model=='deepseek-v4.1-flash'
+        assert model.vision_model=='deepseek-v4.1-flash'
+        assert model.last_model=='deepseek-v4.1-flash'
+    finally:model.close()
+
+
+def test_retired_alias_does_not_change_other_providers_or_custom_vision():
+    other=OpenAICompatibleModel('fixture-key',model='deepseek-flash',base_url='https://other.example/v1',vision_model='private-vision',attempts=1)
+    official=OpenAICompatibleModel('fixture-key',model='deepseek-flash',vision_model='private-vision',attempts=1)
+    try:
+        assert other.model=='deepseek-flash' and other.vision_model=='private-vision'
+        assert official.model=='deepseek-v4.1-flash' and official.vision_model=='private-vision'
+    finally:other.close();official.close()
+
+def test_retired_alias_sends_one_canonical_wire_request():
+    captured=[]
+    def handle(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(200,json={'choices':[{'message':{'content':'{"actions":[]}'}}]})
+    model=OpenAICompatibleModel('fixture-key',model='deepseek-flash',attempts=1)
+    model.client.close();model.client=httpx.Client(transport=httpx.MockTransport(handle))
+    try:
+        result=model.react_call_for_session('hello','alias-wire-test')
+        assert len(captured)==1
+        assert captured[0]['model']=='deepseek-v4.1-flash'
+        assert result.trace.model=='deepseek-v4.1-flash'
+    finally:model.close()

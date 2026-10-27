@@ -146,11 +146,19 @@ class PersonModel(ABC):
         pass
 
 
+def _canonical_provider_model(model: str, base_url: str) -> str:
+    # Provider-confirmed retirement; normalize before sending, never retry a call.
+    if model == "deepseek-flash" and base_url.rstrip("/") in {
+        "https://opencode.ai/zen/go/v1", "https://opencode.ai/zen/v1",
+    }:
+        return "deepseek-v4.1-flash"
+    return model
+
 class OpenAICompatibleModel(PersonModel):
     def __init__(
         self,
         api_key: str,
-        model: str = "deepseek-flash",
+        model: str = "deepseek-v4.1-flash",
         base_url: str = "https://opencode.ai/zen/go/v1",
         timeout: float = 120,
         temperature: float = 0.7,
@@ -160,8 +168,8 @@ class OpenAICompatibleModel(PersonModel):
         usage_recorder: LlmUsageRecorder | None = None,
     ):
         self.api_key = api_key
-        self.model = model
-        self.vision_model = vision_model
+        self.model = _canonical_provider_model(model, base_url)
+        self.vision_model = _canonical_provider_model(vision_model, base_url)
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.temperature = temperature
@@ -176,7 +184,7 @@ class OpenAICompatibleModel(PersonModel):
         self.last_request_messages: list[dict] = []
         self.last_response_text: str = ""
         self.last_attempt: int = 0
-        self.last_model: str = model
+        self.last_model: str = self.model
         self.client = httpx.Client(timeout=self.timeout)
         self._debug_lock = threading.Lock()
         self.usage_recorder = usage_recorder

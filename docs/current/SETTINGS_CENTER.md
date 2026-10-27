@@ -1,4 +1,13 @@
 # Settings Center
+## OpenCode model retirement compatibility
+
+The default chat model is `deepseek-v4.1-flash`. On the exact official OpenCode
+`https://opencode.ai/zen/go/v1` and `https://opencode.ai/zen/v1` roots, the retired
+`deepseek-flash` ID resolves to that replacement before the request is sent.
+This applies to a matching chat or vision ID, preserves custom vision IDs and
+other providers, and adds no fallback request or retry. Persisted configuration
+is not rewritten; traces and usage record the actual canonical model. Changing
+these defaults does not deploy or restart an existing formal runtime.
 
 Settings Center (`:8003/settings`) is the persistent configuration surface for Character Memory. Source code remains authoritative; this document describes the current `main` contract.
 

@@ -18,6 +18,33 @@
   const formatted = t => {if(!t)return "未设置";const d=new Date(t);return Number.isNaN(+d)?"时间未记录":d.toLocaleString("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});};
   const safeURL = value => {try {const u=new URL(value,location.origin);return ["http:","https:"].includes(u.protocol)?u.href:"";}catch{return "";}};
   async function get(url) {const r=await fetch(url);if(!r.ok){const data=await r.json().catch(()=>({}));throw new Error(data.detail||`请求失败 (${r.status})`);}return r.json();}
+  async function postJSON(url, body) {const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(!r.ok){const data=await r.json().catch(()=>({}));throw new Error(data.detail||`请求失败 (${r.status})`);}return r.json();}
+  const cognitionStatus={ACTIVE:"当前认知",INVALIDATED:"来源已失效",SUPERSEDED:"已更正",FORGOTTEN:"已忘记"};
+  const cognitionReason={MEMORY_CORRECTED:"这条记忆已有更正版本",MEMORY_FORGOTTEN:"这条记忆已被忘记",SOURCE_MISSING:"原始来源记录缺失",SOURCE_WITHDRAWN:"原始来源已撤回",SOURCE_INVALID:"原始来源记录无效"};
+  const evidenceRoles={DIRECT_SOURCE:"直接来源",WITNESSED_INPUT:"实际看到的输入",WITHDRAWN_INPUT:"已撤回的来源"};
+  const evidenceKinds={EVENT:"人物事件",CONVERSATION_EVENT:"共享群聊事件"};
+  const changeKinds={MEMORY_CREATED:"记忆创建",MEMORY_CORRECTED:"记忆更正",MEMORY_FORGOTTEN:"记忆忘记"};
+  function cognitionCard(entry) {
+    const memory=entry.memory||{}, status=cognitionStatus[entry.status]||entry.status;
+    const reason=cognitionReason[entry.reason]||"";
+    const evidence=(entry.evidence||[]).map(e=>`<div class="cognition-evidence"><small>${esc(evidenceRoles[e.role]||e.role)} · ${esc(evidenceKinds[e.kind]||e.kind)} #${esc(e.id)} · ${esc(formatted(e.time))}</small><p>${esc(e.content||"来源无正文")}</p></div>`).join("");
+    const actions=entry.asserted
+      ? `<button type="button" data-cognition-action="correct" data-memory-id="${esc(memory.id)}" title="创建更正版本；原记忆与原始 Event 保留为历史">更正</button><button type="button" data-cognition-action="forget" data-memory-id="${esc(memory.id)}" title="不再作为长期记忆；原始事件不删除">忘记</button>`
+      : entry.status==="FORGOTTEN"
+        ? `<button type="button" data-cognition-action="restore" data-memory-id="${esc(memory.id)}" title="恢复这条已忘记的记忆">恢复</button>`
+        : entry.status==="INVALIDATED"
+          ? `<button type="button" data-cognition-action="forget" data-memory-id="${esc(memory.id)}" title="不再作为长期记忆；原始事件不删除">忘记</button>`
+          : "";
+    return `<article class="memory-card cognition-card ${entry.asserted?"":"inactive"}" data-cognition-memory="${esc(memory.id)}"><small><span class="badge ${entry.asserted?"":"warn"}">${esc(status)}</span> · 记忆 #${esc(memory.id)} · ${esc(formatted(memory.event_time))}</small><p>${esc(memory.content||"无正文")}</p>${reason?`<p class="hint">${esc(reason)}；不再作为当前断言。</p>`:""}<details><summary>查看依据（${esc((entry.evidence||[]).length)} 条）</summary>${evidence||'<p class="hint">没有可展示的来源记录。</p>'}</details>${actions?`<div class="cognition-actions">${actions}</div>`:""}</article>`;
+  }
+  function renderCognition(cognition, characterName, name) {
+    const entries=Array.isArray(cognition.cognitions)?cognition.cognitions:[];
+    const active=entries.filter(entry=>entry.asserted), historical=entries.filter(entry=>!entry.asserted);
+    const counts=cognition.counts||{}, changes=Array.isArray(cognition.change_history)?cognition.change_history:[];
+    const boundaries=Array.isArray(cognition.boundaries)?cognition.boundaries:[];
+    const changeRows=changes.map(change=>`<li><small>${esc(formatted(change.at))} · ${esc(changeKinds[change.kind]||change.kind)}${change.kind==="MEMORY_CORRECTED"&&change.to_memory_id?` · #${esc(change.memory_id)} → #${esc(change.to_memory_id)}`:change.memory_id?` · #${esc(change.memory_id)}`:""}${change.at?"":" · 时间未记录"}</small>${change.to_content?`<p>${esc(change.to_content)}</p>`:""}</li>`).join("");
+    return `<section class="cognition-panel" aria-label="有来源的定向关系认知"><h3>${esc(characterName)} 对 ${esc(name)} 的认知</h3><p class="hint">方向 ${esc(cognition.direction||"")} · 只展示该人物自己保存、且有可核验来源的记忆；同群不等于互动，不推断好感或对方想法。当前断言 ${esc(counts.active??0)} 条，失效 ${esc(counts.invalidated??0)} 条，已更正 ${esc(counts.superseded??0)} 条，已忘记 ${esc(counts.forgotten??0)} 条${counts.simulated_excluded?`，SIMULATED 排除 ${esc(counts.simulated_excluded)} 条`:""}。</p><h3>当前有依据的认知</h3>${active.map(cognitionCard).join("")||'<p class="hint">没有查到有可核验来源的当前认知；这不代表人物没有想法，也不代表关系是空白。</p>'}${historical.length?`<h3>已失效或历史版本</h3>${historical.map(cognitionCard).join("")}`:""}${boundaries.length?`<h3>边界</h3><ul class="cognition-boundaries">${boundaries.map(item=>`<li>${esc(item.text)}</li>`).join("")}</ul>`:""}${changes.length?`<details class="cognition-history"><summary>变化历史（${esc(changes.length)}）</summary><ul>${changeRows}</ul></details>`:""}</section>`;
+  }
   function renderCharacterList() {
     const host=$("lifeCharacters");
     if(!profiles.length){host.innerHTML='<p class="life-character-empty">没有可选择的人物。</p>';return;}
@@ -28,8 +55,35 @@
   }
   function renderRelationshipReview(data) {
     const area=$("relationshipReview"), name=profiles.find(p=>p.id===data.peer)?.name||(data.peer==="user"?"用户":data.peer);
-    const character=$("character").value;
-    area.innerHTML=`<h2>与${esc(name)}的近期回顾</h2><p class="hint">${esc(formatted(data.window.start))} — ${esc(formatted(data.window.end))} · 所选日向前最多 7 天，与下方当天筛选分开。只读记录，不推断好感或共同活动完成。</p><h3>已记录的互动</h3>${data.interactions.map(i=>`<article class="memory-card"><small>${esc(formatted(i.time))} · ${esc(channels[i.channel])} · ${esc(sourceNames[i.source.kind])} #${esc(i.source.id)}</small><p>${esc(i.content)}</p><a href="/?${esc(new URLSearchParams({life_character:character,life_key:i.key}))}" title="复核已有来源并在原会话准备草稿；确认发送后才调用模型">查看来源并准备聊天 ↗</a></article>`).join("")||'<p class="hint">该范围内没有可确认的互动记录，关系情况未知；不代表没有交流或选择了沉默。</p>'}${data.interactions_has_more?'<p class="hint">仅显示最近 10 条；当天详情仍可在下方查看。</p>':""}<h3>尚待处理的主动表达意图</h3><p class="hint">当前状态，查询所有创建日期，最多 5 条；不受上方回顾日期或渠道/搜索筛选限制。意图不是承诺，也不是已发生经历；群聊文字邀请不自动解析成计划。</p>${data.pending_intents.map(i=>`<article class="memory-card"><span class="badge plan">尚未执行</span><p>${esc(i.content)}</p><small>意图 #${esc(i.source.id)} · ${i.source_known?`源事件 #${esc(i.source.event_id)}`:"旧意图来源未记录，接收对象沿用现有 User Direct 兼容行为"}<br>最早：${esc(formatted(i.earliest_at))} · 失效：${esc(formatted(i.expires_at))}</small></article>`).join("")||(data.peer==="user"?'<p class="hint">没有查到有效待处理的 User Direct 意图，不据此推断人物没有未来想法。</p>':'<p class="hint">当前只支持向用户的 Direct 主动意图，没有向该人物的可执行计划接口。</p>')}${data.pending_has_more?'<p class="hint">另有待处理意图；可在“未来意图”查看已有记录。</p>':""}`;
+    const character=$("character").value, characterId=data.character_id||character;
+    const characterName=profiles.find(p=>p.id===characterId)?.name||characterId;
+    const cognition=data.cognition&&Array.isArray(data.cognition.cognitions)?renderCognition(data.cognition,characterName,name):"";
+    const openItems=Array.isArray(data.cognition?.open_items)?data.cognition.open_items:(data.pending_intents||[]);
+    const hasMore=Boolean(data.cognition?.open_items_has_more||data.pending_has_more);
+    area.innerHTML=`<h2>与${esc(name)}的近期回顾</h2><p class="hint">${esc(formatted(data.window.start))} — ${esc(formatted(data.window.end))} · 所选日向前最多 7 天，与下方当天筛选分开。只读记录，不推断好感或共同活动完成。</p>${cognition}<h3>已记录的互动</h3>${data.interactions.map(i=>`<article class="memory-card"><small>${esc(formatted(i.time))} · ${esc(channels[i.channel])} · ${esc(sourceNames[i.source.kind])} #${esc(i.source.id)}</small><p>${esc(i.content)}</p><a href="/?${esc(new URLSearchParams({life_character:character,life_key:i.key}))}" title="复核已有来源并在原会话准备草稿；确认发送后才调用模型">查看来源并准备聊天 ↗</a></article>`).join("")||'<p class="hint">该范围内没有可确认的互动记录，关系情况未知；不代表没有交流或选择了沉默。</p>'}${data.interactions_has_more?'<p class="hint">仅显示最近 10 条；当天详情仍可在下方查看。</p>':""}<h3>未完事项（尚未执行的主动意图）</h3><p class="hint">当前状态，查询所有创建日期，最多 5 条；不受上方回顾日期或渠道/搜索筛选限制。意图不是承诺，也不是已发生经历；群聊文字邀请不自动解析成计划。</p>${openItems.map(i=>{const id=i.source?.id??i.evidence?.id,eventId=i.source?.event_id??i.evidence?.event_id;return `<article class="memory-card"><span class="badge plan">尚未执行</span><p>${esc(i.content)}</p><small>意图 #${esc(id)} · ${i.source_known?`源事件 #${esc(eventId)}`:"旧意图来源未记录，接收对象沿用现有 User Direct 兼容行为"}<br>最早：${esc(formatted(i.earliest_at))} · 失效：${esc(formatted(i.expires_at))}</small></article>`;}).join("")||(data.peer==="user"?'<p class="hint">没有查到有效待处理的 User Direct 意图，不据此推断人物没有未来想法。</p>':'<p class="hint">当前只支持向用户的 Direct 主动意图，没有向该人物的可执行计划接口。</p>')}${hasMore?'<p class="hint">另有待处理意图；可在“未来意图”查看已有记录。</p>':""}`;
+    area.querySelectorAll('[data-cognition-action]').forEach(button=>{
+      button.onclick=async()=>{
+        const memoryId=Number(button.dataset.memoryId||0), action=button.dataset.cognitionAction;
+        if(!memoryId||!["correct","forget","restore"].includes(action))return;
+        const base=`/v1/characters/${encodeURIComponent(characterId)}/memories/${memoryId}`;
+        const card=button.closest('[data-cognition-memory]');
+        const current=card?.querySelector('p')?.textContent||"";
+        let body;
+        if(action==="correct"){
+          const corrected=window.prompt("更正这条关系认知：原记忆会保留为历史版本，不删除原始 Event。",current);
+          if(corrected==null||!corrected.trim()||corrected.trim()===current.trim())return;
+          body={content:corrected.trim()};
+        }else if(action==="forget"){
+          if(!window.confirm("让这个人物不再把这条内容作为长期记忆？原始经历不会删除。"))return;
+          body={active:false};
+        }else{
+          body={active:true};
+        }
+        button.disabled=true;
+        try{await postJSON(action==="correct"?`${base}/correct`:`${base}/active`,body);await load();}
+        catch(error){$("status").textContent=error.message;button.disabled=false;}
+      };
+    });
   }
   function render() {
     const peer=$("peer").value, visible=peer?items.filter(i=>i.participants.some(p=>p.id===peer)):items;

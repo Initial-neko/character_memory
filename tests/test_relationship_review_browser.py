@@ -77,3 +77,85 @@ def test_late_relationship_response_cannot_restore_old_peer(page):
     expect(page.locator("#relationshipReview")).to_contain_text("与B的近期回顾")
     page.evaluate("window.lateReview({ok:true,json:async()=>({peer:'user',window:{start:'2026-10-08',end:'2026-10-14'},interactions:[],pending_intents:[{content:'旧对象私人计划'}]})})")
     expect(page.locator("#relationshipReview")).not_to_contain_text("旧对象私人计划")
+
+
+def test_directional_cognition_shows_evidence_and_corrects_at_desktop_and_phone(page, tmp_path):
+    from playwright.sync_api import expect
+    state = {"corrected": False}
+    posts = []
+    def route(request):
+        url = request.request.url
+        method = request.request.method
+        if "/static/" in url:
+            name = url.split("/static/")[1]
+            request.fulfill(body=(WEB / name).read_bytes(), content_type=__import__("mimetypes").guess_type(name)[0] or "application/octet-stream")
+        elif method == "POST" and "/v1/characters/a/memories/11/correct" in url:
+            posts.append((url, request.request.post_data_json))
+            state["corrected"] = True
+            request.fulfill(json={"memory": {"id": 12, "content": "更正后的星灯认知"}})
+        elif "/v1/characters?" in url:
+            request.fulfill(json={"characters": [{"id": "a", "name": "莉娅"}, {"id": "b", "name": "芙露"}]})
+        elif "/relationship-review?" in url:
+            content = "更正后的星灯认知" if state["corrected"] else "莉娅记得芙露说过星灯已经修好了"
+            request.fulfill(json={
+                "character_id": "a", "peer": "b",
+                "window": {"start": "2026-10-08T00:00:00Z", "end": "2026-10-14T12:00:00Z"},
+                "interactions": [], "pending_intents": [], "interactions_has_more": False,
+                "pending_has_more": False,
+                "cognition": {
+                    "direction": "a->b", "character_id": "a", "peer": "b", "read_only": True,
+                    "asserted_count": 1,
+                    "cognitions": [
+                        {"memory": {"id": 11, "content": content, "memory_type": "EPISODIC", "importance": 0.8,
+                                    "event_time": "2026-10-13T12:00:00Z", "active": True, "superseded_by": None},
+                         "status": "ACTIVE", "reason": None, "asserted": True, "attribution": "TRACE_INPUT",
+                         "evidence": [{"kind": "CONVERSATION_EVENT", "id": 21, "conversation_id": "g",
+                                       "event_type": "CHARACTER_MESSAGE", "actor_type": "CHARACTER", "actor_id": "b",
+                                       "time": "2026-10-13T11:59:00Z", "content": "芙露说星灯已经修好了",
+                                       "role": "WITNESSED_INPUT"}]},
+                        {"memory": {"id": 9, "content": "芙露的旧说法", "memory_type": "EPISODIC", "importance": 0.6,
+                                    "event_time": "2026-10-12T12:00:00Z", "active": True, "superseded_by": None},
+                         "status": "INVALIDATED", "reason": "SOURCE_WITHDRAWN", "asserted": False,
+                         "attribution": "WITHDRAWN_INPUT", "evidence": []},
+                    ],
+                    "open_items": [],
+                    "change_history": [{"kind": "MEMORY_CORRECTED", "memory_id": 9, "at": "2026-10-13T12:00:00Z",
+                                        "to_memory_id": 11, "to_content": content}],
+                    "boundaries": [{"code": "DIRECTIONAL", "text": "A 对 B 与 B 对 A 分开计算，不能从一方推断另一方。"},
+                                   {"code": "WITNESSED_ONLY", "text": "同群不等于互动；只有实际看到对方消息才作为依据。"}],
+                    "counts": {"active": 1, "invalidated": 1, "superseded": 0, "forgotten": 0,
+                               "simulated_excluded": 0, "truncated": False},
+                },
+            })
+        elif "/life?" in url:
+            request.fulfill(json={"items": [], "next_cursor": None, "undated_count": 0})
+        else:
+            request.fulfill(body=(WEB / "life.html").read_text(encoding="utf-8"), content_type="text/html")
+    page.route("http://relationship.test/**", route)
+    page.goto("http://relationship.test/life")
+    page.locator('[data-view="relationships"]').click()
+    page.locator("#peer").select_option("b")
+    area = page.locator("#relationshipReview")
+    expect(area).to_contain_text("莉娅 对 芙露 的认知")
+    expect(area).to_contain_text("当前断言 1 条")
+    expect(area).to_contain_text("来源已失效")
+    expect(area).to_contain_text("A 对 B 与 B 对 A 分开计算")
+    area.locator("summary").first.click()
+    expect(area).to_contain_text("芙露说星灯已经修好了")
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.screenshot(path=str(tmp_path / "cognition-desktop.png"), full_page=True)
+    page.once("dialog", lambda dialog: dialog.accept("更正后的星灯认知"))
+    area.locator('[data-cognition-action="correct"]').click()
+    expect(area).to_contain_text("更正后的星灯认知")
+    assert posts and posts[0][1]["content"] == "更正后的星灯认知"
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.reload()
+    page.locator('[data-view="relationships"]').click()
+    page.locator("#peer").select_option("b")
+    area = page.locator("#relationshipReview")
+    expect(area).to_contain_text("莉娅 对 芙露 的认知")
+    overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
+    assert overflow <= 1
+    page.screenshot(path=str(tmp_path / "cognition-phone.png"), full_page=True)
+

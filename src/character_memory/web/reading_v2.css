@@ -348,3 +348,26 @@ body.life-page { font-size: 13px; }
   .feed-card img { height: 150px; min-height: 150px; border-radius: 14px 14px 0 0; }
   .rss-header { flex-wrap: wrap; }
 }
+
+/* Sourced directional relationship cognition on the life relationship view. */
+.life-page .cognition-panel { margin: 16px 0 6px; padding-top: 4px; }
+.life-page .cognition-panel h3:first-child { margin-top: 4px; }
+.life-page .cognition-card { margin-top: 9px; }
+.life-page .cognition-card > p { margin: 7px 0; color: var(--ui-text); font-size: 12.5px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.life-page .cognition-card details { margin-top: 7px; font-size: 11px; color: var(--ui-muted); }
+.life-page .cognition-card summary { cursor: pointer; color: var(--ui-link); }
+.life-page .cognition-evidence { margin-top: 7px; padding: 7px 9px; border-left: 2px solid var(--ui-line-strong); background: var(--ui-surface-sunken); border-radius: 0 var(--ui-r-sm) var(--ui-r-sm) 0; }
+.life-page .cognition-evidence p { margin: 3px 0 0; color: var(--ui-muted); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.life-page .cognition-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.life-page .cognition-actions button { min-height: 30px; padding: 5px 11px; border-radius: var(--ui-r-sm); font-size: 11px; }
+.life-page .cognition-boundaries { margin: 7px 0; padding-left: 18px; color: var(--ui-muted); font-size: 11.5px; line-height: 1.65; }
+.life-page .cognition-history { margin-top: 10px; color: var(--ui-muted); font-size: 11.5px; }
+.life-page .cognition-history summary { cursor: pointer; color: var(--ui-link); }
+.life-page .cognition-history ul { margin: 7px 0 0; padding-left: 18px; }
+.life-page .cognition-history li { margin: 5px 0; line-height: 1.5; }
+.life-page .cognition-history li p { margin: 3px 0 0; color: var(--ui-muted); font-size: 11px; overflow-wrap: anywhere; }
+@media (max-width: 650px) {
+  .life-page .cognition-actions button { min-height: 38px; padding: 8px 13px; font-size: 12px; }
+  .life-page .cognition-evidence p { font-size: 12px; }
+}
+

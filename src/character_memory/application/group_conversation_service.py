@@ -547,24 +547,22 @@ Available Stickers 是系统针对当前群语境召回的候选表情；只能�
             model_ms = evaluation.timings["model_ms"]
 
             state_after = (reaction.mental_state_update or "").strip() or state_before
+            # Same provenance rule as Direct: only the user's own words count.
+            # The source event is included only when the user authored it; a
+            # character's own earlier message is a guess, not evidence.
+            source_parts = []
+            if source_event.event_type == EventType.USER_MESSAGE.value:
+                source_parts.append((source_event.content or "").strip())
+            source_parts.extend(
+                (item.content or "").strip()
+                for item in recent_events
+                if item.event_type == EventType.USER_MESSAGE
+            )
             accepted_memories, memory_decisions = runtime._prepare_memory_writes(
                 character_id,
                 now,
                 reaction.memory_candidates,
-                # Same provenance rule as Direct: only the user's own words
-                # count, not the characters' earlier messages.
-                source_text="\n".join(
-                    part
-                    for part in [
-                        (source_event.content or "").strip(),
-                        *(
-                            (item.content or "").strip()
-                            for item in recent_events
-                            if item.event_type == EventType.USER_MESSAGE
-                        ),
-                    ]
-                    if part
-                ),
+                source_text="\n".join(part for part in source_parts if part),
             )
             created_memory_ids: list[int] = []
             emitted_events: list[GroupEvent] = []

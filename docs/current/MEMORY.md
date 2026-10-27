@@ -121,8 +121,9 @@ Embedding 与第一轮 exact/near-duplicate 判断在事务外执行，避免远
 
 Prompt 已经要求来源忠实（`_PERSON_SOURCE_FIDELITY`），但来源事件完全没有性别信息时，模型仍会把用户写成「他」或「她」，候选随后成为长期 Memory（issue #662）。该规则因此改由确定性代码在 admission 阶段执行（`memory/pronoun_fidelity.py`），位于模型之后、durable write 之前：
 
-- 证据范围：`source_text` 只含用户自己的话（当前事件加更早的 `USER_MESSAGE`）。人物自身设定（Persona）只在 SELF / LIFE / DIARY 这类关于人物本人的类型里算证据；人物性别不是用户性别，人物上一轮自己的说法也不是来源。
+- 证据范围：`source_text` 只含用户自己的话——当前事件仅在它是 `USER_MESSAGE` 时计入，加上更早的 `USER_MESSAGE`。`TIME_TICK`、`PROACTIVE_INTENT` 和人物自己的 `CHARACTER_MESSAGE` 都不是来源。人物自身设定（Persona）只在 SELF / LIFE / DIARY 这类关于人物本人的类型里算证据；人物性别不是用户性别，人物上一轮自己的说法也不能给下一次猜测授权。
 - 判定：证据里出现任何性别标记（第三人称代词、性别自述、称谓或亲属词）就视为有依据，候选原样保留。
+- 中性构词不误判：「其他」「吉他」「他人」「他乡」和「字母」「分母」「师父」「弟子」等不是人称代词或性别证据，既不关闭守卫，也不会被改写成「其TA」；拉丁中性代词 `TA` 必须整词匹配，`data`/`start` 一类普通英文词不算证据。
 - 处理：没有依据时把「他/她/祂」就地替换为中性「TA」。不丢弃候选——拒绝会让用户真实陈述的事实静默消失；替换保留指代对象，只去掉没有依据的性别。
 - Trace：`gender_pronoun_neutralized` 记录替换次数，`normalized_content` 记录实际写入文本，`candidate` 仍保存模型原始输出。
 - 不增加模型调用，不改变 actions 契约。

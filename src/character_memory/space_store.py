@@ -13,6 +13,53 @@ MAX_COMMENTERS_PER_POST = 10
 MAX_SPACE_MENTIONS = 4
 
 
+def normalize_experience_scope(scope: Any) -> dict[str, Any] | None:
+    """Validate an explicit scope for a Space source fact.
+
+    Space facts predate scope storage, so ``None`` deliberately stays ``None``:
+    an absent scope is a legacy real-world fact, never a written ``REAL``
+    default. Anything explicit must be a recognized v1 scope; malformed or
+    unknown values are rejected instead of being silently stored as real.
+    """
+    if scope is None:
+        return None
+    if not isinstance(scope, dict):
+        raise ValueError("experience_scope must be an object")
+    version = scope.get("schema_version")
+    reality = scope.get("reality")
+    if type(version) is not int or version != 1:
+        raise ValueError("unsupported experience_scope schema_version")
+    if reality not in {"REAL", "SIMULATED"}:
+        raise ValueError("unsupported experience_scope reality")
+    if reality == "REAL" and set(scope) != {"schema_version", "reality"}:
+        raise ValueError("REAL experience_scope cannot carry simulation fields")
+    return dict(scope)
+
+
+def _scope_to_json(scope: Any) -> str | None:
+    normalized = normalize_experience_scope(scope)
+    if normalized is None:
+        return None
+    return json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _scope_from_row(row) -> dict[str, Any] | None:
+    """Read a stored scope; corrupt data fails closed instead of becoming real."""
+    try:
+        raw = row["experience_scope_json"]
+    except (IndexError, KeyError):
+        return None
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    # A non-object scope cannot be the exact REAL contract, so it is kept as a
+    # fail-closed marker rather than dropped back to legacy-real semantics.
+    return value if isinstance(value, dict) else {}
+
+
 class SpacePost(BaseModel):
     id: int
     character_id: str
@@ -21,6 +68,7 @@ class SpacePost(BaseModel):
     media_id: str | None = None
     source_event_id: int | None = None
     visibility: str = "ACTIVE_CHARACTERS"
+    experience_scope: dict[str, Any] | None = None
 
 
 class SpaceComment(BaseModel):
@@ -34,6 +82,7 @@ class SpaceComment(BaseModel):
     reply_to_comment_id: int | None = None
     mentions: list[str] = Field(default_factory=list)
     mentions_user: bool = False
+    experience_scope: dict[str, Any] | None = None
     idempotent_replay: bool = Field(default=False, exclude=True)
 
 
@@ -85,7 +134,8 @@ class SpaceRepository:
                     created_at_epoch INTEGER NOT NULL,
                     media_id TEXT,
                     source_event_id INTEGER,
-                    visibility TEXT NOT NULL DEFAULT 'ACTIVE_CHARACTERS'
+                    visibility TEXT NOT NULL DEFAULT 'ACTIVE_CHARACTERS',
+                    experience_scope_json TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS space_comments(
@@ -100,7 +150,8 @@ class SpaceRepository:
                     reply_to_comment_id INTEGER,
                     mentions_json TEXT NOT NULL DEFAULT '[]',
                     mentions_user INTEGER NOT NULL DEFAULT 0,
-                    client_request_id TEXT
+                    client_request_id TEXT,
+                    experience_scope_json TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS space_notifications(
@@ -268,6 +319,16 @@ class SpaceRepository:
                 ("space/007-bidirectional-mentions-notifications", datetime.now().astimezone().isoformat()),
             )
             self.store._maybe_commit()
+        # Scope columns arrived after the core Space tables. Keep them in the
+        # shared migration ledger so legacy databases are upgraded once and a
+        # routine repository construction never repeats PRAGMA/ALTER work.
+        self.store.apply_schema_migration(
+            "space/008-experience-scope", self._migrate_experience_scope
+        )
+
+    def _migrate_experience_scope(self) -> None:
+        self.store._ensure_column_locked("space_posts", "experience_scope_json", "TEXT")
+        self.store._ensure_column_locked("space_comments", "experience_scope_json", "TEXT")
 
     @staticmethod
     def _post_from_row(row) -> SpacePost:
@@ -279,6 +340,7 @@ class SpaceRepository:
             media_id=row["media_id"],
             source_event_id=row["source_event_id"],
             visibility=str(row["visibility"]),
+            experience_scope=_scope_from_row(row),
         )
 
     @staticmethod
@@ -303,6 +365,7 @@ class SpaceRepository:
             reply_to_comment_id=row["reply_to_comment_id"],
             mentions=[str(item) for item in mentions if str(item).strip()],
             mentions_user=bool(row["mentions_user"]),
+            experience_scope=_scope_from_row(row),
         )
 
     @staticmethod
@@ -341,17 +404,31 @@ class SpaceRepository:
         media_id: str | None = None,
         source_event_id: int | None = None,
         visibility: str = "ACTIVE_CHARACTERS",
+        experience_scope: dict[str, Any] | None = None,
     ) -> SpacePost:
         clean_content = str(content or "").strip()
         clean_media = str(media_id or "").strip() or None
         if not clean_content and clean_media is None:
             raise ValueError("space post requires content or media")
+        clean_scope = normalize_experience_scope(experience_scope)
+        scope_json = _scope_to_json(clean_scope)
         stamp = epoch_us(now)
         with self.store._lock:
             cur = self.store.conn.execute(
-                "INSERT INTO space_posts(character_id,content,created_at,created_at_epoch,media_id,source_event_id,visibility) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (character_id, clean_content, now.isoformat(), stamp, clean_media, source_event_id, visibility),
+                "INSERT INTO space_posts("
+                "character_id,content,created_at,created_at_epoch,media_id,source_event_id,visibility,"
+                "experience_scope_json"
+                ") VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    character_id,
+                    clean_content,
+                    now.isoformat(),
+                    stamp,
+                    clean_media,
+                    source_event_id,
+                    visibility,
+                    scope_json,
+                ),
             )
             self.store._maybe_commit()
         return SpacePost(
@@ -362,6 +439,7 @@ class SpaceRepository:
             media_id=clean_media,
             source_event_id=source_event_id,
             visibility=visibility,
+            experience_scope=clean_scope,
         )
 
     def get_post(self, post_id: int) -> SpacePost | None:
@@ -498,6 +576,7 @@ class SpaceRepository:
         mentions: list[str] | None = None,
         mentions_user: bool = False,
         client_request_id: str | None = None,
+        experience_scope: dict[str, Any] | None = None,
     ) -> SpaceComment | None:
         """Return an identical durable request, or reject key reuse with new data."""
 
@@ -509,6 +588,7 @@ class SpaceRepository:
         clean_sticker_id = str(sticker_id or "").strip() or None
         clean_mentions = [str(item or "").strip() for item in (mentions or [])]
         clean_mentions = [item for item in clean_mentions if item]
+        clean_scope = normalize_experience_scope(experience_scope)
         with self.store._lock:
             existing = self.store.conn.execute(
                 "SELECT * FROM space_comments WHERE client_request_id=?",
@@ -526,6 +606,7 @@ class SpaceRepository:
             and existing_comment.reply_to_comment_id == reply_to_comment_id
             and existing_comment.mentions == clean_mentions
             and existing_comment.mentions_user == bool(mentions_user)
+            and existing_comment.experience_scope == clean_scope
         )
         if not same_request:
             raise ValueError("client_request_id was already used for a different Space comment")
@@ -544,12 +625,15 @@ class SpaceRepository:
         mentions: list[str] | None = None,
         mentions_user: bool = False,
         client_request_id: str | None = None,
+        experience_scope: dict[str, Any] | None = None,
     ) -> SpaceComment:
         if self.get_post(post_id) is None:
             raise KeyError("space post not found")
         normalized_actor_type = str(actor_type or "CHARACTER").strip().upper()
         if normalized_actor_type not in {"CHARACTER", "USER"}:
             raise ValueError("space comment actor_type must be CHARACTER or USER")
+        clean_scope = normalize_experience_scope(experience_scope)
+        scope_json = _scope_to_json(clean_scope)
         clean_content = str(content or "").strip()
         clean_sticker_id = str(sticker_id or "").strip() or None
         clean_mentions = [str(item or "").strip() for item in (mentions or [])]
@@ -583,6 +667,7 @@ class SpaceRepository:
                 mentions=clean_mentions,
                 mentions_user=mentions_user,
                 client_request_id=request_id,
+                experience_scope=clean_scope,
             )
             if replay is not None:
                 return replay
@@ -602,8 +687,8 @@ class SpaceRepository:
             cur = self.store.conn.execute(
                 "INSERT INTO space_comments("
                 "post_id,character_id,actor_type,content,sticker_id,created_at,created_at_epoch,reply_to_comment_id,"
-                "mentions_json,mentions_user,client_request_id"
-                ") VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "mentions_json,mentions_user,client_request_id,experience_scope_json"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     int(post_id),
                     character_id,
@@ -616,6 +701,7 @@ class SpaceRepository:
                     json.dumps(clean_mentions, ensure_ascii=False, separators=(",", ":")),
                     int(bool(mentions_user)),
                     request_id,
+                    scope_json,
                 ),
             )
             # User notifications represent human-directed replies, not ambient
@@ -657,6 +743,7 @@ class SpaceRepository:
             reply_to_comment_id=reply_to_comment_id,
             mentions=clean_mentions,
             mentions_user=bool(mentions_user),
+            experience_scope=clean_scope,
         )
 
     def list_notifications(

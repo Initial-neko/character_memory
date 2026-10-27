@@ -427,3 +427,17 @@ Inspector/audit storage remains intact. Scope rules and runtime source/commit
 guards belong to [Person Runtime](PERSON_RUNTIME.md#real-experience-boundary).
 This is a read/admission guard, not a branch-local memory store or a simulation
 reflection-publishing API.
+
+### Space facts and derived events
+
+Space source facts (`space_posts`/`space_comments`) store an optional
+`experience_scope`. A row without a stored scope keeps the legacy real-world
+meaning; an explicit scope is validated on write as schema v1 `REAL`/`SIMULATED`
+(malformed or unknown values are rejected). When `SPACE_POST_SEEN` or
+`SPACE_COMMENT_RECEIVED` is synthesized from a stored post or comment, that
+fact's scope is copied verbatim into the event metadata; a source without a
+scope contributes no scope key, so it stays legacy-real. Replies, reactions,
+views and notifications are not source facts and carry no scope of their own;
+a simulation producer must stamp every post and comment it writes, including
+in-thread replies. A corrupt stored scope reads back as a fail-closed non-real
+marker rather than being silently treated as legacy-real.

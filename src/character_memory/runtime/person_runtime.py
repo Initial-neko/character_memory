@@ -15,6 +15,7 @@ from character_memory.domain.experience_scope import require_real_experience
 from character_memory.storage.message_receipts import ReactionExecutionRepository, ExecutionUnavailable
 from character_memory.time_utils import epoch_us
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, Memory, RuntimeResult
+from character_memory.memory.pronoun_fidelity import enforce_source_gender_fidelity
 from character_memory.runtime.person_context import PersonContextBuilder
 from character_memory.runtime.reaction_engine import evaluate_reaction
 from character_memory.live2d_behavior import behavior_metadata
@@ -172,10 +173,34 @@ class PersonRuntime:
             parts.append(current)
         return "\n".join(parts)
 
-    def _prepare_memory_writes(self, character_id: str, event_time, candidates):
-        """Small V0 admission gate: reject low-value and near-duplicate memories."""
+    @staticmethod
+    def _memory_source_text(event: Event, recent: list[Event]) -> str:
+        """The user's own words the reaction could have learned this fact from.
+
+        Only the source event and earlier USER_MESSAGE events count. The
+        person's own earlier messages are excluded on purpose: a previous guess
+        is not a source, and letting it count would let one fabrication license
+        the next one indefinitely.
+        """
+        parts = [(event.content or "").strip()]
+        for item in recent or []:
+            if item.event_type == EventType.USER_MESSAGE and (item.content or "").strip():
+                parts.append(item.content.strip())
+        return "\n".join(part for part in parts if part)
+
+    def _prepare_memory_writes(self, character_id: str, event_time, candidates, *, source_text: str | None = None):
+        """Admission gate: reject low-value/duplicate memories, keep provenance.
+
+        The deterministic checks here run after the model and before durable
+        Memory. Besides value and duplication this is also where source-gender
+        fidelity is enforced: the prompt already asks for it, but the model
+        still wrote "他"/"她" for a source that never mentioned gender (issue
+        #662), so an unsupported pronoun is neutralized here instead.
+        """
         if not candidates:
             return [], []
+        evidence_text = source_text or ""
+        persona_text = str(getattr(self, "persona", "") or "")
         candidate_loader = getattr(self.store, "list_memory_candidates", None)
         if callable(candidate_loader):
             source_existing = candidate_loader(character_id, at=event_time)
@@ -205,6 +230,26 @@ class PersonRuntime:
                 decision["decision"] = "SKIP_LOW_VALUE"
                 decisions.append(decision)
                 continue
+
+            # Provenance, not value: the pronoun is rewritten before embedding
+            # and duplicate comparison so the stored fact and the dedup key stay
+            # the same sentence.
+            content, neutralized = enforce_source_gender_fidelity(
+                content,
+                candidate.memory_type,
+                source_text=evidence_text,
+                persona_text=persona_text,
+            )
+            if neutralized:
+                decision["gender_pronoun_neutralized"] = neutralized
+                decision["normalized_content"] = content
+                candidate = candidate.model_copy(update={"content": content})
+                logger.info(
+                    "runtime.memory gender_pronoun_neutralized character=%s type=%s count=%d",
+                    character_id,
+                    candidate.memory_type,
+                    neutralized,
+                )
 
             exact_finder = getattr(self.store, "find_active_memory_by_content", None)
             if callable(exact_finder):
@@ -635,7 +680,12 @@ class PersonRuntime:
         state_after = (reaction.mental_state_update or "").strip() or state_before
 
         stage = time.perf_counter()
-        candidate_embeddings, memory_decisions = self._prepare_memory_writes(event.character_id, event.event_time, reaction.memory_candidates)
+        candidate_embeddings, memory_decisions = self._prepare_memory_writes(
+            event.character_id,
+            event.event_time,
+            reaction.memory_candidates,
+            source_text=self._memory_source_text(event, recent),
+        )
         timings["memory_embedding_ms"] = _ms(stage)
 
         stage = time.perf_counter()

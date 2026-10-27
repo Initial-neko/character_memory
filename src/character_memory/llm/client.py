@@ -27,6 +27,17 @@ from character_memory.llm.usage import (
 logger = logging.getLogger("character_memory.llm")
 
 
+# Explicit output ceiling for every chat/vision request. Providers otherwise
+# apply their own default (the OpenCode gateway returns ~1000 tokens), which
+# cannot hold a detailed PersonReaction: actions, memory_candidates,
+# intent_candidates, perception, reaction and mental_state_update share one JSON
+# object. A cut there yields no parsable content at all (issue #662), so the
+# ceiling is part of the request contract instead of an implicit provider
+# default. Settings exposes it as llm_max_output_tokens; 4096 fits a full
+# structured reaction without approaching the context window.
+DEFAULT_MAX_OUTPUT_TOKENS = 4096
+
+
 # Factual modality is a provider-system boundary; the runtime supplies the sources.
 _PERSON_SOURCE_FIDELITY = (
     '事实准确性优先于人物化修辞和叙事完整。'
@@ -67,6 +78,36 @@ class ProviderHTTPError(RuntimeError):
         self.request_id = request_id
         suffix = f" | request_id={request_id}" if request_id else ""
         super().__init__(f"Provider HTTP {status_code} from {url}: {body}{suffix}")
+
+
+class TruncatedResponseError(RuntimeError):
+    """The provider stopped at the output ceiling (finish_reason=length).
+
+    Deliberately distinct from StructuredOutputError: the model did not write
+    broken JSON, it never got the room to finish. The partial content and the
+    burned token count ride along so a caller can tell "cut off" from "empty",
+    and the same ceiling cannot repair it -- asking again just spends another
+    capped request -- so no retry loop consumes it.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        finish_reason: str = "length",
+        response_text: str = "",
+        model: str = "",
+        max_tokens: int = 0,
+        output_tokens: int | None = None,
+        request_id: str = "",
+    ):
+        super().__init__(message)
+        self.finish_reason = finish_reason
+        self.response_text = response_text
+        self.model = model
+        self.max_tokens = max_tokens
+        self.output_tokens = output_tokens
+        self.request_id = request_id
 
 
 class StructuredOutputError(RuntimeError):
@@ -163,6 +204,7 @@ class OpenAICompatibleModel(PersonModel):
         timeout: float = 120,
         temperature: float = 0.7,
         attempts: int = 2,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         session_id: str | None = None,
         vision_model: str = "deepseek-v4-flash-vision-exp",
         usage_recorder: LlmUsageRecorder | None = None,
@@ -174,6 +216,7 @@ class OpenAICompatibleModel(PersonModel):
         self.timeout = timeout
         self.temperature = temperature
         self.attempts = attempts
+        self.max_output_tokens = max(1, int(max_output_tokens))
         self.default_session_id = session_id or str(uuid.uuid4())
         self.session_id = self.default_session_id
         # Compatibility/debug fields only. Runtime persistence must use the
@@ -189,12 +232,13 @@ class OpenAICompatibleModel(PersonModel):
         self._debug_lock = threading.Lock()
         self.usage_recorder = usage_recorder
         logger.info(
-            "provider.ready model=%s vision_model=%s base_url=%s default_session=%s attempts=%s timeout=%ss",
+            "provider.ready model=%s vision_model=%s base_url=%s default_session=%s attempts=%s max_tokens=%s timeout=%ss",
             self.model,
             self.vision_model,
             self.base_url,
             self.default_session_id,
             self.attempts,
+            self.max_output_tokens,
             self.timeout,
         )
 
@@ -375,7 +419,12 @@ class OpenAICompatibleModel(PersonModel):
         usage_logical_call_id: str | None = None,
     ) -> str:
         selected_model = model or self.model
-        payload = {"model": selected_model, "messages": messages, "temperature": self.temperature}
+        payload = {
+            "model": selected_model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_output_tokens,
+        }
         if json_object:
             payload["response_format"] = {"type": "json_object"}
         url = f"{self.base_url}/chat/completions"
@@ -389,12 +438,13 @@ class OpenAICompatibleModel(PersonModel):
         resolved_attempt = max(1, int(usage_attempt or current.attempt or 1))
         started = time.perf_counter()
         logger.info(
-            "provider.request start model=%s session=%s messages=%d input_chars=%d json_object=%s",
+            "provider.request start model=%s session=%s messages=%d input_chars=%d json_object=%s max_tokens=%d",
             selected_model,
             session_id,
             len(messages),
             self._message_chars(messages),
             json_object,
+            self.max_output_tokens,
         )
         try:
             r = self.client.post(
@@ -458,9 +508,12 @@ class OpenAICompatibleModel(PersonModel):
             raise ProviderHTTPError(r.status_code, url, body, request_id)
 
         data = None
+        finish_reason = ""
         try:
             data = r.json()
-            text = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            text = choice["message"]["content"] or ""
+            finish_reason = str(choice.get("finish_reason") or "")
         except Exception as exc:
             # A 2xx response is still a real provider attempt even when its
             # payload is malformed or missing the OpenAI-compatible shape.
@@ -488,6 +541,52 @@ class OpenAICompatibleModel(PersonModel):
                 request_id or "-",
             )
             raise
+
+        if finish_reason.strip().lower() == "length":
+            # The provider reports that it stopped at the output ceiling. What
+            # arrived is cut mid-object, so returning it would look like an
+            # empty or short answer and only fail later as a schema error with
+            # no trace of the real cause. Retrying at the same ceiling cannot
+            # help, so this is terminal -- but the tokens were really burned,
+            # so the attempt is still metered.
+            _, output_tokens, _, _ = self._token_usage(data)
+            self._record_usage(
+                messages=messages,
+                conversation_id=conversation_id,
+                session_id=session_id,
+                selected_model=selected_model,
+                logical_call_id=logical_call_id,
+                attempt=resolved_attempt,
+                duration_ms=duration_ms,
+                status="ERROR",
+                output_text=text,
+                data=data,
+                json_object=json_object,
+                error_type="TRUNCATED_OUTPUT",
+                request_id=request_id,
+            )
+            logger.error(
+                "provider.request truncated model=%s session=%s duration_ms=%d max_tokens=%d output_tokens=%s output_chars=%d request_id=%s",
+                selected_model,
+                session_id,
+                int(duration_ms),
+                self.max_output_tokens,
+                output_tokens if output_tokens is not None else "-",
+                len(text),
+                request_id or "-",
+            )
+            raise TruncatedResponseError(
+                "Provider stopped at the output ceiling "
+                f"(max_tokens={self.max_output_tokens}, finish_reason=length, "
+                f"output_tokens={output_tokens if output_tokens is not None else 'unknown'}); "
+                "the response is truncated, not an empty answer",
+                finish_reason="length",
+                response_text=text,
+                model=selected_model,
+                max_tokens=self.max_output_tokens,
+                output_tokens=output_tokens,
+                request_id=request_id,
+            )
 
         self._record_usage(
             messages=messages,

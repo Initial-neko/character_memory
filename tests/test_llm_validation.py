@@ -2,10 +2,17 @@ import json
 import uuid
 
 import httpx
+import pytest
 from pydantic import ValidationError
 
 from character_memory.domain.models import ActionDecision, ActionType, PersonReaction
-from character_memory.llm.client import OpenAICompatibleModel, ProviderHTTPError
+from character_memory.llm.client import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
+    OpenAICompatibleModel,
+    ProviderHTTPError,
+    StructuredOutputError,
+    TruncatedResponseError,
+)
 
 
 def test_action_message_contract():
@@ -232,3 +239,175 @@ def test_retired_alias_sends_one_canonical_wire_request():
         assert captured[0]['model']=='deepseek-v4.1-flash'
         assert result.trace.model=='deepseek-v4.1-flash'
     finally:model.close()
+
+# --- Output ceiling / truncated-response contract -------------------------
+#
+# Evidence (issue #662): a detailed PersonReaction consumed ~1000 output tokens
+# against the provider's default ceiling, came back with finish_reason=length
+# and empty content, and died later as an unrelated schema failure. The wire
+# request now carries an explicit max_tokens, and a truncated answer is its own
+# failure instead of an empty string that looks like silence.
+
+
+def _wire_model(handler, **kwargs):
+    attempts = kwargs.pop("attempts", 1)
+    model = OpenAICompatibleModel("key", attempts=attempts, **kwargs)
+    model.client.close()
+    model.client = httpx.Client(transport=httpx.MockTransport(handler), timeout=30)
+    return model
+
+
+def test_request_payload_carries_an_explicit_output_ceiling():
+    captured = {}
+
+    def handler(request: httpx.Request):
+        captured.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": '{"actions":[]}'}, "finish_reason": "stop"}]},
+        )
+
+    model = _wire_model(handler)
+    try:
+        assert model.react("context").actions == []
+    finally:
+        model.close()
+
+    assert captured["max_tokens"] == DEFAULT_MAX_OUTPUT_TOKENS
+    # The provider default that truncated the detailed sample was ~1000 tokens.
+    assert captured["max_tokens"] >= 2048
+
+
+def test_output_ceiling_is_configurable_per_model():
+    captured = {}
+
+    def handler(request: httpx.Request):
+        captured.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": '{"actions":[]}'}, "finish_reason": "stop"}]},
+        )
+
+    model = _wire_model(handler, max_output_tokens=3072)
+    try:
+        assert model.max_output_tokens == 3072
+        assert model.react("context").actions == []
+    finally:
+        model.close()
+
+    assert captured["max_tokens"] == 3072
+
+
+def test_truncated_output_raises_instead_of_returning_empty_text():
+    calls = []
+
+    def handler(request: httpx.Request):
+        calls.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+                "usage": {"prompt_tokens": 900, "completion_tokens": 1000, "total_tokens": 1900},
+            },
+        )
+
+    model = _wire_model(handler)
+    try:
+        with pytest.raises(TruncatedResponseError) as caught:
+            model.react_call_for_session("context", "truncated-sample")
+    finally:
+        model.close()
+
+    error = caught.value
+    assert error.finish_reason == "length"
+    assert error.output_tokens == 1000
+    assert error.max_tokens == DEFAULT_MAX_OUTPUT_TOKENS
+    assert error.response_text == ""
+    # A cut-off answer cannot be repaired by asking again at the same ceiling,
+    # so the failure must not spend the remaining attempt budget.
+    assert len(calls) == 1
+
+
+def test_truncated_partial_json_is_not_a_repairable_schema_failure():
+    def handler(request: httpx.Request):
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {"message": {"content": '{"actions":[{"type":"MESS'}, "finish_reason": "length"}
+                ]
+            },
+        )
+
+    model = _wire_model(handler, attempts=2)
+    try:
+        with pytest.raises(TruncatedResponseError) as caught:
+            model.react_call_for_session("context", "truncated-partial")
+        snapshot = model.last_attempt
+    finally:
+        model.close()
+
+    # Truncation is reported before JSON/schema repair gets a say, so a caller
+    # can tell "cut off by the ceiling" from "wrote broken JSON".
+    assert not isinstance(caught.value, StructuredOutputError)
+    assert caught.value.response_text == '{"actions":[{"type":"MESS'
+    assert snapshot == 1
+
+
+def test_empty_content_with_a_normal_stop_stays_a_schema_failure():
+    calls = []
+
+    def handler(request: httpx.Request):
+        calls.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]},
+        )
+
+    model = _wire_model(handler, attempts=2)
+    try:
+        with pytest.raises(StructuredOutputError):
+            model.react_call_for_session("context", "empty-sample")
+    finally:
+        model.close()
+
+    # The existing repair retry still owns this case; only "length" is special.
+    assert len(calls) == 2
+
+
+def test_truncated_response_is_metered_as_an_error():
+    rows = []
+
+    class Recorder:
+        def record(self, row):
+            rows.append(row)
+
+        def close(self):
+            pass
+
+    def handler(request: httpx.Request):
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+                "usage": {"prompt_tokens": 900, "completion_tokens": 1000, "total_tokens": 1900},
+            },
+        )
+
+    model = _wire_model(handler, usage_recorder=Recorder())
+    try:
+        with pytest.raises(TruncatedResponseError):
+            model.react_call_for_session("context", "truncated-usage")
+    finally:
+        model.close()
+
+    row = rows[-1]
+    assert row["status"] == "ERROR"
+    assert row["error_type"] == "TRUNCATED_OUTPUT"
+    assert row["output_tokens"] == 1000

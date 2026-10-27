@@ -29,6 +29,16 @@ chat_temperature: 0.7
 # Maximum HTTP/model attempts for one logical LLM call, including retry/repair.
 llm_attempts: 2
 
+# Output token ceiling sent as OpenAI-compatible max_tokens. Provider defaults
+# are often ~1000 tokens, which cuts a detailed PersonReaction JSON (actions,
+# memory_candidates, intent_candidates, perception, reaction,
+# mental_state_update) before it closes, so the answer arrives empty and schema
+# validation fails. 4096 fits a full structured reaction. Raising it costs more
+# only when the model actually writes more; lowering it below ~2048 re-creates
+# the truncation. finish_reason=length is reported as a failure, never as an
+# empty success.
+llm_max_output_tokens: 4096
+
 # 模型调用前准备的所有权期限（真实服务器秒，1–3600）；到期可重新领取，CALLING/UNKNOWN 永不因超时重跑。重启生效。
 reaction_preparation_lease_seconds: 120.0
 

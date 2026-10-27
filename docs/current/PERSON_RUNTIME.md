@@ -681,6 +681,17 @@ commit transaction. A scope changed after model entry prevents real state,
 Memory and visible output commit; the existing receipt retains the failed/unknown
 execution, without automatically repeating the provider.
 
+Proactive Intent dispatch is not exempt. The persisted intent is only a pointer;
+before dispatch, `intent.source_event_id` is refetched and must still be an
+existing real fact. A missing source, a source relabelled SIMULATED, or scope that
+cannot be decided suppresses the intent with an auditable reason instead of
+producing a real turn. The new `PROACTIVE_INTENT` event carries explicit
+`{schema_version: 1, reality: REAL}` scope rather than omitting it as legacy REAL,
+and the same source check runs again inside the derived commit transaction, so a
+late relabel cannot publish Memory, Intent, Mental State or visible output. A wake
+has no intent source; it is an independent real tick and states REAL explicitly.
+No prompt, model call or schema change is added by this recheck.
+
 Shared Person context filters recent, observed and recalled experiences to this
 boundary. SQL filters precede candidate limits; raw audit queries retain records.
 Malformed legacy metadata keeps the existing INVALID-provenance readable-fact

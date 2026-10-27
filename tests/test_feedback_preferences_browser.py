@@ -113,9 +113,9 @@ def test_null_withdrawal_and_restore_use_original_profile(page,suggestions_serve
     box.get_by_role('button',name='查看或恢复相处偏好',exact=True).click()
     profile=page.get_by_role('dialog',name='相处偏好',exact=True)
     profile.get_by_role('button',name='版本记录',exact=True).click()
-    profile.locator('[data-restore-version="1"]').click()
+    profile.locator('[data-compare-version="1"]').click()
     profile.get_by_role('button',name='确认恢复',exact=True).click()
-    expect(profile.get_by_role('status')).to_contain_text('已保存')
+    expect(profile.get_by_role('status')).to_contain_text('已恢复为新版本')
     restored=page.request.get(suggestions_server+'/v2/me/experience-profile').json()
     assert restored['version']==3 and restored['preferences']=={'tone':'CUTE','verbosity':'DETAILED'}
     assert page.request.post(suggestions_server+'/v2/reply-suggestions/feedback',data=original).status==200

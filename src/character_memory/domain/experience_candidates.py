@@ -99,8 +99,6 @@ _TERMS = {
         ('BALANCED', ('适中', '刚刚好', 'balanced', 'moderate')),
     ),
 }
-_SCENE_MARKERS = ('这次', '刚才', '这一条', '这一句', '这条回复', '这一回', '临时', '先这样',
-                  'this time', 'for now', 'just this', 'just now')
 _LONG_MARKERS = ('以后', '今后', '接下来', '从现在起', '从现在开始', '每次', '长期', '一直', '总是',
                  'always', 'from now on', 'going forward', 'in the future')
 _NOTES = {

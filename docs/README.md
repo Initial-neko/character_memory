@@ -44,6 +44,10 @@ Historical material never overrides current code or `docs/current/`.
 | [MOBILE_API_CONTRACT](current/MOBILE_API_CONTRACT.md) | Core-owned CURRENT/PROPOSED API contract for Android and other external clients. |
 | [RELEASES](current/RELEASES.md) | Branch/tag/version/release promotion policy. |
 
+Acceptance evidence: [P15 full-stack acceptance](current/P15_FULL_STACK_ACCEPTANCE.md) records one
+isolated run of the accelerated P15 story flow and a controlled-clock revisit. It is evidence, not
+a product contract, and it explicitly does not claim a real five-day observation.
+
 ## Ownership rule
 
 Prefer extending an existing domain document. Add a new `docs/current/*.md` only when the capability has an independent runtime boundary, independent lifecycle, or a durable reason to evolve separately.

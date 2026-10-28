@@ -89,6 +89,7 @@ src/character_memory/
 - `experience_profiles.py` — 本地用户底色head/version、CAS、清除与恢复；无模型调用。
 - `experience_candidates.py` — 候选决定的持久列（复用 signal 表，不建新表）：采用/忽略/回退版本与清除时失效。
 - `activities.py` — Activity状态/参与者/幂等回执的同事务持久化；读取不加载模型，也不创建人物。
+- `activity_facts.py` — P13 DSH Activity事实流；`(activity_id, seq)`为身份，写入前校验精确SIMULATED scope与非空authorization，不删除不隐藏。
 - `scenarios.py` — 关系练习场景、描述、SIMULATED事件、回合、分支/尝试、复盘/尝试与采用回执的唯一持久化；每行事件校验冻结scope，只有显式采用会在同一事务内写一条REAL事件与一条REAL记忆。
 - `message_receipts.py` — Direct/Group async接受及逐人物认知执行回执；认知提交与队列交接分别记录，不声明可选外部效果完成。
 - `reaction_delivery.py` — async 来源待交接记录、冻结批次、owner/租约与持久认知交付状态；只引用现有事实和媒体。
@@ -102,6 +103,8 @@ src/character_memory/
 
 ```text
 api.py                  Character Runtime composition root + lifecycle only
+dsh_server.py           independent DSH listener: only /health + /v2/dsh business routes
+dsh/                    P13 subjects/keys/grants, Ed25519 auth, audit chain, business + admin routes
 activity_web.py         Activity lifecycle HTTP surface; no model/runtime warmup
 scenario_web.py         Relationship-practice scene/turn HTTP surface; one explicit turn is the only model call
 experience_profile_web.py Local operator explicit profile HTTP routes; server-owned identity; candidate view/apply/dismiss/revert

@@ -1,0 +1,176 @@
+"""Durable Activity fact stream (P13).
+
+P10/P11/P12 keep their own ``scenario_events`` for practice turns. P13 adds a
+separate fact stream for external DSH participation because a DSH row must carry
+the frozen SIMULATED scope plus an immutable authorization envelope. The table
+deliberately has no ``id`` column: ``(activity_id, seq)`` is the fact identity,
+and ``seq`` is assigned by this module inside the caller's write transaction.
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+from character_memory.domain.activity import activity_experience_scope
+
+ACTOR_TYPES = ("CHARACTER", "SIMULATED_CHARACTER", "DSH")
+AUTHORIZATION_FIELDS = ("grant_id", "subject_id", "status_at_commit")
+
+
+class ActivityFactCorrupt(RuntimeError):
+    """Stored fact data no longer matches the frozen contract."""
+
+
+class ActivityFactConflict(ValueError):
+    """A fact write violates the fact-stream contract."""
+
+
+def _iso(now: datetime | None = None) -> str:
+    value = now or datetime.now(timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+class ActivityFactRepository:
+    def __init__(self, store, *, initialize: bool = True):
+        self.store = store
+        if initialize:
+            store.apply_schema_migration(
+                "activity/004-activity-facts", self._migrate, immediate=True)
+
+    def _migrate(self) -> None:
+        self.store.conn.execute(
+            "CREATE TABLE IF NOT EXISTS activity_facts("
+            "activity_id TEXT NOT NULL REFERENCES activities(id),"
+            "seq INTEGER NOT NULL CHECK(seq>=1),"
+            "actor_type TEXT NOT NULL CHECK(actor_type IN "
+            "('CHARACTER','SIMULATED_CHARACTER','DSH')),"
+            "actor_key TEXT NOT NULL,"
+            "content TEXT NOT NULL,"
+            "reply_to_fact_id INTEGER,"
+            "experience_scope_json TEXT NOT NULL,"
+            "authorization_json TEXT NOT NULL,"
+            "created_at TEXT NOT NULL,"
+            "UNIQUE(activity_id,seq)"
+            ")"
+        )
+        self.store.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_facts_order "
+            "ON activity_facts(activity_id,seq)"
+        )
+
+    def next_seq(self, activity_id: str) -> int:
+        row = self.store.conn.execute(
+            "SELECT COALESCE(MAX(seq),0)+1 FROM activity_facts WHERE activity_id=?",
+            (activity_id,),
+        ).fetchone()
+        return int(row[0])
+
+    def get(self, activity_id: str, seq: int) -> dict | None:
+        row = self.store.conn.execute(
+            "SELECT * FROM activity_facts WHERE activity_id=? AND seq=?",
+            (activity_id, int(seq)),
+        ).fetchone()
+        return self._project(row) if row is not None else None
+
+    def list(self, activity_id: str, *, after_seq: int = 0, limit: int = 50,
+             grant_id: str | None = None) -> list[dict]:
+        if type(after_seq) is not int or after_seq < 0:
+            raise ValueError("after_seq must be a non-negative integer")
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("limit must be between 1 and 50")
+        if grant_id is None:
+            rows = self.store.conn.execute(
+                "SELECT * FROM activity_facts WHERE activity_id=? AND seq>? "
+                "ORDER BY seq ASC LIMIT ?",
+                (activity_id, after_seq, limit),
+            ).fetchall()
+        else:
+            rows = self.store.conn.execute(
+                "SELECT * FROM activity_facts WHERE activity_id=? AND seq>? "
+                "AND json_extract(authorization_json,'$.grant_id')=? "
+                "ORDER BY seq ASC LIMIT ?",
+                (activity_id, after_seq, grant_id, limit),
+            ).fetchall()
+        return [self._project(row) for row in rows]
+
+    def insert(
+        self,
+        activity_id: str,
+        *,
+        actor_type: str,
+        actor_key: str,
+        content: str,
+        reply_to_fact_id: int | None,
+        experience_scope: dict,
+        authorization: dict,
+        now: datetime | None = None,
+    ) -> dict:
+        """Insert one fact. The caller owns the enclosing write transaction."""
+        if actor_type not in ACTOR_TYPES:
+            raise ActivityFactConflict("ACTIVITY_FACT_ACTOR_INVALID")
+        if not str(actor_key or "").strip():
+            raise ActivityFactConflict("ACTIVITY_FACT_ACTOR_INVALID")
+        if not str(content or "").strip():
+            raise ActivityFactConflict("ACTIVITY_FACT_CONTENT_INVALID")
+        if not isinstance(authorization, dict) or not authorization:
+            raise ActivityFactConflict("DSH_AUTHORIZATION_MISSING")
+        if any(not str(authorization.get(field) or "").strip()
+               for field in AUTHORIZATION_FIELDS):
+            raise ActivityFactConflict("DSH_AUTHORIZATION_MISSING")
+        if authorization.get("status_at_commit") != "ACTIVE":
+            raise ActivityFactConflict("DSH_AUTHORIZATION_INVALID")
+        # The scope is generated by the server. Reject anything that is not the
+        # exact frozen SIMULATED shape before it can reach the table; a missing
+        # scope would otherwise be read back as legacy REAL.
+        expected = activity_experience_scope(activity_id)
+        if not isinstance(experience_scope, dict) or experience_scope != expected:
+            raise ActivityFactConflict("DSH_SCOPE_BROKEN")
+        seq = self.next_seq(activity_id)
+        self.store.conn.execute(
+            "INSERT INTO activity_facts("
+            "activity_id,seq,actor_type,actor_key,content,reply_to_fact_id,"
+            "experience_scope_json,authorization_json,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                activity_id,
+                seq,
+                actor_type,
+                actor_key,
+                str(content),
+                None if reply_to_fact_id is None else int(reply_to_fact_id),
+                json.dumps(experience_scope, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False, allow_nan=False),
+                json.dumps(authorization, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False, allow_nan=False),
+                _iso(now),
+            ),
+        )
+        self.store._maybe_commit()
+        return self.get(activity_id, seq)
+
+    @staticmethod
+    def _project(row) -> dict:
+        try:
+            scope = json.loads(row["experience_scope_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise ActivityFactCorrupt("DSH_SCOPE_BROKEN")
+        try:
+            authorization = json.loads(row["authorization_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise ActivityFactCorrupt("DSH_AUTHORIZATION_INVALID")
+        if not isinstance(scope, dict):
+            raise ActivityFactCorrupt("DSH_SCOPE_BROKEN")
+        if not isinstance(authorization, dict):
+            raise ActivityFactCorrupt("DSH_AUTHORIZATION_INVALID")
+        return {
+            "activity_id": str(row["activity_id"]),
+            "fact_id": int(row["seq"]),
+            "seq": int(row["seq"]),
+            "actor_type": str(row["actor_type"]),
+            "actor_key": str(row["actor_key"]),
+            "content": str(row["content"]),
+            "reply_to_fact_id": row["reply_to_fact_id"],
+            "experience_scope": scope,
+            "authorization": authorization,
+            "created_at": str(row["created_at"]),
+        }

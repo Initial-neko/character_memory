@@ -23,6 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, m
 MAX_ACTIVITY_VERSION = 2**31 - 1
 MAX_ACTIVITY_PARTICIPANTS = 8
 SIMULATED_ID_PREFIX = "sim:"
+DSH_ID_PREFIX = "dsh:"
+DSH_SUBJECT_PATTERN = r"^dsh_[0-9a-f]{32}$"
 
 ActivityStatus = Literal["CREATED", "ACTIVE", "PAUSED", "ENDED"]
 ActivityOperation = Literal["PAUSE", "RESUME", "END"]
@@ -59,6 +61,10 @@ class CharacterParticipant(BaseModel):
             # The prefix is the activity-local namespace marker; a formal id
             # carrying it would be indistinguishable from a simulated actor.
             raise ValueError("character_id must not use the simulated participant namespace")
+        if value.startswith(DSH_ID_PREFIX):
+            # DSH participant keys are ``dsh:<subject_id>``. A formal Person
+            # must never be able to occupy that namespace.
+            raise ValueError("character_id must not use the DSH participant namespace")
         return value
 
 
@@ -84,8 +90,22 @@ class SimulatedParticipant(BaseModel):
         return value
 
 
+class DshParticipant(BaseModel):
+    """An external DSH subject explicitly admitted to one Activity.
+
+    ``subject_id`` is assigned by the DSH admin surface, never by this caller.
+    ``display_name`` is resolved server-side from the registered subject, so the
+    Activity create payload cannot smuggle a Persona or a ``character_id``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    actor_type: Literal["DSH"]
+    subject_id: StrictStr = Field(pattern=DSH_SUBJECT_PATTERN)
+
+
 Participant = Annotated[
-    CharacterParticipant | SimulatedParticipant,
+    CharacterParticipant | SimulatedParticipant | DshParticipant,
     Field(discriminator="actor_type"),
 ]
 
@@ -94,15 +114,29 @@ def simulated_participant_id(local_id: str) -> str:
     return f"{SIMULATED_ID_PREFIX}{local_id}"
 
 
-def participant_id(participant: CharacterParticipant | SimulatedParticipant) -> str:
+def dsh_participant_id(subject_id: str) -> str:
+    return f"{DSH_ID_PREFIX}{subject_id}"
+
+
+def participant_id(
+    participant: CharacterParticipant | SimulatedParticipant | DshParticipant,
+) -> str:
     if participant.actor_type == "CHARACTER":
         return participant.character_id
+    if participant.actor_type == "DSH":
+        return dsh_participant_id(participant.subject_id)
     return simulated_participant_id(participant.local_id)
 
 
-def participant_display_name(participant: CharacterParticipant | SimulatedParticipant) -> str:
+def participant_display_name(
+    participant: CharacterParticipant | SimulatedParticipant | DshParticipant,
+) -> str:
     if participant.actor_type == "CHARACTER":
         return participant.character_id
+    if participant.actor_type == "DSH":
+        # The repository replaces this with the registered display name; this
+        # value only keeps the pure function total.
+        return dsh_participant_id(participant.subject_id)
     return participant.display_name
 
 

@@ -56,6 +56,7 @@ src/character_memory/
 - `reply_suggestions.py` — 建议请求、3–5项结构与差异约束。
 
 - `facts.py` — 不同权威事实域的不可变FactRef身份契约。
+- `activity.py` — Activity状态机、参与者身份（正式/活动局部）与冻结的SIMULATED scope；无模型调用。
 - `experience_profile.py` — 显式用户底色枚举、版本请求及独立Prompt区块；不属于人物Persona。
 - `experience_candidates.py` — 从明确反馈文本确定性解析可解释的偏好候选（长期/当前场景、命中短语、显式选择优先）；不调用模型，只允许既有三个维度。
 - `models.py` — `Event / Memory / PersonReaction / ActionDecision / ...`。
@@ -85,6 +86,7 @@ src/character_memory/
 
 - `experience_profiles.py` — 本地用户底色head/version、CAS、清除与恢复；无模型调用。
 - `experience_candidates.py` — 候选决定的持久列（复用 signal 表，不建新表）：采用/忽略/回退版本与清除时失效。
+- `activities.py` — Activity状态/参与者/幂等回执的同事务持久化；读取不加载模型，也不创建人物。
 - `message_receipts.py` — Direct/Group async接受及逐人物认知执行回执；认知提交与队列交接分别记录，不声明可选外部效果完成。
 - `reaction_delivery.py` — async 来源待交接记录、冻结批次、owner/租约与持久认知交付状态；只引用现有事实和媒体。
 - `sqlite.py` — core tables、migration ledger、Event/Memory/Trace/Intent/Media persistence。
@@ -97,6 +99,7 @@ src/character_memory/
 
 ```text
 api.py                  Character Runtime composition root + lifecycle only
+activity_web.py         Activity lifecycle HTTP surface; no model/runtime warmup
 experience_profile_web.py Local operator explicit profile HTTP routes; server-owned identity; candidate view/apply/dismiss/revert
 reply_suggestions_web.py  User draft generation/read HTTP routes; no implicit chat send
 background_services.py  shared worker start/rollback/stop ownership and ordering
@@ -344,6 +347,7 @@ CLI 不提供 `day` / `simulate` / `tick`，AppBundle 不装配生活模拟器�
 | Personal Browse / RSS / local recovery | `world_activity.py` → `runtime/capability_execution.py` / `rss_world.py` → `world_recovery.py` → `world_web.py` |
 | Stateless Claude World execution | `runtime_services.py` → `runtime/claude_process.py` / `claude_tools.py` / `process_tree.py` → `runtime/capability_execution.py` |
 | Character life / execution inspection | `character_life.py` / `life_conversation.py` → `character_life_web.py` → `web/life.js` / `web/app.js` |
+| Activity lifecycle (P10) | `domain/activity.py` → `storage/activities.py` → `activity_web.py`；契约见 [Activity](ACTIVITY.md) |
 | Avatar | `runtime_services.py` → `avatars.py` / `avatar_intent.py` → `avatar_web.py` → `web/avatars.js` |
 | Voice/ASR | `media_bootstrap.py` → `media_runtime.py` → `media_server.py` → `web/voice.js` |
 | Formal TTS | `config.py` → `media_server.py` → `tts_lab.py` → `web/voice.js` |

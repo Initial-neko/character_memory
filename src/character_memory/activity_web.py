@@ -7,6 +7,8 @@ exist here.
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException, Query
 
 from character_memory.domain.activity import (
@@ -20,6 +22,9 @@ from character_memory.storage.activities import (
     ActivityMissing,
     ActivityRepository,
 )
+
+
+logger = logging.getLogger("character_memory.activity")
 
 
 def _present(activity: dict) -> dict:
@@ -44,7 +49,10 @@ def attach_activity_routes(app) -> None:
         except ActivityConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         except ActivityCorrupt as exc:
-            raise HTTPException(503, str(exc)) from exc
+            # Stored data no longer matches the frozen contract. The stable code
+            # is the client contract; the internal detail goes to the log only.
+            logger.warning("activity.corrupt detail=%s", exc)
+            raise HTTPException(503, "ACTIVITY_CORRUPT") from exc
 
     def respond(result: dict) -> dict:
         return {**result, "activity": _present(result["activity"])}

@@ -1,33 +1,9 @@
 {
-  "captured_at": "2026-10-28T12:28:31.083206+00:00",
-  "commit": "63546c56d8d094b8c6951f5f9613297af49feaa6",
-  "dirty": true,
-  "git_status_porcelain": [
-    " M docs/current/ACTIVITY.md",
-    " M docs/current/CODEBASE_LAYOUT.md",
-    " M docs/current/STATUS.md",
-    " M src/character_memory/application/reply_suggestion_signals.py",
-    " M src/character_memory/application/reply_suggestions.py",
-    " M src/character_memory/domain/facts.py",
-    " M src/character_memory/reply_suggestions_web.py",
-    " M src/character_memory/server.py",
-    " M src/character_memory/web/app.js",
-    " M src/character_memory/web/groups.js",
-    " M src/character_memory/web/index.html",
-    " M src/character_memory/web/reply_suggestions.js",
-    "?? docs/assets/p11-relationship-scenario/",
-    "?? src/character_memory/application/relationship_scenario.py",
-    "?? src/character_memory/domain/relationship_scenario.py",
-    "?? src/character_memory/scenario_web.py",
-    "?? src/character_memory/storage/scenarios.py",
-    "?? src/character_memory/web/scenario.css",
-    "?? src/character_memory/web/scenarios.js",
-    "?? tests/e2e_scenario_app.py",
-    "?? tests/test_relationship_scenario.py",
-    "?? tests/test_relationship_scenario_browser.py",
-    "?? tests/test_relationship_scenario_http.py"
-  ],
-  "api_pid": 54828,
+  "captured_at": "2026-10-28T12:39:29.635246+00:00",
+  "commit": "41a3a79850b114d4c1de3d193e147fc2612a5f5d",
+  "dirty": false,
+  "git_status_porcelain": [],
+  "api_pid": 45308,
   "model_calls": {
     "react": 0,
     "suggestions": 0,
@@ -37,6 +13,6 @@
     "width": 400,
     "height": 1400
   },
-  "url": "http://127.0.0.1:64883/",
-  "screenshot_sha256": "a93a5d89a44e2fddc194433c87b31561e953583bdb0309fa74daf9f0d1710952"
+  "url": "http://127.0.0.1:54405/",
+  "screenshot_sha256": "22516a70e4bd34bf8f540f7ca103a219afdabba2dcf408556a382ee5fb978f6d"
 }

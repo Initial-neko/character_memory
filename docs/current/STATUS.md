@@ -1,6 +1,6 @@
 # Current Status & Roadmap
 
-> Character / World implementation status reviewed: 2026-10-17. Media and real-device acceptance remain subject to their existing validation gates.
+> Character / World implementation status reviewed: 2026-10-28. Media and real-device acceptance remain subject to their existing validation gates.
 >
 > This file owns **implementation status only**. Source/tests remain authoritative; the other topic documents define current behavior contracts.
 
@@ -37,7 +37,7 @@ An open PR never upgrades a capability to SHIPPED. Implementation on main does n
 | Stateless Claude World backend | SHIPPED opt-in foundation | Optional WEB_SEARCH backend uses fresh `claude -p` tasks and a single controlled World tool. Default remains direct. CLI/tool fixture validation passed; live Persona/public-source quality and deployment activation are separate. See ARCHITECTURE. |
 | Character life / execution inspection | SHIPPED | Read-only real event/state/Memory/Intent timeline and per-character external task/reply/source/tool/usage details. Continuation step/source results and bilateral collaboration facts are projected without model calls. Indexed receipt lookups keep relationship reads from scanning all ACTION rows under the store lock; complete intermediate tool transcripts are not implemented. |
 | Random Encounter | SHIPPED | Temporary WEB/GENERATED candidates, trial chat, accept/dismiss lifecycle and scheduler. |
-| Activity lifecycle | SHIPPED | Backend-only P10 create/read/pause/resume/end with version CAS, request-id idempotency, formal-vs-activity-local participants and a frozen SIMULATED scope. No execution, branch, reflection (P12) or UI; reads never load the model. See [ACTIVITY](ACTIVITY.md). |
+| Activity lifecycle | SHIPPED | P10 create/read/pause/resume/end with version CAS, request-id idempotency, formal-vs-activity-local participants and a frozen SIMULATED scope. P11 adds user-authored 2–3 partner relationship practice: distinct views, simulated replies, the existing draft/edit/free-input path and explicit failed rounds. Practice facts stay in scenario tables and never enter real Event/Memory; reads never load the model. No branch, reflection or cross-scenario continuity (P12). See [ACTIVITY](ACTIVITY.md). |
 | Memory governance | SHIPPED | Inspect, pin/unpin, forget/restore and provenance-preserving correction. |
 | Voice Message | SHIPPED | Direct/Group durable voice-message lifecycle through formal TTS. |
 | Browser call | SHIPPED | Shared streaming ASR is preferred when Media Runtime advertises it, with batch fallback; speak-over-reply, TTS, pending turns, visual context and hardened late-permission ownership are retained. |

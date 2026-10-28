@@ -1,0 +1,230 @@
+/* Relationship practice reuses the chat transcript, composer and reply drafts.
+ * Only the scene briefing, partner-view cards and drawer form are new. */
+
+.sidebar-scenario-slot { margin-top: 6px; }
+.scenario-entry {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+body.scenario-mode #voiceCallButton,
+body.scenario-mode #runtimeButton,
+body.scenario-mode #intentButton,
+body.scenario-mode #conversationSearchButton,
+body.scenario-mode .composer-tools-trigger,
+body.scenario-mode .sticker-trigger {
+  display: none !important;
+}
+
+/* Drawer ---------------------------------------------------------------- */
+.scenario-drawer { display: grid; gap: 16px; }
+.scenario-drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.scenario-drawer-head h3 { margin: 0 0 3px; font-size: 14px; }
+.scenario-drawer-head p { margin: 0; max-width: 34ch; color: var(--ui-muted); font-size: 11px; line-height: 1.5; }
+.scenario-new {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 11px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.scenario-new:hover { background: var(--ui-hover); }
+.scenario-list { display: grid; gap: 7px; }
+.scenario-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.scenario-card:hover { background: var(--ui-hover); }
+.scenario-card.current { border-color: color-mix(in srgb, var(--ui-accent) 36%, var(--ui-line)); }
+.scenario-card-copy { display: grid; gap: 3px; min-width: 0; }
+.scenario-card-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.scenario-card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-muted); font-size: 10px; }
+.scenario-status {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--ui-surface-sunken);
+  color: var(--ui-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.scenario-status.is-active { background: color-mix(in srgb, var(--ui-accent) 12%, var(--ui-surface)); color: var(--ui-accent); }
+.scenario-status.is-paused { background: var(--ui-warn-bg); color: var(--ui-warn); }
+.scenario-status.is-ended { color: var(--ui-faint); }
+.scenario-empty-copy { margin: 0; color: var(--ui-muted); font-size: 12px; line-height: 1.6; }
+
+.scenario-create-form { display: grid; gap: 12px; padding: 13px; border: 1px solid var(--ui-line); border-radius: var(--ui-r-md); background: var(--ui-surface-soft); }
+.scenario-form-error { margin: 0; }
+.scenario-form-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.scenario-form-head h3 { margin: 0; font-size: 14px; }
+.scenario-form-head span { color: var(--ui-muted); font-size: 10px; }
+.scenario-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.scenario-form-grid > label:first-child,
+.scenario-form-grid > label:nth-child(2) { grid-column: 1 / -1; }
+.scenario-create-form label { display: grid; gap: 5px; color: var(--ui-text); font-size: 11px; font-weight: 650; }
+.scenario-create-form input[type="text"],
+.scenario-create-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  padding: 7px 8px;
+  resize: vertical;
+}
+.scenario-create-form input[type="text"]:focus,
+.scenario-create-form textarea:focus { outline: 2px solid color-mix(in srgb, var(--ui-accent) 32%, transparent); outline-offset: 1px; }
+.scenario-cast-field { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.scenario-cast-field legend { padding: 0; font-size: 11px; font-weight: 650; }
+.scenario-hint { margin: 0; color: var(--ui-muted); font-size: 10px; line-height: 1.5; }
+.scenario-formal-picker { display: grid; gap: 6px; }
+.scenario-formal-option {
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px !important;
+  padding: 8px 9px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  font-weight: 400 !important;
+  cursor: pointer;
+}
+.scenario-formal-option:has(input:checked) { border-color: color-mix(in srgb, var(--ui-accent) 38%, var(--ui-line)); background: color-mix(in srgb, var(--ui-accent) 6%, var(--ui-surface)); }
+.scenario-formal-option span { display: grid; gap: 1px; min-width: 0; }
+.scenario-formal-option strong { font-size: 12px; }
+.scenario-formal-option small { color: var(--ui-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scenario-sim-row { display: grid; gap: 7px; padding: 9px; border: 1px dashed var(--ui-line); border-radius: var(--ui-r-sm); background: var(--ui-surface); }
+.scenario-create-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.scenario-submit {
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 42%, var(--ui-line));
+  border-radius: var(--ui-r-sm);
+  background: color-mix(in srgb, var(--ui-accent) 13%, var(--ui-surface));
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 6px 13px;
+  cursor: pointer;
+}
+.scenario-submit:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-accent) 20%, var(--ui-surface)); }
+.scenario-submit:disabled { opacity: .6; cursor: wait; }
+
+/* Transcript ------------------------------------------------------------ */
+.scenario-brief {
+  max-width: 780px;
+  margin: 2px auto 16px;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 16%, var(--ui-line));
+  border-radius: var(--ui-r-lg, 16px);
+  background: color-mix(in srgb, var(--ui-accent) 3.5%, var(--ui-surface));
+}
+.scenario-brief-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.scenario-brief-head > div:first-child { display: flex; align-items: center; gap: 6px; }
+.scenario-mode-chip {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-accent) 13%, var(--ui-surface));
+  color: var(--ui-accent);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .03em;
+}
+.scenario-brief-actions { display: flex; align-items: center; gap: 8px; }
+.scenario-brief h2 { margin: 9px 0 8px; font-size: clamp(16px, 2vw, 19px); line-height: 1.35; }
+.scenario-brief dl { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 5px 10px; margin: 0; font-size: 12px; line-height: 1.55; }
+.scenario-brief dt { color: var(--ui-muted); font-weight: 600; }
+.scenario-brief dd { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.scenario-cast { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.scenario-cast-item {
+  display: inline-grid;
+  gap: 1px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  font-size: 11px;
+  font-weight: 600;
+}
+.scenario-cast-item small { color: var(--ui-muted); font-size: 9.5px; font-weight: 400; line-height: 1.4; }
+.scenario-scope-note { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: 10px; line-height: 1.5; }
+
+.scenario-perspectives {
+  max-width: 780px;
+  margin: 13px auto 8px;
+  padding: 11px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg, 16px);
+  background: var(--ui-surface-soft);
+}
+.scenario-perspectives-head { margin: 0 2px 8px; color: var(--ui-muted); font-size: 10px; letter-spacing: .03em; }
+.scenario-views { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 7px; }
+.scenario-view { min-width: 0; padding: 9px 10px; border: 1px solid var(--ui-line); border-radius: var(--ui-r-md); background: var(--ui-surface); }
+.scenario-view header { display: flex; align-items: center; gap: 5px; min-width: 0; flex-wrap: wrap; }
+.scenario-view-avatar {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ui-surface-sunken);
+  color: var(--ui-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+.scenario-view-name { font-size: 11px; font-weight: 650; }
+.scenario-stance {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-accent) 9%, var(--ui-surface));
+  color: var(--ui-accent);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+.scenario-view p { margin: 7px 0 0; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.scenario-reply .group-speaker-name { font-size: 10px; }
+.scenario-empty { max-width: 780px; margin: 18px auto; color: var(--ui-muted); font-size: 12px; text-align: center; }
+.scenario-pending { border-color: color-mix(in srgb, var(--ui-accent) 24%, var(--ui-line)) !important; background: color-mix(in srgb, var(--ui-accent) 4%, var(--ui-surface)) !important; }
+.scenario-pending strong { color: var(--ui-accent) !important; }
+.scenario-round-pending button { justify-self: start; margin-top: 3px; }
+
+@media (max-width: 620px) {
+  .scenario-form-grid { grid-template-columns: 1fr; }
+  .scenario-form-grid > label:first-child,
+  .scenario-form-grid > label:nth-child(2) { grid-column: auto; }
+  .scenario-brief { padding: 11px 12px; }
+  .scenario-brief dl { grid-template-columns: 38px minmax(0, 1fr); }
+  .scenario-views { grid-template-columns: 1fr; }
+  .scenario-drawer-head { align-items: center; }
+  .scenario-drawer-head p { display: none; }
+}

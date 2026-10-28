@@ -11,9 +11,10 @@
   let feedbackProfile=null, preferenceDraft={}, preferenceConflict=false, preferenceOpen=false;
   const pendingFeedback=new Map();
   const preferenceFields=[['tone','反馈表达风格',[['NATURAL','自然'],['CUTE','可爱']]],['energy','反馈相处节奏',[['QUIET','安静'],['LIVELY','活泼']]],['verbosity','反馈回答长度',[['BRIEF','简短'],['BALANCED','适中'],['DETAILED','详细']]]];
-  const scope=()=>CM.isGroupConversation()?`GROUP:${CM.state.conversation.groupId}`:`DIRECT:${CM.state.characterId}`;
-  const latest=()=>CM.isGroupConversation()?CM.features.groups?.latestMessage?.():CM.state.directHistory.messages.at(-1);
-  const ref=()=>{const m=latest();return m?.id?{kind:CM.isGroupConversation()?'CONVERSATION_EVENT':'EVENT',id:Number(m.id),...(CM.isGroupConversation()?{conversation_id:CM.state.conversation.groupId}:{})}:null;};
+  const scenarioActive=()=>Boolean(CM.isScenarioConversation?.());
+  const scope=()=>scenarioActive()?`SCENARIO:${CM.state.conversation.activityId}`:CM.isGroupConversation()?`GROUP:${CM.state.conversation.groupId}`:`DIRECT:${CM.state.characterId}`;
+  const latest=()=>scenarioActive()?CM.features.scenarios?.latestEvent?.():CM.isGroupConversation()?CM.features.groups?.latestMessage?.():CM.state.directHistory.messages.at(-1);
+  const ref=()=>{const m=latest();return m?.id?(scenarioActive()?{kind:'SCENARIO_EVENT',id:Number(m.id),activity_id:CM.state.conversation.activityId}:CM.isGroupConversation()?{kind:'CONVERSATION_EVENT',id:Number(m.id),conversation_id:CM.state.conversation.groupId}:{kind:'EVENT',id:Number(m.id)}):null;};
   const contextKey=()=>JSON.stringify([scope(),ref()]);
   const blocked=()=>Boolean(CM.state.lifeReference||CM.features.voice?.state?.active);
   const storageKey=()=>`cm-reply-last:${scope()}`;
@@ -45,8 +46,8 @@
     const toggle=ready?`<button type="button" class="cm-replies-toggle" data-reply-toggle aria-expanded="${collapsed?'false':'true'}" title="${collapsed?'展开这几条回复草稿':'收起建议，输入框和聊天保持清爽'}">${collapsed?`展开建议 · ${count}`:'收起建议'}</button>`:'';
     host.innerHTML=`<div class="cm-replies-head"><button type="button" data-reply-generate title="明确点击才生成回复草稿；不会自动发消息">${label}</button>${lastBatch?'<button type="button" data-reply-feedback title="查看、记录、更正或撤回明确文字反馈">建议反馈</button>':''}${toggle}<span role="status">${esc(busy?'正在准备建议…':notice)}</span></div>${ready&&!collapsed?`<div class="cm-replies-options">${active.data.suggestions.map(item=>`<button type="button" data-suggestion-id="${esc(item.id)}" ${selected===item.id?'aria-pressed="true"':'aria-pressed="false"'}><small>${esc(item.intent)}</small><span>${esc(item.text)}</span></button>`).join('')}</div><div class="cm-replies-foot"><span>点击仅填入草稿，可编辑或直接写自己的话。</span><button type="button" data-reply-ignore>不用这些</button></div>`:''}`;
     const generate=host.querySelector('[data-reply-generate]');generate.disabled=busy||blocked()||!ref();
-    if(blocked())generate.title='建议归因目前仅用于普通文本聊天；通话或生活引用期间请直接输入';
-    else if(!ref())generate.title='先聊一句，有真实上下文后再生成建议';
+    if(blocked())generate.title='通话或引用输入期间请直接输入，建议仅用于普通文字对话';
+    else if(!ref())generate.title='先写一句，再根据当前对话生成建议';
     generate.onclick=()=>generateSuggestions();
     host.querySelector('[data-reply-toggle]')?.addEventListener('click',()=>{collapsed=!collapsed;render();});
     host.querySelector('[data-reply-feedback]')?.addEventListener('click',openFeedback);

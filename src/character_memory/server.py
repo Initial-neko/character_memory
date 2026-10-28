@@ -14,6 +14,7 @@ from character_memory.group_web import attach_group_routes
 from character_memory.history_web import attach_history_routes
 from character_memory.memory_web import attach_memory_routes
 from character_memory.search_web import attach_search_routes
+from character_memory.scenario_web import attach_scenario_routes
 from character_memory.space_web import attach_space_routes
 from character_memory.visual_capture_web import attach_visual_capture_routes
 from character_memory.visual_web import attach_visual_routes
@@ -33,6 +34,9 @@ def create_server_app(config_path: str):
     app = create_api(config_path)
     # Local-only lifecycle state; attaching it never warms up the model bundle.
     attach_activity_routes(app)
+    # Practice routes read the same Activity rows; only an explicit turn calls
+    # the model, and every fact they write carries the frozen SIMULATED scope.
+    attach_scenario_routes(app)
     attach_history_routes(app)
     attach_memory_routes(app)
     # RuntimeServices are composed before any feature route attaches. World no

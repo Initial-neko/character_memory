@@ -739,16 +739,25 @@ class ReflectionService:
     @staticmethod
     def _apply_char_budget(evidence: CollectedEvidence, budget: int) -> None:
         # Facts are dropped oldest-first before memories; both lists are stored
-        # newest-first, so the tail is the most recent evidence.
-        while evidence.facts and sum(len(item.line) + 1 for item in evidence.facts) > budget:
-            evidence.facts.pop()
-            evidence.governance["facts_truncated"] += 1
-        while evidence.memories and sum(len(item.line) + 1 for item in evidence.memories) > budget:
-            evidence.memories.pop()
-            evidence.governance["memories_truncated"] += 1
-        evidence.chars = sum(len(item.line) + 1 for item in evidence.facts) + sum(
-            len(item.line) + 1 for item in evidence.memories
-        )
+        # newest-first, so the tail is the most recent evidence. At least one
+        # item always survives: otherwise a very large individual fact would
+        # look like an idle window and suppress a real call.
+        def total() -> int:
+            return sum(len(item.line) + 1 for item in evidence.facts) + sum(
+                len(item.line) + 1 for item in evidence.memories
+            )
+
+        while total() > budget and len(evidence.facts) + len(evidence.memories) > 1:
+            if len(evidence.facts) > 1:
+                evidence.facts.pop()
+                evidence.governance["facts_truncated"] += 1
+            else:
+                evidence.memories.pop()
+                evidence.governance["memories_truncated"] += 1
+        if total() > budget:
+            newest = evidence.facts[0] if evidence.facts else evidence.memories[0]
+            newest.line = newest.line[:max(1, budget - 1)]  # +1 for its newline
+        evidence.chars = total()
 
     def _signature(self, evidence: CollectedEvidence) -> str:
         fact_keys = sorted(

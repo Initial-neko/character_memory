@@ -498,6 +498,20 @@ def test_a16_evidence_is_truncated_in_a_fixed_order_and_counted(tmp_path):
         store.close()
 
 
+def test_single_oversize_fact_is_trimmed_not_treated_as_idle(tmp_path):
+    store, service, model = make_service(tmp_path)
+    window = reflection_window("DAILY", NOW, OFFSET)
+    seed_event(store, window.start + timedelta(hours=1), content="x" * 20000)
+    try:
+        result = service.run_period("c00", "DAILY", now=NOW)
+        assert result["status"] == "COMMITTED"
+        assert len(result["evidence"]["facts"]) == 1
+        assert result["evidence"]["chars"] <= 6000
+        assert len(model.calls) == 1
+    finally:
+        store.close()
+
+
 # A17 ------------------------------------------------------------------------
 def test_a17_oversize_output_fails_without_partial_reflection(tmp_path):
     store, service, model = make_service(tmp_path, model=FakeReflectionModel(mode="oversize"))

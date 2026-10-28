@@ -29,7 +29,7 @@ src/character_memory/
 ├─ memory/                  embedding + recall
 ├─ storage/                 SQLite core persistence/search/history
 ├─ llm/                     cloud model adapter
-└─ eval/                    eval runner
+└─ eval/                    eval runner, report/compare, offline model and independent review merge
 ```
 
 ### `application/`

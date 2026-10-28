@@ -164,8 +164,11 @@ bash scripts/stack.sh status | start | stop | restart
 uv run pytest -q
 bash scripts/sync-all.sh
 uv run python scripts/benchmark_media.py --wav path/to/test.wav --iterations 20
-uv run character-memory eval evals/p0_relationship.jsonl
+uv run character-memory eval evals/smoke.jsonl
+uv run character-memory eval evals/b1_b7.jsonl --report /tmp/b1_b7.report.json
 ```
+
+`eval` 默认使用离线确定性模型，不产生付费调用。`evals/p0_relationship.jsonl` 会断言 memory write/recall，离线模型不具备这些行为；它是真实 provider 套件，需要 `--live` 并在预算允许时分批运行。
 
 Playwright Python runtime 已进入 canonical `all` extra，因为 World Observation 正式使用它；Chromium 浏览器二进制仍由独立安装步骤（CI browser job 或 `uv run playwright install chromium`）准备。
 

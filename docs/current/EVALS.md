@@ -92,16 +92,109 @@ Context 提供上次聊天时间和真实间隔；Eval 要禁止固定 `gap > N 
 运行：
 
 ```bash
-uv run character-memory eval evals/p0_relationship.jsonl
+uv run character-memory eval evals/p0_relationship.jsonl --report /tmp/p0.report.json
 ```
+
+默认使用确定性的离线模型（`offline-deterministic-v1`），不产生付费调用；它只证明 runner、上下文、种子记忆和报告链路可执行，不代表模型质量。需要真实 provider 时必须显式 `--live`，并受 `--max-paid-calls` 硬上限约束（默认 10，且不允许超过 10）。
+
+P0 suite 会断言 memory write / recall 等模型行为，离线确定性模型会产生 `engineering` 结果（这是如实报告，不是产品回归）。P0 需要在目标环境用真实 provider 分批运行；B1–B7 才是当前离线可执行的基线。
 
 Eval 使用临时 SQLite，不污染正式人物数据。
 
-Eval CLI 输出一份 JSON 报告，保留 `passed / total / by_tag / results`。非空且全部通过时退出码为 `0`；存在失败用例时为 `1`；没有可执行用例时为 `2`。配置、输入解析或运行异常以非零状态失败，不输出虚假的成功报告。自动化必须同时核对退出状态与实际执行用例，不能把空结果视作通过。
+Eval CLI 输出一份 JSON 摘要，保留 `passed / total / by_tag / results`，并增加 `status_counts / unscored / reviewed_passed / paid_calls / metadata`。只有全部用例状态为 `passed`（含必要的独立评审）时退出码才是 `0`；未评、语义失败、工程失败、环境缺失均为 `1`；没有可执行用例时为 `2`。配置、输入解析或运行异常以非零状态失败，不输出虚假的成功报告。自动化必须同时核对退出状态与实际执行用例，不能把空结果视作通过。
 
 CLI 状态传播的隔离/子进程测试不证明真实模型质量；真实 Provider 的评测仍需在目标环境单独运行并保存 JSON、模型/配置版本和退出码。
 
-注意：结构规则只能验证可观察 contract。Persona 是否真的像某个人物仍需要盲评或未来 Judge Model，不能靠关键词断言。
+注意：结构规则只能验证可观察 contract。Persona 是否真的像某个人物仍需要盲评或独立 Judge Model，不能靠关键词断言。
+
+## B1–B7 independent evaluation and trend comparison
+
+`evals/b1_b7.jsonl` 固定七个互不替代的域，每个域至少一条可执行用例：
+
+| ID | Domain | Meaning |
+| --- | --- | --- |
+| B1 | dialogue | 日常对话的自然回应 |
+| B2 | preference | 用户偏好的延续与确定程度 |
+| B3 | persona | 人物表达与 safe summary 边界 |
+| B4 | memory | 明确记录的事实召回 |
+| B5 | relationship | 真实时间间隔与关系语境 |
+| B6 | activity | 已采用的共同活动/共同记忆 |
+| B7 | system | Delivery/Behavioral Contract 与动作边界 |
+
+### Outcome separation
+
+一个用例只有五种状态，报告不得把它们压成一个绿灯：
+
+| Status | Meaning |
+| --- | --- |
+| `passed` | 可观察 contract 通过；若声明了 `review_criteria`，还必须有独立评审且 verdict 为 pass |
+| `engineering` | 执行异常或 contract 检查失败；这是工程/行为失败 |
+| `environment` | 缺少 runtime、依赖、provider、embedding 或模型等本地环境条件 |
+| `unscored` | contract 通过，但语义评审尚未进行；**不是** pass，不计入 `passed` 或 `reviewed_passed` |
+| `semantic` | 独立评审已进行且判定失败 |
+
+`contract_passed` 只表示确定性断言，不等于“可爱分”。报告的 `summary` 同时保留 `contract_passed`、`reviewed_passed`、`unscored` 与各失败分类，任何一层都不能替代另一层。
+
+### Generation and review separation
+
+`eval` 只生成报告，不产生评审结论。语义评审必须由另一个进程/评审者读取生成报告后写出独立 artifact：
+
+```json
+{
+  "schema": "character-memory/eval-reviews/v1",
+  "reviewed_run_id": "<report.run_id>",
+  "reviewer": {"kind": "human", "name": "reviewer-a"},
+  "created_at": "2026-10-28T00:00:00+00:00",
+  "cases": {
+    "B2_preference_continuity": {"verdict": "pass", "notes": ""},
+    "B3_persona_boundary": {"verdict": "fail", "notes": "tone drift"}
+  }
+}
+```
+
+```bash
+uv run character-memory eval-review report.json --reviews reviews.json --out reviewed.json
+```
+
+- `reviewed_run_id` 必须匹配，防止把旧评审套到新运行。
+- `reviewer.kind` 只允许 `human`、`external-judge`、`external-model`；`generation`/`runtime`/`runner`/`same-process` 会被拒绝。
+- artifact 是权威的：未列出的已声明语义用例回到 `unscored`，不会继承旧 verdict。
+- 失败的 contract 不能被语义 pass 升级。
+- 相同 artifact 重复应用结果完全一致（幂等）。
+
+### Version, cost and provenance
+
+每份报告记录：commit、dirty 状态、model、prompt/policy 源文件指纹、每个 Persona 内容指纹、suite 路径与 sha256、模式（offline/live）、允许的付费调用上限。每个用例记录：model/logical 调用数、input/output/total tokens、token coverage（缺失 token 记为未知而非 0）、provider 耗时、wall time、付费调用数。
+
+Prompt/policy 的“版本”是源码内容指纹，不是语义版本号；它保证同一指纹确实来自同一份 prompt/policy owner。离线运行的成本为 0，不能被解读为“真实 provider 也很便宜”。
+
+`--live` 会强制 `llm_attempts=1`，并在每次 provider 调用前检查预算。因此 10 次上限约束的是真实请求，而不是可被重试放大的逻辑调用数。
+
+### Baseline vs candidate
+
+```bash
+uv run character-memory eval evals/b1_b7.jsonl --label baseline  --report baseline.json
+uv run character-memory eval evals/b1_b7.jsonl --label candidate --report candidate.json
+uv run character-memory eval-compare baseline.json candidate.json --out compare.json
+```
+
+比较不是单一通过率差值，而是按 case 输出：
+
+- baseline/candidate 状态与 `direction`（`improved` / `regressed` / `unchanged` / `still_failing` / `still_unscored` / `not_comparable` / `case_added` / `case_removed`）；
+- 字段级 diff（actions、messages、recall/write ids、review verdict、failure class、token/call、duration、output digest）；
+- 每 case 成本增量与 metadata 变化（commit、model、prompt/policy、persona、suite sha256）。
+
+`unscored` 或 `environment` 与任何状态比较时标为 `not_comparable`，不会把“还没评”或“本机缺依赖”伪装成提升或回归。
+
+### Internal viewer
+
+```bash
+uv run character-memory eval-report report.json
+uv run character-memory eval-report report.json --case B2_preference_continuity
+uv run character-memory eval-report report.json --json
+```
+
+文本视图按 case 显示生成结果（actions/messages/perception/reaction）、recall/write ids、每条 check、review verdict/notes、failure class 与成本；未评审用例明确显示 `UNSCORED`，缺少环境显示 `ENVIRONMENT`，执行异常显示 `ENGINEERING`。
 
 ### Memory modality suite
 
@@ -128,9 +221,9 @@ and share their character's temporary history, so fixture authors must avoid
 unintended cross-case facts or choose explicitly configured separate characters.
 
 Optional `review_criteria` is a list of semantic checks copied into results with
-`review_required`. The existing `pass` field only reports mechanical assertions;
-nonempty review criteria remain pending until the actual output is separately
-reviewed. Known forbidden phrases detect specific regressions but cannot prove
+`review_required`. `contract_passed` reports mechanical assertions only;
+`pass` is true only for a contract-only case or an independently reviewed pass.
+Nonempty review criteria without a review artifact stay `unscored`, never pass. Known forbidden phrases detect specific regressions but cannot prove
 all paraphrases factual. Optional `messages_equal` validates the complete ordered
 message-text list exactly (including punctuation, whitespace and extra messages),
 without additional stripping or Unicode normalization. This compares the runtime
@@ -394,13 +487,17 @@ Settings Center 至少验证：
 - safe summary presence；
 - min/max Memory write；
 - minimum Recall count；
-- Context contains。
+- Context contains；
+- `review_criteria` 与独立 review artifact；
+- per-case 失败分类与成本记录。
+
+没有 `review_criteria` 的 contract-only 用例（如 `smoke.jsonl`、B7）可以直接 `passed`；声明了语义评审的用例在评审缺失时永远是 `unscored`。冒烟数据通过不能替代 B1–B7 的语义结论。
 
 ## 12. Future evaluation work
 
 后续候选：
 
-- Model-as-Judge adapter；
+- Model-as-Judge adapter（必须写入独立 review artifact，不能由生成进程静默打分）；
 - Persona Identification Accuracy；
 - 10/50/100/500 turn persona decay；
 - 30/100/365-day continuity；

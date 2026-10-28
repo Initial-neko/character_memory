@@ -500,6 +500,9 @@
   async function enter(groupId) {
     const group = groups.find(item => item.id === groupId);
     if (!group) return;
+    // A group is a different conversation surface; leaving practice restores
+    // Direct state before this function takes over the shared composer.
+    CM.features.scenarios?.leave?.();
     const generation = ++entryGeneration;
     CM.closeDirectStream?.();
     closeStream();

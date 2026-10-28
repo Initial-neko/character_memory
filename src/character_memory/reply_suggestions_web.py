@@ -9,13 +9,16 @@ from character_memory.domain.reply_suggestions import SuggestionRequest, Suggest
 from character_memory.application.reply_suggestion_signals import record_feedback
 from character_memory.storage.reply_suggestion_signals import ReplySuggestionSignalRepository
 from character_memory.config import load_persona, resolve_persona_path
+from character_memory.storage.scenarios import ScenarioCorrupt, ScenarioRepository
 
 
 def attach_reply_suggestion_routes(app, access, *, persona_for=None):
+    scenario_repository = ScenarioRepository(access.read_store)
     service = ReplySuggestionService(access.read_store,
         ensure_character=access.ensure_character,
         persona_for=persona_for or (lambda char:load_persona(resolve_persona_path(access.settings,char))),
-        model_for=lambda:access.require_bundle().model)
+        model_for=lambda:access.require_bundle().model,
+        scenario_for=lambda activity_id,event_id:scenario_repository.suggestion_snapshot(activity_id,event_id))
 
     def call(operation, *args):
         try:
@@ -28,6 +31,8 @@ def attach_reply_suggestion_routes(app, access, *, persona_for=None):
             raise HTTPException(502,str(exc)) from exc
         except ProfileCorrupt as exc:
             raise HTTPException(503,str(exc)) from exc
+        except ScenarioCorrupt as exc:
+            raise HTTPException(503,'SCENARIO_CORRUPT') from exc
         return JSONResponse(result,status_code=202 if result.get('status')=='PENDING' else 200)
 
     @app.post('/v2/reply-suggestions')

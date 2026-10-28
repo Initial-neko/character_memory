@@ -110,6 +110,11 @@
   };
   CM.currentProfile = () => CM.state.characters.find(item => item.id === CM.state.characterId) || {id: CM.state.characterId, name: CM.state.characterId, identity:"", tagline:""};
   CM.isGroupConversation = () => CM.state.conversation.type === "GROUP" && Boolean(CM.state.conversation.groupId);
+  // A practice is a third conversation surface: it owns the transcript, but it
+  // is not a Direct chat and must never be treated as one by the composer,
+  // suggestions or the sidebar's active highlight.
+  CM.isScenarioConversation = () => CM.state.conversation.type === "SCENARIO" && Boolean(CM.state.conversation.activityId);
+  CM.isDirectConversation = () => !CM.isGroupConversation() && !CM.isScenarioConversation();
   CM.registerFeature = (name, feature) => { CM.features[name] = feature; return feature; };
   CM.on = (name, fn) => { if (!CM.listeners.has(name)) CM.listeners.set(name, []); CM.listeners.get(name).push(fn); };
   CM.emit = async (name, payload) => { for (const fn of CM.listeners.get(name) || []) await fn(payload); };
@@ -344,7 +349,7 @@
       const pending = CM.state.pendingCharacters.has(profile.id);
       const hasUnread = unread?.isUnread?.(profile.id) || false;
       const preview = unread?.preview?.(profile) || profile.tagline || profile.identity || "Persistent AI Person";
-      const active = !CM.isGroupConversation() && profile.id === CM.state.characterId;
+      const active = CM.isDirectConversation() && profile.id === CM.state.characterId;
       const id = CM.escapeHtml(profile.id);
       return `<div class="character-item-wrap" data-character-row="${id}"><button class="character-item ${active ? "active" : ""}" type="button" data-character="${id}"><span class="character-avatar">${CM.escapeHtml(CM.initialFor(profile))}</span><span class="character-copy"><span class="character-name character-name-line"><span>${CM.escapeHtml(profile.name)}${pending ? '<span class="character-pending"> · 输入中</span>' : ""}</span>${hasUnread ? '<span class="unread-dot" title="有新消息" aria-label="有新消息"></span>' : ""}</span><span class="character-tagline character-preview">${CM.escapeHtml(preview)}</span></span></button><button class="character-more-button" type="button" data-character-more="${id}" title="人物操作" aria-label="人物操作">···</button><div class="character-context-menu hidden" data-character-menu="${id}"><button type="button" data-character-persona="${id}">查看人物设定</button><button type="button" data-character-live2d="${id}" title="管理当前角色的 Live2D 模型，普通头像保持不变">Live2D 模型</button><button type="button" data-character-archive="${id}">归档人物…</button></div></div>`;
     }).join("");
@@ -370,12 +375,13 @@
     const current = CM.state.characterId;
     CM.openDrawer("全部人物", `当前 ${CM.state.characterCapacity.activeTotal || CM.state.characters.length} / ${CM.state.characterCapacity.hardLimit || 20} 位；侧边栏只展示最多 10 位`);
     CM.dom.drawerBody.innerHTML = `<div class="character-overflow-list">${CM.state.characters.map(profile => {
-      const active = !CM.isGroupConversation() && profile.id === current;
+      const active = CM.isDirectConversation() && profile.id === current;
       return `<button type="button" class="character-overflow-card ${active ? "active" : ""}" data-overflow-character="${CM.escapeHtml(profile.id)}"><span class="character-avatar">${CM.escapeHtml(CM.initialFor(profile))}</span><span><strong>${CM.escapeHtml(profile.name || profile.id)}</strong><small>${CM.escapeHtml(profile.identity || profile.tagline || "")}</small></span></button>`;
     }).join("")}</div>`;
   };
 
   CM.updateComposerState = () => {
+    if (CM.isScenarioConversation() && CM.features.scenarios?.applyComposerState?.()) return;
     if (CM.isGroupConversation() && CM.features.groups?.applyComposerState?.()) return;
     CM.dom.sendButton.disabled = CM.state.sendingCount > 0;
     CM.dom.input.disabled = false;
@@ -385,6 +391,9 @@
   };
 
   CM.updateHeader = () => {
+    // Scenario owns the header while it is the visible transcript. It must be
+    // checked before Direct, because a practice still belongs to a character.
+    if (CM.isScenarioConversation() && CM.features.scenarios?.applyHeader?.()) { CM.updateComposerState(); return; }
     if (CM.isGroupConversation() && CM.features.groups?.applyHeader?.()) { CM.updateComposerState(); return; }
     const profile = CM.currentProfile();
     const pending = CM.state.pendingCharacters.has(CM.state.characterId);
@@ -560,12 +569,17 @@
     }
   };
 
-  CM.loadHistory = async () => CM.isGroupConversation() ? CM.features.groups?.loadHistory?.() : CM.loadDirectHistory();
+  CM.loadHistory = async () => {
+    if (CM.isScenarioConversation()) return CM.features.scenarios?.loadHistory?.();
+    return CM.isGroupConversation() ? CM.features.groups?.loadHistory?.() : CM.loadDirectHistory();
+  };
 
   CM.switchCharacter = async nextId => {
     const wasGroup = CM.isGroupConversation();
+    const wasScenario = CM.isScenarioConversation();
+    CM.features.scenarios?.leave?.();
     CM.features.groups?.leave?.();
-    if (!wasGroup && nextId === CM.state.characterId) return;
+    if (!wasGroup && !wasScenario && nextId === CM.state.characterId) return;
     CM.closeDirectStream();
     CM.features.stickers?.close?.();
     CM.features.images?.close?.();
@@ -631,7 +645,7 @@
       CM.state.lifeSending=true;
       const ref=CM.state.lifeReference, target=CM.state.lifeTarget;
       if ((target.type==="GROUP" && (!CM.isGroupConversation() || CM.state.conversation.groupId!==target.id)) ||
-          (target.type==="DIRECT" && (CM.isGroupConversation() || CM.state.characterId!==ref.character_id))) {
+          (target.type==="DIRECT" && (!CM.isDirectConversation() || CM.state.characterId!==ref.character_id))) {
         CM.state.lifeSending=false;CM.clearLifeReference();
         throw new Error("会话已变化，请从生活记录重新打开引用");
       }
@@ -645,6 +659,7 @@
       return;
     }
     const attribution=CM.features.replySuggestions?.capture?.();
+    if (CM.isScenarioConversation()) return CM.features.scenarios?.sendText?.(message,attribution);
     if (CM.isGroupConversation()) return CM.features.groups?.sendText?.(message,attribution);
     return CM.sendDirectText(message,attribution);
   };

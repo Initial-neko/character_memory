@@ -1,0 +1,18 @@
+{
+  "captured_at": "2026-10-28T12:39:30.665732+00:00",
+  "commit": "41a3a79850b114d4c1de3d193e147fc2612a5f5d",
+  "dirty": false,
+  "git_status_porcelain": [],
+  "api_pid": 45308,
+  "model_calls": {
+    "react": 0,
+    "suggestions": 1,
+    "scenario": 4
+  },
+  "viewport": {
+    "width": 400,
+    "height": 900
+  },
+  "url": "http://127.0.0.1:54405/",
+  "screenshot_sha256": "0fbf15ebf4d22f2faf33c1f9a2fce87830494f5aefc70887ec42c0dfb91110ba"
+}

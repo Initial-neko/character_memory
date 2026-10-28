@@ -1,6 +1,7 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import pytest
 from character_memory.domain.facts import FactRef
+from character_memory.domain.models import Event, EventType
 from character_memory.storage.sqlite import SQLiteStore
 from character_memory.storage.reaction_delivery import ReactionDeliveryRepository, DeliveryUnavailable
 
@@ -464,4 +465,90 @@ def test_corrupt_committed_cache_reports_blocked_not_cognition_success(tmp_path,
     delivery.recover_once()
     wait_state(repo, ref, 'BLOCKED')
     assert [model.calls for model in models.values()] == calls
+    delivery.stop(); scheduler.close(); hub.close(); store.close()
+
+
+def _direct_event(store, at, content):
+    return store.append_message(Event(character_id='momo', event_type=EventType.USER_MESSAGE,
+        event_time=at, content=content, metadata={'conversation_id': 'once'}))
+
+
+def _record(repo, store, event):
+    with store.transaction():
+        repo.record(FactRef(kind='EVENT', id=event.id), 'direct:momo:once',
+            character_id='momo', conversation_id='once')
+
+
+def test_future_dated_fact_does_not_stall_present_delivery(tmp_path):
+    """P15-F1: a future event_time must not supersede a present generation."""
+    from test_reaction_receipts import NOW
+    store, repo, delivery, scheduler, hub, models, bundle, profiles = delivery_runtime(tmp_path)
+    future = _direct_event(store, NOW + timedelta(days=1), '未来的一天')
+    present = _direct_event(store, NOW, '现在这一句')
+    _record(repo, store, future)
+    _record(repo, store, present)
+
+    scheduler.enqueue_direct('momo', 'once', present)
+    wait_state(repo, FactRef(kind='EVENT', id=present.id), 'COGNITION_COMMITTED')
+    assert repo.pending() == []
+    assert models['momo'].calls == 1
+
+    # Repeated scans after the commit are idempotent: no retry storm, no replay.
+    for _ in range(3):
+        delivery.recover_once()
+    assert repo.status(FactRef(kind='EVENT', id=present.id)) == 'COGNITION_COMMITTED'
+    assert models['momo'].calls == 1
+    delivery.stop(); scheduler.close(); hub.close(); store.close()
+
+
+def test_future_dated_fact_is_still_delivered_on_its_own(tmp_path):
+    """A future-dated input is not blocked merely because it is ahead of the clock."""
+    from test_reaction_receipts import NOW
+    store, repo, delivery, scheduler, hub, models, bundle, profiles = delivery_runtime(tmp_path)
+    future = _direct_event(store, NOW + timedelta(days=1), '明天再来')
+    _record(repo, store, future)
+
+    scheduler.enqueue_direct('momo', 'once', future)
+    wait_state(repo, FactRef(kind='EVENT', id=future.id), 'COGNITION_COMMITTED')
+    assert repo.pending() == []
+    assert models['momo'].calls == 1
+    delivery.stop(); scheduler.close(); hub.close(); store.close()
+
+
+def test_superseded_batch_with_pending_sources_is_reclaimed_after_restart(tmp_path):
+    """A SUPERSEDED batch must never strand its still-PENDING sources (P15-F1)."""
+    store, repo, now = repository(tmp_path)
+    one = add(repo, store, 1)
+    two = add(repo, store, 2)
+    batch = repo.claim(two, lease_seconds=10)
+    repo.finish(batch, 'SUPERSEDED')
+    assert repo.pending(), 'superseded generation should stay recoverable'
+    store.close()
+
+    store = SQLiteStore(tmp_path / 'delivery.db')
+    repo = ReactionDeliveryRepository(store, clock=lambda: now[0])
+    again = repo.claim(two, lease_seconds=10)
+    assert again is not None and again.ref == two
+    assert repo.finish(again, 'COGNITION_COMMITTED')
+    assert repo.status(one) == 'COGNITION_COMMITTED'
+    assert repo.pending() == []
+    store.close()
+
+
+def test_future_dated_fact_delivers_once_when_its_time_has_arrived(tmp_path):
+    """After the trusted clock reaches event_time the fact replies normally."""
+    from test_reaction_receipts import NOW
+    store, repo, delivery, scheduler, hub, models, bundle, profiles = delivery_runtime(tmp_path)
+    event = _direct_event(store, NOW + timedelta(days=1), '到了明天')
+    _record(repo, store, event)
+
+    bundle.clock.set(NOW + timedelta(days=2))
+    delivery.recover_once()
+    wait_state(repo, FactRef(kind='EVENT', id=event.id), 'COGNITION_COMMITTED')
+    assert models['momo'].calls == 1
+
+    delivery.recover_once()
+    delivery.recover_once()
+    assert repo.pending() == []
+    assert models['momo'].calls == 1
     delivery.stop(); scheduler.close(); hub.close(); store.close()

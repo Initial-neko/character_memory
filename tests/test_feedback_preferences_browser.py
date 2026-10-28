@@ -122,6 +122,119 @@ def test_null_withdrawal_and_restore_use_original_profile(page,suggestions_serve
     assert page.request.get(suggestions_server+'/v2/me/experience-profile').json()==restored
 
 
+def submit_note(box,text):
+    box.get_by_label('反馈内容',exact=True).fill(text)
+    with box.page.expect_response(lambda r:r.url.endswith('/v2/reply-suggestions/feedback') and r.request.method=='POST') as result:
+        box.get_by_role('button',name='提交反馈',exact=True).click()
+    assert result.value.status==200,result.value.text()
+    return result.value.json()
+
+
+def open_candidates(page,box):
+    from playwright.sync_api import expect
+    box.get_by_role('button',name='关闭建议反馈').click()
+    page.get_by_role('button',name='相处偏好',exact=True).click()
+    profile=page.get_by_role('dialog',name='相处偏好',exact=True)
+    profile.get_by_role('button',name='反馈建议',exact=True).click()
+    expect(profile.get_by_role('button',name='刷新建议',exact=True)).to_be_visible()
+    return profile
+
+
+@pytest.mark.parametrize('width',[1280,390])
+def test_natural_language_feedback_becomes_an_explicit_candidate(page,suggestions_server,tmp_path,width):
+    from playwright.sync_api import expect
+    batch,box=open_after_send(page,suggestions_server,width)
+    assert submit_note(box,'以后回答简短一点')['applied_profile_version'] is None
+    expect(box.get_by_role('status')).to_contain_text('反馈已保存')
+    assert page.request.get(suggestions_server+'/v2/me/experience-profile').json()['preferences']=={}
+    profile=open_candidates(page,box)
+    row=profile.locator('[data-candidate-status="PENDING"]')
+    expect(row).to_have_count(1)
+    expect(row).to_contain_text('长期')
+    expect(row).to_contain_text('简短')
+    capture(page,tmp_path,f'feedback-candidate-{width}-pending')
+    with page.expect_response(lambda r:r.url.endswith('/apply') and r.request.method=='POST') as applied:
+        row.get_by_role('button',name='采用',exact=True).click()
+    assert applied.value.status==200,applied.value.text()
+    assert applied.value.json()['applied_profile_version']==1
+    expect(profile.get_by_role('status')).to_contain_text('已保存为新版本')
+    profile_state=page.request.get(suggestions_server+'/v2/me/experience-profile').json()
+    assert profile_state['version']==1 and profile_state['preferences']=={'verbosity':'BRIEF'}
+    expect(profile.locator('[data-candidate-status="APPLIED"]')).to_have_count(1)
+    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+    assert profile.evaluate('(d)=>d.scrollWidth<=d.clientWidth')
+    capture(page,tmp_path,f'feedback-candidate-{width}-applied')
+    # The applied preference reaches the very next real reply context.
+    assert page.request.post(suggestions_server+'/v1/chat',data={'character_id':'rin','message':'采用后的下一条'}).status==200
+    contexts=[json.loads(x) for x in (tmp_path/'profile-contexts.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert contexts[-1]['profile_version']==1 and contexts[-1]['brief']
+    # Revert changes only the active version; the applied version stays in history.
+    row=profile.locator('[data-candidate-status="APPLIED"]')
+    with page.expect_response(lambda r:r.url.endswith('/revert') and r.request.method=='POST') as reverted:
+        row.get_by_role('button',name='回退这次采用',exact=True).click()
+    assert reverted.value.status==200,reverted.value.text()
+    after=page.request.get(suggestions_server+'/v2/me/experience-profile').json()
+    assert after['version']==2 and after['preferences']=={}
+    history={item['version']:item for item in page.request.get(suggestions_server+'/v2/me/experience-profile/versions').json()['versions']}
+    assert history[1]['preferences']=={'verbosity':'BRIEF'}
+    expect(profile.locator('[data-candidate-status="REVERTED"]')).to_have_count(1)
+    assert page.request.post(suggestions_server+'/v1/chat',data={'character_id':'rin','message':'回退后的下一条'}).status==200
+    contexts=[json.loads(x) for x in (tmp_path/'profile-contexts.jsonl').read_text(encoding='utf-8').splitlines()]
+    # With the reverted profile empty again, the next turn carries no preference
+    # section at all rather than the old BRIEF value.
+    assert contexts[-1]['profile_version'] is None and not contexts[-1]['brief']
+    capture(page,tmp_path,f'feedback-candidate-{width}-reverted')
+
+
+def test_explicit_choice_outranks_natural_language_inference(page,suggestions_server,tmp_path):
+    from playwright.sync_api import expect
+    assert page.request.patch(suggestions_server+'/v2/me/experience-profile',
+                               data={'expected_version':0,'changes':{'tone':'NATURAL'}}).status==200
+    batch,box=open_after_send(page,suggestions_server,390)
+    submit_note(box,'以后可爱一点')
+    assert page.request.get(suggestions_server+'/v2/me/experience-profile').json()['preferences']=={'tone':'NATURAL'}
+    profile=open_candidates(page,box)
+    row=profile.locator('[data-candidate-status="OVERRIDDEN"]')
+    expect(row).to_have_count(1)
+    expect(row).to_contain_text('你已明确选择')
+    assert row.get_by_role('button').count()==0
+    assert page.request.get(suggestions_server+'/v2/me/experience-profile').json()['version']==1
+    capture(page,tmp_path,'feedback-candidate-390-overridden')
+
+
+def test_withdrawn_feedback_candidate_never_revives_after_reopen(page,suggestions_server):
+    from playwright.sync_api import expect
+    batch,box=open_after_send(page,suggestions_server,390)
+    submit_note(box,'以后回答简短一点')
+    row=box.locator('[data-signal-id]').first
+    page.once('dialog',lambda d:d.accept())
+    row.get_by_role('button',name='撤回',exact=True).click()
+    expect(row).to_contain_text('已撤回')
+    profile=open_candidates(page,box)
+    retired=profile.locator('[data-candidate-status="WITHDRAWN"]')
+    expect(retired).to_have_count(1)
+    assert retired.get_by_role('button').count()==0
+    assert page.request.post(suggestions_server+'/v2/me/experience-profile/candidates/'+
+                             retired.get_attribute('data-candidate-id')+'/apply',
+                             data={'request_id':'11111111-2222-3333-4444-555555555555',
+                                   'expected_profile_version':0}).status==409
+    assert page.request.get(suggestions_server+'/v2/me/experience-profile').json()['version']==0
+    profile.get_by_role('button',name='刷新建议',exact=True).click()
+    expect(profile.locator('[data-candidate-status="WITHDRAWN"]')).to_have_count(1)
+    assert profile.locator('[data-candidate-status="PENDING"]').count()==0
+
+
+def test_cleared_profile_expires_open_candidate(page,suggestions_server):
+    from playwright.sync_api import expect
+    batch,box=open_after_send(page,suggestions_server,390)
+    submit_note(box,'以后回答简短一点')
+    assert page.request.delete(suggestions_server+'/v2/me/experience-profile',
+                               params={'expected_version':0}).status==200
+    profile=open_candidates(page,box)
+    expect(profile.locator('[data-candidate-status="SUPERSEDED"]')).to_have_count(1)
+    assert page.request.get(suggestions_server+'/v2/me/experience-profile').json()['preferences']=={}
+
+
 def test_feedback_application_survives_real_http_restart(page,tmp_path):
     from contextlib import contextmanager
     from playwright.sync_api import expect

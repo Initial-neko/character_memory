@@ -57,6 +57,7 @@ src/character_memory/
 
 - `facts.py` — 不同权威事实域的不可变FactRef身份契约。
 - `experience_profile.py` — 显式用户底色枚举、版本请求及独立Prompt区块；不属于人物Persona。
+- `experience_candidates.py` — 从明确反馈文本确定性解析可解释的偏好候选（长期/当前场景、命中短语、显式选择优先）；不调用模型，只允许既有三个维度。
 - `models.py` — `Event / Memory / PersonReaction / ActionDecision / ...`。
 
 `llm/usage.py` 拥有调用归因 scope 与 durable request 计量；Runtime Trace 保留模型 I/O，两者通过 logical call id 关联。
@@ -83,6 +84,7 @@ src/character_memory/
 - `reply_suggestions.py` — 用户建议批次的持久领取、缓存与失败/陈旧状态。
 
 - `experience_profiles.py` — 本地用户底色head/version、CAS、清除与恢复；无模型调用。
+- `experience_candidates.py` — 候选决定的持久列（复用 signal 表，不建新表）：采用/忽略/回退版本与清除时失效。
 - `message_receipts.py` — Direct/Group async接受及逐人物认知执行回执；认知提交与队列交接分别记录，不声明可选外部效果完成。
 - `reaction_delivery.py` — async 来源待交接记录、冻结批次、owner/租约与持久认知交付状态；只引用现有事实和媒体。
 - `sqlite.py` — core tables、migration ledger、Event/Memory/Trace/Intent/Media persistence。
@@ -95,7 +97,7 @@ src/character_memory/
 
 ```text
 api.py                  Character Runtime composition root + lifecycle only
-experience_profile_web.py Local operator explicit profile HTTP routes; server-owned identity
+experience_profile_web.py Local operator explicit profile HTTP routes; server-owned identity; candidate view/apply/dismiss/revert
 reply_suggestions_web.py  User draft generation/read HTTP routes; no implicit chat send
 background_services.py  shared worker start/rollback/stop ownership and ordering
 web_lifecycle.py        feature-route adapter to the shared lifecycle owner
@@ -257,7 +259,7 @@ src/character_memory/web/
 
 ```text
 app.js                  conversation/composer core
-experience_profile.js/css local operator preference dialog, CAS draft reconciliation, versions/clear
+experience_profile.js/css local operator preference dialog, CAS draft reconciliation, versions/clear, feedback candidates
 reply_suggestions.js/css explicit draft generation, composer attribution and authored feedback UI
 frontend_v2.js/css      shared user-page navigation, chat visual shell and click-only experience entry
 profile_v2.js/css       read-only character profile, sourced daily posts and user interactions
@@ -330,6 +332,7 @@ CLI 不提供 `day` / `simulate` / `tick`，AppBundle 不装配生活模拟器�
 | Character Space | `space_store.py` → `space_autonomy.py` → `space_media_executor.py` / `world_observation.py` → `space_web.py` → `web/space.js` |
 | Group autonomous ImageGen | `group_autonomous_visual.py` → `visual_generation.py` → `web/groups.js` |
 | 显式用户底色 | `domain/experience_profile.py` → `storage/experience_profiles.py` → `experience_profile_web.py` → `runtime/person_context.py`；契约见 [Person Runtime](PERSON_RUNTIME.md) |
+| 反馈偏好候选 | `domain/experience_candidates.py` → `application/experience_candidates.py` → `storage/experience_candidates.py`（复用 signal 表的决定列）→ `experience_profile_web.py`；仍经 Profile CAS 写版本 |
 | Memory/Recall/Governance | `runtime/person_context.py` → `memory/recall.py` → `storage/sqlite.py` → `memory_web.py` → `web/app.js` |
 | Formal TTS registry/routing | `tts_registry.py` → `settings_server.py` / `media_server.py` → `tts_lab.py` |
 | Character GSV voice | `voices.py` → `gsv_tts_runtime.py` → `tts_lab.py` VoiceDesign freeze |

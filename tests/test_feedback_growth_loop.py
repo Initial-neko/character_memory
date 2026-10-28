@@ -3,7 +3,6 @@ from uuid import uuid4
 import pytest
 
 from test_message_receipts import acceptance, body
-from test_reply_suggestion_signals import batch_for
 from character_memory.domain.experience_candidates import candidate_fields, interpret_feedback
 from character_memory.storage.experience_profiles import ExperienceProfileRepository
 
@@ -15,7 +14,6 @@ def draft(client, store, group, scope='DIRECT'):
     from character_memory.domain.models import Event, EventType
     from character_memory.group_store import GroupRepository
     from test_reply_suggestion_signals import NOW, Model
-    from uuid import uuid4
     service = suggestion_service(store, client.app.state.character_memory)
     service.model_for = lambda: Model()
     version = ExperienceProfileRepository(store).get()['version']
@@ -290,7 +288,7 @@ def test_applied_candidate_reaches_next_direct_and_group_prompt(tmp_path):
     from character_memory.storage.sqlite import SQLiteStore
     from character_memory.application.experience_candidates import FeedbackCandidateService
     from character_memory.storage.reply_suggestion_signals import ReplySuggestionSignalRepository
-    from character_memory.domain.experience_profile import LOCAL_OPERATOR
+    from character_memory.domain.experience_candidates import CandidateApply
 
     class Recorder(CountedModel):
         def __init__(self):
@@ -306,7 +304,6 @@ def test_applied_candidate_reaches_next_direct_and_group_prompt(tmp_path):
                             kind='EXPLICIT_FEEDBACK', profile_version=0, comment='以后回答简短一点')
     service = FeedbackCandidateService(store)
     assert service.list()['candidates'][0]['status'] == 'PENDING'
-    from character_memory.domain.experience_candidates import CandidateApply
     result = service.apply(signal['id'], CandidateApply(request_id=str(uuid4()), expected_profile_version=0))
     assert result['applied_profile_version'] == 1
 
@@ -314,7 +311,6 @@ def test_applied_candidate_reaches_next_direct_and_group_prompt(tmp_path):
     person = runtime(store, model)
     person.handle(Event(character_id='rin', event_type=EventType.USER_MESSAGE, event_time=NOW, content='hello'))
     assert 'verbosity=BRIEF' in model.prompts[-1]
-    assert locals().get('LOCAL_OPERATOR') is not None
 
     models = {'rin': Recorder(), 'momo': Recorder()}
     groups = group_service(store, models)

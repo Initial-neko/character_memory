@@ -9,6 +9,11 @@ dependencies = [
   "numpy==2.5.3",
   "httpx==0.28.1",
   "webless==0.1.0",
+  # Windows has no system zoneinfo database, and activity scheduling resolves
+  # "Asia/Shanghai" at import time. Minimal installs (for example the
+  # local-embedding extra without the full `all` stack) crashed on startup
+  # until this was installed by hand.
+  "tzdata>=2024.1,<2027",
 ]
 
 [project.optional-dependencies]

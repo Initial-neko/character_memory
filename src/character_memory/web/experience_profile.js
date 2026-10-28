@@ -102,7 +102,10 @@
     dialog.querySelectorAll('button').forEach(node=>{
       const action=node.dataset.profileAction;
       if(!action){
-        if(node.dataset.candidateAction)node.onclick=()=>candidateAct(node.dataset.candidateAction,node.dataset.candidateId);
+        if(node.dataset.candidateAction){
+          node.disabled=busy||needsLatest;
+          node.onclick=()=>candidateAct(node.dataset.candidateAction,node.dataset.candidateId);
+        }
         return;
       }
       const allowedWhenStale={edit:['close','latest','reload'],history:['close','edit','history','cancel-compare'],compare:['close','recompare','cancel-compare'],candidates:['close','edit','candidates'],clear:['close']}[view]||['close'];
@@ -138,7 +141,15 @@
       if(token!==epoch||!dialog.open||view!=='candidates')return;
       if(!Array.isArray(result.candidates))throw Error('invalid candidates response');
       candidateRows=result.candidates;candidateState='ready';candidateError='';
-      if(Number.isSafeInteger(result.profile_version)){current={...current,version:result.profile_version,preferences:result.preferences||current.preferences};}
+      // Refresh the read baseline. An unsent edit draft is never silently
+      // rebound to a newer version: it stays visible and requires an explicit
+      // latest read before another save.
+      if(Number.isSafeInteger(result.profile_version)){
+        const unsaved=dirty();
+        if(unsaved)previousDraft=summary(draft);
+        current={version:result.profile_version,preferences:result.preferences||{}};
+        if(unsaved)needsLatest=true;else draft=values(current.preferences);
+      }
       if(notice)status=notice;
     }catch(failure){
       if(token!==epoch)return;

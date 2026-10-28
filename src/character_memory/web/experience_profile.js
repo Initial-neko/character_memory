@@ -54,7 +54,9 @@
     const rows=candidateRows.map(item=>{
       const proposed=item.fields&&Object.keys(item.fields).length
         ? dimensions.filter(([key])=>Object.hasOwn(item.fields,key))
-            .map(([key,label])=>`${label}：${valueName(key,item.current_fields?.[key])} → ${valueName(key,item.fields[key])}`).join('，')
+            .map(([key,label])=>item.status==='PENDING'
+              ?`${label}：${valueName(key,item.current_fields?.[key])} → ${valueName(key,item.fields[key])}`
+              :`${label}：${valueName(key,item.fields[key])}`).join('，')
         : '';
       const target=dimensions.filter(([key])=>item.applicable_fields&&Object.hasOwn(item.applicable_fields,key))
         .map(([key,label])=>`${label}：${valueName(key,item.applicable_fields[key])}`).join('，');

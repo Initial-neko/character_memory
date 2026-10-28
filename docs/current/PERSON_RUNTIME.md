@@ -779,11 +779,10 @@ and ask for a refresh instead of retrying. A candidate is never reported as lear
 or a changed Persona.
 
 Run `scripts/validate_experience_profile.py` for isolated real HTTP, two-process
-CAS, Direct/Group context use and restart/clear checks. It uses a deterministic
-provider; model quality/human experience, free-text feedback, reply suggestions,
-learning and Activity-specific integration remain separate work. There is no new
-frontend in this backend slice; new profile/suggestion screens require approved
-desktop/mobile references and their own visual acceptance.
+CAS, candidate lifecycle, Direct/Group context use and restart/clear checks. It uses
+a deterministic provider, so model quality and human experience acceptance remain
+separate: the interpreter is a bounded phrase table, not open-ended language
+understanding, and no model call is made to interpret feedback.
 
 
 ## User reply suggestions

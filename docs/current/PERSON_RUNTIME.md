@@ -737,12 +737,52 @@ the character's interests. A new build observes corrections, withdrawal, clearin
 and restored revisions; an already running model call retains its input snapshot.
 With no active choices the prompt section is absent.
 
+### Effective feedback and profile growth versions
+
+Authored EXPLICIT_FEEDBACK text that names a supported dimension also yields a
+deterministic preference candidate in `domain/experience_candidates.py`. This is
+not a second profile: the interpreter only proposes existing tone/energy/verbosity
+fields, records the exact Chinese/English phrase it matched, and never runs a model
+or writes on its own. Text with no supported term, or with two equally long
+conflicting terms in one field, yields no candidate. `LONG_TERM` versus `SCENE`
+comes from explicit time wording; unmarked text is treated as scene-scoped, so an
+unstated inference cannot become durable without confirmation.
+
+Explicit choices always outrank inference. A field the operator already chose is
+never overwritten: a matching inference shows as satisfied, a differing one shows
+as overridden and is excluded from application. `candidate_fields` is the single
+place that splits this, so the UI and the apply service cannot disagree.
+
+`GET /v2/me/experience-profile/candidates` lists candidate views without a model
+call. `POST .../candidates/{signal_id}/apply` takes a request identity, the current
+`expected_profile_version`, and `as_long_term`. Scene candidates require
+`as_long_term=true`; applying still uses the ordinary Profile CAS, so a stale
+version is 409, and the result is a new normal revision. An already-applied
+candidate whose version is no longer active reads as superseded rather than
+reusable. `POST .../dismiss` records the operator's decision without changing the
+profile. `POST .../revert` re-writes only the fields still holding the inferred
+value, back to the candidate's base version as another new revision: history is
+never rewritten, and a later explicit choice in those fields is not clobbered.
+
+Decisions live in extra columns of the existing `reply_suggestion_signals` table
+(feature migration `experience/005-candidate-decisions`); there is no second table
+and no duplicated feedback text. Withdrawing the authored feedback retires its open
+candidate; correcting it re-interprets the new text. Clearing the profile expires
+every undecided interpretation in the same transaction, so a cleared value cannot
+reappear as a fresh suggestion, and the next context carries no preference section.
+Old candidate sources never revive after withdrawal or clear.
+
+The 相处偏好 dialog exposes these views behind 反馈建议: status, scope, matched
+phrase, your current explicit value, and the value an apply would write. Apply,
+revert and dismiss require an explicit click; conflicts preserve the current state
+and ask for a refresh instead of retrying. A candidate is never reported as learning
+or a changed Persona.
+
 Run `scripts/validate_experience_profile.py` for isolated real HTTP, two-process
-CAS, Direct/Group context use and restart/clear checks. It uses a deterministic
-provider; model quality/human experience, free-text feedback, reply suggestions,
-learning and Activity-specific integration remain separate work. There is no new
-frontend in this backend slice; new profile/suggestion screens require approved
-desktop/mobile references and their own visual acceptance.
+CAS, candidate lifecycle, Direct/Group context use and restart/clear checks. It uses
+a deterministic provider, so model quality and human experience acceptance remain
+separate: the interpreter is a bounded phrase table, not open-ended language
+understanding, and no model call is made to interpret feedback.
 
 
 ## User reply suggestions

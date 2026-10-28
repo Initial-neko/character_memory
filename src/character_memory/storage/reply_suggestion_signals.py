@@ -102,6 +102,21 @@ class ReplySuggestionSignalRepository:
             changed=self.store.conn.execute('UPDATE reply_suggestion_signals SET comment=?,revision=?,withdrawn_at=?,updated_at=? WHERE owner_id=? AND id=? AND revision=? AND withdrawn_at IS NULL',
                 (comment,revision,now if operation=='WITHDRAW' else None,now,LOCAL_OPERATOR,signal_id,request.expected_revision))
             if changed.rowcount!=1:raise SuggestionConflict('signal changed')
+            # An open interpretation follows its authored source: withdrawal
+            # retires it. A still-open candidate is simply re-interpreted from a
+            # corrected text. An APPLIED decision belongs to the wording it was
+            # made from, so correcting that wording retires it instead of
+            # re-pointing the old decision at new text.
+            columns={row['name'] for row in self.store.conn.execute('PRAGMA table_info(reply_suggestion_signals)').fetchall()}
+            if 'candidate_status' in columns:
+                if operation=='WITHDRAW':
+                    self.store.conn.execute(
+                        "UPDATE reply_suggestion_signals SET candidate_status='WITHDRAWN',candidate_decided_at=? "
+                        'WHERE owner_id=? AND id=? AND candidate_status IS NULL',(now,LOCAL_OPERATOR,signal_id))
+                else:
+                    self.store.conn.execute(
+                        "UPDATE reply_suggestion_signals SET candidate_status='SUPERSEDED',candidate_decided_at=? "
+                        "WHERE owner_id=? AND id=? AND candidate_status='APPLIED'",(now,LOCAL_OPERATOR,signal_id))
             identifier=str(uuid4())
             self.store.conn.execute('INSERT INTO reply_suggestion_signal_changes VALUES(?,?,?,?,?,?,?,?)',
                 (identifier,LOCAL_OPERATOR,str(request.request_id),digest,signal_id,operation,revision,now))

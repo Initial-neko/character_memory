@@ -18,6 +18,11 @@
   let epoch=0, current=null, draft={}, previousDraft='', view='edit';
   let busy=false, needsLatest=false, error='', status='', loaded=false;
   let compareTargetVersion=null, restoreBase=null, compareRows=[], compareState='', compareBlocked=false, compareError='';
+  let candidateState='', candidateRows=[], candidateError='';
+  const candidateEndpoint='/v2/me/experience-profile/candidates';
+  const scopeName=scope=>scope==='LONG_TERM'?'长期':'当前场景';
+  const statusName={PENDING:'待决定',APPLIED:'已采用',REVERTED:'已回退',DISMISSED:'已忽略',
+    SATISFIED:'与你已选的一致',OVERRIDDEN:'你已明确选择，建议不覆盖',SUPERSEDED:'已失效',WITHDRAWN:'来源已撤回'};
   const values=p=>Object.fromEntries(dimensions.map(([key])=>[key,p?.[key]||'']));
   const summary=p=>dimensions.map(([key,,options])=>options.find(([value])=>value===p?.[key])?.[1]).filter(Boolean).join(' · ')||'未指定，先自然相处';
   const valueName=(key,value)=>dimensions.find(([name])=>name===key)?.[2].find(([choice])=>choice===value)?.[1]||'未指定';
@@ -41,6 +46,33 @@
     if(compareState==='loading')return button('取消','cancel-compare')+button('确认恢复','confirm-restore','class="primary" disabled');
     return button('返回版本记录','cancel-compare')+button('重新比较','recompare');
   }
+  function candidateContent(){
+    const heading='<h3>来自反馈的偏好建议</h3>';
+    if(candidateState==='loading')return `${heading}<p role="status">正在读取建议…</p>`;
+    if(candidateError)return `${heading}<div role="alert" class="cm-experience-warning">${escape(candidateError)}</div>`;
+    if(!candidateRows.length)return `${heading}<p>暂时没有可以采用的建议。你在建议反馈里写下的明确选择，仍会直接保存。</p>`;
+    const rows=candidateRows.map(item=>{
+      const proposed=item.fields&&Object.keys(item.fields).length
+        ? dimensions.filter(([key])=>Object.hasOwn(item.fields,key))
+            .map(([key,label])=>item.status==='PENDING'
+              ?`${label}：${valueName(key,item.current_fields?.[key])} → ${valueName(key,item.fields[key])}`
+              :`${label}：${valueName(key,item.fields[key])}`).join('，')
+        : '';
+      const target=dimensions.filter(([key])=>item.applicable_fields&&Object.hasOwn(item.applicable_fields,key))
+        .map(([key,label])=>`${label}：${valueName(key,item.applicable_fields[key])}`).join('，');
+      const evidence=item.evidence?.map(x=>x.phrase).filter(Boolean).join('、');
+      const actions=[];
+      if(item.status==='PENDING'){
+        actions.push(`<button type="button" data-candidate-action="apply" data-candidate-id="${escape(item.signal_id)}">采用</button>`);
+        actions.push(`<button type="button" data-candidate-action="dismiss" data-candidate-id="${escape(item.signal_id)}" class="quiet">忽略</button>`);
+      }else if(item.status==='APPLIED'){
+        actions.push(`<button type="button" data-candidate-action="revert" data-candidate-id="${escape(item.signal_id)}" class="quiet">回退这次采用</button>`);
+      }
+      const title=proposed||(item.status==='WITHDRAWN'?'来源反馈已撤回':'与你已选的一致');
+      return `<section class="cm-experience-version" data-candidate-id="${escape(item.signal_id)}" data-candidate-status="${escape(item.status)}"><div><strong>${escape(title)}</strong><p>${escape(scopeName(item.scope))} · ${escape(statusName[item.status]||item.status)}${evidence?` · 依据「${escape(evidence)}」`:''}</p>${item.status==='PENDING'?`<p>${escape(item.note)}</p>${target?`<p>采用后会写：${escape(target)}</p>`:''}`:''}${item.comment?`<p>原话：${escape(item.comment)}</p>`:''}</div><div class="cm-experience-candidate-actions">${actions.join('')}</div></section>`;
+    }).join('');
+    return `${heading}<p>这些只是建议，不会自动生效。你已经明确选过的项目永远优先。</p>${rows}`;
+  }
   function render(){
     const focused=dialog.contains(document.activeElement)?document.activeElement:null;
     const focusAction=focused?.dataset?.profileAction;
@@ -55,6 +87,9 @@
     }else if(view==='compare'){
       content=compareContent();
       footer=compareFooter();
+    }else if(view==='candidates'){
+      content=candidateContent();
+      footer=(candidateState==='loading'?button('返回偏好','edit'):button('返回偏好','edit')+button('刷新建议','candidates'));
     }else if(view==='history'){
       content='<p>只保留明确保存的选择。已清除的快照无法恢复。</p><div data-profile-history></div>';
       footer=button('返回偏好','edit');
@@ -63,12 +98,19 @@
       if(previousDraft)content+=`<p class="cm-experience-summary" data-profile-draft>刚才未保存的草稿：${escape(previousDraft)}。上方显示最新选择；需要时请重新选择。</p>`;
       else if(dirty())content+=`<p class="cm-experience-summary" data-profile-unsaved>未保存的草稿：${escape(summary(draft))}。当前读取的是版本 ${current.version}；保存会按这个版本提交。</p>`;
       content+='<p class="cm-experience-note">下次回复开始使用新选择，正在生成的回复不变。这里不修改人物设定，也不设置主动通知。</p>';
-      footer=(current.version>0?button('版本记录','history')+button('清除偏好','clear','class="quiet"'):button('先聊聊','close'))+button(current.version>0?'保存修改':'保存选择','save',`class="primary" ${!dirty()||needsLatest?'disabled':''}`);
+      footer=(current.version>0?button('反馈建议','candidates')+button('版本记录','history')+button('清除偏好','clear','class="quiet"'):button('反馈建议','candidates')+button('先聊聊','close'))+button(current.version>0?'保存修改':'保存选择','save',`class="primary" ${!dirty()||needsLatest?'disabled':''}`);
     }
     dialog.innerHTML=`<header><div><h2 id="experienceTitle">相处偏好</h2><p>选你舒服的表达方式，也可以先不选。<br>所有伙伴共用，仍保留各自的观点。</p></div>${button('×','close','class="cm-experience-close" aria-label="关闭相处偏好" title="关闭面板；不会保存尚未提交的选择"')}</header><div class="cm-experience-body">${error&&loaded?`<div role="alert" class="cm-experience-warning">${escape(error)}${needsLatest?button('查看最新偏好','latest'):''}</div>`:''}${loaded&&view!=='compare'?`<p role="status" class="cm-experience-status">${escape(status)}</p>`:''}${needsLatest&&loaded&&view==='edit'&&!error?`<div role="alert" class="cm-experience-warning">偏好可能已在别处更新，尚未覆盖。请先查看最新偏好。${button('查看最新偏好','latest')}</div>`:''}${content}</div><footer>${footer}</footer>`;
     dialog.querySelectorAll('button').forEach(node=>{
       const action=node.dataset.profileAction;
-      const allowedWhenStale={edit:['close','latest','reload'],history:['close','edit','history','cancel-compare'],compare:['close','recompare','cancel-compare'],clear:['close']}[view]||['close'];
+      if(!action){
+        if(node.dataset.candidateAction){
+          node.disabled=busy||needsLatest;
+          node.onclick=()=>candidateAct(node.dataset.candidateAction,node.dataset.candidateId);
+        }
+        return;
+      }
+      const allowedWhenStale={edit:['close','latest','reload'],history:['close','edit','history','cancel-compare'],compare:['close','recompare','cancel-compare'],candidates:['close','edit','candidates'],clear:['close']}[view]||['close'];
       // A fresh comparison read is a valid baseline for the restore write even
       // though the older edit draft still requires an explicit latest read.
       if(view==='compare'&&compareState==='ready'&&!compareBlocked)allowedWhenStale.push('confirm-restore');
@@ -91,6 +133,62 @@
       const replacement=[...dialog.querySelectorAll('button')].find(node=>node.dataset.profileAction===focusAction&&node.dataset.compareVersion===focusVersion&&!node.disabled)
         ||[...dialog.querySelectorAll('button')].find(node=>node.dataset.profileAction===focusAction&&!node.disabled);
       (replacement||dialog.querySelector('[data-profile-action="close"]'))?.focus({preventScroll:true});
+    }
+  }
+  async function candidates({notice=''}={}){
+    view='candidates';error='';busy=true;candidateState=candidateState||'loading';render();
+    const token=++epoch;
+    try{
+      const result=await request(candidateEndpoint);
+      if(token!==epoch||!dialog.open||view!=='candidates')return;
+      if(!Array.isArray(result.candidates))throw Error('invalid candidates response');
+      candidateRows=result.candidates;candidateState='ready';candidateError='';
+      // Refresh the read baseline. An unsent edit draft is never silently
+      // rebound to a newer version: it stays visible and requires an explicit
+      // latest read before another save.
+      if(Number.isSafeInteger(result.profile_version)){
+        const unsaved=dirty();
+        if(unsaved)previousDraft=summary(draft);
+        current={version:result.profile_version,preferences:result.preferences||{}};
+        if(unsaved)needsLatest=true;else draft=values(current.preferences);
+      }
+      if(notice)status=notice;
+    }catch(failure){
+      if(token!==epoch)return;
+      candidateState='error';candidateError='暂时无法读取偏好建议；没有自动采用任何建议。';
+    }finally{if(token===epoch&&dialog.open){busy=false;render();}}
+  }
+  async function candidateAct(action,signalId){
+    if(busy||!signalId)return;
+    const row=candidateRows.find(item=>item.signal_id===signalId);
+    if(!row||(row.status!=='PENDING'&&row.status!=='APPLIED'))return;
+    const token=++epoch,requestId=crypto.randomUUID();
+    const target=action==='apply'?`${candidateEndpoint}/${encodeURIComponent(signalId)}/apply`
+      :action==='revert'?`${candidateEndpoint}/${encodeURIComponent(signalId)}/revert`
+      :`${candidateEndpoint}/${encodeURIComponent(signalId)}/dismiss`;
+    const body=action==='dismiss'?{request_id:requestId}
+      :{request_id:requestId,expected_profile_version:current.version,...(action==='apply'?{as_long_term:row.scope==='LONG_TERM'}:{})};
+    busy=true;error='';status='';render();
+    let notice='';
+    try{
+      const result=await request(target,'POST',body);
+      if(token!==epoch||!dialog.open)return;
+      const applied=result.applied_profile_version;
+      let latest=null;
+      if(applied!=null)latest=await request(endpoint).catch(()=>null);
+      if(token!==epoch||!dialog.open)return;
+      if(applied!=null){
+        if(latest?.version===applied){current={version:latest.version,preferences:latest.preferences};draft=values(latest.preferences);needsLatest=false;}
+        else{needsLatest=true;}
+      }
+      notice=applied!=null?'已保存为新版本，下次回复开始使用。':action==='revert'?'已回退这次采用，作为新版本保存；历史版本保留。':action==='dismiss'?'已忽略，这条建议不会自动生效。':'这项选择已经是你当前明确选择，没有写入新版本。';
+      CM.emit('experienceProfileChanged').catch(console.error);
+    }catch(failure){
+      if(token!==epoch)return;
+      needsLatest=true;
+      notice=failure.status===409?'偏好或建议已在别处变化，未覆盖。请刷新建议后再决定。':failure.status===404?'这条建议已失效，不再提供采用。':'未确认结果；没有自动重试。';
+    }finally{
+      if(token===epoch&&dialog.open){busy=false;candidateState='';await candidates({notice});}
     }
   }
   async function read({keepDraft=false}={}){
@@ -207,6 +305,7 @@
     if(busy&&!cancelLoad)return;
     if(action==='reload'||action==='latest'){read({keepDraft:loaded});return;}
     if(action==='history'){history();return;}
+    if(action==='candidates'){candidateState='';candidateError='';candidates();return;}
     if(action==='compare'){const version=Number(node?.dataset?.compareVersion);if(Number.isSafeInteger(version))compare(version);return;}
     if(action==='cancel-compare'){epoch++;busy=false;history();return;}
     if(action==='recompare'){if(compareTargetVersion!=null)compare(compareTargetVersion);return;}
@@ -219,6 +318,7 @@
     if(dialog.open)return;
     current=null;draft={};previousDraft='';loaded=false;needsLatest=false;view='edit';busy=false;error='';status='';
     compareTargetVersion=null;restoreBase=null;compareRows=[];compareState='';compareBlocked=false;compareError='';
+    candidateState='';candidateRows=[];candidateError='';
     render();dialog.showModal();read();
   }
   dialog.addEventListener('close',()=>{epoch++;busy=false;});

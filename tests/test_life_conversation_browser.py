@@ -15,7 +15,7 @@ def live_life(isolated_app):
     import uvicorn
     app=isolated_app;access=app.state.character_memory;s=access.store()
     profiles=access.character_profiles();character=profiles[0]['id']
-    e=s.append_event(Event(character_id=character,event_type=EventType.USER_MESSAGE,event_time=datetime.now(timezone.utc),content='浏览器原始事实 <script>window.FORGED=true</script>',metadata={'conversation_id':'browser-existing'}))
+    e=s.append_message(Event(character_id=character,event_type=EventType.USER_MESSAGE,event_time=datetime.now(timezone.utc),content='浏览器原始事实 <script>window.FORGED=true</script>',metadata={'conversation_id':'browser-existing'}))
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     server=uvicorn.Server(uvicorn.Config(app,host='127.0.0.1',port=port,log_level='error',lifespan='off'))

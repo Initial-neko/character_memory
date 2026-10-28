@@ -335,7 +335,7 @@ def test_person_own_words_do_not_license_a_user_gender_claim(tmp_path):
     try:
         runtime = build_runtime(store, CandidateModel("她很累"))
         # A previous character turn already guessed the user's gender.
-        store.append_event(
+        store.append_message(
             Event(
                 character_id="rin",
                 event_type=EventType.CHARACTER_MESSAGE,

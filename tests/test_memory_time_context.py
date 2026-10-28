@@ -67,7 +67,7 @@ def test_restart_retains_source_anchor_without_writes(tmp_path):
     from character_memory.storage.sqlite import SQLiteStore
     from character_memory.runtime.prompt_parts import render_memory_lines
     store = SQLiteStore(tmp_path / 'memory.db')
-    event = store.append_event(Event(character_id='rin', event_type=EventType.USER_MESSAGE,
+    event = store.append_message(Event(character_id='rin', event_type=EventType.USER_MESSAGE,
                                     event_time=OLD, content='明天一起整理书桌'))
     store.add_memory(memory().model_copy(update={'source_event_id': event.id}))
     store.close()

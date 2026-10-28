@@ -9,7 +9,7 @@ from character_memory.storage.sqlite import SQLiteStore
 def test_legacy_action_trace_is_moved_out_of_event_metadata(tmp_path):
     path = tmp_path / "x.db"
     store = SQLiteStore(path)
-    source = store.append_event(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=datetime.now(timezone.utc), content="你好"))
+    source = store.append_message(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=datetime.now(timezone.utc), content="你好"))
     store.append_event(Event(character_id="rin", event_type=EventType.ACTION, event_time=source.event_time, content="REPLY", metadata={"source_event_id": source.id, "reason": "test", "trace": {"source_event_id": source.id, "action": {"type": "REPLY", "message": "你好"}}}))
     store.close()
 
@@ -57,7 +57,7 @@ def test_bad_source_does_not_block_later_valid_trace(tmp_path, phase, bad):
     path = tmp_path / 'legacy.db'
     now = datetime.now(timezone.utc)
     store = SQLiteStore(path)
-    source = store.append_event(Event(character_id='fixture', event_type=EventType.USER_MESSAGE, event_time=now, content='test source'))
+    source = store.append_message(Event(character_id='fixture', event_type=EventType.USER_MESSAGE, event_time=now, content='test source'))
     broken = store.append_event(Event(character_id='fixture', event_type=EventType.ACTION, event_time=now, content='BROKEN', metadata={'trace': {'source_event_id': bad}}))
     valid = store.append_event(Event(character_id='fixture', event_type=EventType.ACTION, event_time=now, content='VALID', metadata={'trace': {'source_event_id': source.id, 'action': {'type': 'REPLY', 'message': 'valid fixture'}}}))
     if phase == 'core':

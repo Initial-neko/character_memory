@@ -29,7 +29,7 @@ def test_invitation_lifecycle_is_durable_idempotent_and_not_conversation(tmp_pat
 
 def test_disabled_wrong_channel_and_expiry(tmp_path):
     store=SQLiteStore(tmp_path/'calls.db');repo=CallInvitationRepository(store)
-    source=store.append_event(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=NOW,content='聊天',metadata={'channel':'DIRECT','conversation_id':'direct'}))
+    source=store.append_message(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=NOW,content='聊天',metadata={'channel':'DIRECT','conversation_id':'direct'}))
     assert repo.offer(source,'邀请','依据',CallInvitationPolicy()) is None
     enabled=CallInvitationPolicy(enabled=True,ttl_seconds=30,cooldown_minutes=60)
     wrong=source.model_copy(update={'metadata':{'channel':'GROUP','conversation_id':'group'}})
@@ -80,7 +80,7 @@ def test_http_permission_and_session_token(tmp_path):
     from fastapi.testclient import TestClient
     from character_memory.call_invitation_web import attach_call_invitation_routes
     store=SQLiteStore(tmp_path/'api.db');repo=CallInvitationRepository(store);now=datetime.now(timezone.utc)
-    source=store.append_event(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=now,content='机会',metadata={'channel':'DIRECT','conversation_id':'direct'}))
+    source=store.append_message(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=now,content='机会',metadata={'channel':'DIRECT','conversation_id':'direct'}))
     invite=repo.offer(source,'邀请','公开依据',CallInvitationPolicy(enabled=True))
     settings=SimpleNamespace(direct_call_invitations_enabled=True)
     app=FastAPI();app.state.character_memory=SimpleNamespace(read_store=store,settings=settings,character_profiles=lambda:[{'id':'a'}])
@@ -111,7 +111,7 @@ def test_archive_marker_blocks_invitation_even_without_timestamp(tmp_path, archi
     store = SQLiteStore(tmp_path / "archived.db")
     repo = CallInvitationRepository(store)
     now = datetime.now(timezone.utc)
-    event = store.append_event(Event(character_id="a", event_type=EventType.USER_MESSAGE,
+    event = store.append_message(Event(character_id="a", event_type=EventType.USER_MESSAGE,
         event_time=now, content="机会", metadata={"channel": "DIRECT", "conversation_id": "direct"}))
     invite = repo.offer(event, "邀请", "公开依据", CallInvitationPolicy(enabled=True))
     profile = {"id": "a"}
@@ -147,7 +147,7 @@ def test_proactive_invitation_is_only_proposed_in_audit(tmp_path):
     store=SQLiteStore(tmp_path/'intent.db');emb=DeterministicEmbedding();model=InviteModel()
     runtime=PersonRuntime(store,VectorRecall(store,emb),emb,model,'人物',call_policy=CallInvitationPolicy(enabled=True))
     chat=ChatService(store,runtime,FixedClock(NOW))
-    source=store.append_event(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=NOW-timedelta(hours=1),content='原有私聊',metadata={'channel':'DIRECT','conversation_id':'direct'}))
+    source=store.append_message(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=NOW-timedelta(hours=1),content='原有私聊',metadata={'channel':'DIRECT','conversation_id':'direct'}))
     intent=store.add_intent('a','问问近况','PROACTIVE_MESSAGE',NOW-timedelta(hours=1),NOW-timedelta(minutes=1),NOW+timedelta(hours=1),source_event_id=source.id)
     outcomes=ProactiveService(store,chat).dispatch_due(['a'],NOW)
     assert outcomes[0]['status']=='EXECUTED' and outcomes[0]['resolution_reason']=='CALL_INVITATION_PROPOSED'

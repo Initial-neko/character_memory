@@ -13,6 +13,7 @@ import json
 from character_memory.character_life import obj, text
 from character_memory.domain.experience_scope import is_real_experience
 from character_memory.group_store import GroupRepository
+from character_memory.storage.conversation_facts import CONVERSATION_FACT_ID_FLOOR
 from character_memory.time_utils import epoch_us
 
 MAX_COGNITION_MEMORIES = 400
@@ -48,9 +49,15 @@ class CharacterRelationshipReader:
             metadata = "CASE WHEN json_valid(e.metadata_json) THEN e.metadata_json ELSE '{}' END"
             # Direct messages belong to this person and the User; social receipts
             # name their actual commenter, never a guessed name in message text.
+            # Migrated conversation facts are excluded from this legacy scan and
+            # read from their DIRECT conversation below, so one message is never
+            # shown twice and never disappears after the migration.
             direct = f"""SELECT e.* FROM events e WHERE e.character_id=?
                 AND e.event_time_epoch>=? AND e.event_time_epoch<?
                 AND julianday(e.event_time) IS NOT NULL
+                AND NOT (e.event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE') AND EXISTS (
+                    SELECT 1 FROM conversation_fact_aliases a WHERE a.legacy_kind='EVENT'
+                    AND a.legacy_id=e.id AND a.status='MIGRATED'))
                 AND ((?='user' AND e.event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE')
                     AND upper(coalesce(json_extract({metadata},'$.channel'),'')) IN ('','DIRECT')
                     AND upper(coalesce(json_extract({metadata},'$.origin'),''))<>'GROUP'
@@ -61,6 +68,19 @@ class CharacterRelationshipReader:
             for row in self.store.conn.execute(direct, [character_id, *bounds, peer, peer]):
                 kind = "SPACE" if row["event_type"] == "SPACE_COMMENT_RECEIVED" else "DIRECT"
                 interactions.append(self._fact("events", row, kind, row["event_time"], row["event_time_epoch"]))
+            if {"conversation_events", "conversations", "conversation_members"} <= tables:
+                chat = """SELECT e.*,cm.actor_id AS character_id FROM conversation_events e
+                    JOIN conversations dc ON dc.id=e.conversation_id AND dc.type='DIRECT'
+                    JOIN conversation_members cm ON cm.conversation_id=e.conversation_id
+                        AND cm.actor_type='CHARACTER' AND cm.actor_id=?
+                    WHERE e.event_time_epoch>=? AND e.event_time_epoch<?
+                    AND julianday(e.event_time) IS NOT NULL
+                    AND e.event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE')
+                    AND ((?='user' AND e.actor_type='USER' AND e.actor_id='user')
+                      OR e.actor_id=?)
+                    ORDER BY e.event_time_epoch DESC,e.id DESC LIMIT 11"""
+                for row in self.store.conn.execute(chat, [character_id, *bounds, peer, peer]):
+                    interactions.append(self._fact("direct", row, "DIRECT", row["event_time"], row["event_time_epoch"]))
             if {"conversation_events", "conversation_runtime_traces", "conversation_members"} <= tables:
                 trace = "CASE WHEN json_valid(t.trace_json) THEN t.trace_json ELSE '{}' END"
                 recent_ids = f"CASE WHEN json_type({trace},'$.recent_group_event_ids')='array' THEN json_extract({trace},'$.recent_group_event_ids') ELSE '[]' END"
@@ -99,19 +119,47 @@ class CharacterRelationshipReader:
                     interactions.append(self._fact("comment", row, "SPACE", row["created_at"], row["created_at_epoch"]))
             pending = []
             if peer == "user" and "intents" in tables:
-                plans = f"""SELECT i.*,e.metadata_json AS source_metadata FROM intents i
-                    LEFT JOIN events e ON e.id=i.source_event_id
-                    WHERE i.character_id=? AND i.status='PENDING' AND i.preferred_action='PROACTIVE_MESSAGE'
-                    AND i.created_at_epoch<=? AND i.earliest_at_epoch IS NOT NULL AND i.expires_at_epoch>=?
-                    AND julianday(i.created_at) IS NOT NULL AND julianday(i.earliest_at) IS NOT NULL AND julianday(i.expires_at) IS NOT NULL
-                    AND i.earliest_at_epoch<=i.expires_at_epoch
-                    AND (i.source_event_id IS NULL OR (e.character_id=i.character_id
-                        AND e.event_type IN ('USER_MESSAGE','TIME_TICK') AND e.event_time_epoch<=i.created_at_epoch AND julianday(e.event_time) IS NOT NULL
-                        AND upper(coalesce(json_extract({metadata},'$.channel'),'')) IN ('','DIRECT')
-                        AND upper(coalesce(json_extract({metadata},'$.origin'),''))<>'GROUP'
-                        AND json_extract({metadata},'$.source_conversation_event_id') IS NULL
-                        AND json_extract({metadata},'$.group_event_id') IS NULL))
-                    ORDER BY i.earliest_at_epoch,i.id LIMIT 6"""
+                # An intent's source may be a legacy prompt input below the unified
+                # floor or a Direct conversation fact above it. Both domains are
+                # read here; a LEFT JOIN to `events` alone would drop every intent
+                # whose source is now a unified row.
+                direct_fact_sql = (
+                    "SELECT ce.id,cm.actor_id AS character_id,ce.event_type,ce.event_time,"
+                    "ce.event_time_epoch,ce.metadata_json FROM conversation_events ce "
+                    "JOIN conversations c ON c.id=ce.conversation_id AND c.type='DIRECT' "
+                    "JOIN conversation_members cm ON cm.conversation_id=ce.conversation_id "
+                    "AND cm.actor_type='CHARACTER'"
+                ) if {"conversation_events", "conversations", "conversation_members"} <= tables else None
+                source_meta = "CASE WHEN json_valid(s.metadata_json) THEN s.metadata_json ELSE '{}' END"
+                if direct_fact_sql is not None:
+                    plans = f"""SELECT i.*,s.metadata_json AS source_metadata FROM intents i
+                        LEFT JOIN ({direct_fact_sql} UNION ALL SELECT id,character_id,event_type,event_time,event_time_epoch,metadata_json FROM events) s
+                            ON s.id=i.source_event_id
+                        WHERE i.character_id=? AND i.status='PENDING' AND i.preferred_action='PROACTIVE_MESSAGE'
+                        AND i.created_at_epoch<=? AND i.earliest_at_epoch IS NOT NULL AND i.expires_at_epoch>=?
+                        AND julianday(i.created_at) IS NOT NULL AND julianday(i.earliest_at) IS NOT NULL AND julianday(i.expires_at) IS NOT NULL
+                        AND i.earliest_at_epoch<=i.expires_at_epoch
+                        AND (i.source_event_id IS NULL OR (s.character_id=i.character_id
+                            AND s.event_type IN ('USER_MESSAGE','TIME_TICK') AND s.event_time_epoch<=i.created_at_epoch AND julianday(s.event_time) IS NOT NULL
+                            AND upper(coalesce(json_extract({source_meta},'$.channel'),'')) IN ('','DIRECT')
+                            AND upper(coalesce(json_extract({source_meta},'$.origin'),''))<>'GROUP'
+                            AND json_extract({source_meta},'$.source_conversation_event_id') IS NULL
+                            AND json_extract({source_meta},'$.group_event_id') IS NULL))
+                        ORDER BY i.earliest_at_epoch,i.id LIMIT 6"""
+                else:
+                    plans = f"""SELECT i.*,e.metadata_json AS source_metadata FROM intents i
+                        LEFT JOIN events e ON e.id=i.source_event_id
+                        WHERE i.character_id=? AND i.status='PENDING' AND i.preferred_action='PROACTIVE_MESSAGE'
+                        AND i.created_at_epoch<=? AND i.earliest_at_epoch IS NOT NULL AND i.expires_at_epoch>=?
+                        AND julianday(i.created_at) IS NOT NULL AND julianday(i.earliest_at) IS NOT NULL AND julianday(i.expires_at) IS NOT NULL
+                        AND i.earliest_at_epoch<=i.expires_at_epoch
+                        AND (i.source_event_id IS NULL OR (e.character_id=i.character_id
+                            AND e.event_type IN ('USER_MESSAGE','TIME_TICK') AND e.event_time_epoch<=i.created_at_epoch AND julianday(e.event_time) IS NOT NULL
+                            AND upper(coalesce(json_extract({metadata},'$.channel'),'')) IN ('','DIRECT')
+                            AND upper(coalesce(json_extract({metadata},'$.origin'),''))<>'GROUP'
+                            AND json_extract({metadata},'$.source_conversation_event_id') IS NULL
+                            AND json_extract({metadata},'$.group_event_id') IS NULL))
+                        ORDER BY i.earliest_at_epoch,i.id LIMIT 6"""
                 for row in self.store.conn.execute(plans, [character_id, epoch_us(now), epoch_us(now)]):
                     pending.append({
                         "content": text(row["content"], 500), "status": "PENDING",
@@ -151,6 +199,34 @@ class CharacterRelationshipReader:
             "source": {"kind": kind, "id": row["id"],
                        "conversation_id": row["conversation_id"] if "conversation_id" in row.keys() else metadata.get("conversation_id")},
         }
+
+    def _direct_source_row_locked(self, character_id, source_id):
+        """Resolve a Memory's Direct source across both id spaces.
+
+        Migrated Direct facts live in ``conversation_events`` above the unified
+        floor; unmigrated rows and non-conversation inputs stay in ``events``.
+        Ownership is checked here, not inferred from the number.
+        """
+        canonical = None
+        try:
+            canonical = self.store.fact_reader.canonical_id_for_legacy(int(source_id)) if source_id < CONVERSATION_FACT_ID_FLOOR else int(source_id)
+        except (TypeError, ValueError, AttributeError):
+            canonical = None
+        if canonical is None:
+            return self.store.conn.execute(
+                "SELECT id,character_id,event_type,event_time,event_time_epoch,content,metadata_json "
+                "FROM events WHERE id=? AND character_id=?",
+                (source_id, character_id),
+            ).fetchone()
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT e.*,cm.actor_id AS character_id FROM conversation_events e "
+                "JOIN conversations c ON c.id=e.conversation_id AND c.type='DIRECT' "
+                "JOIN conversation_members cm ON cm.conversation_id=e.conversation_id "
+                "AND cm.actor_type='CHARACTER' AND cm.actor_id=? WHERE e.id=?",
+                (character_id, canonical),
+            ).fetchone()
+        return row
 
     # --- directional cognition ------------------------------------------------
 
@@ -332,11 +408,7 @@ class CharacterRelationshipReader:
             return None, "MISSING"
         if type(source_id) is not int:
             return None, "INVALID"
-        event = self.store.conn.execute(
-            "SELECT id,character_id,event_type,event_time,event_time_epoch,content,metadata_json "
-            "FROM events WHERE id=? AND character_id=?",
-            (source_id, row["character_id"]),
-        ).fetchone()
+        event = self._direct_source_row_locked(row["character_id"], source_id)
         if event is None:
             return None, "MISSING"
         event_meta = obj(event["metadata_json"])
@@ -350,7 +422,8 @@ class CharacterRelationshipReader:
 
     def _group_event_locked(self, conversation_id, event_id):
         row = self.store.conn.execute(
-            "SELECT * FROM conversation_events WHERE id=? AND conversation_id=?",
+            "SELECT e.* FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id "
+            "WHERE e.id=? AND e.conversation_id=? AND c.type='GROUP'",
             (event_id, conversation_id),
         ).fetchone()
         if row is None:

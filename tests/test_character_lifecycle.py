@@ -47,7 +47,7 @@ def test_personal_rss_history_survives_recent_window_and_stays_private(baseline,
     assert embedding.calls-embedding_before==1
     assert search.queries==[] and fetcher.urls==[] and store.list_memories('c00')==[]
     for index in range(30):
-        store.append_event(Event(character_id='c00',event_type=EventType.USER_MESSAGE,
+        store.append_message(Event(character_id='c00',event_type=EventType.USER_MESSAGE,
             event_time=NOW+timedelta(minutes=index+1),content=f'unrelated message {index}'))
     model.calls.clear()
     reaction=runtime.handle(Event(character_id='c00',event_type=EventType.USER_MESSAGE,
@@ -94,7 +94,7 @@ def test_actual_rss_title_remains_a_retrieval_key_after_recent_window(baseline,m
     result=WorldActivityService(access,repo).browse_character('c00',now=NOW,opportunity_id='lifecycle:title')
     event_id=result['items'][0]['source_event_id']
     for index in range(30):
-        store.append_event(Event(character_id='c00',event_type=EventType.USER_MESSAGE,
+        store.append_message(Event(character_id='c00',event_type=EventType.USER_MESSAGE,
             event_time=NOW+timedelta(minutes=index+1),content='unrelated ordinary conversation'))
     observed=store.recall_observed_events('c00','Aurelia',at=NOW+timedelta(hours=1))
     assert [event.id for event in observed]==[event_id]
@@ -112,7 +112,7 @@ def test_context_projections_share_core_state_and_reject_future_facts(baseline):
         embedding=embedding.embed('current provenance fact')))
     later=store.add_memory(Memory(character_id='c00',content='future provenance fact',event_time=NOW+timedelta(days=1),
         embedding=embedding.embed('future provenance fact')))
-    future=store.append_event(Event(character_id='c00',event_type=EventType.USER_MESSAGE,
+    future=store.append_message(Event(character_id='c00',event_type=EventType.USER_MESSAGE,
         event_time=NOW+timedelta(days=1),content='future event'))
     before_calls=embedding.calls
     personal=runtime.context_builder.build('c00',query='provenance',at=NOW)

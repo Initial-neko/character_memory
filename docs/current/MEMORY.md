@@ -7,14 +7,19 @@
 原始经历先进入它所属的 durable fact store，而不是为了形式统一全部复制进一个 `events` 表。
 
 ```text
-Direct fact        -> events
-Group shared fact  -> conversation_events
-Space shared fact  -> space_*
-Media fact         -> media_assets
+Direct conversation fact -> conversation_events (conversations.type='DIRECT')
+Group shared fact        -> conversation_events (conversations.type='GROUP')
+Direct non-chat event    -> events
+Space shared fact        -> space_*
+Media fact               -> media_assets
 
 Durable Facts = Source of Truth
 Memory / Mental State / Diary / Summary = derived cognition
 ```
+
+Direct 与 Group 的可见对话事实（`USER_MESSAGE` / `CHARACTER_MESSAGE`）现在共用一张物理表，域由 `conversations.type` 与 `FactRef.kind`（`EVENT` / `CONVERSATION_EVENT`）区分，不再由表名区分。Direct 写入只有一个入口 `ConversationFactWriter`；旧的 `events` 消息行作为只读归档永久保留，产品代码不再读写它们，历史旧 ID 通过 `conversation_fact_aliases` 解析。迁移边界、ID 区间与回滚见 [CONVERSATION_FACT_MIGRATION.md](CONVERSATION_FACT_MIGRATION.md)。
+
+`TIME_TICK`、`ACTION`、`VISUAL_OBSERVATION`、`PROACTIVE_INTENT`、`LIFE_EVENT`、`DIARY`、`SOCIAL_POST`、`SPACE_*`、`WORLD_OBSERVATION` 仍留在 `events`，各有自己的运行时 owner。
 
 因此：
 

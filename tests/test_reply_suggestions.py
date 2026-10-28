@@ -27,7 +27,7 @@ def setup(store,model=None):
     return ReplySuggestionService(store,persona_for=lambda char:'Persona for '+char,model_for=lambda:model or Model(),ensure_character=lambda char:{'id':char})
 
 def event(store,content='明天有聚餐',character='rin',**metadata):
-    return store.append_event(Event(character_id=character,event_type=EventType.CHARACTER_MESSAGE,event_time=NOW,content=content,metadata=metadata))
+    return store.append_message(Event(character_id=character,event_type=EventType.CHARACTER_MESSAGE,event_time=NOW,content=content,metadata=metadata))
 
 def request(source,**changes):
     from character_memory.domain.reply_suggestions import SuggestionRequest
@@ -61,7 +61,7 @@ def test_batch_invalidates_after_profile_or_context_change(tmp_path,mutation):
     if mutation=='profile':ExperienceProfileRepository(store).patch(0,{'tone':'CUTE'})
     elif mutation=='message':event(store,'更新的消息')
     else:
-        store.conn.execute('UPDATE events SET metadata_json=? WHERE id=?',(json.dumps({'hidden':True}),source.id));store.conn.commit()
+        store.conn.execute('UPDATE conversation_events SET metadata_json=? WHERE id=?',(json.dumps({'hidden':True}),source.id));store.conn.commit()
     with pytest.raises(SuggestionStale):service.get(batch['batch_id'])
     store.close()
 
@@ -106,11 +106,11 @@ def test_invisible_or_old_source_never_calls_model(tmp_path,kind):
     from character_memory.application.reply_suggestions import SuggestionStale
     store=SQLiteStore(tmp_path/'deny.db');source=event(store);model=Model();service=setup(store,model)
     if kind=='hidden':
-        store.conn.execute('UPDATE events SET metadata_json=? WHERE id=?',(json.dumps({'hidden':True}),source.id))
+        store.conn.execute('UPDATE conversation_events SET metadata_json=? WHERE id=?',(json.dumps({'hidden':True}),source.id))
     elif kind=='simulation':
-        store.conn.execute('UPDATE events SET metadata_json=? WHERE id=?',(json.dumps({'experience_scope':{'schema_version':1,'reality':'SIMULATION'}}),source.id))
+        store.conn.execute('UPDATE conversation_events SET metadata_json=? WHERE id=?',(json.dumps({'experience_scope':{'schema_version':1,'reality':'SIMULATION'}}),source.id))
     elif kind=='future':
-        store.conn.execute('UPDATE events SET event_time_epoch=? WHERE id=?',(2**63-1,source.id))
+        store.conn.execute('UPDATE conversation_events SET event_time_epoch=? WHERE id=?',(2**63-1,source.id))
     else:event(store,'new message')
     store.conn.commit()
     with pytest.raises(SuggestionStale):service.generate(request(source))
@@ -156,8 +156,8 @@ def test_suggestions_use_public_projection_not_internal_image_instructions(tmp_p
     from character_memory.application.reply_suggestions import SuggestionStale
     store=SQLiteStore(tmp_path/'media.db');fact=normalize_user_fact('看这张图片',image={'id':'image-one','original_name':'unpublished-secret-filename.png','mime_type':'image/png','size_bytes':10})
     if channel=='DIRECT':
-        source=store.append_event(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW,content=fact.runtime_content,metadata=fact.metadata))
-        ref=FactRef(kind='EVENT',id=source.id);table='events'
+        source=store.append_message(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW,content=fact.runtime_content,metadata=fact.metadata))
+        ref=FactRef(kind='EVENT',id=source.id);table='conversation_events'
     else:
         repo=GroupRepository(store);group=repo.create_group('Images',['rin','momo'],NOW)
         source=repo.append_event(GroupEvent(conversation_id=group.id,turn_id='t',actor_type='USER',actor_id='user',event_type='USER_MESSAGE',event_time=NOW,content=fact.runtime_content,metadata=fact.metadata))
@@ -176,7 +176,7 @@ def test_suggestions_use_public_projection_not_internal_image_instructions(tmp_p
 def test_visible_text_tail_change_invalidates_bounded_prompt_batch(tmp_path):
     from character_memory.application.reply_suggestions import SuggestionStale
     store=SQLiteStore(tmp_path/'tail.db');source=event(store,'a'*4100);service=setup(store);batch=service.generate(request(source))
-    store.conn.execute('UPDATE events SET content=? WHERE id=?',('a'*4100+' changed visible tail',source.id));store.conn.commit()
+    store.conn.execute('UPDATE conversation_events SET content=? WHERE id=?',('a'*4100+' changed visible tail',source.id));store.conn.commit()
     with pytest.raises(SuggestionStale):service.get(batch['batch_id'])
     store.close()
 

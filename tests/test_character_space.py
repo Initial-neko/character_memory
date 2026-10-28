@@ -595,7 +595,7 @@ def test_space_post_rejects_foreign_media_and_source_event(tmp_path: Path):
         assert "belongs to another character" in borrowed.json()["detail"]
 
         store = app.state.character_memory.read_store
-        foreign_event = store.append_event(
+        foreign_event = store.append_message(
             Event(
                 character_id="c01",
                 event_type=EventType.USER_MESSAGE,
@@ -615,7 +615,7 @@ def test_space_post_rejects_foreign_media_and_source_event(tmp_path: Path):
         assert forged_source.status_code == 400
         assert "source_event_id" in forged_source.json()["detail"]
 
-        own_event = store.append_event(
+        own_event = store.append_message(
             Event(
                 character_id="c00",
                 event_type=EventType.USER_MESSAGE,

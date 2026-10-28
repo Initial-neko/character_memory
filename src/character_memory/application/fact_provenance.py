@@ -29,8 +29,10 @@ def resolve_memory_provenance(store, memory: Memory) -> dict:
     result = {"ref": ref.model_dump(), "status": "UNRESOLVED", "fact": None}
     try:
         if ref.kind == "EVENT":
-            event = store.get_event(ref.id)
-            if event is None or event.character_id != memory.character_id:
+            # Direct facts may be a preserved legacy row or a unified
+            # conversation fact; the reader owns that distinction.
+            event = store.fact_reader.resolve_direct(ref, character_id=memory.character_id)
+            if event is None:
                 return result
         else:
             event = GroupRepository.read_source_fact(store, ref.conversation_id,

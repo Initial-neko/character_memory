@@ -92,7 +92,7 @@ def _plain_event(character_id="momo") -> Event:
 
 def test_get_event_round_trips_a_persisted_event(tmp_path):
     store = _store(tmp_path)
-    saved = store.append_event(_voice_event())
+    saved = store.append_message(_voice_event())
 
     reloaded = store.get_event(saved.id)
 
@@ -109,7 +109,7 @@ def test_get_event_returns_none_for_a_missing_row(tmp_path):
 
 def test_update_event_metadata_replaces_the_document(tmp_path):
     store = _store(tmp_path)
-    saved = store.append_event(_voice_event())
+    saved = store.append_message(_voice_event())
 
     updated = store.update_event_metadata(
         saved.id,
@@ -138,11 +138,11 @@ def test_update_event_metadata_reports_a_missing_row(tmp_path):
 def test_update_event_metadata_leaves_the_row_readable(tmp_path):
     """event_time_epoch is filtered on every read; an UPDATE must not clear it."""
     store = _store(tmp_path)
-    saved = store.append_event(_voice_event())
+    saved = store.append_message(_voice_event())
 
     store.update_event_metadata(saved.id, {"action": "VOICE_MESSAGE", "voice_status": "failed"})
 
-    row = store.conn.execute("SELECT event_time_epoch FROM events WHERE id=?", (saved.id,)).fetchone()
+    row = store.conn.execute("SELECT event_time_epoch FROM conversation_events WHERE id=?", (saved.id,)).fetchone()
     assert row["event_time_epoch"] is not None
     assert store.get_event(saved.id) is not None
 
@@ -269,7 +269,7 @@ def test_a_persisted_voice_message_reloads_with_its_audio_reference(tmp_path):
     reloaded row instead would only re-assert what the store round-trip already
     covers, and would stay green with the builder's spread deleted."""
     store = _store(tmp_path)
-    saved = store.append_event(
+    saved = store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.CHARACTER_MESSAGE,
@@ -278,7 +278,7 @@ def test_a_persisted_voice_message_reloads_with_its_audio_reference(tmp_path):
             metadata={**_ready_voice_metadata(), "source_event_id": 1},
         )
     )
-    store.append_event(_plain_event())
+    store.append_message(_plain_event())
     client = _api_client(tmp_path, store)
 
     response = client.get("/v1/chat/history-page", params={"character_id": "momo"})
@@ -295,7 +295,7 @@ def test_a_plain_text_message_gains_the_keys_as_none(tmp_path):
     """Converging the builders adds four keys to every payload; nothing else may
     move. The web client keys off presence, so None (not absence) is the contract."""
     store = _store(tmp_path)
-    plain = store.append_event(_plain_event())
+    plain = store.append_message(_plain_event())
     client = _api_client(tmp_path, store)
 
     message = next(
@@ -348,7 +348,7 @@ def test_the_legacy_history_and_summary_payloads_carry_the_same_keys(tmp_path):
     GET /v1/chat/history and -- through character_summary -- the character
     summaries that the browser's unread badge reads."""
     store = _store(tmp_path)
-    saved = store.append_event(
+    saved = store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.CHARACTER_MESSAGE,
@@ -374,7 +374,7 @@ def test_the_legacy_history_and_summary_payloads_carry_the_same_keys(tmp_path):
 def test_chat_service_history_carries_the_same_keys(tmp_path):
     """ChatService.history is the fourth builder emitting this shape."""
     store = _store(tmp_path)
-    saved = store.append_event(
+    saved = store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.CHARACTER_MESSAGE,

@@ -23,7 +23,8 @@ def test_invalid_intent_time_is_unknown_not_pending(store):
 
 def test_undated_records_reported_without_character_leak(store):
     e=event(store);other=event(store,'b')
-    store.conn.execute("UPDATE events SET event_time='broken' WHERE id IN (?,?)",[e.id,other.id]);store.conn.commit()
+    # Direct conversation facts live in the shared table after W3.
+    store.conn.execute("UPDATE conversation_events SET event_time='broken' WHERE id IN (?,?)",[e.id,other.id]);store.conn.commit()
     page=CharacterLifeReader(store).timeline('a',day='2026-10-09')
     assert page['items']==[] and page['undated_count']==1
 

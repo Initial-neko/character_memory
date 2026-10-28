@@ -48,7 +48,7 @@ def test_history_exposes_sticker_without_losing_provenance(tmp_path):
     store = SQLiteStore(tmp_path / "x.db")
     now = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
     source = store.append_event(Event(character_id="rin", event_type=EventType.PROACTIVE_INTENT, event_time=now, content="发个表情", metadata={"conversation_id": "x"}))
-    event = store.append_event(
+    event = store.append_message(
         Event(
             character_id="rin",
             event_type=EventType.CHARACTER_MESSAGE,

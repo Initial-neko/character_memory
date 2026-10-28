@@ -26,9 +26,9 @@ def build(db_path):
     store.conn.execute("INSERT INTO world_browse_decisions(opportunity_id,character_id,started_at,phase,plan_json,result_json) VALUES(?,?,?,?,?,?)",['world:a','a',now.replace(hour=18,minute=15).isoformat(),'APPLIED','{"decision":{"choice":"NO_ACTION"}}','{"execution_status":"SKIPPED"}'])
     store.add_intent('a','明天继续讨论配色','PROACTIVE_MESSAGE',now.replace(hour=19),now+timedelta(days=1),now+timedelta(days=3))
     for n in range(35):
-        store.append_event(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=now-timedelta(minutes=n+1),content=f'真实分页测试 {n}'))
-    store.append_event(Event(character_id='b',event_type=EventType.USER_MESSAGE,event_time=now,content='另一个人物独立经历'))
-    store.append_event(Event(character_id='c',event_type=EventType.USER_MESSAGE,event_time=now,content='归档人物的独立经历'))
+        store.append_message(Event(character_id='a',event_type=EventType.USER_MESSAGE,event_time=now-timedelta(minutes=n+1),content=f'真实分页测试 {n}'))
+    store.append_message(Event(character_id='b',event_type=EventType.USER_MESSAGE,event_time=now,content='另一个人物独立经历'))
+    store.append_message(Event(character_id='c',event_type=EventType.USER_MESSAGE,event_time=now,content='归档人物的独立经历'))
     app=FastAPI();web=Path(__file__).parents[1]/'src/character_memory/web'
     def ensure(cid):
         if cid not in {'a','b','c'}:raise HTTPException(404,'unknown')

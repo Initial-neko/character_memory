@@ -26,8 +26,8 @@ def test_relationship_time_ignores_future_chat_events(tmp_path):
     day1 = datetime(2026, 9, 1, 9, tzinfo=timezone.utc)
     day5 = datetime(2026, 9, 5, 9, tzinfo=timezone.utc)
     day10 = datetime(2026, 9, 10, 9, tzinfo=timezone.utc)
-    store.append_event(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=day1, content="过去的聊天"))
-    store.append_event(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=day10, content="未来的聊天"))
+    store.append_message(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=day1, content="过去的聊天"))
+    store.append_message(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=day10, content="未来的聊天"))
 
     runtime.handle(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=day5, content="回放到这里"))
 

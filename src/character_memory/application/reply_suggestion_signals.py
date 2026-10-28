@@ -24,7 +24,7 @@ def prepare_choice(store,access,attribution,scope):
     if batch['status']!='READY':raise SuggestionStale('suggestions are not ready')
     ref=SuggestionRequest.model_validate_json(service.batches.get(batch['batch_id'])['request_json']).context_ref
     if scope[0]=='DIRECT':
-        source=store.get_event(ref.id) if ref.kind=='EVENT' else None
+        source=store.fact_reader.resolve_direct(ref) if ref.kind=='EVENT' else None
         matches=source is not None and source.character_id==scope[1]
     else:matches=ref.kind=='CONVERSATION_EVENT' and ref.conversation_id==scope[1]
     if not matches:raise SuggestionStale('suggestion batch belongs to another target')
@@ -38,12 +38,13 @@ def prepare_choice(store,access,attribution,scope):
 def record_choice(store,prepared,source,scope,request_id):
     batch,choice=prepared
     if source.kind=='EVENT':
-        event=store.get_event(source.id)
-        if event is None or event.event_type.value!='USER_MESSAGE' or event.character_id!=scope[1]:
+        event=store.fact_reader.resolve_direct(source, character_id=scope[1])
+        if event is None or event.event_type.value!='USER_MESSAGE':
             raise SuggestionStale('accepted user source is unavailable')
         public=project_direct_message(event)
     else:
-        row=store.conn.execute('SELECT * FROM conversation_events WHERE id=? AND conversation_id=?',(source.id,source.conversation_id)).fetchone()
+        row=store.conn.execute("SELECT e.* FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id "
+            "WHERE e.id=? AND e.conversation_id=? AND c.type='GROUP'",(source.id,source.conversation_id)).fetchone()
         if row is None or row['actor_type']!='USER' or row['actor_id']!='user':
             raise SuggestionStale('accepted user source is unavailable')
         public=project_group_message(GroupRepository._event_from_row(row),actor_name='user')

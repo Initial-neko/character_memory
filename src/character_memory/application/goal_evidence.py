@@ -13,8 +13,8 @@ def evidence_digest(store,character_id,reference):
     reference=FactRef.model_validate(reference)
     try:
         if reference.kind=='EVENT':
-            fact=store.get_event(reference.id)
-            if fact is None or fact.character_id!=character_id:raise EvidenceUnavailable('EVIDENCE_UNAVAILABLE')
+            fact=store.fact_reader.resolve_direct(reference, character_id=character_id)
+            if fact is None:raise EvidenceUnavailable('EVIDENCE_UNAVAILABLE')
         else:
             fact=GroupRepository.read_source_fact(store,reference.conversation_id,reference.id,character_id)
             if fact is None:raise EvidenceUnavailable('EVIDENCE_UNAVAILABLE')

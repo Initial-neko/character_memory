@@ -16,6 +16,16 @@ from typing import Any
 from character_memory.domain.models import Event, EventType, Memory
 from character_memory.domain.experience_scope import real_experience_sql
 from character_memory.media import MediaAsset
+from character_memory.storage.conversation_facts import (
+    CONVERSATION_FACT_ID_FLOOR,
+    DIRECT_MESSAGE_TYPES,
+    ConversationFactReader,
+    ConversationFactSchema,
+    ConversationFactWriter,
+    _conversation_row_to_event,
+    ensure_writable_event,
+    is_unified_fact_id,
+)
 from character_memory.time_utils import epoch_us, epoch_us_from_iso, parse_datetime
 
 
@@ -52,7 +62,21 @@ class SQLiteStore:
             lambda text: str(text or "").strip().casefold(),
             deterministic=True,
         )
+        self._fact_reader: ConversationFactReader | None = None
+        self._fact_writer: ConversationFactWriter | None = None
         self._init_schema()
+
+    @property
+    def fact_reader(self) -> ConversationFactReader:
+        if self._fact_reader is None:
+            self._fact_reader = ConversationFactReader(self)
+        return self._fact_reader
+
+    @property
+    def fact_writer(self) -> ConversationFactWriter:
+        if self._fact_writer is None:
+            self._fact_writer = ConversationFactWriter(self)
+        return self._fact_writer
 
     def _ensure_migration_table_locked(self) -> None:
         self.conn.execute(
@@ -350,6 +374,10 @@ class SQLiteStore:
             self._run_migration_locked("core/011-collaboration-fact-index", self._create_collaboration_fact_index_locked)
             compat_migrated = self._migrate_legacy_action_traces_incremental_locked()
             self.conn.commit()
+            # Empty-schema DDL only: Direct conversation facts need the shared
+            # table and the alias ledger to exist before the first write. No scan
+            # of `events`, no backfill, no mode switch happens here.
+            ConversationFactSchema(self).ensure()
             if intent_added:
                 logger.info("storage.intent_migration added=source_event_id")
             if embedding_added:
@@ -560,6 +588,24 @@ class SQLiteStore:
         )
 
     def append_event(self, event: Event) -> Event:
+        """Append a durable non-conversation event to the legacy ``events`` log.
+
+        Direct conversation facts (USER_MESSAGE / CHARACTER_MESSAGE) have exactly
+        one writer, ``ConversationFactWriter``, and live in
+        ``conversation_events``. Writing them here would recreate the second
+        source of truth this migration removed, so it fails loudly instead of
+        silently landing in a table product reads no longer consult.
+        """
+        ensure_writable_event(event)
+        return self.append_legacy_event(event)
+
+    def append_legacy_event(self, event: Event) -> Event:
+        """Unchecked write to ``events``; only migration tooling may choose this.
+
+        The W3 migration and evaluation fixtures need the raw primitive. Product
+        call sites must use ``append_event`` (guarded) or
+        ``ConversationFactWriter.append_direct``.
+        """
         # A failed implicit sqlite3 write (including SQLITE_BUSY) can leave an
         # open deferred transaction on the connection. Use our transaction owner
         # so failed autonomous World/Space event writes always roll back, while
@@ -570,6 +616,20 @@ class SQLiteStore:
                 (event.character_id, event.event_type.value, event.event_time.isoformat(), epoch_us(event.event_time), event.content, json.dumps(event.metadata, ensure_ascii=False)),
             )
             return event.model_copy(update={"id": cur.lastrowid})
+
+    def append_message(self, event: Event) -> Event:
+        """Persist one Direct conversation fact through the single writer."""
+        return self.fact_writer.append_direct(event)
+
+    def append_fact(self, event: Event) -> Event:
+        """Persist any event into the domain that owns its type.
+
+        Chat turns go to the Direct conversation domain; everything else (world
+        observations, ticks, actions, life events) keeps the legacy event log.
+        """
+        if event.event_type.value in DIRECT_MESSAGE_TYPES:
+            return self.fact_writer.append_direct(event)
+        return self.append_event(event)
 
     def append_observation_once(self, event: Event) -> tuple[Event, bool]:
         """Persist a retained reading result once; legacy events have no key."""
@@ -607,15 +667,34 @@ class SQLiteStore:
                 raise ValueError("observation_key already belongs to a different reading result")
             return existing, False
 
-    def get_event(self, event_id: int) -> Event | None:
+    def _legacy_event_by_id(self, event_id: int, *, require_valid_time: bool = True) -> Event | None:
         with self._lock:
             row = self.conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
-            if row is None:
-                return None
-            if row["event_time_epoch"] is None:
-                logger.warning("storage.event skipped_invalid_time event_id=%s value=%r", event_id, row["event_time"])
-                return None
-            return self._event_from_row(row)
+        if row is None:
+            return None
+        if require_valid_time and row["event_time_epoch"] is None:
+            logger.warning("storage.event skipped_invalid_time event_id=%s value=%r", event_id, row["event_time"])
+            return None
+        return self._event_from_row(row)
+
+    def get_event(self, event_id: int) -> Event | None:
+        """Read one durable fact across both conversation domains.
+
+        Ids at or above the unified floor are Direct conversation facts in
+        ``conversation_events``. Below it, an imported legacy id resolves through
+        its alias first: the preserved ``events`` row is an archive copy that
+        product code no longer reads or writes, so the canonical row is the only
+        current truth (its metadata, e.g. voice state, may have moved on). Rows
+        with no alias keep their legacy home (TIME_TICK, observations, actions).
+        Group rows are never returned here: callers own the Direct/EVENT domain.
+        """
+        identifier = int(event_id)
+        if is_unified_fact_id(identifier):
+            return self.fact_reader.get_canonical_event(identifier)
+        canonical = self.fact_reader.canonical_id_for_legacy(identifier)
+        if canonical is not None:
+            return self.fact_reader.get_canonical_event(canonical)
+        return self._legacy_event_by_id(identifier)
 
     def update_event_metadata(self, event_id: int, metadata: dict[str, Any]) -> bool:
         """Replace an event's metadata document.
@@ -623,11 +702,21 @@ class SQLiteStore:
         The whole document is replaced, not merged: callers read the current
         metadata, merge their keys, and pass the result. event_time_epoch is
         deliberately untouched, because every read filters on it being non-NULL.
+        Unified ids address the shared Direct row.
         """
+        identifier = int(event_id)
+        if is_unified_fact_id(identifier):
+            with self._lock:
+                cur = self.conn.execute(
+                    "UPDATE conversation_events SET metadata_json=? WHERE id=?",
+                    (json.dumps(metadata, ensure_ascii=False), identifier),
+                )
+                self._maybe_commit()
+                return cur.rowcount > 0
         with self._lock:
             cur = self.conn.execute(
                 "UPDATE events SET metadata_json=? WHERE id=?",
-                (json.dumps(metadata, ensure_ascii=False), event_id),
+                (json.dumps(metadata, ensure_ascii=False), identifier),
             )
             self._maybe_commit()
             return cur.rowcount > 0
@@ -814,12 +903,36 @@ class SQLiteStore:
         self, character_id: str, limit: int = 50, event_type: str | None = None,
         before: datetime | None = None, *, exclude_reaction_receipts: bool = False, real_experience_only: bool = False,
     ) -> list[Event]:
+        """Bounded recent durable events for one character, including chat.
+
+        Conversation facts no longer live in ``events``. When the request can
+        include them (no event_type filter, or a chat event type), the Direct
+        domain is read from ``conversation_events`` and merged with the
+        remaining non-conversation events, then truncated to ``limit`` in time
+        order. Summing the two tables untruncated would double-count migrated
+        rows; nothing here reads the same fact twice because migration copies
+        rather than moves and product writes never touch the legacy table again.
+        """
+        identifiers = [EventType.USER_MESSAGE.value, EventType.CHARACTER_MESSAGE.value]
+        wanted_direct = event_type is None or event_type in identifiers
+        direct_extra = ""
+        direct_args: list = []
+        if real_experience_only:
+            direct_extra += " AND " + real_experience_sql("e.metadata_json")
         with self._lock:
             sql = "SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL"
             args: list = [character_id]
             if event_type:
                 sql += " AND event_type=?"
                 args.append(event_type)
+            elif wanted_direct:
+                # Keep legacy rows only when the migration has not imported them;
+                # every imported message already has a canonical Direct row.
+                sql += (
+                    " AND NOT (event_type IN (?,?) AND EXISTS (SELECT 1 FROM conversation_fact_aliases a "
+                    "WHERE a.legacy_kind='EVENT' AND a.legacy_id=events.id AND a.status='MIGRATED'))"
+                )
+                args.extend(identifiers)
             if before:
                 sql += " AND event_time_epoch<=?"
                 args.append(epoch_us(before))
@@ -834,8 +947,43 @@ class SQLiteStore:
                 args.extend([EventType.ACTION.value, "ROLE_COLLABORATION_MESSAGE"])
             sql += " ORDER BY event_time_epoch DESC,id DESC LIMIT ?"
             args.append(limit)
-            rows = list(reversed(self.conn.execute(sql, args).fetchall()))
-            return [self._event_from_row(r) for r in rows]
+            legacy_rows = self.conn.execute(sql, args).fetchall()
+
+            direct_rows = []
+            if wanted_direct:
+                direct_sql = self.fact_reader._UNIFIED_DIRECT
+                direct_args = [character_id]
+                if event_type:
+                    direct_sql += " AND e.event_type=?"
+                    direct_args.append(event_type)
+                if before:
+                    direct_sql += " AND e.event_time_epoch<=?"
+                    direct_args.append(epoch_us(before))
+                if real_experience_only:
+                    direct_sql += " AND " + real_experience_sql("e.metadata_json")
+                direct_sql += " ORDER BY e.event_time_epoch DESC,e.id DESC LIMIT ?"
+                direct_args.append(limit)
+                direct_rows = self.conn.execute(direct_sql, direct_args).fetchall()
+                owners = {
+                    str(row["conversation_id"]): self._direct_owner(row["conversation_id"])
+                    for row in direct_rows
+                }
+
+        merged: list[tuple[int, int, int, Event]] = []
+        for row in legacy_rows:
+            merged.append((int(row["event_time_epoch"]), 1, int(row["id"]), self._event_from_row(row)))
+        for row in direct_rows:
+            owner = owners.get(str(row["conversation_id"]))
+            if owner is None:
+                continue
+            merged.append((int(row["event_time_epoch"]), 0, int(row["id"]), self._direct_event(row, owner)))
+        # Time is the ordering contract. Direct and legacy ids come from two
+        # AUTOINCREMENT spaces, so a tie cannot be ordered by id across them; a
+        # same-microsecond legacy row is normally a reaction derived *from* the
+        # conversation fact (ACTION receipts), so conversation facts come first
+        # within a tie and each space keeps its own insertion order.
+        merged.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [item[3] for item in merged[-limit:]]
 
     def recall_observed_events(self, character_id: str, query: str, *, at: datetime, limit: int = 4, projection: str = "PERSONAL") -> list[Event]:
         """Local lexical recall of actual personal observations, never RSS inventory.
@@ -890,16 +1038,31 @@ class SQLiteStore:
                 }) if event.metadata.get('channel') == 'WORLD' else event for event in events]
             return events
 
+    def _direct_owner(self, conversation_id: str) -> str | None:
+        """Character owner of a Direct conversation. Caller holds the store lock."""
+        row = self.conn.execute(
+            "SELECT actor_id FROM conversation_members WHERE conversation_id=? "
+            "AND actor_type='CHARACTER' ORDER BY position LIMIT 1",
+            (conversation_id,),
+        ).fetchone()
+        return str(row["actor_id"]) if row is not None else None
+
+    def _direct_event(self, row, owner: str) -> Event:
+        return _conversation_row_to_event(row, owner)
+
     def latest_event_id(
         self,
         character_id: str,
         *,
         event_types: tuple[str, ...] | list[str] | None = None,
     ) -> int:
-        """Return the newest insertion id for a character's durable events.
+        """Newest insertion id in the legacy ``events`` domain.
 
         Event ids reflect write order, unlike event_time which may intentionally
-        represent simulated or backfilled world time.
+        represent simulated or backfilled world time. Direct conversation facts
+        are not in this table; callers that need both domains keep two counters
+        (see ``ConversationFactReader.latest_direct_message_id``) and compare
+        each with its own previous value.
         """
         with self._lock:
             sql = "SELECT MAX(id) AS max_id FROM events WHERE character_id=?"
@@ -919,24 +1082,25 @@ class SQLiteStore:
         *,
         event_types: tuple[str, ...] | list[str],
     ) -> int | None:
-        """Newest inserted direct-conversation fact matching the supplied event types.
+        """Newest inserted Direct conversation fact matching the supplied types.
 
-        Direct conversation identity is stored in event metadata. Keeping the JSON
-        query here prevents application schedulers from depending on SQLite layout.
+        Arrival order (id) is authoritative, never caller-controlled event time.
+        Two id spaces exist while preserved legacy rows are unreadable as
+        canonical facts: conversation facts are always above the unified floor;
+        non-conversation inputs (TIME_TICK, VISUAL_OBSERVATION) stay in the legacy
+        table. Only the comparison between those two spaces needs the raw
+        timestamps, which is why this method still knows about both.
         """
-        normalized = tuple(str(item) for item in event_types if str(item))
-        if not normalized:
-            return None
-        placeholders = ",".join("?" for _ in normalized)
-        with self._lock:
-            row = self.conn.execute(
-                "SELECT id FROM events WHERE character_id=? "
-                f"AND event_type IN ({placeholders}) "
-                "AND json_extract(metadata_json,'$.conversation_id')=? "
-                "ORDER BY id DESC LIMIT 1",
-                [character_id, *normalized, conversation_id],
-            ).fetchone()
-        return int(row["id"]) if row is not None else None
+        return self.fact_reader.latest_fact_id(character_id, conversation_id, event_types)
+
+    def latest_direct_visual_source_id(
+        self,
+        character_id: str,
+        conversation_id: str,
+    ) -> int | None:
+        return self.latest_direct_event_id(
+            character_id, conversation_id, event_types=("VISUAL_OBSERVATION",),
+        )
 
     def list_character_response_events(
         self,
@@ -944,18 +1108,7 @@ class SQLiteStore:
         source_event_id: int,
     ) -> list[Event]:
         """Character messages durably derived from one source event, in insertion order."""
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT * FROM events WHERE character_id=? AND event_type=? "
-                "AND CAST(json_extract(metadata_json,'$.source_event_id') AS INTEGER)=? "
-                "ORDER BY id",
-                (
-                    character_id,
-                    EventType.CHARACTER_MESSAGE.value,
-                    int(source_event_id),
-                ),
-            ).fetchall()
-        return [self._event_from_row(row) for row in rows]
+        return self.fact_reader.list_response_events(character_id, source_event_id)
 
     def memory_operational_metrics(self, since: datetime) -> dict[str, Any]:
         """Small storage-owned Memory growth view used by runtime diagnostics."""
@@ -973,13 +1126,18 @@ class SQLiteStore:
             ).fetchone()
             rows = self.conn.execute(
                 """
-                SELECT e.event_type,e.metadata_json
+                SELECT
+                    CASE WHEN m.source_event_id>=? THEN 'DIRECT' ELSE 'EVENT' END AS fact_domain,
+                    COALESCE(e.event_type,ce.event_type) AS event_type,
+                    COALESCE(e.metadata_json,ce.metadata_json) AS metadata_json
                 FROM memories m
-                LEFT JOIN events e ON e.id=m.source_event_id
+                LEFT JOIN events e ON e.id=m.source_event_id AND m.source_event_id<?
+                LEFT JOIN conversation_events ce ON ce.id=m.source_event_id AND m.source_event_id>=?
+                    AND EXISTS (SELECT 1 FROM conversations c WHERE c.id=ce.conversation_id AND c.type='DIRECT')
                 WHERE m.event_time_epoch>=?
                 ORDER BY m.event_time_epoch DESC,m.id DESC
                 """,
-                (cutoff,),
+                (CONVERSATION_FACT_ID_FLOOR, CONVERSATION_FACT_ID_FLOOR, CONVERSATION_FACT_ID_FLOOR, cutoff),
             ).fetchall()
 
         by_channel = {"DIRECT": 0, "GROUP": 0, "SPACE": 0, "WORLD": 0, "OTHER": 0}
@@ -989,6 +1147,10 @@ class SQLiteStore:
             except (TypeError, ValueError, json.JSONDecodeError):
                 metadata = {}
             channel = str(metadata.get("channel") or "").strip().upper()
+            if row["fact_domain"] == "DIRECT":
+                # Migrated Direct facts are no longer in `events`; their channel
+                # lives in metadata and defaults to DIRECT for chat messages.
+                channel = channel or "DIRECT"
             if not channel and str(row["event_type"] or "").upper() == EventType.WORLD_OBSERVATION.value:
                 channel = "WORLD"
             if channel not in by_channel:
@@ -1005,9 +1167,7 @@ class SQLiteStore:
         }
 
     def list_chat_events(self, character_id: str, limit: int = 160) -> list[Event]:
-        with self._lock:
-            rows = self.conn.execute("SELECT * FROM events WHERE character_id=? AND event_time_epoch IS NOT NULL AND event_type IN (?,?) ORDER BY event_time_epoch DESC,id DESC LIMIT ?", (character_id, EventType.USER_MESSAGE.value, EventType.CHARACTER_MESSAGE.value, limit)).fetchall()
-            return [self._event_from_row(r) for r in reversed(rows)]
+        return self.fact_reader.list_chat_events(character_id, limit=limit)
 
     def count_character_messages(self, character_id: str) -> int:
         """Messages this character itself spoke in its own (private) chats.
@@ -1015,15 +1175,12 @@ class SQLiteStore:
         The archive drawer shows this beside the character's posts and
         comments, so it counts one side of the conversation on purpose:
         including the user's turns would report activity the character never
-        performed. Group turns live in ``conversation_events`` and are added
-        by ``GroupRepository.count_character_messages``.
+        performed. Group turns live in ``conversation_events`` under
+        ``type='GROUP'`` and are counted separately by
+        ``GroupRepository.count_character_messages``; Direct turns are counted
+        from the same table's DIRECT domain, never from both places.
         """
-        with self._lock:
-            row = self.conn.execute(
-                "SELECT COUNT(*) AS total FROM events WHERE character_id=? AND event_type=?",
-                (character_id, EventType.CHARACTER_MESSAGE.value),
-            ).fetchone()
-        return int(row["total"] if row is not None else 0)
+        return self.fact_reader.count_character_messages(character_id)
 
     def add_runtime_trace(self, character_id: str, source_event_id: int, created_at: datetime, trace: dict) -> int:
         with self._lock:
@@ -1090,18 +1247,33 @@ class SQLiteStore:
         )
         placeholders = ",".join("?" for _ in blocked_types)
         metadata = "CASE WHEN json_valid(e.metadata_json) THEN e.metadata_json ELSE '{}' END"
+        # An intent's source can be a legacy prompt input (below the unified
+        # floor) or a Direct conversation fact (above it). Both must be read
+        # here: after migration the user message an intent points at is no longer
+        # an `events` row, and a missing JOIN would suppress it as SOURCE_MISSING.
         with self.transaction(immediate=True):
             cursor = self.conn.execute(
                 f"""UPDATE intents SET status='SUPPRESSED'
                 WHERE character_id=? AND status='PENDING' AND EXISTS (
-                    SELECT 1 FROM events e WHERE e.id=intents.source_event_id AND (
+                    SELECT 1 FROM (
+                        SELECT e.id,e.character_id,e.event_type,e.metadata_json
+                        FROM events e
+                        WHERE e.id=intents.source_event_id AND intents.source_event_id<?
+                        UNION ALL
+                        SELECT ce.id,cm.actor_id AS character_id,ce.event_type,ce.metadata_json
+                        FROM conversation_events ce
+                        JOIN conversations c ON c.id=ce.conversation_id AND c.type='DIRECT'
+                        JOIN conversation_members cm ON cm.conversation_id=ce.conversation_id
+                            AND cm.actor_type='CHARACTER'
+                        WHERE ce.id=intents.source_event_id AND intents.source_event_id>=?
+                    ) e WHERE (
                         e.character_id<>intents.character_id OR e.event_type IN ({placeholders})
                         OR upper(coalesce(json_extract({metadata}, '$.channel'), '')) IN ('GROUP','SPACE')
                         OR json_extract({metadata}, '$.source_conversation_event_id') IS NOT NULL
                         OR json_extract({metadata}, '$.group_event_id') IS NOT NULL
                     )
                 ) RETURNING id,source_event_id""",
-                (character_id, *blocked_types),
+                (character_id, CONVERSATION_FACT_ID_FLOOR, CONVERSATION_FACT_ID_FLOOR, *blocked_types),
             )
             rows = cursor.fetchall()
             cursor.close()

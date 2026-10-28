@@ -56,7 +56,7 @@ class DurableReactionDelivery:
                 self.repository.block(ref, reason='SCOPE_UNAVAILABLE')
                 continue
             if ref.kind == 'EVENT':
-                event = store.get_event(ref.id)
+                event = store.fact_reader.resolve_direct(ref, character_id=item['character_id'])
                 channel = direct_channel(item['character_id'], item['conversation_id'])
                 latest = self.scheduler._latest_direct_user_id(store, item['character_id'], item['conversation_id'])
             else:
@@ -64,7 +64,7 @@ class DurableReactionDelivery:
                 event = repo.get_event(ref.conversation_id, ref.id)
                 channel = group_channel(ref.conversation_id)
                 latest = repo.latest_user_event_id_by_insertion(ref.conversation_id)
-            if latest is not None and latest > ref.id:
+            if latest is not None and store.fact_reader.fact_order_key(latest) > store.fact_reader.fact_order_key(ref.id):
                 self.repository.discard_stale(ref)
                 continue
             if event is None:

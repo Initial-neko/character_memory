@@ -35,6 +35,12 @@ jobs:
       - name: Prepare test evidence directory
         run: mkdir -p artifacts/core-visual-evidence
 
+      - name: Enforce the single conversation-fact writer
+        # Direct chat facts have exactly one writer (ConversationFactWriter).
+        # A raw INSERT in product code would recreate the second source of truth
+        # the W3 migration removed, and no runtime test would catch it.
+        run: uv run python scripts/check_conversation_fact_writes.py
+
       - name: Run tests
         env:
           # faulthandler dumps every Python thread's stack on SIGSEGV/SIGABRT.

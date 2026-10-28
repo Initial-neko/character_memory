@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 from character_memory.application.voice_message_service import (
@@ -30,7 +31,7 @@ CONVERSATION_ID = "momo:default"
 
 def _pending(tmp_path):
     store = SQLiteStore(tmp_path / "voice.db")
-    saved = store.append_event(
+    saved = store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.CHARACTER_MESSAGE,
@@ -200,11 +201,14 @@ def test_a_group_event_id_never_rewrites_the_direct_message_with_that_id(tmp_pat
             metadata={"action": "VOICE_MESSAGE", **voice_pending_fields()},
         )
     )
-    # The collision is the precondition, not an accident of the fixture: both
-    # tables hand out 1 first.
-    assert group_event.id == direct.id
+    # W3 puts Direct and Group facts in one AUTOINCREMENT table, so the old
+    # numeric collision is structural rather than accidental. The guard must still
+    # refuse a group id when it is asked to update a direct conversation.
+    assert group_event.id != direct.id
     assert group.id != CONVERSATION_ID
 
+    # A direct service call must not touch the group row, even with the correct
+    # group conversation id: the writer requires the DIRECT domain.
     assert (
         mark_voice_message_ready(
             store,
@@ -217,6 +221,10 @@ def test_a_group_event_id_never_rewrites_the_direct_message_with_that_id(tmp_pat
         )
         is False
     )
+    group_row = store.conn.execute(
+        "SELECT metadata_json FROM conversation_events WHERE id=?", (group_event.id,)
+    ).fetchone()
+    assert json.loads(group_row[0])[VOICE_STATUS] == "pending"
 
     # The direct row is the one the bug used to corrupt; it must be untouched.
     metadata = store.get_event(direct.id).metadata

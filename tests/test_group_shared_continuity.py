@@ -80,7 +80,7 @@ def test_history_recall_scope_membership_watermark_and_budget(tmp_path):
     other = service.create_group("other", ["rin", "momo"])
     old = service.persist_user_event(group.id, "星灯真实共享 " + "x" * 5000, at=at)
     service.persist_user_event(other.id, "星灯跨群秘密", at=at)
-    store.append_event(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=at, content="星灯私人秘密"))
+    store.append_message(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=at, content="星灯私人秘密"))
     service.repo.append_event(GroupEvent(conversation_id=group.id, turn_id="hidden", actor_type="SYSTEM", actor_id="system", event_type="GROUP_OPPORTUNITY", event_time=at, content="星灯隐藏机会", metadata={"hidden": True}))
     source = service.persist_user_event(group.id, "星灯", at=at + timedelta(days=1))
     service.persist_user_event(group.id, "星灯未来时间", at=at + timedelta(days=2))

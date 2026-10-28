@@ -17,7 +17,7 @@ class ImageChatStub:
 def test_proactive_image_action_marks_intent_executed(tmp_path):
     store = SQLiteStore(tmp_path / "x.db")
     now = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
-    source = store.append_event(
+    source = store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.USER_MESSAGE,

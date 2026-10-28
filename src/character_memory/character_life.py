@@ -285,9 +285,23 @@ class CharacterLifeReader:
             tables = self._tables()
             sources = []
             # Source event identities are namespaced; Group IDs are not Core event IDs.
-            sources.append(("events", "e.id", "e.event_time_epoch", "e.event_time", "e.content||CASE WHEN json_valid(e.metadata_json) THEN coalesce(json_extract(e.metadata_json,'$.rss_reading.title'),'') ELSE '' END", "e.character_id=? AND e.event_type NOT IN ('ACTION','TIME_TICK','LIFE_EVENT','DIARY')", [character_id], "SELECT e.* FROM events e"))
-            if 'conversation_events' in tables:
-                sources.append(("group", "e.id", "e.event_time_epoch", "e.event_time", "e.content", f"(e.actor_type='CHARACTER' AND e.actor_id=? OR EXISTS(SELECT 1 FROM conversation_runtime_traces t WHERE t.character_id=? AND t.source_conversation_event_id=e.id) OR EXISTS({collaboration_peer_sql('GROUP')}))", [character_id, character_id, character_id], "SELECT e.* FROM conversation_events e"))
+            # Migrated chat rows stay in `events` for provenance but are no longer
+            # the authoritative copy; the `direct` source below projects them.
+            sources.append(("events", "e.id", "e.event_time_epoch", "e.event_time", "e.content||CASE WHEN json_valid(e.metadata_json) THEN coalesce(json_extract(e.metadata_json,'$.rss_reading.title'),'') ELSE '' END", "e.character_id=? AND e.event_type NOT IN ('ACTION','TIME_TICK','LIFE_EVENT','DIARY') AND NOT (e.event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE') AND EXISTS (SELECT 1 FROM conversation_fact_aliases a WHERE a.legacy_kind='EVENT' AND a.legacy_id=e.id AND a.status='MIGRATED'))", [character_id], "SELECT e.* FROM events e"))
+            if {'conversation_events', 'conversations'} <= tables:
+                # Shared facts share this table with Direct facts after W3, so a
+                # group scan must name its domain or it would project private
+                # turns as group activity.
+                if 'conversation_runtime_traces' in tables:
+                    group_condition = (f"(e.actor_type='CHARACTER' AND e.actor_id=? OR EXISTS(SELECT 1 FROM conversation_runtime_traces t "
+                        f"WHERE t.character_id=? AND t.source_conversation_event_id=e.id) OR EXISTS({collaboration_peer_sql('GROUP')}))")
+                    group_params = [character_id, character_id, character_id]
+                else:
+                    group_condition = (f"(e.actor_type='CHARACTER' AND e.actor_id=? OR EXISTS({collaboration_peer_sql('GROUP')}))")
+                    group_params = [character_id, character_id]
+                sources.append(("group", "e.id", "e.event_time_epoch", "e.event_time", "e.content", group_condition, group_params, "SELECT e.* FROM conversation_events e JOIN conversations gc ON gc.id=e.conversation_id AND gc.type='GROUP'"))
+            if {'conversation_events', 'conversations', 'conversation_members'} <= tables:
+                sources.append(("direct", "e.id", "e.event_time_epoch", "e.event_time", "e.content", "1=1", [character_id], "SELECT e.*,cm.actor_id AS character_id FROM conversation_events e JOIN conversations dc ON dc.id=e.conversation_id AND dc.type='DIRECT' JOIN conversation_members cm ON cm.conversation_id=e.conversation_id AND cm.actor_type='CHARACTER' AND cm.actor_id=?"))
             if 'space_posts' in tables:
                 sources.append(("post", "e.id", "e.created_at_epoch", "e.created_at", "e.content", "e.character_id=?", [character_id], "SELECT e.* FROM space_posts e"))
             if 'space_comments' in tables:
@@ -302,7 +316,7 @@ class CharacterLifeReader:
             records = []
             undated_count = 0
             for kind, identity, stamp, time, content, condition, params, sql in sources:
-                if channel != 'ALL' and kind != 'events' and {'group':'GROUP','post':'SPACE','comment':'SPACE','world':'WORLD','intent':'INTENT','space_run':'SPACE','intent_audit':'INTENT'}[kind] != channel:
+                if channel != 'ALL' and kind != 'events' and {'group':'GROUP','direct':'DIRECT','post':'SPACE','comment':'SPACE','world':'WORLD','intent':'INTENT','space_run':'SPACE','intent_audit':'INTENT'}[kind] != channel:
                     continue
                 if view == 'intents' and kind != 'intent':
                     continue
@@ -319,18 +333,23 @@ class CharacterLifeReader:
                     params += [query]
                 if view == 'relationships':
                     if kind=='events': condition += " AND (e.event_type='USER_MESSAGE' OR (e.event_type='SPACE_COMMENT_RECEIVED' AND json_valid(e.metadata_json) AND json_extract(e.metadata_json,'$.commenter_id') IS NOT NULL))"
+                    elif kind=='direct': condition += " AND e.event_type='USER_MESSAGE'"
                     elif kind=='group': condition += f" AND e.actor_type IN ('CHARACTER','USER') AND (NOT(e.actor_type='CHARACTER' AND e.actor_id=?) OR EXISTS({collaboration_peer_sql('GROUP')}))"; params += [character_id, character_id]
                     elif kind=='comment': condition += f" AND (EXISTS({collaboration_peer_sql('SPACE')}) OR (CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END)<>?)"; params += [character_id, character_id]
                     else: continue
                     if peer:
                         if kind=='events':
                             condition += " AND ((e.event_type='USER_MESSAGE' AND ?='user') OR (json_valid(e.metadata_json) AND json_extract(e.metadata_json,'$.commenter_id')=?))"; params += [peer,peer]
+                        elif kind=='direct':
+                            condition += " AND e.actor_type='USER' AND e.actor_id='user' AND ?='user'"; params += [peer]
                         elif kind=='group': condition += f" AND ((e.actor_id=? AND e.actor_id<>?) OR EXISTS({collaboration_peer_sql('GROUP', match_peer=True)}))"; params += [peer, character_id, character_id, peer]
                         elif kind=='comment': condition += f" AND (EXISTS({collaboration_peer_sql('SPACE', match_peer=True)}) OR (NOT EXISTS({collaboration_peer_sql('SPACE')}) AND (CASE WHEN e.reply_to_comment_id IS NULL THEN p.character_id ELSE parent.character_id END)=?))"; params += [character_id, peer, character_id, peer]
                 if view == 'changes':
                     if kind == 'events':
                         condition += " AND (EXISTS(SELECT 1 FROM mental_state_history s WHERE s.character_id=e.character_id AND s.source_event_id=e.id) OR EXISTS(SELECT 1 FROM memories m WHERE m.character_id=e.character_id AND m.source_event_id=e.id AND CASE WHEN json_valid(m.metadata_json) THEN coalesce(upper(json_extract(m.metadata_json,'$.origin')),'') ELSE '' END<>'GROUP'))"
                     elif kind == 'group':
+                        if 'conversation_runtime_traces' not in tables:
+                            continue
                         condition += " AND EXISTS(SELECT 1 FROM conversation_runtime_traces t WHERE t.character_id=? AND t.source_conversation_event_id=e.id AND json_valid(t.trace_json) AND (json_extract(t.trace_json,'$.mental_state_before')<>json_extract(t.trace_json,'$.mental_state_after') OR json_array_length(json_extract(t.trace_json,'$.created_memory_ids'))>0))"
                         params += [character_id]
                     else: continue
@@ -357,20 +376,26 @@ class CharacterLifeReader:
 
     def _project(self, kind, row, character, tables):
         metadata=obj(row.get('metadata_json'))
-        event_id=row.get('id') if kind=='events' else None
+        event_id=row.get('id') if kind in ('events','direct') else None
         trace={}
         if kind=='events':
             t=self.store.get_runtime_trace(event_id)
             trace=t or {}
-        elif kind=='group':
-            t=self.store.conn.execute("SELECT trace_json FROM conversation_runtime_traces WHERE character_id=? AND source_conversation_event_id=?",[character,row['id']]).fetchone()
-            trace=obj(t[0]) if t else {}
-        title={'events':'聊天经历','group':'群聊交流','post':'发布了 Space 动态','comment':'参与了 Space 讨论','world':'World 行动机会','intent':'未来表达意图','space_run':'Space 自主机会','intent_audit':'表达意图处理记录'}[kind]
-        channel={'events':'DIRECT','group':'GROUP','post':'SPACE','comment':'SPACE','world':'WORLD','intent':'INTENT','space_run':'SPACE','intent_audit':'INTENT'}[kind]
+        elif kind in ('group','direct'):
+            # A Direct-only database may never have initialized the Group schema.
+            if 'conversation_runtime_traces' in tables:
+                t=self.store.conn.execute("SELECT trace_json FROM conversation_runtime_traces WHERE character_id=? AND source_conversation_event_id=?",[character,row['id']]).fetchone()
+                trace=obj(t[0]) if t else {}
+            if not trace and kind=='direct':
+                # Direct reaction traces are stored beside the legacy event log,
+                # keyed by whichever id the runtime persisted.
+                trace=self.store.get_runtime_trace(row['id']) or {}
+        title={'events':'聊天经历','group':'群聊交流','direct':'聊天经历','post':'发布了 Space 动态','comment':'参与了 Space 讨论','world':'World 行动机会','intent':'未来表达意图','space_run':'Space 自主机会','intent_audit':'表达意图处理记录'}[kind]
+        channel={'events':'DIRECT','group':'GROUP','direct':'DIRECT','post':'SPACE','comment':'SPACE','world':'WORLD','intent':'INTENT','space_run':'SPACE','intent_audit':'INTENT'}[kind]
         status='RECORDED'
         content=text(row.get('content'))
         participants=[]
-        if kind=='events':
+        if kind in ('events','direct'):
             et=row['event_type']
             if et=='WORLD_OBSERVATION':
                 title='保留了一次外界观察';channel='WORLD'
@@ -382,7 +407,9 @@ class CharacterLifeReader:
                     participants=[{'id':metadata['commenter_id'],'name':metadata['commenter_id']}]
             elif et=='PROACTIVE_INTENT': title='主动表达机会';channel='INTENT'
             elif et=='USER_MESSAGE': participants=[{'id':'user','name':'用户'}];title='与用户交流'
-            elif et=='CHARACTER_MESSAGE': title='表达了一条消息'
+            elif et=='CHARACTER_MESSAGE':
+                title='表达了一条消息'
+                if kind=='direct' and row.get('actor_id'): participants=[{'id':row['actor_id'],'name':row['actor_id']}]
         if kind=='group':
             if row['actor_type'] not in ('USER','CHARACTER'): title='群聊自主机会'
             if row['actor_type'] in ('USER','CHARACTER') and row['actor_id']!=character:

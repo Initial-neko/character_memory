@@ -36,7 +36,7 @@ def observe(store, *, character='a', at=NOW, content='读过长期记忆文章�
 def test_observation_survives_thirty_ordinary_events_without_extra_model_work(store, query):
     event = observe(store)
     for index in range(30):
-        store.append_event(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW + timedelta(minutes=index+1), content='普通聊天'))
+        store.append_message(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW + timedelta(minutes=index+1), content='普通聊天'))
     recall = LocalRecall()
     snapshot = PersonContextBuilder(store, recall, 'persona').build('a', query=query, at=NOW + timedelta(hours=1))
     assert event.id not in [row.id for row in snapshot.recent_events]
@@ -49,7 +49,7 @@ def test_observation_survives_thirty_ordinary_events_without_extra_model_work(st
 
 def test_unread_non_observation_and_other_character_are_not_experiences(store):
     observe(store, character='a')
-    store.append_event(Event(character_id='b', event_type=EventType.USER_MESSAGE, event_time=NOW, content='长期记忆文章已被RSS采集'))
+    store.append_message(Event(character_id='b', event_type=EventType.USER_MESSAGE, event_time=NOW, content='长期记忆文章已被RSS采集'))
     assert store.recall_observed_events('b', '长期记忆', at=NOW) == []
     assert store.recall_observed_events('a', '天气预报', at=NOW) == []
     assert store.recall_observed_events('a', '', at=NOW) == []
@@ -66,8 +66,8 @@ def test_observation_time_barrier_and_public_projection(store):
 
 
 def test_supplied_recent_events_apply_time_and_exclusion(store):
-    past = store.append_event(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW-timedelta(minutes=1), content='过去'))
-    future = store.append_event(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW+timedelta(minutes=1), content='未来'))
+    past = store.append_message(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW-timedelta(minutes=1), content='过去'))
+    future = store.append_message(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW+timedelta(minutes=1), content='未来'))
     snapshot = PersonContextBuilder(store, LocalRecall(), 'persona').build('a', query='记忆', at=NOW, recent_events=[past, future], exclude_event_id=past.id)
     assert snapshot.recent_events == []
 
@@ -102,7 +102,7 @@ def test_real_direct_reaction_receives_old_observation_with_one_reaction(store):
 
     observed = observe(store)
     for index in range(30):
-        store.append_event(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW+timedelta(minutes=index+1), content='普通聊天'))
+        store.append_message(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW+timedelta(minutes=index+1), content='普通聊天'))
     embedding, model = CountingEmbedding(), CountingModel()
     runtime = PersonRuntime(store, VectorRecall(store, embedding), embedding, model, 'persona')
     result = runtime.handle(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=NOW+timedelta(hours=1), content='你上次读过的长期记忆文章是什么'))
@@ -127,7 +127,7 @@ def test_legacy_invalid_metadata_preserves_fact_without_inventing_provenance(sto
     store.conn.execute("UPDATE events SET metadata_json=? WHERE id=?", (raw, event.id))
     store.conn.commit()
     for index in range(ordinary_events):
-        store.append_event(Event(character_id="a", event_type=EventType.USER_MESSAGE,
+        store.append_message(Event(character_id="a", event_type=EventType.USER_MESSAGE,
                                  event_time=NOW + timedelta(minutes=index+1), content="普通聊天"))
     snapshot = PersonContextBuilder(store, LocalRecall(), "persona").build(
         "a", query="长期记忆", at=NOW + timedelta(hours=1))

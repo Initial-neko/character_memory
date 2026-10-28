@@ -316,7 +316,7 @@ def test_interrupted_recipient_preserves_sender_projection_and_publish_without_r
 def test_shared_projection_never_copies_private_sender_events(tmp_path):
     from character_memory.domain.models import Event,EventType
     store,groups,space,service,now=make_service(tmp_path,lambda *args:None)
-    store.append_event(Event(character_id='alice',event_type=EventType.USER_MESSAGE,
+    store.append_message(Event(character_id='alice',event_type=EventType.USER_MESSAGE,
         event_time=now,content='private-user-secret',metadata={'channel':'DIRECT','conversation_id':'alice:default'}))
     group=groups.create_group('g',['alice','claude'],now)
     service.contact('claude','public only',context=CollaborationContext('alice','GROUP',group.id,'privacy',None,now))
@@ -353,7 +353,7 @@ def test_life_collaboration_reads_only_actual_participant_receipts(tmp_path, cha
     target = groups.create_group('g', ['alice', 'claude', 'outsider'], now).id if channel == 'GROUP' else str(space.create_post('outsider', 'Public post', now).id)
     receipt = service.contact('claude', 'Actual question', context=CollaborationContext('alice', channel, target, 'life-read', None, now))
     for cid in ('alice', 'claude'):
-        store.append_event(Event(character_id=cid, event_type=EventType.USER_MESSAGE, event_time=now, content='Existing Direct', metadata={'conversation_id': cid + ':existing'}))
+        store.append_message(Event(character_id=cid, event_type=EventType.USER_MESSAGE, event_time=now, content='Existing Direct', metadata={'conversation_id': cid + ':existing'}))
     kind = 'group' if channel == 'GROUP' else 'comment'
     expected = {receipt['sent_event_id']}
     if reply:

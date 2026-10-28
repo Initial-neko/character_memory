@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from character_memory.application.async_conversation import direct_channel
+from character_memory.domain.facts import FactRef
 from character_memory.voice_message_fields import (
     VOICE_DURATION_MS,
     VOICE_ERROR,
@@ -43,29 +44,34 @@ def _publish(hub, event, character_id: str, conversation_id: str) -> None:
 
 
 def _apply(store, hub, event_id: int, *, character_id: str, conversation_id: str, patch: dict) -> bool:
-    event = store.get_event(event_id)
+    event = store.fact_reader.resolve_direct(
+        FactRef(kind="EVENT", id=int(event_id)), character_id=character_id,
+    )
     if event is None:
         logger.warning("voice_message.missing_event event_id=%s", event_id)
         return False
 
-    # store.get_event reads the direct-chat `events` table only. Group events
-    # live in `conversation_events`, a separate AUTOINCREMENT table whose ids
-    # also start at 1, so the two sequences always overlap: a group event id
-    # addresses an unrelated direct message here. Without this check the call
-    # returns True having rewritten that stranger's row with this audio and
-    # broadcast it on the direct channel, while the group row stays pending
-    # forever -- a silent wrong-row write. Every direct event carries the
-    # conversation_id it belongs to, so a legitimate call still passes.
+    # Direct facts now share `conversation_events` with Group facts, and preserved
+    # legacy rows share the surface with migrated ones. The conversation identity
+    # check is what proves this id belongs to the conversation that requested the
+    # synthesis: without it a same-numbered stranger would be rewritten with this
+    # audio and broadcast on the direct channel while its own row stays pending.
     if event.character_id != character_id or event.metadata.get("conversation_id") != conversation_id:
         logger.warning("voice_message.provenance_mismatch event_id=%s", event_id)
         return False
 
     metadata = dict(event.metadata)
     metadata.update(patch)
-    if not store.update_event_metadata(event_id, metadata):
+    updated = store.fact_writer.update_direct_metadata(
+        event.id,
+        metadata,
+        character_id=character_id,
+        raw_conversation_id=conversation_id,
+    )
+    if updated is None:
         return False
 
-    _publish(hub, event.model_copy(update={"metadata": metadata}), character_id, conversation_id)
+    _publish(hub, updated, character_id, conversation_id)
     return True
 
 

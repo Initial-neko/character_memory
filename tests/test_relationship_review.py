@@ -18,7 +18,7 @@ NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 
 
 def direct(store, character="a", content="昨天修好了星灯", at=NOW, event_type=EventType.USER_MESSAGE, metadata=None):
-    return store.append_event(Event(character_id=character, event_type=event_type, event_time=at, content=content, metadata=metadata or {"channel": "DIRECT", "conversation_id": "chat-a"}))
+    return store.append_message(Event(character_id=character, event_type=event_type, event_time=at, content=content, metadata=metadata or {"channel": "DIRECT", "conversation_id": "chat-a"}))
 
 
 def test_review_combines_recent_real_interaction_and_current_user_plans_without_writes(tmp_path):
@@ -35,14 +35,14 @@ def test_review_combines_recent_real_interaction_and_current_user_plans_without_
     before = store.conn.total_changes
     data = CharacterRelationshipReader(store).review("a", "user", day="2026-10-14", offset=0, now=NOW)
     assert store.conn.total_changes == before
-    assert [item["key"] for item in data["interactions"]] == [f"events:{old.id}"]
+    assert [item["key"] for item in data["interactions"]] == [f"direct:{old.id}"]
     assert [item["source"]["id"] for item in data["pending_intents"]] == [intent]
     assert data["read_only"] and data["pending_scope"] == "CURRENT_USER_DIRECT_PENDING_ALL_CREATION_DATES"
     assert "未来消息" not in str(data) and "另一人物私聊" not in str(data)
     assert CharacterRelationshipReader(store).review("a", "b", day="2026-10-14", now=NOW)["pending_intents"] == []
     midnight = direct(store, content="所选日后一天午夜", at=datetime(2026, 10, 14, tzinfo=timezone.utc))
     prior_day = CharacterRelationshipReader(store).review("a", "user", day="2026-10-13", offset=0, now=NOW)
-    assert f"events:{midnight.id}" not in [item["key"] for item in prior_day["interactions"]]
+    assert f"direct:{midnight.id}" not in [item["key"] for item in prior_day["interactions"]]
     store.close()
 
 

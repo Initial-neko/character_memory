@@ -33,7 +33,7 @@ def action(version, operation, **changes):
 
 
 def source(store, character='rin', content='PRIVATE_SOURCE_BODY', **metadata):
-    event = store.append_event(Event(character_id=character, event_type=EventType.USER_MESSAGE,
+    event = store.append_message(Event(character_id=character, event_type=EventType.USER_MESSAGE,
         event_time=NOW, content=content, metadata=metadata))
     return FactRef(kind='EVENT', id=event.id)
 
@@ -187,11 +187,11 @@ def test_live_projection_reports_source_change_without_returning_body(state, mut
     entry = accepted['completions'][0]['evidence'][0]
     assert entry['status'] == 'CURRENT' and entry['accepted_digest']
     if mutation == 'content':
-        store.conn.execute("UPDATE events SET content='PRIVATE_CHANGED_BODY' WHERE id=?", (ref.id,))
+        store.conn.execute("UPDATE conversation_events SET content='PRIVATE_CHANGED_BODY' WHERE id=?", (ref.id,))
     elif mutation == 'scope':
-        store.conn.execute('UPDATE events SET metadata_json=? WHERE id=?', (json.dumps({'experience_scope': SIM}), ref.id))
+        store.conn.execute('UPDATE conversation_events SET metadata_json=? WHERE id=?', (json.dumps({'experience_scope': SIM}), ref.id))
     else:
-        store.conn.execute('DELETE FROM events WHERE id=?', (ref.id,))
+        store.conn.execute('DELETE FROM conversation_events WHERE id=?', (ref.id,))
     store.conn.commit()
     goal = repo.get('rin', gid)
     assert goal['phase'] == 'COMPLETED'

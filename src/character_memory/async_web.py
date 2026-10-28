@@ -293,7 +293,11 @@ def attach_async_routes(app):
             if reference:
                 event.content, reference = prepare_life_message(store, req.life_reference, req.message, character_id=req.character_id, conversation_id=req.conversation_id)
                 event.metadata["life_reference"] = reference
-            event = store.append_event(event)
+            event = store.fact_writer.append_direct(
+                event,
+                owner_character_id=req.character_id,
+                raw_conversation_id=req.conversation_id,
+            )
             deliveries.record(FactRef(kind="EVENT", id=event.id), direct_channel(req.character_id, req.conversation_id),
                 character_id=req.character_id, conversation_id=req.conversation_id,
                 media_ids=[event.metadata["media_id"]] if event.metadata.get("media_id") else [])

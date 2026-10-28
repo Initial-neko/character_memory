@@ -24,7 +24,7 @@ def store(tmp_path):
 
 
 def event(s, character='a', content='真实交流', at=NOW):
-    return s.append_event(Event(character_id=character,event_type=EventType.USER_MESSAGE,event_time=at,content=content))
+    return s.append_message(Event(character_id=character,event_type=EventType.USER_MESSAGE,event_time=at,content=content))
 
 
 def test_source_state_memory_links_and_no_writes(store):

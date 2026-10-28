@@ -109,7 +109,7 @@ def test_direct_selfie_uses_avatar_reference_and_persists_generated_image(tmp_pa
         source="CHAT_ASSET",
         title="current avatar",
     )
-    source = store.append_event(
+    source = store.append_message(
         Event(
             character_id="mika",
             event_type=EventType.USER_MESSAGE,
@@ -151,7 +151,7 @@ def test_direct_selfie_uses_avatar_reference_and_persists_generated_image(tmp_pa
 def test_scene_generation_does_not_force_avatar_reference(tmp_path):
     service, runtime, provider, avatar_store, _media_storage, store = _runtime(tmp_path)
     avatar_store.save_from_bytes("mika", _PNG, "image/png", source="CHAT_ASSET")
-    source = store.append_event(
+    source = store.append_message(
         Event(
             character_id="mika",
             event_type=EventType.USER_MESSAGE,
@@ -176,7 +176,7 @@ def test_scene_generation_does_not_force_avatar_reference(tmp_path):
 
 def test_slow_generation_is_discarded_when_newer_user_fact_supersedes_it(tmp_path):
     service, runtime, provider, avatar_store, _media_storage, store = _runtime(tmp_path)
-    source = store.append_event(
+    source = store.append_message(
         Event(
             character_id="mika",
             event_type=EventType.USER_MESSAGE,

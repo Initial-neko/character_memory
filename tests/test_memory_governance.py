@@ -115,7 +115,7 @@ def test_person_context_builder_reads_one_person_state_memory_and_recent_events(
         embedding=embeddings.embed("用户喜欢一起聊鱼缸。"),
     )
     store.add_memory(memory)
-    event = store.append_event(
+    event = store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.USER_MESSAGE,

@@ -47,7 +47,7 @@ def runtime(store, model):
 
 
 def source(store, *, character_id="momo"):
-    return store.append_event(Event(character_id=character_id, event_type=EventType.USER_MESSAGE,
+    return store.append_message(Event(character_id=character_id, event_type=EventType.USER_MESSAGE,
         event_time=NOW, content="同一来源", metadata={"conversation_id": "once"}))
 
 
@@ -299,7 +299,9 @@ def test_equal_core_and_group_ids_keep_distinct_cognition_receipts(tmp_path):
     service = GroupConversationService(store, {"momo": person, "rin": runtime(store, rin)}, FixedClock(NOW))
     group = service.create_group("distinct", ["momo", "rin"], at=NOW)
     shared = service.persist_user_event(group.id, "shared", at=NOW)
-    assert shared.id == event.id
+    # After W3 both domains share one AUTOINCREMENT table, so the ids that used to
+    # collide now differ; the receipts must still stay distinct by namespace.
+    assert shared.id != event.id
     service.react_from_event(shared)
     person.handle(event, persist_event=False)
     service.react_from_event(shared)
@@ -363,7 +365,7 @@ finally: store.close()
                 process.kill(); process.wait(timeout=5)
     assert marker.read_text(encoding="utf-8").splitlines() == ["CALL"]
     assert any(result["status"] == "COMMITTED" for result in results)
-    assert store.conn.execute("SELECT COUNT(*) FROM events WHERE event_type='CHARACTER_MESSAGE'").fetchone()[0] == 1
+    assert store.conn.execute("SELECT COUNT(*) FROM conversation_events WHERE event_type='CHARACTER_MESSAGE'").fetchone()[0] == 1
     store.close()
 
 

@@ -21,7 +21,7 @@ def test_proactive_sharing_recovers_sourced_observation_without_extra_reaction(t
             event_time=NOW-timedelta(hours=1), content='我读了公开的紫杉醇研究报道。',
             metadata={'channel': 'PERSONAL_BROWSE', 'sources': ['https://example.com/research']}))
         for index in range(10):
-            store.append_event(Event(character_id='a', event_type=EventType.USER_MESSAGE,
+            store.append_message(Event(character_id='a', event_type=EventType.USER_MESSAGE,
                 event_time=NOW-timedelta(minutes=20-index), content='普通聊天', metadata={'conversation_id': 'direct'}))
         model, embedding = CountingModel(), CountingEmbedding()
         runtime = PersonRuntime(store, VectorRecall(store, embedding), embedding, model, 'persona')
@@ -151,7 +151,7 @@ def test_sharing_candidate_window_does_not_scan_unbounded_history(tmp_path):
         store.append_event(Event(character_id='a', event_type=EventType.WORLD_OBSERVATION,
             event_time=NOW-timedelta(hours=1), content='旧观察', metadata={'channel': 'PERSONAL_BROWSE', 'sources': ['https://example.com/old']}))
         for index in range(32):
-            store.append_event(Event(character_id='a', event_type=EventType.USER_MESSAGE,
+            store.append_message(Event(character_id='a', event_type=EventType.USER_MESSAGE,
                 event_time=NOW-timedelta(minutes=32-index), content='新聊天'))
         result = ChatService(store, type('Recorder', (), {'handle': lambda self, event: event})(), FixedClock(NOW)).dispatch_wake(character_id='a', at=NOW)
         assert result.metadata['sharing_observations'] == []

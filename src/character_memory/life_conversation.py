@@ -69,6 +69,13 @@ def resolve_life_reference(store, ref):
         if tables[kind] not in existing:
             fail(404, '来源记录不存在或已删除')
         raw = store.conn.execute(f'SELECT * FROM {tables[kind]} WHERE id=?', [int(identity)]).fetchone()
+        if kind == 'events':
+            # Chat facts may have moved to the unified Direct domain; a canonical
+            # id or an imported legacy id resolves there. Non-conversation rows
+            # (world readings, Space receipts) stay in the legacy table.
+            direct_row = store.fact_reader.get_direct_row(ref.character_id, int(identity))
+            if direct_row is not None:
+                raw = direct_row
         if raw is None:
             fail(404, '来源记录不存在或已删除')
         row = dict(raw)
@@ -80,7 +87,7 @@ def resolve_life_reference(store, ref):
             participated = _group_participated(store, row, ref.character_id)
             if not participated:
                 fail(404, '来源不属于所选人物的可见经历')
-            group = store.conn.execute('SELECT * FROM conversations WHERE id=?', [row['conversation_id']]).fetchone()
+            group = store.conn.execute("SELECT * FROM conversations WHERE id=? AND type='GROUP'", [row['conversation_id']]).fetchone()
             if group is None:
                 fail(404, '来源群聊已删除')
             if group['archived_at']:
@@ -106,8 +113,8 @@ def resolve_life_reference(store, ref):
             else:
                 conversation = None
             if not isinstance(conversation, str) or not conversation:
-                recent = store.conn.execute("SELECT metadata_json FROM events WHERE character_id=? AND event_type='USER_MESSAGE' AND json_valid(metadata_json) AND json_extract(metadata_json,'$.conversation_id') IS NOT NULL ORDER BY event_time_epoch DESC,id DESC LIMIT 1", [ref.character_id]).fetchone()
-                conversation = obj(recent[0]).get('conversation_id') if recent else None
+                recent = store.fact_reader.list_chat_events(ref.character_id, limit=1)
+                conversation = recent[-1].metadata.get('conversation_id') if recent else None
             if not isinstance(conversation, str) or not conversation:
                 fail(409, '还没有可继续的私聊，请先与该人物建立私聊')
             target = {'type': 'DIRECT', 'id': conversation}

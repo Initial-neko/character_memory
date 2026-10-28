@@ -37,8 +37,8 @@ def _runtime(store, embeddings, model, persona):
 def test_direct_watermark_uses_persisted_arrival_order_not_event_time(tmp_path):
     store = SQLiteStore(tmp_path / "direct-order.db")
     now = datetime(2026, 9, 11, 20, 0, tzinfo=timezone.utc)
-    first = store.append_event(build_user_event("先到", character_id="rin", conversation_id="conv", at=now))
-    second = store.append_event(build_user_event("后到但时间更早", character_id="rin", conversation_id="conv", at=now - timedelta(hours=2)))
+    first = store.append_message(build_user_event("先到", character_id="rin", conversation_id="conv", at=now))
+    second = store.append_message(build_user_event("后到但时间更早", character_id="rin", conversation_id="conv", at=now - timedelta(hours=2)))
     hub = ConversationEventHub()
     scheduler = ReactionScheduler(lambda: None, lambda: [], hub)
 

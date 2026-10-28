@@ -53,7 +53,9 @@ class EvalRunner:
                 metadata={"eval_fixture": True},
             ) for spec in specs]
             with runtime.store.transaction():
-                source = runtime.store.append_event(event)
+                # Eval fixtures may seed any event type; route chat turns through the
+                # one conversation writer so they behave like real history.
+                source = runtime.store.append_fact(event)
                 ids = [runtime.store.add_memory(memory.model_copy(update={"source_event_id": source.id})).id
                        for memory in memories]
             event_ids.append(source.id)

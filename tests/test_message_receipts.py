@@ -75,7 +75,10 @@ def test_keyed_acceptance_reuses_fact_media_and_dispatch_after_restart(acceptanc
     assert third.status_code == 202
     assert third.json()["event_id"] == first.json()["event_id"]
     assert len(calls) == 1
-    table = "events" if scope == "DIRECT" else "conversation_events"
+    # Both scopes now share one table; the domain is the conversation type.
+    table = "conversation_events" if scope == "GROUP" else (
+        "(SELECT e.* FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id "
+        "WHERE c.type='DIRECT')")
     assert store.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE event_type='USER_MESSAGE'").fetchone()[0] == 1
     assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == int(image)
 
@@ -132,15 +135,15 @@ def test_failed_queue_handoff_is_unknown_and_replay_does_not_execute_again(accep
     assert replay.json()["request_receipt"]["dispatch"] == "UNKNOWN"
     assert replay.json()["request_receipt"]["execution"] == "PENDING"
     assert calls == ["attempt"]
-    assert store.conn.execute("SELECT COUNT(*) FROM events WHERE event_type='USER_MESSAGE'").fetchone()[0] == 1
+    assert store.conn.execute("SELECT COUNT(*) FROM conversation_events WHERE event_type='USER_MESSAGE'").fetchone()[0] == 1
 
 
 def test_acceptance_failure_rolls_back_fact_receipt_and_staged_media(acceptance, monkeypatch):
     from pathlib import Path
     client, store, group, calls, _ = acceptance
-    def broken(event):
+    def broken(event, **kwargs):
         raise RuntimeError("injected fact write failure")
-    monkeypatch.setattr(store, "append_event", broken)
+    monkeypatch.setattr(store.fact_writer, "append_direct", broken)
     with pytest.raises(RuntimeError, match="fact write failure"):
         client.post(endpoint(group, "DIRECT"), json=body("DIRECT", image=True))
     assert store.conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
@@ -165,7 +168,7 @@ from character_memory.storage.message_receipts import MessageReceiptRepository
 store=SQLiteStore(sys.argv[1]); repo=MessageReceiptRepository(store)
 while time.time()<float(sys.argv[2]): time.sleep(.01)
 def create():
- e=store.append_event(Event(character_id='momo',event_type=EventType.USER_MESSAGE,event_time=datetime.now(timezone.utc),content='once'))
+ e=store.append_message(Event(character_id='momo',event_type=EventType.USER_MESSAGE,event_time=datetime.now(timezone.utc),content='once'))
  return {'accepted':True,'event_id':e.id}
 a=repo.accept(['DIRECT','momo','cross-process'],'cross-process-key',{'message':'once'},create,source_kind='EVENT')
 print(json.dumps({'created':a.created,'event_id':a.response['event_id']}));store.close()
@@ -186,4 +189,4 @@ print(json.dumps({'created':a.created,'event_id':a.response['event_id']}));store
                 process.wait(timeout=5)
     assert sorted(row["created"] for row in results) == [False, True]
     assert len({row["event_id"] for row in results}) == 1
-    assert store.conn.execute("SELECT COUNT(*) FROM events WHERE event_type='USER_MESSAGE'").fetchone()[0] == 1
+    assert store.conn.execute("SELECT COUNT(*) FROM conversation_events WHERE event_type='USER_MESSAGE'").fetchone()[0] == 1

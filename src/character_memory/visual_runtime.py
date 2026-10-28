@@ -209,10 +209,13 @@ class DirectVisualRuntime:
             created_at=source_event.event_time,
             source=f"GENERATED_{purpose.value}",
         )
+        raw_conversation_id = str(
+            source_event.metadata.get("conversation_id") or f"{source_event.character_id}:default"
+        )
         try:
             runtime.store.add_media_asset(asset)
             with runtime.store.transaction():
-                event = runtime.store.append_event(
+                event = runtime.store.fact_writer.append_direct(
                 Event(
                     character_id=source_event.character_id,
                     event_type=EventType.CHARACTER_MESSAGE,
@@ -230,9 +233,11 @@ class DirectVisualRuntime:
                         "model": result.model,
                         "source_event_id": source_event.id,
                         "source_event_type": source_event.event_type.value,
-                        "conversation_id": str(source_event.metadata.get("conversation_id") or f"{source_event.character_id}:default"),
+                        "conversation_id": raw_conversation_id,
                     },
-                )
+                ),
+                owner_character_id=source_event.character_id,
+                raw_conversation_id=raw_conversation_id,
                 )
                 if job_id is not None and not self._jobs.finish(job_id, status="SUCCEEDED", event_id=event.id):
                     raise RuntimeError("image reservation no longer owned by this worker")

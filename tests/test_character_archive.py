@@ -184,7 +184,7 @@ def test_the_archive_list_counts_only_what_the_character_itself_produced(tmp_pat
         space.add_comment(rin_post.id, "momo", "同意", now)
         space.add_comment(rin_post.id, "user", "我也觉得", now, actor_type="USER")
 
-        store.append_event(
+        store.append_message(
             Event(
                 character_id="momo",
                 event_type=EventType.CHARACTER_MESSAGE,
@@ -192,7 +192,7 @@ def test_the_archive_list_counts_only_what_the_character_itself_produced(tmp_pat
                 content="在的",
             )
         )
-        store.append_event(
+        store.append_message(
             Event(
                 character_id="momo",
                 event_type=EventType.USER_MESSAGE,
@@ -335,7 +335,7 @@ def test_deleting_a_character_keeps_everything_it_said(tmp_path: Path):
         space.create_post("momo", "今天天气不错", now)
         rin_post = space.create_post("rin", "安静的下午", now)
         space.add_comment(rin_post.id, "momo", "同意", now)
-        store.append_event(
+        store.append_message(
             Event(
                 character_id="momo",
                 event_type=EventType.CHARACTER_MESSAGE,

@@ -123,8 +123,8 @@ def test_burst_mentions_merge_in_first_seen_order_and_everyone_wins(tmp_path):
 def test_message_search_is_literal_and_only_reads_chat_events(tmp_path):
     store = SQLiteStore(tmp_path / "search.db")
     now = datetime(2026, 9, 11, 20, 0, tzinfo=timezone.utc)
-    store.append_event(build_user_event("SQLite 100% 完成", character_id="rin", conversation_id="c1", at=now))
-    store.append_event(build_user_event("SQLite 100x 完成", character_id="momo", conversation_id="c2", at=now + timedelta(seconds=1)))
+    store.append_message(build_user_event("SQLite 100% 完成", character_id="rin", conversation_id="c1", at=now))
+    store.append_message(build_user_event("SQLite 100x 完成", character_id="momo", conversation_id="c2", at=now + timedelta(seconds=1)))
     repository = MessageSearchRepository(store)
 
     assert [item["character_id"] for item in repository.search_direct("100%", limit=10)] == ["rin"]
@@ -137,8 +137,7 @@ def test_search_jump_cursor_reuses_history_page_and_keeps_hit_in_window(tmp_path
     start = datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
     target = None
     for index in range(80):
-        event = store.append_event(
-            build_user_event(
+        event = store.append_message(build_user_event(
                 f"message-{index}{' UNIQUE-NEEDLE' if index == 15 else ''}",
                 character_id="rin",
                 conversation_id="jump",
@@ -177,7 +176,7 @@ def test_global_search_http_merges_direct_and_group_results(tmp_path):
         first, second = profiles[0]["id"], profiles[1]["id"]
         store = app.state.character_memory.store()
         now = datetime(2026, 9, 11, 20, 0, tzinfo=timezone.utc)
-        store.append_event(build_user_event("needle direct", character_id=first, conversation_id="direct-search", at=now))
+        store.append_message(build_user_event("needle direct", character_id=first, conversation_id="direct-search", at=now))
         group = client.post("/v1/groups", json={"name":"Search Group", "member_ids":[first, second]}).json()["group"]
         repository = GroupRepository(store)
         repository.append_event(build_group_user_event(group["id"], "needle group", at=now + timedelta(seconds=1)))

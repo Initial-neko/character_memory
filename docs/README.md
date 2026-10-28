@@ -32,6 +32,7 @@ Historical material never overrides current code or `docs/current/`.
 | [SOCIAL_WORLD](current/SOCIAL_WORLD.md) | Character Space, World Pulse and Personal Browse. |
 | [REFLECTION_WATERMARK](current/REFLECTION_WATERMARK.md) | P08 ADR: evidence watermarks and daily/weekly/monthly reflection contract (design frozen, not executed). |
 | [ACTIVITY](current/ACTIVITY.md) | P10 Activity lifecycle: state machine, participant identity, versions, idempotency and the SIMULATED scope boundary (lifecycle only; execution/branch/review are P12). |
+| [DSH_AUTHORIZATION](current/DSH_AUTHORIZATION.md) | P13 external DSH subject identity, grant scopes, expiry/quota, revocation, typed actions, read boundaries and audit (contract frozen; not implemented). |
 | [RSS_SOURCES](current/RSS_SOURCES.md) | RSS/Atom external-source ingestion, storage and UI boundary. |
 | [VISUAL](current/VISUAL.md) | Camera/Screen capture, ImageGen and Avatar sources. |
 | [VOICE_AND_TTS](current/VOICE_AND_TTS.md) | ASR/TTS runtime, providers, Workbench, GSV and Qwen tooling. |

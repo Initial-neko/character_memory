@@ -57,6 +57,11 @@ class ActivityRepository:
         self.store = store
         if initialize:
             store.apply_schema_migration("activity/001-lifecycle", self._migrate, immediate=True)
+            # Separate ledger entry: 001 already ran on databases created by the
+            # first revision of this slice, so folding the column into 001 would
+            # leave those databases without it.
+            store.apply_schema_migration("activity/002-updated-seq", self._migrate_ordering,
+                                         immediate=True)
 
     def _migrate(self) -> None:
         conn = self.store.conn
@@ -67,11 +72,9 @@ class ActivityRepository:
             "status TEXT NOT NULL CHECK(status IN ('CREATED','ACTIVE','PAUSED','ENDED')),"
             "version INTEGER NOT NULL CHECK(version>=1),"
             "created_at TEXT NOT NULL,"
-            "updated_at TEXT NOT NULL"
+            "updated_at TEXT NOT NULL,"
+            "updated_seq INTEGER NOT NULL DEFAULT 0"
             ")"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_activities_updated ON activities(updated_at DESC,id)"
         )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS activity_participants("
@@ -100,6 +103,29 @@ class ActivityRepository:
             ")"
         )
 
+    def _migrate_ordering(self) -> None:
+        """Add the monotonic order key and backfill existing rows once.
+
+        Wall-clock stamps are not an ordering key: Windows' clock granularity can
+        return the same microsecond for two separate creations, which made
+        "most recently updated" fall back to a random uuid tie-break. A
+        store-assigned counter is monotonic within the durable database and
+        survives restarts. Older databases get the column here, in its own
+        ledger entry, because revision 001 has already been recorded for them.
+        """
+        conn = self.store.conn
+        if not self._exists():
+            return
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(activities)").fetchall()}
+        if "updated_seq" not in columns:
+            conn.execute("ALTER TABLE activities ADD COLUMN updated_seq INTEGER NOT NULL DEFAULT 0")
+            # Insertion rowid preserves the original creation order, so a
+            # backfilled database does not appear to have been rewritten.
+            conn.execute("UPDATE activities SET updated_seq=rowid")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activities_updated ON activities(updated_seq DESC,id)"
+        )
+
     @contextmanager
     def _snapshot(self):
         """Read on one snapshot; never commit or roll back a caller's transaction."""
@@ -121,6 +147,16 @@ class ActivityRepository:
         return self.store.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='activities'"
         ).fetchone() is not None
+
+    def _next_seq(self) -> int:
+        """Monotonic store-assigned ordering key; caller holds the write lock.
+
+        MAX+1 is safe under the immediate transaction every mutation opens: the
+        second writer waits on SQLite's write lock, so two rows cannot receive
+        the same value.
+        """
+        row = self.store.conn.execute("SELECT COALESCE(MAX(updated_seq),0)+1 FROM activities").fetchone()
+        return int(row[0])
 
     def _participants(self, activity_id: str) -> list[dict]:
         rows = self.store.conn.execute(
@@ -175,11 +211,11 @@ class ActivityRepository:
                 return []
             if status is None:
                 rows = self.store.conn.execute(
-                    "SELECT id FROM activities ORDER BY updated_at DESC,id LIMIT ?", (limit,)
+                    "SELECT id FROM activities ORDER BY updated_seq DESC,id LIMIT ?", (limit,)
                 ).fetchall()
             else:
                 rows = self.store.conn.execute(
-                    "SELECT id FROM activities WHERE status=? ORDER BY updated_at DESC,id LIMIT ?",
+                    "SELECT id FROM activities WHERE status=? ORDER BY updated_seq DESC,id LIMIT ?",
                     (status, limit),
                 ).fetchall()
             return [self._row(str(row["id"])) for row in rows]
@@ -226,8 +262,8 @@ class ActivityRepository:
             activity_id = uuid4().hex
             now = stamp()
             self.store.conn.execute(
-                "INSERT INTO activities VALUES(?,?,?,?,?,?)",
-                (activity_id, request.title, "CREATED", 1, now, now),
+                "INSERT INTO activities VALUES(?,?,?,?,?,?,?)",
+                (activity_id, request.title, "CREATED", 1, now, now, self._next_seq()),
             )
             for position, participant in enumerate(request.participants):
                 self.store.conn.execute(
@@ -262,9 +298,10 @@ class ActivityRepository:
             except ValueError as exc:
                 raise ActivityConflict("ACTIVITY_STATE_CONFLICT") from exc
             changed = self.store.conn.execute(
-                "UPDATE activities SET status=?,version=version+1,updated_at=? "
+                "UPDATE activities SET status=?,version=version+1,updated_at=?,updated_seq=? "
                 "WHERE id=? AND version=? AND status=?",
-                (target, stamp(), activity_id, request.expected_version, activity["status"]),
+                (target, stamp(), self._next_seq(), activity_id,
+                 request.expected_version, activity["status"]),
             )
             if changed.rowcount != 1:
                 raise ActivityConflict("ACTIVITY_VERSION_CONFLICT")

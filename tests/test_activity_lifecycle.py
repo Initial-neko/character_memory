@@ -269,3 +269,33 @@ def test_reading_does_not_write_schema_rows(tmp_path):
     store.close()
     after = sqlite3.connect(path).execute("SELECT COUNT(*) FROM activity_receipts").fetchone()[0]
     assert before == after == 1
+
+
+def test_list_order_is_monotonic_without_clock_resolution(tmp_path):
+    """Two creations inside the same clock tick must still order deterministically.
+
+    Windows' timestamp resolution is coarse enough that two separate creates can
+    share a microsecond; ordering on the wall clock then fell through to a random
+    uuid tie-break. The durable counter is the ordering key, so this is stable.
+    """
+    store = SQLiteStore(tmp_path / "order.sqlite")
+    try:
+        repo = ActivityRepository(store)
+        ids = [repo.create(request(request_id=f"req-order-{index:04d}",
+                                    title=f"第{index}件"))["activity"]["id"]
+               for index in range(5)]
+        assert [item["id"] for item in repo.list(limit=5)] == list(reversed(ids))
+        # An update moves the activity to the front, with a version bump but no
+        # dependence on the timestamp value.
+        repo.act(ids[0], "RESUME", action(1, "req-order-touch"))
+        assert [item["id"] for item in repo.list(limit=5)][0] == ids[0]
+        # A separate connection sees the same order, so it is durable state and
+        # not an in-process counter.
+        reopened_store = SQLiteStore(tmp_path / "order.sqlite")
+        try:
+            assert [item["id"] for item in ActivityRepository(reopened_store).list(limit=5)][0] == ids[0]
+        finally:
+            reopened_store.close()
+    finally:
+        store.close()
+

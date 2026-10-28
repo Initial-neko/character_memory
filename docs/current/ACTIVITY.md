@@ -50,6 +50,8 @@ CREATED --RESUME--> ACTIVE --PAUSE--> PAUSED --RESUME--> ACTIVE
 - 相同 `request_id` + 相同请求内容返回原结果并标记 `replayed: true`，不再次执行，也不再次递增版本；回执与状态在同一条 immediate 事务内提交，重启后仍可重放。
 - 相同 `request_id` 但内容不同（不同操作、不同 Activity、不同 `expected_version`）返回 `409 REQUEST_ID_CONFLICT`，避免一个请求 ID 被重新绑定到别的目标。
 
+列表排序使用持久化的单调 `updated_seq`，不使用墙钟时间戳：系统时钟粒度可能让两次创建落在同一微秒，排序就会退化成随机 uuid。`updated_seq` 由存储层在写事务内分配，跨进程、跨重启保持同一顺序。
+
 ## 5. 读取与恢复
 
 - `GET /v2/activities`、`GET /v2/activities/{activity_id}` 只读本地 SQLite；不加载模型 bundle、不初始化 embedding provider、不写任何行。

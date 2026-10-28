@@ -4,10 +4,10 @@ Effective feedback is explicit first: a stored explicit choice is never replaced
 an interpretation. Applying a candidate is an ordinary Profile CAS write, so the
 version/history/restore/clear semantics stay in one owner.
 
-Lifecycle: PENDING -> APPLIED (a new profile version) or DISMISSED. An applied
-candidate can be REVERTED by restoring the version it started from; the revert is
-another new version, never a rewrite of history. Clearing the profile expires every
-open interpretation, so an old comment cannot offer a cleared value back.
+Lifecycle: PENDING -> APPLIED (a normal new profile version) or DISMISSED. An
+applied candidate can be REVERTED by re-writing its base values as another new
+version; history is never rewritten. Clearing the profile expires every open
+interpretation, so an old comment cannot offer a cleared value back.
 """
 from character_memory.domain.experience_candidates import (
     CandidateApply, CandidateDismiss, candidate_fields, interpret_feedback,

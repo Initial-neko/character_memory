@@ -11,6 +11,8 @@ from character_memory.group_autonomous_visual import install_group_autonomous_vi
 from character_memory.group_autonomy_web import attach_group_autonomy_routes
 from character_memory.group_members_web import attach_group_member_routes
 from character_memory.group_web import attach_group_routes
+from character_memory.dsh.admin_web import attach_dsh_admin_routes
+from character_memory.dsh.service import DshService
 from character_memory.history_web import attach_history_routes
 from character_memory.memory_web import attach_memory_routes
 from character_memory.search_web import attach_search_routes
@@ -34,6 +36,11 @@ def create_server_app(config_path: str):
     app = create_api(config_path)
     # Local-only lifecycle state; attaching it never warms up the model bundle.
     attach_activity_routes(app)
+    # DSH admin lives only on this operator listener. The business surface is a
+    # separate app/port (`dsh_server.py`) so a DSH client cannot reach Main API
+    # routes by construction.
+    attach_dsh_admin_routes(
+        app, DshService(app.state.character_memory.read_store))
     # Practice routes read the same Activity rows; only an explicit turn calls
     # the model, and every fact they write carries the frozen SIMULATED scope.
     attach_scenario_routes(app)

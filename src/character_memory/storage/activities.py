@@ -62,6 +62,11 @@ class ActivityRepository:
             # leave those databases without it.
             store.apply_schema_migration("activity/002-updated-seq", self._migrate_ordering,
                                          immediate=True)
+            # P13 adds the external DSH actor to the closed participant set.
+            # A CHECK constraint cannot be widened in place, so this ledger
+            # entry rebuilds the table once and copies every existing row.
+            store.apply_schema_migration("activity/003-dsh-participants",
+                                         self._migrate_dsh_participants, immediate=True)
 
     def _migrate(self) -> None:
         conn = self.store.conn
@@ -102,6 +107,48 @@ class ActivityRepository:
             "created_at TEXT NOT NULL"
             ")"
         )
+
+    def _migrate_dsh_participants(self) -> None:
+        """Widen ``activity_participants`` for external DSH subjects.
+
+        Existing ``CHARACTER``/``SIMULATED_CHARACTER`` rows keep their
+        ``participant_key`` and position; a DSH row stores ``subject_id`` and a
+        ``participation_status``. The latter is ``ACTIVE`` for every pre-DSH row
+        because the old contract had no way to leave an activity.
+        """
+        conn = self.store.conn
+        if not self._exists():
+            return
+        columns = {str(row["name"])
+                   for row in conn.execute("PRAGMA table_info(activity_participants)").fetchall()}
+        if {"subject_id", "participation_status"} <= columns:
+            return
+        conn.execute("ALTER TABLE activity_participants RENAME TO activity_participants_pre_dsh")
+        conn.execute(
+            "CREATE TABLE activity_participants("
+            "activity_id TEXT NOT NULL REFERENCES activities(id),"
+            "position INTEGER NOT NULL,"
+            "participant_key TEXT NOT NULL,"
+            "actor_type TEXT NOT NULL CHECK(actor_type IN "
+            "('CHARACTER','SIMULATED_CHARACTER','DSH')),"
+            "character_id TEXT,"
+            "local_id TEXT,"
+            "subject_id TEXT,"
+            "display_name TEXT NOT NULL,"
+            "participation_status TEXT NOT NULL DEFAULT 'ACTIVE' "
+            "CHECK(participation_status IN ('ACTIVE','LEFT')),"
+            "PRIMARY KEY(activity_id,participant_key),"
+            "UNIQUE(activity_id,position)"
+            ")"
+        )
+        conn.execute(
+            "INSERT INTO activity_participants("
+            "activity_id,position,participant_key,actor_type,character_id,local_id,"
+            "subject_id,display_name,participation_status) "
+            "SELECT activity_id,position,participant_key,actor_type,character_id,local_id,"
+            "NULL,display_name,'ACTIVE' FROM activity_participants_pre_dsh"
+        )
+        conn.execute("DROP TABLE activity_participants_pre_dsh")
 
     def _migrate_ordering(self) -> None:
         """Add the monotonic order key and backfill existing rows once.
@@ -172,6 +219,13 @@ class ActivityRepository:
             elif actor_type == "SIMULATED_CHARACTER":
                 participants.append({"actor_type": actor_type, "local_id": row["local_id"],
                                      "display_name": row["display_name"]})
+            elif actor_type == "DSH":
+                participants.append({
+                    "actor_type": actor_type,
+                    "subject_id": str(row["subject_id"]),
+                    "display_name": row["display_name"],
+                    "participation_status": str(row["participation_status"]),
+                })
             else:  # pragma: no cover - the CHECK constraint already refuses this
                 raise ActivityCorrupt("unknown stored participant type")
         return participants
@@ -200,6 +254,36 @@ class ActivityRepository:
             if not self._exists():
                 raise ActivityMissing("ACTIVITY_NOT_FOUND")
             return self._row(activity_id)
+
+    def get_participant(self, activity_id: str, participant_key: str) -> dict | None:
+        """Read one participant row without leaving the caller's transaction."""
+        if not self._exists():
+            return None
+        row = self.store.conn.execute(
+            "SELECT * FROM activity_participants WHERE activity_id=? AND participant_key=?",
+            (activity_id, participant_key)).fetchone()
+        if row is None:
+            return None
+        return {
+            "activity_id": str(row["activity_id"]),
+            "participant_key": str(row["participant_key"]),
+            "actor_type": str(row["actor_type"]),
+            "subject_id": row["subject_id"],
+            "display_name": str(row["display_name"]),
+            "participation_status": str(row["participation_status"]),
+        }
+
+    def set_participation_status(self, activity_id: str, participant_key: str,
+                                 status: str) -> None:
+        """Set ACTIVE/LEFT for one participant. Caller owns the transaction."""
+        if status not in {"ACTIVE", "LEFT"}:
+            raise ValueError("invalid participation status")
+        changed = self.store.conn.execute(
+            "UPDATE activity_participants SET participation_status=? "
+            "WHERE activity_id=? AND participant_key=?",
+            (status, activity_id, participant_key))
+        if changed.rowcount != 1:
+            raise ActivityMissing("ACTIVITY_PARTICIPANT_NOT_FOUND")
 
     def list(self, *, limit: int = 50, status: str | None = None) -> list[dict]:
         if type(limit) is not int or not 1 <= limit <= 100:
@@ -252,13 +336,20 @@ class ActivityRepository:
         ).fetchone()
         return self._response(activity_id, row, replayed=False)
 
-    def create(self, request: ActivityCreate) -> dict:
+    def create(self, request: ActivityCreate, *,
+               dsh_display_names: dict[str, str] | None = None) -> dict:
         request = ActivityCreate.model_validate(request.model_dump(mode="json"))
         request_hash = digest({"operation": "CREATE", "payload": request.model_dump(mode="json")})
+        dsh_names = dsh_display_names or {}
         with self.store.transaction(immediate=True):
             replay = self._replay(request.request_id, request_hash)
             if replay is not None:
                 return replay
+            for participant in request.participants:
+                if participant.actor_type == "DSH" and participant.subject_id not in dsh_names:
+                    # The route resolves this before calling; the repository
+                    # still refuses rather than inventing a display identity.
+                    raise ActivityConflict("DSH_PARTICIPANT_MISSING")
             activity_id = uuid4().hex
             now = stamp()
             self.store.conn.execute(
@@ -266,16 +357,34 @@ class ActivityRepository:
                 (activity_id, request.title, "CREATED", 1, now, now, self._next_seq()),
             )
             for position, participant in enumerate(request.participants):
+                if participant.actor_type == "CHARACTER":
+                    character_id = participant.character_id
+                else:
+                    character_id = None
+                if participant.actor_type == "SIMULATED_CHARACTER":
+                    local_id = participant.local_id
+                else:
+                    local_id = None
+                if participant.actor_type == "DSH":
+                    subject_id = participant.subject_id
+                    display_name = dsh_names[participant.subject_id]
+                else:
+                    subject_id = None
+                    display_name = participant_display_name(participant)
                 self.store.conn.execute(
-                    "INSERT INTO activity_participants VALUES(?,?,?,?,?,?,?)",
+                    "INSERT INTO activity_participants("
+                    "activity_id,position,participant_key,actor_type,character_id,"
+                    "local_id,subject_id,display_name,participation_status) "
+                    "VALUES(?,?,?,?,?,?,?,?, 'ACTIVE')",
                     (
                         activity_id,
                         position,
                         participant_id(participant),
                         participant.actor_type,
-                        participant.character_id if participant.actor_type == "CHARACTER" else None,
-                        participant.local_id if participant.actor_type == "SIMULATED_CHARACTER" else None,
-                        participant_display_name(participant),
+                        character_id,
+                        local_id,
+                        subject_id,
+                        display_name,
                     ),
                 )
             return self._record(request.request_id, request_hash, activity_id, "CREATE", 1)

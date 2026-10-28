@@ -30,6 +30,7 @@ CREATED --RESUME--> ACTIVE --PAUSE--> PAUSED --RESUME--> ACTIVE
 | --- | --- | --- |
 | `CHARACTER` | `character_id` | 是。必须已存在于 Persona 注册表；复用同一个 Person，不复制 Persona、Mental State 或 Memory。 |
 | `SIMULATED_CHARACTER` | `local_id` + `display_name` | 否。身份只存在于该 Activity 内，持久键为 `sim:<local_id>`。 |
+| `DSH` | `subject_id` | 否。外部 DSH 主体，必须先在 DSH 管理面注册并由操作者写入参与者列表；持久键为 `dsh:<subject_id>`，`display_name` 由服务端从注册主体解析。见 [DSH_AUTHORIZATION](DSH_AUTHORIZATION.md)。 |
 
 正式参与者的 `display_name` 就是 `character_id`：存储层不读 Persona 注册表，显示名的解析属于读取方。`local_id` 不得以 `sim:` 开头被当作正式 ID 使用，正式 `character_id` 也不得带 `sim:` 前缀——两侧都拒绝，前缀不会成为模糊地带。
 
@@ -69,6 +70,7 @@ P11 的练习回合另有一张按 `(activity_id, request_id)` 唯一的回合�
 - P12 的分支事件由服务端生成的 `branch_id` 写入：`{"schema_version": 1, "reality": "SIMULATED", "activity_id": "<id>", "branch_id": "<branch-id>"}`。主记录事件不带 `branch_id`。调用方不能提交或选择这两个字段。
 - 读取层逐行校验 scope 必须与行所属的 `(activity_id, branch_id)` **完全相等**；缺字段、多字段或串到另一分支都按 `503 SCENARIO_CORRUPT` 处理。
 - P10 不写任何事实；P11/P12 的主记录和分支只写自己的 `scenario_events` 行，每行都带冻结 scope。未采用的分支仍不写 Event、Memory 或 Direct/Group conversation fact。
+- P13 的 DSH turn 写入独立的 `activity_facts` 行（`(activity_id, seq)` 为身份），每行同样带精确的三字段 SIMULATED scope 和不可变的 `authorization_json`。它不写 `scenario_events`、Event、Memory 或 Direct/Group conversation fact；撤销后事实保留并由操作者投影标注 `REVOKED_AFTER_COMMIT`。
 - P12 唯一允许写 REAL 行的路径是显式采用（§8.6）：一条 REAL `PRACTICE_ADOPTED` 事件加一条 REAL `SHARED` 记忆，二者在同一事务中与采用回执一起提交。
 
 ## 7. 关系练习执行切片 (P11)
@@ -211,7 +213,7 @@ review READY --any request_id--> READY (replayed, no model call)
 
 ## 10. 明确不做
 
-- 不做跨情境延续、不做 P13（DSH 参与）、不自动把分支写进现实。
+- 不做跨情境延续、不自动把分支写进现实。DSH 参与见 [DSH_AUTHORIZATION](DSH_AUTHORIZATION.md)，不在此切片扩展。
 - 不创建调度器、不自动推进 ACTIVE → 下一步、不产生 Intent、不自动结束/复盘/采用。
 - 不复制 Persona/Memory/Mental State，不写第二套人物注册表。
 - 不把未采用的练习内容写入真实 Event/Memory/Conversation fact；显式采用只写一条 REAL 事件和一条 REAL `SHARED` 记忆。

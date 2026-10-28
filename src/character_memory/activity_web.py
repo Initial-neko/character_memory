@@ -57,6 +57,24 @@ def attach_activity_routes(app) -> None:
     def respond(result: dict) -> dict:
         return {**result, "activity": _present(result["activity"])}
 
+    def dsh_display_names(subject_ids: set[str]) -> dict[str, str]:
+        """Resolve registered DSH subjects; the caller never supplies the name.
+
+        Only a registered, non-revoked DSH subject may be written into an
+        Activity's participant list. Importing lazily keeps the DSH migration
+        out of deployments that never use an external subject.
+        """
+        from character_memory.dsh.store import DshStore
+
+        subjects = DshStore(access.read_store)
+        names: dict[str, str] = {}
+        for subject_id in subject_ids:
+            subject = subjects.get_subject(subject_id)
+            if subject is None or subject["status"] != "ACTIVE":
+                raise HTTPException(422, "DSH_PARTICIPANT_MISSING")
+            names[subject_id] = str(subject["display_name"])
+        return names
+
     @app.post("/v2/activities", status_code=201)
     def create_activity(body: ActivityCreate):
         formal = [item.character_id for item in body.participants if item.actor_type == "CHARACTER"]
@@ -64,11 +82,12 @@ def attach_activity_routes(app) -> None:
         if missing:
             raise HTTPException(422, f"unknown formal participant: {', '.join(missing)}")
         if not formal:
-            # A purely simulated cast has no formal Person to attach later
-            # results to. Requiring one keeps the boundary explicit instead of
-            # letting a scenario quietly exist with nobody real in it.
+            # A purely simulated or DSH cast has no formal Person to attach
+            # later results to. Requiring one keeps the boundary explicit.
             raise HTTPException(422, "an activity requires at least one formal character participant")
-        return respond(call(repository.create, body))
+        dsh_ids = {item.subject_id for item in body.participants if item.actor_type == "DSH"}
+        names = dsh_display_names(dsh_ids) if dsh_ids else None
+        return respond(call(repository.create, body, dsh_display_names=names))
 
     @app.get("/v2/activities")
     def list_activities(

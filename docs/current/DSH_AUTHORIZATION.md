@@ -1,6 +1,15 @@
 # DSH 授权参与与执行契约 (P13)
 
-状态：**CONTRACT FROZEN — NOT IMPLEMENTED**。本文只冻结外部主体 DSH 的授权参与与执行边界；本轮不写代码、不建表、不挂路由、不改 UI。验收以第 10 节为准，未实现期间 `STATUS` 保持 `CONTRACT FROZEN`。
+状态：**IMPLEMENTED — P13**。实现落在 `dsh_server.py`（独立 DSH 监听器）、`dsh/`（身份、授权、审计与业务路由）、`storage/activity_facts.py` 与 Activity 迁移 `activity/003-dsh-participants` / `activity/004-activity-facts`；验收以第 10 节为准，`tests/test_dsh_authorization.py` 在真实双进程 HTTP + 临时 SQLite 上覆盖 A01–A27。第 11 节仍是待用户确认的产品/安全选择，实现采用文中冻结的保守默认值。
+
+实现补充（不改变冻结语义）：
+
+- 运行独立监听器：`uv run uvicorn character_memory.dsh_server:app --host 127.0.0.1 --port 8010`。该 app 只挂 `/health` 与 `/v2/dsh/*` 业务路由，`docs_url/redoc_url/openapi_url` 均为 `None`。
+- 管理面由 `server.py` 挂到操作者监听器；token 只从 `CHARACTER_MEMORY_DSH_OPERATOR_TOKEN` 读取，不进 Settings、日志或审计详情。
+- 事实身份使用 `(activity_id, seq)`，读取投影中的 `fact_id` 即 `seq`；`reply_to_fact_id` 也是同一 Activity 内的 `seq`。
+- 审计哈希对 `detail_json` 的**解析后对象**做 canonical 序列化；`verify` 用同一规则逐行重算。
+- 管理面幂等复用 `dsh_request_receipts`，以空 `grant_id` 作为非 grant 命名空间；业务读取/动作使用真实 `grant_id`。
+- 契约未给出管理面未知对象与写失败的具体错误码，实现新增 `404 DSH_SUBJECT_NOT_FOUND` / `404 DSH_KEY_NOT_FOUND` 与 `500 DSH_WRITE_FAILED`；其余错误码保持第 9 节。
 
 DSH 指由外部操作者持有、在本系统之外运行的数字主体。它不是 Person，不是用户，也不是 Activity 内的 `SIMULATED_CHARACTER`。本契约把 DSH 当作需要显式授权、可撤销、可审计的第三方主体；默认拒绝一切访问。
 

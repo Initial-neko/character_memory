@@ -44,6 +44,10 @@ Historical material never overrides current code or `docs/current/`.
 | [MOBILE_API_CONTRACT](current/MOBILE_API_CONTRACT.md) | Core-owned CURRENT/PROPOSED API contract for Android and other external clients. |
 | [RELEASES](current/RELEASES.md) | Branch/tag/version/release promotion policy. |
 
+Acceptance evidence: [P15 full-stack acceptance](current/P15_FULL_STACK_ACCEPTANCE.md) records one
+isolated run of the accelerated P15 story flow and a controlled-clock revisit. It is evidence, not
+a product contract, and it explicitly does not claim a real five-day observation.
+
 ## Ownership rule
 
 Prefer extending an existing domain document. Add a new `docs/current/*.md` only when the capability has an independent runtime boundary, independent lifecycle, or a durable reason to evolve separately.
@@ -57,5 +61,4 @@ Implementation plans, temporary handoffs and one-off acceptance logs belong in I
 - [research/REFERENCES.md](research/REFERENCES.md) collects external references; research is not automatically a product contract.
 - [ASR P0 research](research/ASR_P0_TECHNICAL_REPORT.md) preserves the original batch-path audit, model comparisons and benchmark proposals. Its risks and migration steps describe that historical baseline, not current defects or new implementation instructions.
 - [ASR streaming design notes](research/ASR_STREAMING_ARCHITECTURE_DRAFT.md) preserve design rationale and proposed refinements. For current provider selection and runtime behavior, start with [VOICE_AND_TTS](current/VOICE_AND_TTS.md); for outstanding acceptance, use [DELIVERY_PLAN](current/DELIVERY_PLAN.md).
-- [P15 full-stack acceptance](research/P15_FULL_STACK_ACCEPTANCE.md) is one-off acceptance evidence for the accelerated P15 story flow and controlled-clock revisit. It is not a product contract, and it explicitly does not claim a real five-day observation.
 - `archive/` preserves selected historical milestones and may contain obsolete ports/providers/non-goals.

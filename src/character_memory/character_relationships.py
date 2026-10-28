@@ -76,7 +76,11 @@ class CharacterRelationshipReader:
                     WHERE e.event_time_epoch>=? AND e.event_time_epoch<?
                     AND julianday(e.event_time) IS NOT NULL
                     AND e.event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE')
-                    AND ((?='user' AND e.actor_type='USER' AND e.actor_id='user')
+                    -- A Direct conversation holds exactly this character and the
+                    -- User, so peer=user must keep the character's own replies.
+                    -- Filtering actor_type='USER' dropped the migrated
+                    -- CHARACTER_MESSAGE rows after the W3 cutover.
+                    AND ((?='user' AND e.actor_type IN ('USER','CHARACTER'))
                       OR e.actor_id=?)
                     ORDER BY e.event_time_epoch DESC,e.id DESC LIMIT 11"""
                 for row in self.store.conn.execute(chat, [character_id, *bounds, peer, peer]):

@@ -46,6 +46,37 @@ def test_review_combines_recent_real_interaction_and_current_user_plans_without_
     store.close()
 
 
+def test_review_keeps_character_replies_in_direct_chat_after_migration(tmp_path):
+    from character_memory.character_relationships import CharacterRelationshipReader
+    from character_memory.storage.conversation_facts import canonical_direct_conversation_id
+
+    store = SQLiteStore(tmp_path / "direct-review.db")
+    ask = direct(store, content="用户问候", at=NOW - timedelta(minutes=3))
+    answer = direct(store, content="角色回应", event_type=EventType.CHARACTER_MESSAGE, at=NOW - timedelta(minutes=2))
+    # Simulate the W3 migration's output: the legacy row stays in `events`, the
+    # fact lives in `conversation_events`, and the alias marks it as migrated so
+    # the legacy scan skips it. Peer=user must still see the character's reply.
+    legacy = store.append_legacy_event(Event(
+        character_id="a", event_type=EventType.CHARACTER_MESSAGE,
+        event_time=NOW - timedelta(minutes=1), content="迁移前的角色回应",
+        metadata={"channel": "DIRECT", "conversation_id": "chat-a"},
+    ))
+    migrated = direct(store, content="迁移前的角色回应", event_type=EventType.CHARACTER_MESSAGE, at=NOW - timedelta(minutes=1))
+    store.conn.execute(
+        "INSERT INTO conversation_fact_aliases(legacy_kind,legacy_id,character_id,legacy_conversation_id,"
+        "conversation_id,conversation_event_id,content_sha256,metadata_sha256,status,reason,migrated_at) "
+        "VALUES('EVENT',?,?,?,?,?,'x','y','MIGRATED','deadbeef',?)",
+        (legacy.id, "a", "chat-a", canonical_direct_conversation_id("a", "chat-a"),
+         migrated.id, NOW.isoformat()),
+    )
+    data = CharacterRelationshipReader(store).review("a", "user", day="2026-10-14", offset=0, now=NOW)
+    assert [item["key"] for item in data["interactions"]] == [
+        f"events:{migrated.id}", f"events:{answer.id}", f"events:{ask.id}",
+    ]
+    assert [item["content"] for item in data["interactions"]].count("迁移前的角色回应") == 1
+    store.close()
+
+
 def test_space_counterpart_and_unknown_legacy_plan_provenance(tmp_path):
     from character_memory.character_relationships import CharacterRelationshipReader
     store = SQLiteStore(tmp_path / "space-review.db")

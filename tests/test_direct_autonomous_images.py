@@ -94,7 +94,7 @@ def test_daily_application_limit_and_character_cooldown_before_any_paid_call(tmp
 
 def test_failure_preserves_text_consumes_reservation_and_restart_never_retries(tmp_path):
     service, runtime, provider, compiled, store = setup_image(tmp_path)
-    original = store.append_event(Event(character_id="mika", event_type=EventType.CHARACTER_MESSAGE, event_time=NOW, content="合法文字先提交"))
+    original = store.append_message(Event(character_id="mika", event_type=EventType.CHARACTER_MESSAGE, event_time=NOW, content="合法文字先提交"))
     event = source(store)
     provider.generate = lambda request: (_ for _ in ()).throw(RuntimeError("provider failed"))
     with pytest.raises(RuntimeError, match="provider failed"):

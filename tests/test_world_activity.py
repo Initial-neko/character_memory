@@ -696,7 +696,7 @@ def test_idle_browse_gate_reopens_immediately_after_new_character_event(tmp_path
     assert len(_browsed(scheduler.run_once(now=NOW))) == 1
 
     changed = NOW + timedelta(minutes=10)
-    store.append_event(
+    store.append_message(
         Event(
             character_id="c00",
             event_type=EventType.USER_MESSAGE,

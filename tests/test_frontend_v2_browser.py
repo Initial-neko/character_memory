@@ -35,13 +35,13 @@ def test_late_chat_image_keeps_latest_message_above_composer(page, live_life):
         payload=picture.getvalue(), created_at=now, source='GENERATED_TEST')
     store.add_media_asset(asset)
     for index in range(10):
-        store.append_event(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
+        store.append_message(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
             event_time=now + timedelta(seconds=index), content=f'旧消息 {index}',
             metadata={'action':'MESSAGE', 'conversation_id':character+':default'}))
-    store.append_event(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
+    store.append_message(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
         event_time=now+timedelta(seconds=11), content='图片',
         metadata={'action':'IMAGE','media_id':asset.id,'conversation_id':character+':default'}))
-    store.append_event(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
+    store.append_message(Event(character_id=character, event_type=EventType.CHARACTER_MESSAGE,
         event_time=now+timedelta(seconds=12), content='图片之后的最新消息',
         metadata={'action':'MESSAGE','conversation_id':character+':default'}))
     held = []
@@ -243,9 +243,9 @@ def test_older_direct_history_cannot_repaint_after_character_switch(page, live_l
     second = next(p["id"] for p in access.character_profiles() if p["id"] != first)
     now = datetime.now(timezone.utc)
     for index in range(60):
-        store.append_event(Event(character_id=first, event_type=EventType.USER_MESSAGE,
+        store.append_message(Event(character_id=first, event_type=EventType.USER_MESSAGE,
             event_time=now + timedelta(seconds=index), content=f"History-A-{index:02d}"))
-    store.append_event(Event(character_id=second, event_type=EventType.USER_MESSAGE,
+    store.append_message(Event(character_id=second, event_type=EventType.USER_MESSAGE,
         event_time=now, content="History-B-current"))
     page.set_viewport_size({"width": width, "height": 960 if width > 500 else 844})
     page.goto(base + "/")

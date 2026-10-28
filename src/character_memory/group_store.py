@@ -869,16 +869,22 @@ class GroupRepository:
         return int(row["n"] if row else 0)
 
     def count_character_messages(self, character_id: str) -> int:
-        """Group turns one character spoke, summed over every conversation.
+        """Group turns one character spoke, summed over every group conversation.
 
         The group-side half of the archive drawer's message count. Mirrors
         ``Storage.count_character_messages``: it counts what the character
         said, not what was said to it, so the user's turns in the same
         conversations are excluded.
+
+        Direct conversation facts share this table after W3. Without the
+        ``type='GROUP'`` join every private turn would be counted twice -- once
+        here and once by the Direct reader.
         """
         with self.store._lock:
             row = self.store.conn.execute(
-                "SELECT COUNT(*) AS n FROM conversation_events WHERE actor_id=? AND actor_type='CHARACTER'",
+                "SELECT COUNT(*) AS n FROM conversation_events e "
+                "JOIN conversations c ON c.id=e.conversation_id "
+                "WHERE c.type='GROUP' AND e.actor_id=? AND e.actor_type='CHARACTER'",
                 (character_id,),
             ).fetchone()
         return int(row["n"] if row else 0)
@@ -930,9 +936,11 @@ class GroupRepository:
             if trace is not None:
                 return True
             own_event = self.store.conn.execute(
-                "SELECT 1 FROM conversation_events "
-                "WHERE actor_type='CHARACTER' AND actor_id=? AND event_time_epoch>? "
-                "ORDER BY event_time_epoch DESC,id DESC LIMIT 1",
+                "SELECT 1 FROM conversation_events e "
+                "JOIN conversations c ON c.id=e.conversation_id "
+                "WHERE c.type='GROUP' AND e.actor_type='CHARACTER' AND e.actor_id=? "
+                "AND e.event_time_epoch>? "
+                "ORDER BY e.event_time_epoch DESC,e.id DESC LIMIT 1",
                 (character_id, cutoff),
             ).fetchone()
         return own_event is not None

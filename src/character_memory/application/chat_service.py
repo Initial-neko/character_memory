@@ -28,6 +28,21 @@ class ProactiveSourceScopeError(RuntimeError):
         super().__init__(f"proactive intent source is not real: {reason}")
 
 
+def _read_direct_source(store, source_event_id: int):
+    """Read an intent's Direct source from whichever domain owns its id.
+
+    A wake or intent may point at a conversation fact (unified table) or at a
+    non-conversation prompt input such as TIME_TICK (legacy table). Using the
+    reader here keeps a migrated user message from turning into SOURCE_MISSING.
+    """
+    reader = getattr(store, "fact_reader", None)
+    if reader is not None:
+        event = reader.get_canonical_event(source_event_id)
+        if event is not None:
+            return event
+    return store.get_event(source_event_id)
+
+
 def resolve_real_intent_source(store, source_event_id):
     """Refetch the intent's authoritative source and enforce the real boundary.
 
@@ -38,7 +53,7 @@ def resolve_real_intent_source(store, source_event_id):
     if source_event_id is None:
         return None, "SOURCE_MISSING"
     try:
-        source = store.get_event(int(source_event_id))
+        source = _read_direct_source(store, int(source_event_id))
     except (TypeError, ValueError):
         return None, "SOURCE_MISSING"
     if source is None:
@@ -174,7 +189,11 @@ class ChatService:
             sticker=sticker,
             image=image,
         )
-        stored = self.store.append_event(event)
+        stored = self.store.fact_writer.append_direct(
+            event,
+            owner_character_id=character_id,
+            raw_conversation_id=conversation_id,
+        )
         logger.info(
             "chat.persist character=%s conversation=%s event_id=%s at=%s chars=%d sticker=%s image=%s",
             character_id,

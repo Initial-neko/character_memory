@@ -16,8 +16,8 @@ app.state.character_memory.require_bundle=forbidden
 now=datetime.now(timezone.utc)
 row=fixture.store.conn.execute("SELECT id FROM events WHERE character_id='rin' ORDER BY id LIMIT 1").fetchone()
 if row is None:
-    direct=fixture.store.append_event(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=now,content='Private fixture direct acceptance source'))
-    other=fixture.store.append_event(Event(character_id='momo',event_type=EventType.USER_MESSAGE,event_time=now,content='Other character private source'))
+    direct=fixture.store.append_message(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=now,content='Private fixture direct acceptance source'))
+    other=fixture.store.append_message(Event(character_id='momo',event_type=EventType.USER_MESSAGE,event_time=now,content='Other character private source'))
     groups=GroupRepository(fixture.store);group=groups.create_group('Goal witness fixture',['rin','momo'],now)
     shared=groups.append_event(GroupEvent(conversation_id=group.id,turn_id='goal-fixture',actor_type='USER',actor_id='user',event_type='USER_MESSAGE',event_time=now,content='Private shared acceptance source'))
     groups.add_trace(group.id,shared.turn_id,'rin',shared.id,now,{})

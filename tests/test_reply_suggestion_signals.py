@@ -16,7 +16,7 @@ def batch_for(client,store,group,scope):
     from character_memory.domain.reply_suggestions import SuggestionRequest
     service=suggestion_service(store,client.app.state.character_memory);service.model_for=lambda:Model()
     if scope=='DIRECT':
-        source=store.append_event(Event(character_id='momo',event_type=EventType.CHARACTER_MESSAGE,event_time=NOW,content='一起准备聚会吧'))
+        source=store.append_message(Event(character_id='momo',event_type=EventType.CHARACTER_MESSAGE,event_time=NOW,content='一起准备聚会吧'))
         ref=FactRef(kind='EVENT',id=source.id)
     else:
         source=GroupRepository(store).append_event(GroupEvent(conversation_id=group.id,turn_id='t',actor_type='CHARACTER',actor_id='momo',event_type='CHARACTER_MESSAGE',event_time=NOW,content='一起准备聚会吧'))
@@ -74,7 +74,7 @@ def test_old_message_fingerprint_omits_new_absent_field(acceptance):
     from character_memory.storage.message_receipts import MessageReceiptRepository
     client,store,group,calls,_=acceptance;payload=body('DIRECT');request=AsyncChatRequest(**payload)
     old_payload=request.model_dump(mode='json',exclude={'request_id','reply_suggestion'})
-    source=store.append_event(Event(character_id='momo',event_type=EventType.USER_MESSAGE,event_time=NOW,content='原始消息'))
+    source=store.append_message(Event(character_id='momo',event_type=EventType.USER_MESSAGE,event_time=NOW,content='原始消息'))
     MessageReceiptRepository(store).accept(['DIRECT','momo','one'],payload['request_id'],old_payload,lambda:{'accepted':True,'event_id':source.id},source_kind='EVENT')
     result=client.post('/v1/chat/messages',json=payload);assert result.status_code==202,result.text
     assert result.json()['event_id']==source.id and len(calls)==0

@@ -151,7 +151,10 @@ def test_memory_commit_order_current_active_duplicate(tmp_path, monkeypatch, nea
         assert factory_calls == []
         assert model.calls == ["old", "new"]
         assert len(embeddings.candidate_calls) == 2
-        assert [r.event.id for r in results] == [1, 2]
+        # Direct facts carry unified ids above the shared floor; the Space source
+        # keeps its legacy id. Only their relative order is a contract.
+        assert results[0].event.id >= 10**15
+        assert results[1].event.id < 10**15
         assert newer_result.created_memory_ids == [1]
         assert all(m.character_id == "rin" and m.active for m in rows)
         assert all(m.event_time <= NOW for m in at_old)

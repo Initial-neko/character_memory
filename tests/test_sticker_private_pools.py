@@ -113,7 +113,7 @@ def test_identical_named_private_packs_do_not_collide_and_reimports_preserve_his
         assert client.get(second["url"]).content == b"new-content"
 
         now = datetime(2026, 10, 4, tzinfo=timezone.utc)
-        event = store.append_event(Event(
+        event = store.append_message(Event(
             character_id="neko", event_type=EventType.CHARACTER_MESSAGE,
             event_time=now, content="[表情包]",
             metadata={"action": "STICKER", "sticker_id": first["id"],
@@ -139,7 +139,7 @@ def test_private_sticker_survives_history_page_and_space_comment_payload(tmp_pat
                        if item["scope"] == "character")
 
         now = datetime(2026, 10, 19, tzinfo=timezone.utc)
-        event = store.append_event(Event(
+        event = store.append_message(Event(
             character_id="neko", event_type=EventType.CHARACTER_MESSAGE,
             event_time=now, content="[表情包]",
             metadata={"action": "STICKER", "sticker_id": sticker["id"],

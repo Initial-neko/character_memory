@@ -23,7 +23,7 @@ class FakeChat:
 def _intent(store, character_id: str, now: datetime, *, earliest_delta=-1, expires_delta=4):
     # A persisted intent is only a pointer: dispatch now requires its source to
     # still exist as a real fact, so the fixture records one.
-    source = store.append_event(
+    source = store.append_message(
         Event(
             character_id=character_id,
             event_type=EventType.USER_MESSAGE,
@@ -97,7 +97,7 @@ def test_unanswered_proactive_message_blocks_another_proactive_turn(tmp_path):
     now = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
     store = SQLiteStore(tmp_path / "x.db")
     _intent(store, "momo", now)
-    store.append_event(
+    store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.CHARACTER_MESSAGE,

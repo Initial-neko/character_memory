@@ -9,7 +9,7 @@ from character_memory.goal_web import attach_goal_routes
 
 def test_goal_api_lifecycle_is_person_scoped_and_never_initializes_model(tmp_path):
     store=SQLiteStore(tmp_path/'goals.sqlite')
-    event=store.append_event(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=datetime.now(timezone.utc),content='Local operator source'))
+    event=store.append_message(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=datetime.now(timezone.utc),content='Local operator source'))
     app=FastAPI()
     def forbidden():raise AssertionError('Goal metadata API initialized model')
     app.state.character_memory=SimpleNamespace(read_store=store,character_profiles=lambda:[{'id':'rin'}],require_bundle=forbidden)
@@ -83,7 +83,7 @@ def test_invalid_raw_fact_metadata_cannot_become_real_goal_evidence(tmp_path):
     store=SQLiteStore(tmp_path/'metadata.sqlite');repo=GoalRepository(store)
     try:
         ref=source(store);goal=repo.create('rin',create_request())['goal']
-        store.conn.execute("UPDATE events SET metadata_json='not-json' WHERE id=?",(ref.id,));store.conn.commit()
+        store.conn.execute("UPDATE conversation_events SET metadata_json='not-json' WHERE id=?",(ref.id,));store.conn.commit()
         with pytest.raises(EvidenceUnavailable):repo.act('rin',goal['id'],complete(1,[ref]))
         assert repo.get('rin',goal['id'])['version']==1
     finally:store.close()

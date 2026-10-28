@@ -98,7 +98,7 @@ def test_direct_history_uses_cursor_pages_and_trace_lookup_only_for_requested_id
     start = datetime(2026, 9, 1, tzinfo=timezone.utc)
     saved_ids = []
     for index in range(120):
-        event = store.append_event(
+        event = store.append_message(
             Event(
                 character_id="rin",
                 event_type=EventType.USER_MESSAGE,

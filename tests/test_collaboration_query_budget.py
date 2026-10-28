@@ -27,7 +27,7 @@ def test_relationship_query_stays_within_instruction_budget(tmp_path):
         }
         store.append_event(Event(character_id='alice', event_type=EventType.ACTION,
             event_time=now, content='unrelated action', metadata=metadata))
-    source = store.append_event(Event(character_id='alice', event_type=EventType.USER_MESSAGE,
+    source = store.append_message(Event(character_id='alice', event_type=EventType.USER_MESSAGE,
         event_time=now, content='actual direct interaction'))
     before = store.conn.total_changes
     instructions = 0

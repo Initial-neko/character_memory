@@ -16,7 +16,7 @@ NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 
 
 def direct_event(store, character, content, *, at=NOW, event_type=EventType.USER_MESSAGE, metadata=None):
-    return store.append_event(Event(
+    return store.append_message(Event(
         character_id=character, event_type=event_type, event_time=at, content=content,
         metadata=metadata or {"channel": "DIRECT", "conversation_id": f"chat-{character}"},
     ))

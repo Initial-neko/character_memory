@@ -25,7 +25,7 @@ def profile_app(isolated_app):
     access = app.state.character_memory
     store = access.store()
     character = access.character_profiles()[0]["id"]
-    event = store.append_event(Event(
+    event = store.append_message(Event(
         character_id=character,
         event_type=EventType.USER_MESSAGE,
         event_time=datetime.now(timezone.utc),

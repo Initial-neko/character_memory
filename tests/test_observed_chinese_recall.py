@@ -25,7 +25,7 @@ def test_chinese_question_recalls_real_read_title_after_recent_window(baseline, 
     result = WorldActivityService(access, repo).browse_character("c00", now=NOW, opportunity_id="chinese:title")
     event_id = result["items"][0]["source_event_id"]
     for i in range(30):
-        store.append_event(Event(character_id="c00", event_type=EventType.USER_MESSAGE,
+        store.append_message(Event(character_id="c00", event_type=EventType.USER_MESSAGE,
             event_time=NOW + timedelta(minutes=i+1), content="unrelated conversation"))
     at = NOW + timedelta(hours=1)
     assert [e.id for e in store.recall_observed_events("c00", question, at=at)] == [event_id]

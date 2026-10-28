@@ -40,7 +40,7 @@ def remember(store, *, character_id="momo", source_event_id=None, metadata=None)
 
 
 def direct(store, character_id="momo"):
-    return store.append_event(Event(character_id=character_id,
+    return store.append_message(Event(character_id=character_id,
         event_type=EventType.USER_MESSAGE, event_time=NOW, content="私聊中的原始事实"))
 
 
@@ -75,7 +75,10 @@ def provenance(store, memory):
 def test_equal_numeric_ids_resolve_distinct_fact_domains_without_writes(store):
     event = direct(store)
     _, group, shared = group_source(store)
-    assert event.id == shared.id
+    # W3 put Direct and Group facts in one AUTOINCREMENT table, so the two domains
+    # no longer share numeric ids. What must hold is that each reference resolves
+    # only inside its own domain, which the assertions below still prove.
+    assert event.id != shared.id
     one = remember(store, source_event_id=event.id)
     two = remember(store, metadata=group_metadata(group, shared))
     before = store.conn.total_changes

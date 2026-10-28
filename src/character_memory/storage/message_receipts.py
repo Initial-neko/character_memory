@@ -51,11 +51,18 @@ class MessageReceiptRepository:
                 if not isinstance(response, dict) or response.get("event_id") != ref.id:
                     raise ReceiptConflict("stored acceptance receipt is invalid")
                 if ref.kind == "EVENT":
-                    fact = self.store.get_event(ref.id)
-                    valid = fact is not None and fact.character_id == scope[1]
+                    # A Direct source can be a preserved legacy row or a unified
+                    # conversation fact; the reader is the one place that knows.
+                    fact = self.store.fact_reader.resolve_direct(ref, character_id=scope[1])
+                    valid = fact is not None
                 else:
-                    valid = self.store.conn.execute("SELECT 1 FROM conversation_events WHERE id=? AND conversation_id=?",
-                        (ref.id, ref.conversation_id)).fetchone() is not None
+                    # Direct facts share `conversation_events`, so id+conversation
+                    # alone could let a mislabelled Direct ref pass as Group.
+                    valid = self.store.conn.execute(
+                        "SELECT 1 FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id "
+                        "WHERE e.id=? AND e.conversation_id=? AND c.type='GROUP'",
+                        (ref.id, ref.conversation_id),
+                    ).fetchone() is not None
                 if not valid:
                     raise ReceiptConflict("accepted source fact is unavailable; do not repeat the request")
                 return AcceptedMessage(response, False, row["dispatch"])

@@ -16,7 +16,7 @@ def history(tmp_path):
     facts = []
     with store.transaction():
         for index in range(12):
-            facts.append(store.append_event(Event(character_id='rin', event_type=EventType.USER_MESSAGE,
+            facts.append(store.append_message(Event(character_id='rin', event_type=EventType.USER_MESSAGE,
                 event_time=NOW + timedelta(seconds=index), content=f'shared-experience-{index}')))
             # A burst of receipts must not hide the preceding actual facts.
             for receipt in range(4):
@@ -50,9 +50,9 @@ def test_time_identity_exclusion_and_real_action_projection(history, supplied):
         metadata={'trace_id': 100, 'fact_kind': 'ROLE_COLLABORATION_MESSAGE'}))
     unknown = store.append_event(Event(character_id='rin', event_type=EventType.ACTION,
         event_time=NOW + timedelta(seconds=21), content='unknown historical action'))
-    store.append_event(Event(character_id='other', event_type=EventType.USER_MESSAGE,
+    store.append_message(Event(character_id='other', event_type=EventType.USER_MESSAGE,
         event_time=NOW + timedelta(seconds=22), content='another person'))
-    future = store.append_event(Event(character_id='rin', event_type=EventType.USER_MESSAGE,
+    future = store.append_message(Event(character_id='rin', event_type=EventType.USER_MESSAGE,
         event_time=NOW + timedelta(days=1), content='future'))
     kwargs = {'recent_events': store.list_events('rin', limit=100)} if supplied else {}
     snapshot = builder(store).build('rin', query='shared', at=NOW + timedelta(minutes=1),

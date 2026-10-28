@@ -545,7 +545,7 @@ class PersonRuntime:
         require_real_experience(event.metadata)
         ReactionExecutionRepository.require_independent_boundary(self.store)
         if persist_event:
-            event = self.store.append_event(event)
+            event = self.store.append_fact(event)
         elif event.id is None:
             raise ValueError("persist_event=False requires an already persisted event id")
         source_ref = FactRef(kind="EVENT", id=event.id)
@@ -603,7 +603,7 @@ class PersonRuntime:
 
         stage = time.perf_counter()
         if persist_event:
-            event = self.store.append_event(event)
+            event = self.store.append_fact(event)
         elif event.id is None:
             raise ValueError("persist_event=False requires an already persisted event id")
         timings["event_store_ms"] = _ms(stage)
@@ -784,14 +784,16 @@ class PersonRuntime:
                     )
                     if materialized is None:
                         continue
-                    self.store.append_event(
+                    self.store.fact_writer.append_direct(
                         Event(
                             character_id=event.character_id,
                             event_type=EventType.CHARACTER_MESSAGE,
                             event_time=event.event_time,
                             content=materialized.content,
                             metadata=materialized.metadata,
-                        )
+                        ),
+                        owner_character_id=event.character_id,
+                        raw_conversation_id=conversation_id,
                     )
 
                 timings["persist_ms"] = _ms(stage)

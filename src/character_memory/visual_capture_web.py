@@ -281,7 +281,11 @@ def attach_visual_capture_routes(app):
         if presentation:
             event.metadata["live2d"] = presentation
         event.metadata["visual_capture"] = visual_metadata
-        event = access.store().append_event(event)
+        event = access.store().fact_writer.append_direct(
+            event,
+            owner_character_id=req.character_id,
+            raw_conversation_id=req.conversation_id,
+        )
         scheduler().enqueue_direct(
             req.character_id,
             req.conversation_id,

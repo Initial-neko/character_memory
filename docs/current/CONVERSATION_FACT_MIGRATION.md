@@ -1,8 +1,10 @@
 # Conversation Fact Migration ADR (W3)
 
-状态：**DESIGN FROZEN — NOT EXECUTED**。本文冻结 W3「Direct → 现有 `conversation_events`」的映射、兼容读取、唯一写入口、回填、切写、回滚与正式操作边界。
+状态：**IMPLEMENTED (UNIFIED) — 正式切换未执行**。本文冻结 W3「Direct → 现有 `conversation_events`」的映射、兼容读取、唯一写入口、回填、切写、回滚与正式操作边界；实现已按第 15 节落地，正式切换仍是独立操作步骤。
 
-本轮只读源码与现有文档，**不写迁移代码、不改 schema、不执行任何回填/切写、不读写正式数据库**。正式迁移不得由代码合并、应用启动、CI 或测试自动触发。
+本文第一版是只读设计（“DESIGN FROZEN”）。当前实现只保留 UNIFIED 单一模式：没有 LEGACY/SHADOW 运行时分叉，也没有 `conversation_fact_cutover` 开关决定读写路径（该表只为迁移账本与回滚记录保留）。旧的 `events` 消息行永久保留但产品代码不再读它写它。差异见第 15 节。
+
+正式迁移不得由代码合并、应用启动、CI 或测试自动触发。
 
 依据：V2 详细 PLAN 的 W3 定义与 ADR-1 推荐（Direct 从 `events` 渐进迁移到已有 `conversation_events`），以及当前 main 的事实表、引用表和读写路径。
 
@@ -737,3 +739,70 @@ python scripts/migrate_conversation_facts.py \
 - 声音：`src/character_memory/application/voice_message_service.py:45-69`、`src/character_memory/application/voice_message_materializer.py:117-201`
 - 引用/收据/投递：`src/character_memory/domain/facts.py:9-23`、`src/character_memory/application/fact_provenance.py:9-44`、`src/character_memory/storage/message_receipts.py:30-66`、`src/character_memory/storage/reaction_delivery.py:27-34`
 - 所有权文档：`docs/current/MEMORY.md:5-17`、`docs/current/CONVERSATION_RUNTIME.md`
+
+## 15. 实施记录（UNIFIED，正式切换未执行）
+
+本节记录与第 1–14 节冻结设计的差异与实现落点。设计的 ID 区间、映射、唯一写入口、回填与回滚边界未改变；变化只在“模式”与“回滚深度”两处，均由用户取舍拍板。
+
+### 15.1 单一模式
+
+- 移除 `LEGACY` / `SHADOW` / `UNIFIED` 的运行时分叉与 `conversation_fact_cutover` 开关驱动的读写路由。
+- `conversation_fact_cutover` 表保留（空 schema），只用于记录正式切换审计；应用启动与读取路径不查询它。
+- 唯一实现：`src/character_memory/storage/conversation_facts.py`
+  - `ConversationFactWriter.append_direct / update_direct_metadata / append_group`
+  - `ConversationFactReader.resolve_direct / list_page / list_chat_events / search / jump_before / latest_fact_id / newest_direct_input`
+  - `ConversationFactSchema` 只建空表与预留 `sqlite_sequence`，不扫描、不回填。
+- 运行时守护：`SQLiteStore.append_event` 对 `USER_MESSAGE` / `CHARACTER_MESSAGE` 抛 `LegacyDirectWriteClosed`；迁移与测试夹具使用显式的 `append_legacy_event`。
+- CI 守护：`scripts/check_conversation_fact_writes.py` 拒绝允许清单之外的新 `INSERT INTO events` / `INSERT INTO conversation_events`。
+
+### 15.2 旧表处置
+
+`events` 中的消息行保留且永不改写（迁移是 copy-only）。产品代码不再读写它们；历史旧 ID 通过 `conversation_fact_aliases` 解析到规范行。旧行只在迁移前的 backup 与审计中可见。若日后要删除，必须按第 2 节边界单独批准。
+
+### 15.3 回滚取舍（简化 inverse-delta）
+
+用户拍板：**回滚以备份恢复为主**，不追求保留切写后新事实的完整 inverse-delta。因此：
+
+- 第 8 节的 `conversation_fact_reverse_aliases` 表与逐行反向插入流程**不实现**。
+- 回滚步骤：停写 → 记录当前计数与哈希 → 用切换前 online backup 恢复整库 → 以切换前二进制启动。
+- 代价明示：backup 之后产生的 Direct 新事实会随恢复丢失。若不能接受该损失，只能在切换窗口内把新事实导出为 JSONL 并人工回放，本实现不提供自动回放。
+- `conversation_fact_aliases` / `conversation_fact_migrations` / `conversation_fact_quarantine` 与 backup 一同保留，供复审。
+- 回滚后旧 `events` 行完整可读，因为迁移从未 UPDATE/DELETE 它们。
+
+### 15.4 5.3 硬前置的落点
+
+| 前置 | 实现位置 |
+|---|---|
+| Group/全局查询补 `type='GROUP'` | `storage/message_search.py::search_group`、`group_store.py::count_character_messages` / `has_character_activity_since`、`character_life.py` 的 group source、`character_relationships.py::_group_event_locked`、`life_conversation.py` 的 group 分支、`storage/message_receipts.py` 的 `CONVERSATION_EVENT` 校验 |
+| `intents.source_event_id` JOIN 改走新事实表 | `storage/sqlite.py::suppress_non_direct_intents`（按 ID 区间 UNION 两个域） |
+| `memories` 指标改走新事实表 | `storage/sqlite.py::memory_operational_metrics`（按区间 LEFT JOIN 两个域） |
+| `character_relationships` evidence 改走新事实表 | `character_relationships.py::_direct_source_row_locked` |
+| `message_receipts` EVENT 分支改走新事实表 | `storage/message_receipts.py::accept` 使用 `ConversationFactReader.resolve_direct` |
+
+### 15.5 迁移脚本
+
+`scripts/migrate_conversation_facts.py`：
+
+- 默认 `--dry-run`，只读不写；输出源指纹与前后计数。
+- `--apply` 必须有 `--backup`（online backup API + `integrity_check` + `foreign_key_check`），或对一次性副本显式 `--allow-unbacked`。
+- alias 主键幂等；哈希或规范 ID 不一致即中止，不覆盖。
+- 每批一个 `BEGIN IMMEDIATE`，checkpoint 只在提交后推进；中途被杀可续跑。
+- 迁移前把 `conversation_events` 的 `sqlite_sequence` 预留到 `FLOOR + max(legacy_id)`；迁移中出现更大的源 ID 立即中止。
+- `--cutover` 是独立显式步骤，写 `conversation_fact_cutover(mode='UNIFIED')`；本 PR 未执行。
+- `--confirm <fingerprint>` 拒绝源库与 dry-run 不一致的 apply。
+
+### 15.6 验收证据边界
+
+本 PR 的副本验收：真实 `data/character-memory.db` 的只读 online backup 副本上 dry-run + apply，逐行核对正文/时间/参与者/媒体，重复执行无副作用，批间中断可续跑且终态与一次跑完一致。**未**对真实库执行迁移，未停止任何服务。
+
+该次副本的证据数字（源指纹 `6e9b574b…`）：
+
+- dry-run 命中 `2500` 条（`USER_MESSAGE` 468 + `CHARACTER_MESSAGE` 2032），`conversation_events` 原有 `2438` 条全部为 Group。
+- apply：迁移 `2500`、隔离 `0`，Direct 会话 `38` 个；逐行比对正文/`event_time`/epoch/类型/metadata/actor/owner 不一致数为 `0`；含媒体/贴纸类 metadata 的 `151` 行原样保留；`PRAGMA integrity_check` 为 `ok`，`foreign_key_check` 为空。
+- 重复 apply：`skipped=2500`，两表行数与序列值不变。
+- 第 3 批后模拟中断再续跑：alias 与 Direct 行与一次跑完逐行相等。
+- `sqlite_sequence` 预留到 `1000000000031994`（`FLOOR + 32003 - 1`，取源表最大 id；Direct 消息最大 id 为 31994）。
+
+### 15.7 实施中补上的跨域水位
+
+第 5.2 节的“调度水位”只覆盖了 `latest_direct_event_id`。World 的 BROWSE 重排门槛 `world_activity._browse_signal_event_id` 也把“用户/角色消息”当成信号，但它只查旧 `events`：切写后新对话永远无法重开预算门。两个域的 id 空间互不可比，因此改为**成对水位** `(signal_event_id, signal_fact_id)`，各自与上次记录比较；旧运行记录缺 `signal_fact_id` 时按 `SIGNAL_WATERMARK_INIT` 重排一次。

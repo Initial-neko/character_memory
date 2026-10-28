@@ -15,7 +15,7 @@ def live_life(isolated_app):
     import uvicorn
     app=isolated_app;access=app.state.character_memory;s=access.store()
     profiles=access.character_profiles();character=profiles[0]['id']
-    e=s.append_event(Event(character_id=character,event_type=EventType.USER_MESSAGE,event_time=datetime.now(timezone.utc),content='浏览器原始事实 <script>window.FORGED=true</script>',metadata={'conversation_id':'browser-existing'}))
+    e=s.append_message(Event(character_id=character,event_type=EventType.USER_MESSAGE,event_time=datetime.now(timezone.utc),content='浏览器原始事实 <script>window.FORGED=true</script>',metadata={'conversation_id':'browser-existing'}))
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     server=uvicorn.Server(uvicorn.Config(app,host='127.0.0.1',port=port,log_level='error',lifespan='off'))
@@ -40,7 +40,8 @@ def test_real_chromium_draft_cancel_and_confirm_only(page,live_life):
     page.get_by_role('button',name='围绕这件事聊天').click()
     expect(page.locator('#messageInput')).to_have_value('想和你聊聊这条记录。')
     expect(page.get_by_role('button',name='取消引用')).to_be_visible()
-    assert store.conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]==1
+    direct_count = "SELECT COUNT(*) FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id WHERE c.type='DIRECT'"
+    assert store.conn.execute(direct_count).fetchone()[0]==1
     assert not [r for r in requests if r[0]=='POST' and r[1].endswith('/messages')]
     assert page.evaluate('window.FORGED') is None
     page.get_by_role('button',name='取消引用').click()
@@ -63,11 +64,14 @@ def test_real_chromium_deleted_source_keeps_draft(page,live_life):
     base,character,event,store,access=live_life
     page.goto(f'{base}/?life_character={character}&life_key=events:{event.id}')
     expect(page.get_by_role('button',name='取消引用')).to_be_visible()
-    store.conn.execute('DELETE FROM events WHERE id=?',[event.id]);store.conn.commit()
+    # Direct facts live in conversation_events; the preserved legacy row is no
+    # longer the authoritative copy, so deleting only that row must not matter.
+    store.conn.execute('DELETE FROM conversation_events WHERE id=?',[event.id]);store.conn.commit()
     page.locator('#sendButton').click()
     expect(page.locator('p[aria-live="polite"]:visible')).to_contain_text('草稿已保留')
     expect(page.locator('#messageInput')).to_have_value('想和你聊聊这条记录。')
-    assert store.conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]==0
+    direct_count = "SELECT COUNT(*) FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id WHERE c.type='DIRECT'"
+    assert store.conn.execute(direct_count).fetchone()[0]==0
     assert page.request.get(base+'/health').json()['runtime_loaded'] is False
 
 

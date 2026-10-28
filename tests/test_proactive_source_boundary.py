@@ -33,7 +33,9 @@ def test_legacy_social_intent_never_becomes_direct_message(tmp_path, event_type,
     now = datetime(2026, 10, 13, tzinfo=timezone.utc)
     path = tmp_path / "legacy.db"
     store = SQLiteStore(path)
-    source = store.append_event(Event(character_id="momo", event_type=event_type,
+    # A row written before the W3 migration: the preserved legacy log is exactly
+    # the shape this test must keep refusing as a Direct source.
+    source = store.append_legacy_event(Event(character_id="momo", event_type=event_type,
         event_time=now - timedelta(hours=2), content="和铃继续聊植物", metadata=metadata))
     intent_id = store.add_intent("momo", "明天继续回复铃", "PROACTIVE_MESSAGE",
         now - timedelta(hours=2), now - timedelta(hours=1), now + timedelta(hours=4), source_event_id=source.id)
@@ -101,7 +103,7 @@ def test_dispatch_without_preflight_skips_social_and_preserves_direct_intent(tmp
         event_time=now - timedelta(hours=2), content="回复另一角色"))
     social = store.add_intent("momo", "回复铃", "MESSAGE", now - timedelta(hours=2),
         now - timedelta(hours=1), now + timedelta(hours=4), source_event_id=source.id)
-    user = store.append_event(Event(character_id="momo", event_type=EventType.USER_MESSAGE,
+    user = store.append_message(Event(character_id="momo", event_type=EventType.USER_MESSAGE,
         event_time=now - timedelta(minutes=30), content="晚点问问我", metadata={"conversation_id": "my-chat"}))
     direct = store.add_intent("momo", "问问用户", "MESSAGE", now - timedelta(minutes=30),
         now - timedelta(minutes=10), now + timedelta(hours=4), source_event_id=user.id)

@@ -62,7 +62,7 @@ def test_direct_voice_message_is_one_tts_request_and_one_persisted_asset(tmp_pat
     hub = _Hub()
     client = _Client()
     text = "第一句。第二句。第三句。"
-    event = store.append_event(Event(
+    event = store.append_message(Event(
         character_id="momo",
         event_type=EventType.CHARACTER_MESSAGE,
         event_time=datetime(2026, 9, 21, tzinfo=timezone.utc),
@@ -92,7 +92,7 @@ def test_direct_response_publisher_materializes_proactive_voice_messages(tmp_pat
         content="到点后重新判断",
         metadata={"conversation_id":"browser-session"},
     ))
-    voice = store.append_event(Event(
+    voice = store.append_message(Event(
         character_id="momo",
         event_type=EventType.CHARACTER_MESSAGE,
         event_time=now,
@@ -138,7 +138,7 @@ def test_direct_voice_message_failure_keeps_text_and_marks_failed(tmp_path):
     store = SQLiteStore(tmp_path / "voice.db")
     hub = _Hub()
     client = _Client(_Response(status=503))
-    event = store.append_event(Event(
+    event = store.append_message(Event(
         character_id="momo",
         event_type=EventType.CHARACTER_MESSAGE,
         event_time=datetime(2026, 9, 21, tzinfo=timezone.utc),
@@ -157,7 +157,7 @@ def test_direct_voice_message_failure_keeps_text_and_marks_failed(tmp_path):
 def test_media_db_failure_removes_the_audio_file_before_marking_failed(tmp_path):
     store = SQLiteStore(tmp_path / "voice.db")
     hub = _Hub()
-    event = store.append_event(Event(
+    event = store.append_message(Event(
         character_id="momo",
         event_type=EventType.CHARACTER_MESSAGE,
         event_time=datetime(2026, 9, 21, tzinfo=timezone.utc),
@@ -181,7 +181,7 @@ def test_media_db_failure_removes_the_audio_file_before_marking_failed(tmp_path)
 def test_late_direct_result_discards_audio_when_the_event_no_longer_exists(tmp_path):
     store = SQLiteStore(tmp_path / "voice.db")
     hub = _Hub()
-    event = store.append_event(Event(
+    event = store.append_message(Event(
         character_id="momo",
         event_type=EventType.CHARACTER_MESSAGE,
         event_time=datetime(2026, 9, 21, tzinfo=timezone.utc),
@@ -189,7 +189,7 @@ def test_late_direct_result_discards_audio_when_the_event_no_longer_exists(tmp_p
         metadata={"action":"VOICE_MESSAGE","conversation_id":"c1",**voice_pending_fields()},
     ))
     with store.conn:
-        store.conn.execute("DELETE FROM events WHERE id=?", (event.id,))
+        store.conn.execute("DELETE FROM conversation_events WHERE id=?", (event.id,))
 
     _materializer(tmp_path, store, hub, _Client()).materialize_direct(event, conversation_id="c1")
 
@@ -350,7 +350,7 @@ def test_a_failed_synthesis_keeps_the_cause_the_body_carried(tmp_path):
     hub = _Hub()
     inner = "Default template 'murasame' is not defined; pick an existing template in Settings Center."
     client = _Client(response=_refused(json.dumps({"detail": inner})))
-    event = store.append_event(Event(
+    event = store.append_message(Event(
         character_id="momo",
         event_type=EventType.CHARACTER_MESSAGE,
         event_time=datetime(2026, 9, 21, 23, 1, tzinfo=timezone.utc),

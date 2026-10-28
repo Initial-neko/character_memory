@@ -14,7 +14,7 @@ def test_memory_governance_http_round_trip(tmp_path):
     store = SQLiteStore(tmp_path / "memory-web.db")
     embeddings = DeterministicEmbedding()
     now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
-    source = store.append_event(
+    source = store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.USER_MESSAGE,

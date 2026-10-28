@@ -40,7 +40,7 @@ class RelabellingModel(PersonModel):
     def react(self, context):
         self.calls += 1
         self.store.conn.execute(
-            "UPDATE events SET metadata_json=? WHERE id=?",
+            "UPDATE conversation_events SET metadata_json=? WHERE id=?",
             (json.dumps({"experience_scope": SIM}), self.source_event_id),
         )
         self.store.conn.commit()
@@ -54,7 +54,7 @@ def _runtime(store, model):
 
 def _source(store, *, scope=REAL):
     metadata = {"conversation_id": "direct"} if scope is None else {"conversation_id": "direct", "experience_scope": scope}
-    return store.append_event(
+    return store.append_message(
         Event(
             character_id="momo",
             event_type=EventType.USER_MESSAGE,

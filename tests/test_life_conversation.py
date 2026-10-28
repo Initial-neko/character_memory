@@ -8,7 +8,7 @@ from character_memory.life_conversation import LifeReference, resolve_life_refer
 
 def test_reference_is_readonly_owned_and_timed(tmp_path):
     s=SQLiteStore(tmp_path/'test.db')
-    e=s.append_event(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=datetime.now(timezone.utc), content='原始事实', metadata={'conversation_id':'conv'}))
+    e=s.append_message(Event(character_id='a', event_type=EventType.USER_MESSAGE, event_time=datetime.now(timezone.utc), content='原始事实', metadata={'conversation_id':'conv'}))
     ref=LifeReference(character_id='a', key=f'events:{e.id}')
     before=s.conn.total_changes
     data=resolve_life_reference(s,ref)
@@ -17,7 +17,7 @@ def test_reference_is_readonly_owned_and_timed(tmp_path):
     assert s.conn.total_changes==before
     with pytest.raises(HTTPException): resolve_life_reference(s,LifeReference(character_id='b',key=ref.key))
     with pytest.raises(HTTPException): resolve_life_reference(s,LifeReference(character_id='a',key='intent:1'))
-    s.conn.execute("UPDATE events SET event_time='invalid' WHERE id=?",[e.id])
+    s.conn.execute("UPDATE conversation_events SET event_time='invalid' WHERE id=?",[e.id])
     with pytest.raises(HTTPException): resolve_life_reference(s,ref)
     with pytest.raises(HTTPException): resolve_life_reference(s,LifeReference(character_id='a',key='events:'+('9'*140)))
     s.close()
@@ -94,7 +94,7 @@ def test_http_reference_validates_before_writes_and_model(isolated_app):
         persisted=s.get_event(sent.json()['event_id'])
         assert persisted.metadata['life_reference']==ref and '真实原记录' in persisted.content
         assert c.get('/health').json()['runtime_loaded'] is False
-        s.conn.execute('DELETE FROM events WHERE id=?',[source.json()['event_id']]);before=s.conn.total_changes
+        s.conn.execute('DELETE FROM conversation_events WHERE id=?',[source.json()['event_id']]);before=s.conn.total_changes
         assert c.post('/v1/chat/messages',json=request).status_code==404
         assert s.conn.total_changes==before
 
@@ -107,7 +107,7 @@ def test_group_http_confirmed_reference_and_archived_character(isolated_app, arc
     repo=GroupRepository(s);now=datetime.now(timezone.utc);group=repo.create_group('共同经历',[a,b],now)
     source=repo.append_event(GroupEvent(conversation_id=group.id,turn_id='source',actor_type='CHARACTER',actor_id=a,event_type='CHARACTER_MESSAGE',event_time=now,content='人物确实说过'))
     ref={'character_id':a,'key':f'group:{source.id}'}
-    direct=s.append_event(Event(character_id=a,event_type=EventType.USER_MESSAGE,event_time=now,
+    direct=s.append_message(Event(character_id=a,event_type=EventType.USER_MESSAGE,event_time=now,
         content='真实私聊',metadata={'channel':'DIRECT','conversation_id':'archive-direct'}))
     with TestClient(app) as c:
         payload={'message':'继续聊聊','life_reference':ref}

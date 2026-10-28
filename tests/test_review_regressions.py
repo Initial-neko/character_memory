@@ -153,8 +153,8 @@ def test_event_and_intent_time_queries_use_absolute_time_not_iso_lexical_order(t
     store = SQLiteStore(tmp_path / "time.db")
     past_with_later_local_date = datetime.fromisoformat("2026-09-11T00:30:00+08:00")  # 2026-09-10 16:30Z
     future_with_earlier_local_date = datetime.fromisoformat("2026-09-10T23:30:00-07:00")  # 2026-09-11 06:30Z
-    store.append_event(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=past_with_later_local_date, content="past"))
-    store.append_event(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=future_with_earlier_local_date, content="future"))
+    store.append_message(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=past_with_later_local_date, content="past"))
+    store.append_message(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=future_with_earlier_local_date, content="future"))
 
     at_1700z = datetime.fromisoformat("2026-09-10T17:00:00+00:00")
     assert [event.content for event in store.list_events("rin", before=at_1700z)] == ["past"]

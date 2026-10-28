@@ -7,14 +7,19 @@
 原始经历先进入它所属的 durable fact store，而不是为了形式统一全部复制进一个 `events` 表。
 
 ```text
-Direct fact        -> events
-Group shared fact  -> conversation_events
-Space shared fact  -> space_*
-Media fact         -> media_assets
+Direct conversation fact -> conversation_events (conversations.type='DIRECT')
+Group shared fact        -> conversation_events (conversations.type='GROUP')
+Direct non-chat event    -> events
+Space shared fact        -> space_*
+Media fact               -> media_assets
 
 Durable Facts = Source of Truth
 Memory / Mental State / Diary / Summary = derived cognition
 ```
+
+Direct 与 Group 的可见对话事实（`USER_MESSAGE` / `CHARACTER_MESSAGE`）现在共用一张物理表，域由 `conversations.type` 与 `FactRef.kind`（`EVENT` / `CONVERSATION_EVENT`）区分，不再由表名区分。Direct 写入只有一个入口 `ConversationFactWriter`；旧的 `events` 消息行作为只读归档永久保留，产品代码不再读写它们，历史旧 ID 通过 `conversation_fact_aliases` 解析。迁移边界、ID 区间与回滚见 [CONVERSATION_FACT_MIGRATION.md](CONVERSATION_FACT_MIGRATION.md)。
+
+`TIME_TICK`、`ACTION`、`VISUAL_OBSERVATION`、`PROACTIVE_INTENT`、`LIFE_EVENT`、`DIARY`、`SOCIAL_POST`、`SPACE_*`、`WORLD_OBSERVATION` 仍留在 `events`，各有自己的运行时 owner。
 
 因此：
 
@@ -389,7 +394,7 @@ Relationship records are actual received Direct messages, Group events processed
 
 同一响应中的 `cognition` 是有来源的定向关系认知，不是新的关系状态表。它只从该人物自己的 Memory 及其 durable fact 派生：A 对 B 与 B 对 A 分开计算，绝不互相推断；Memory 只有在直接来源是 B 的真实消息/评论，或群聊 Trace 证明 A 实际看到过 B 的真实消息时，才计入 A 对 B 的认知。同群、同 turn、成员身份或看到动态本身都不构成互动凭据。每条认知保留 Memory ID、记忆时间以及来源 Event/Conversation Event ID、actor、时间和正文节选；群聊输入另标 `WITNESSED_INPUT`。Memory 被更正（`superseded_by`）、忘记（`active=0`）、来源删除/撤回（来源事件缺失或 `hidden`）或来源变为 SIMULATED 时，旧认知标记为 `SUPERSEDED` / `FORGOTTEN` / `INVALIDATED` 且 `asserted=false`，不再作为当前断言；SIMULATED 内容整体排除，只保留计数。更正与忘记复用现有 Memory governance（更正创建新版本、忘记只切换派生状态），不删除原始 Memory/Event，也不允许通过关系视图回滚事实。该投影有界（默认最多扫描最近 400 条 Memory、600 条 Trace、输出 50 条），不新增表、不调用模型、不写库；缺失数据保持未知，不推断好感、关系等级或对方态度。关系视图展示当前断言、已失效历史、依据、变化历史、边界和未完成意图，并可在有来源的当前认知上执行更正或忘记/恢复。
 
-“围绕这件事聊天”通过只读 `GET /v1/characters/{character_id}/life/conversation?key=...` 核验来源，跳转原有 Direct/Group 会话并准备草稿。URL 只携人物和 namespaced source key；正文从服务端记录读取。查看、跳转、取消均不写事实、不调用模型。用户确认发送后，异步消息入口携 `life_reference={character_id,key}` 再次核验，追加有来源的记录引用并保存同一用户消息的 `metadata.life_reference`，再复用现有 scheduler/SSE。引用声明用户未必亲历，也不是共同活动完成凭据；World 记录正文不等同网页全文。同步旧发送入口拒绝该字段。
+“围绕这件事聊天”通过只读 `GET /v1/characters/{character_id}/life/conversation?key=...` 核验来源，跳转原有 Direct/Group 会话并准备草稿。URL 只携人物和 namespaced source key；正文从服务端记录读取。查看、跳转、取消均不写事实、不调用模型。用户确认发送后，异步消息入口携 `life_reference={character_id,key}` 再次核验，追加有来源的记录引用并保存同一用户消息的 `metadata.life_reference`，再复用现有 scheduler/SSE。引用声明用户未必亲历，也不是共同活动完成凭据；World 记录正文不等同网页全文。同步旧发送入口拒绝该字段。物理表迁移不改变 source key 命名空间：Direct 对话事实仍属 EVENT 域，key 仍是 `events:{id}`（迁移后的规范 ID 或经 alias 解析的旧 ID），只有 Group 保持 `group:{id}`。
 
 Direct/Group 继续聊天入口按 `archived_at` 键存在判定来源人物归档，空值或损坏标记也会在写入用户消息前拒绝；历史记录仍可按原只读边界查看。
 

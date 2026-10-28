@@ -4,6 +4,7 @@ from character_memory.storage.sqlite import SQLiteStore
 
 
 EXPECTED_CORE_MIGRATIONS = [
+    "conversation/004-conversation-fact-unified",
     "core/001-intent-source-event",
     "core/002-epoch-time-keys",
     "core/003-mental-state-history",

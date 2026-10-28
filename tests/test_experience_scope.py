@@ -23,7 +23,7 @@ def test_direct_denies_nonreal_before_any_write_or_model(tmp_path,scope):
 
 def test_authoritative_scope_cannot_be_stripped_by_caller(tmp_path):
     store=SQLiteStore(tmp_path/'authority.db');model=CountedModel();person=runtime(store,model)
-    event=store.append_event(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW,content='simulated trigger',metadata={'experience_scope':SIM}))
+    event=store.append_message(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW,content='simulated trigger',metadata={'experience_scope':SIM}))
     before=snapshot(store)
     with pytest.raises(ValueError,match='experience scope'):person.handle(event.model_copy(update={'metadata':{}}),persist_event=False)
     assert model.calls==0 and snapshot(store)==before
@@ -40,11 +40,11 @@ def test_existing_real_behavior_is_preserved(tmp_path,scope):
 def test_real_context_filters_before_limits_and_keeps_audit_after_reopen(tmp_path):
     path=tmp_path/'contexts.db';store=SQLiteStore(path);emb=runtime(store,CountedModel()).embeddings
     for i in range(12):
-        store.append_event(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW+timedelta(seconds=i),content=f'real-{i}'))
+        store.append_message(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW+timedelta(seconds=i),content=f'real-{i}'))
     store.add_memory(Memory(character_id='rin',content='real memory',event_time=NOW,importance=.5,embedding=emb.embed('practice')))
     for i in range(25):
         metadata={'experience_scope':SIM}
-        store.append_event(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW+timedelta(seconds=20+i),content='SIMULATION_SECRET',metadata=metadata))
+        store.append_message(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW+timedelta(seconds=20+i),content='SIMULATION_SECRET',metadata=metadata))
         store.append_event(Event(character_id='rin',event_type=EventType.WORLD_OBSERVATION,event_time=NOW+timedelta(seconds=20+i),content='practice SIMULATION_SECRET',metadata=metadata))
         store.add_memory(Memory(character_id='rin',content='SIMULATION_SECRET',event_time=NOW+timedelta(seconds=i),importance=1,pinned=True,metadata=metadata,embedding=emb.embed('practice')))
     store.close();store=SQLiteStore(path)
@@ -84,11 +84,11 @@ def test_python_sql_scope_parity(scope):
 
 def test_late_scope_change_prevents_real_derived_commit(tmp_path):
     store=SQLiteStore(tmp_path/'late.db')
-    event=store.append_event(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW,content='real initially'))
+    event=store.append_message(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW,content='real initially'))
     class ChangingModel(CountedModel):
         def react_call_for_session(self,context,session_id):
             result=super().react_call_for_session(context,session_id)
-            store.conn.execute('UPDATE events SET metadata_json=? WHERE id=?',(json.dumps({'experience_scope':SIM}),event.id));store.conn.commit()
+            store.conn.execute('UPDATE conversation_events SET metadata_json=? WHERE id=?',(json.dumps({'experience_scope':SIM}),event.id));store.conn.commit()
             return result
     model=ChangingModel();person=runtime(store,model)
     with pytest.raises(ValueError,match='experience scope'):person.handle(event,persist_event=False)
@@ -138,7 +138,7 @@ def test_visual_planning_recent_dialogue_has_no_simulation(tmp_path,kind):
     from character_memory.group_autonomous_visual import _group_recent_dialogue
     from character_memory.group_store import GroupRepository,GroupEvent
     store=SQLiteStore(tmp_path/'visual.db')
-    store.append_event(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW,content='SIMULATION_SECRET',metadata={'experience_scope':SIM}))
+    store.append_message(Event(character_id='rin',event_type=EventType.USER_MESSAGE,event_time=NOW,content='SIMULATION_SECRET',metadata={'experience_scope':SIM}))
     if kind=='group':
         repo=GroupRepository(store);group=repo.create_group('practice',['rin','momo'],NOW)
         repo.append_event(GroupEvent(conversation_id=group.id,turn_id='sim',actor_type='USER',actor_id='user',event_type='USER_MESSAGE',event_time=NOW,content='SIMULATION_SECRET',metadata={'experience_scope':SIM}))

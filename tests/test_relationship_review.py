@@ -18,7 +18,7 @@ NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 
 
 def direct(store, character="a", content="昨天修好了星灯", at=NOW, event_type=EventType.USER_MESSAGE, metadata=None):
-    return store.append_event(Event(character_id=character, event_type=event_type, event_time=at, content=content, metadata=metadata or {"channel": "DIRECT", "conversation_id": "chat-a"}))
+    return store.append_message(Event(character_id=character, event_type=event_type, event_time=at, content=content, metadata=metadata or {"channel": "DIRECT", "conversation_id": "chat-a"}))
 
 
 def test_review_combines_recent_real_interaction_and_current_user_plans_without_writes(tmp_path):

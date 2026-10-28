@@ -1649,23 +1649,39 @@ class WorldActivityScheduler:
         )
         return max(60.0, min(360.0, base * 4.0))
 
-    def _browse_signal_event_id(self, character_id: str) -> int:
-        return self.access.read_store.latest_event_id(
+    def _browse_signal_watermark(self, character_id: str) -> tuple[int, int]:
+        """Arrival-order watermark for browse-reconsideration signals.
+
+        Direct chat facts live in ``conversation_events`` and every other durable
+        event in ``events``; the two tables have independent id sequences
+        (``CONVERSATION_FACT_MIGRATION.md`` §2). A single number cannot order
+        both, so the watermark is a pair and each counter is compared only with
+        its own previous value.
+        """
+        store = self.access.read_store
+        legacy = store.latest_event_id(
             character_id,
             event_types=[item.value for item in BROWSE_RECONSIDER_EVENT_TYPES],
         )
+        direct = store.fact_reader.latest_direct_message_id(
+            character_id,
+            [item.value for item in BROWSE_RECONSIDER_EVENT_TYPES],
+        )
+        return legacy, direct
 
     def _has_browse_reconsideration_signal(
         self,
         character_id: str,
         *,
         since_event_id: int,
+        since_fact_id: int,
         since_epoch: int,
     ) -> bool:
-        # Durable event ids are insertion-order watermarks. They deliberately
-        # avoid comparing simulated/backfilled event_time values with the real
+        # Durable ids are insertion-order watermarks. They deliberately avoid
+        # comparing simulated/backfilled event_time values with the real
         # scheduler clock, which are two different timelines.
-        if self._browse_signal_event_id(character_id) > since_event_id:
+        legacy, direct = self._browse_signal_watermark(character_id)
+        if legacy > since_event_id or direct > since_fact_id:
             return True
         return self.group_repository.has_character_activity_since(
             character_id,
@@ -1708,6 +1724,11 @@ class WorldActivityScheduler:
         signal_event_id = last_details.get("signal_event_id")
         if signal_event_id is None:
             return True, "SIGNAL_WATERMARK_INIT"
+        # Runs written before Direct facts moved to conversation_events carry no
+        # Direct counter; re-plan once so the next quiet decision stores one.
+        signal_fact_id = last_details.get("signal_fact_id")
+        if signal_fact_id is None:
+            return True, "SIGNAL_WATERMARK_INIT"
 
         last_epoch = int(
             last.get("completed_at_epoch")
@@ -1722,6 +1743,7 @@ class WorldActivityScheduler:
         if self._has_browse_reconsideration_signal(
             character_id,
             since_event_id=int(signal_event_id),
+            since_fact_id=int(signal_fact_id),
             since_epoch=last_epoch,
         ):
             return True, "NEW_CHARACTER_SIGNAL"
@@ -1771,7 +1793,9 @@ class WorldActivityScheduler:
             )
         if kind == "BROWSE" and status == "OK":
             details = dict(details or {})
-            details["signal_event_id"] = self._browse_signal_event_id(subject_id)
+            signal_event_id, signal_fact_id = self._browse_signal_watermark(subject_id)
+            details["signal_event_id"] = signal_event_id
+            details["signal_fact_id"] = signal_fact_id
             if getattr(self.access.settings, "world_rss_reading_enabled", False):
                 details["rss_signal"] = self._rss_signal(subject_id)
         completed = now

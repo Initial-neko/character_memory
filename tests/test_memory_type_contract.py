@@ -98,7 +98,7 @@ def test_typed_memory_admission_restart_and_relationship_projection(tmp_path):
     source_ids = []
     try:
         for index in range(3):
-            source = store.append_event(Event(character_id='rin', event_type=EventType.USER_MESSAGE,
+            source = store.append_message(Event(character_id='rin', event_type=EventType.USER_MESSAGE,
                 event_time=NOW, content=f'actual source {index}'))
             source_ids.append(source.id)
             runtime.handle(source, persist_event=False)

@@ -12,6 +12,7 @@ from character_memory.llm.usage import llm_usage_scope
 from character_memory.time_utils import epoch_us
 from character_memory.message_projection import project_direct_message, project_group_message
 from character_memory.group_store import GroupRepository
+from character_memory.storage.conversation_facts import as_event
 
 class SuggestionStale(ValueError):
     pass
@@ -27,8 +28,11 @@ class ReplySuggestionService:
         self.batches = ReplySuggestionRepository(store)
 
     def _visible_message(self, row, kind):
-        if kind == 'EVENT':
-            event = self.store._event_from_row(row)
+        if kind in ('EVENT', 'DIRECT_EVENT'):
+            if kind == 'EVENT':
+                event = self.store._event_from_row(row)
+            else:
+                event = as_event(row, row['character_id'])
             public = project_direct_message(event)
         else:
             event = GroupRepository._event_from_row(row)
@@ -48,14 +52,21 @@ class ReplySuggestionService:
                    f"COALESCE(json_extract({safe},'$.hidden'),0)=0 AND " + real_experience_sql('metadata_json'))
         with self.store._lock:
             if ref.kind == 'EVENT':
-                source = self.store.get_event(ref.id)
+                # Direct facts live in the unified conversation table; the reader
+                # resolves a preserved legacy id or a canonical one.
+                source = self.store.fact_reader.resolve_direct(ref)
                 if source is None:
                     raise SuggestionStale('source is unavailable')
                 ids = [source.character_id]
                 namespace = {'type':'DIRECT', 'character_id':source.character_id}
-                where = f"character_id=? AND event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE') AND event_time_epoch<=? AND {visible}"
+                table = ('(SELECT e.*,cm.actor_id AS character_id FROM conversation_events e '
+                         "JOIN conversations c ON c.id=e.conversation_id AND c.type='DIRECT' "
+                         'JOIN conversation_members cm ON cm.conversation_id=e.conversation_id '
+                         "AND cm.actor_type='CHARACTER') AS conversation_events")
+                where = (f"character_id=? AND event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE') "
+                         f"AND event_time_epoch<=? AND {visible}")
                 params = (source.character_id, now)
-                table = 'events'
+                row_kind = 'DIRECT_EVENT'
                 members = []
             else:
                 # Existing Group tables and local user membership are authoritative.
@@ -71,6 +82,7 @@ class ReplySuggestionService:
                 where = f"conversation_id=? AND event_type IN ('USER_MESSAGE','CHARACTER_MESSAGE') AND event_time_epoch<=? AND {visible}"
                 params = (ref.conversation_id, now)
                 table = 'conversation_events'
+                row_kind = ref.kind
             profiles = [self.ensure_character(char) for char in ids]
             if any(p and p.get('archived_at') for p in profiles):
                 raise SuggestionStale('a participant is archived')
@@ -80,7 +92,7 @@ class ReplySuggestionService:
             watermark = self.store.conn.execute(f'SELECT MAX(id) FROM {table} WHERE {where}',params).fetchone()[0]
             messages = []
             for row in reversed(rows):
-                text, attachments, visible_digest = self._visible_message(row, ref.kind)
+                text, attachments, visible_digest = self._visible_message(row, row_kind)
                 messages.append({'ref':{'kind':ref.kind,'id':row['id'],**({'conversation_id':ref.conversation_id} if ref.kind=='CONVERSATION_EVENT' else {})},
                     'speaker':row['actor_id'] if ref.kind=='CONVERSATION_EVENT' else ('user' if row['event_type']=='USER_MESSAGE' else row['character_id']),
                     'text':text,'attachments':attachments,'visible_text_digest':visible_digest})

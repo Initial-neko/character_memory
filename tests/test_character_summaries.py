@@ -15,9 +15,9 @@ from character_memory.storage.sqlite import SQLiteStore
 def test_character_summary_exposes_latest_preview_and_proactive_source(tmp_path):
     store = SQLiteStore(tmp_path / "x.db")
     now = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
-    user = store.append_event(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=now, content="下午再聊", metadata={"conversation_id": "x"}))
+    user = store.append_message(Event(character_id="rin", event_type=EventType.USER_MESSAGE, event_time=now, content="下午再聊", metadata={"conversation_id": "x"}))
     source = store.append_event(Event(character_id="rin", event_type=EventType.PROACTIVE_INTENT, event_time=now, content="问问用户", metadata={"conversation_id": "x", "intent_id": 1}))
-    reply = store.append_event(Event(character_id="rin", event_type=EventType.CHARACTER_MESSAGE, event_time=now, content="忙完了吗？", metadata={"conversation_id": "x", "action": "MESSAGE", "source_event_id": source.id, "source_event_type": EventType.PROACTIVE_INTENT.value}))
+    reply = store.append_message(Event(character_id="rin", event_type=EventType.CHARACTER_MESSAGE, event_time=now, content="忙完了吗？", metadata={"conversation_id": "x", "action": "MESSAGE", "source_event_id": source.id, "source_event_type": EventType.PROACTIVE_INTENT.value}))
 
     settings = SimpleNamespace(
         chat_model="fake",

@@ -438,11 +438,14 @@ class ReactionScheduler:
         A later user message always wins. A later visual observation also makes
         the older screen reaction stale. Ordinary character output does neither.
         """
-        return store.latest_direct_event_id(
-            character_id,
-            conversation_id,
-            event_types=("USER_MESSAGE", "VISUAL_OBSERVATION"),
+        newest = store.fact_reader.newest_direct_input(
+            character_id, conversation_id, visual=True,
         )
+        return newest[1] if newest is not None else None
+
+    @staticmethod
+    def _input_identity(store, character_id: str, conversation_id: str, event_id: int):
+        return store.fact_reader.direct_input_identity(character_id, conversation_id, event_id)
 
     @staticmethod
     def _direct_response_events(store, character_id: str, source_event_id: int):
@@ -541,10 +544,16 @@ class ReactionScheduler:
                 runtime = bundle.runtimes[character_id]
                 def current():
                     durable = self.delivery is None or self.delivery.guard(batch, character_id)
-                    latest = (self._latest_direct_visual_source_id(bundle.store, character_id, conversation_id)
+                    identity = self._input_identity(bundle.store, character_id, conversation_id, event.id)
+                    newest = (bundle.store.fact_reader.newest_direct_input(
+                        character_id, conversation_id, visual=True)
                         if event.event_type.value == "VISUAL_OBSERVATION"
-                        else self._latest_direct_user_id(bundle.store, character_id, conversation_id))
-                    return durable and not self._closed.is_set() and latest == watermark
+                        else bundle.store.fact_reader.newest_direct_input(
+                            character_id, conversation_id, visual=False))
+                    # Compare (event_time, id, space): chat and non-chat inputs
+                    # share neither table nor id space, and arrival order alone
+                    # cannot order them.
+                    return durable and not self._closed.is_set() and identity is not None and newest is not None and newest <= identity
                 with bundle.chat._lock_for(character_id):
                     bundle.store.set_world_time(character_id, event.event_time)
                     result = runtime.handle(

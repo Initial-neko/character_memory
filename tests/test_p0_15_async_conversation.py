@@ -67,7 +67,7 @@ def test_superseded_direct_reaction_cannot_commit_derived_state(tmp_path):
     emb = DeterministicEmbedding()
     runtime = PersonRuntime(store, VectorRecall(store, emb), emb, DerivedWriteModel(), "persona")
     now = datetime(2026, 9, 11, 20, 0, tzinfo=timezone.utc)
-    source = store.append_event(
+    source = store.append_message(
         Event(
             character_id="rin",
             event_type=EventType.USER_MESSAGE,
@@ -109,7 +109,7 @@ class RecordingRuntime:
 
 
 def _append_direct(store, content, at, conversation_id="conv"):
-    return store.append_event(
+    return store.append_message(
         build_user_event(
             content,
             character_id="rin",

@@ -29,7 +29,7 @@ from character_memory.domain.activity import (
 
 
 class ActivityMissing(LookupError):
-    """No activity with that id and owner scope."""
+    """No activity with that id."""
 
 
 class ActivityConflict(ValueError):

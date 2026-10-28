@@ -23,6 +23,7 @@
 
   let view = null;
   let scenarios = [];
+  let review = {status: "NONE", review: null};
   let drawerError = "";
   let formOpen = false;
   let creating = false;
@@ -32,6 +33,12 @@
   let entryGeneration = 0;
   let loadGeneration = 0;
   let hintOriginal = null;
+  let branchAfter = null;
+  let branchText = "";
+  let pendingBranch = null;
+  let branchBusy = false;
+  let reviewBusy = false;
+  let adoptBusy = false;
 
   const activeId = () => CM.isScenarioConversation() ? CM.state.conversation.activityId : null;
   const isActiveId = id => Boolean(id) && activeId() === id && CM.isScenarioConversation();
@@ -112,7 +119,11 @@
       const perspectives = turn.events.filter(event => event.event_type === "PERSPECTIVE");
       const replies = turn.events.filter(event => event.event_type === "REPLY");
       const partnerFacts = perspectives.length || replies.length;
-      const userHtml = user ? `<article class="message-row user" data-scenario-event="${user.id}"><div class="bubble-wrap"><div class="bubble">${esc(user.content)}</div><div class="message-meta"><span>${esc(CM.fmtTime(user.created_at))}</span></div></div></article>` : "";
+      const canBranch = currentStatus() === "ACTIVE";
+      const branchLink = canBranch && user
+        ? `<button type="button" class="scenario-branch-link${branchAfter === user.id ? " is-selected" : ""}" data-scenario-branch-after="${user.id}">从这里分叉</button>`
+        : "";
+      const userHtml = user ? `<article class="message-row user" data-scenario-event="${user.id}"><div class="bubble-wrap"><div class="bubble">${esc(user.content)}</div><div class="message-meta"><span>${esc(CM.fmtTime(user.created_at))}</span>${branchLink}</div></div></article>` : "";
       const views = perspectives.length ? `<section class="scenario-perspectives" aria-label="伙伴观点"><div class="scenario-perspectives-head">每个人看到的不一样</div><div class="scenario-views">${perspectives.map(item => `<article class="scenario-view"><header><span class="scenario-view-avatar">${esc(nameByKey(item.participant_key).slice(0, 1))}</span><span class="scenario-view-name">${esc(nameByKey(item.participant_key))}</span><span class="scenario-stance">${esc(item.stance || "自己的看法")}</span></header><p>${esc(item.content)}</p></article>`).join("")}</div></section>` : "";
       const replyHtml = replies.map(item => `<article class="message-row assistant group-assistant scenario-reply" data-scenario-event="${item.id}"><div class="avatar">${esc(nameByKey(item.participant_key).slice(0, 1))}</div><div class="bubble-wrap"><div class="group-speaker-name">${esc(nameByKey(item.participant_key))} · 模拟回应</div><div class="bubble">${esc(item.content)}</div><div class="message-meta"><span>${esc(CM.fmtTime(item.created_at))}</span></div></div></article>`).join("");
       const round = rounds.get(turn.turn_id);
@@ -131,8 +142,9 @@
       return `<span class="scenario-cast-item">${esc(participantName(item))}${note ? `<small>${esc(note)}</small>` : ""}</span>`;
     }).join("");
     const canResume = status === "PAUSED" || status === "CREATED";
+    const canEnd = status !== "ENDED";
     return `<section class="scenario-brief" aria-label="练习情境">
-      <div class="scenario-brief-head"><div><span class="scenario-mode-chip">模拟情境</span><span class="scenario-status is-${esc(status.toLowerCase())}">${esc(statusLabel)}</span></div><div class="scenario-brief-actions">${canResume ? `<button type="button" class="detail-button" data-scenario-resume>${status === "CREATED" ? "开始练习" : "继续练习"}</button>` : ""}<button type="button" class="detail-button" data-scenario-exit>退出练习</button></div></div>
+      <div class="scenario-brief-head"><div><span class="scenario-mode-chip">模拟情境</span><span class="scenario-status is-${esc(status.toLowerCase())}">${esc(statusLabel)}</span></div><div class="scenario-brief-actions">${canResume ? `<button type="button" class="detail-button" data-scenario-resume>${status === "CREATED" ? "开始练习" : "继续练习"}</button>` : ""}${canEnd ? `<button type="button" class="detail-button" data-scenario-end>结束练习</button>` : ""}<button type="button" class="detail-button" data-scenario-exit>退出练习</button></div></div>
       <h2>${esc(activity.title)}</h2>
       <dl><dt>情境</dt><dd>${esc(view.scenario.situation)}</dd><dt>想练</dt><dd>${esc(view.scenario.goal)}</dd>${view.scenario.concern ? `<dt>顾虑</dt><dd>${esc(view.scenario.concern)}</dd>` : ""}</dl>
       <div class="scenario-cast" aria-label="参与者">${cast}</div>
@@ -140,10 +152,102 @@
     </section>`;
   }
 
+  function branchPointLabel(point) {
+    if (!point) return "先写一句话，才有可分叉的位置。";
+    const candidates = (view.scenario.events || []);
+    const event = candidates.find(item => item.id === point);
+    if (!event || event.event_type !== "USER_MESSAGE") return "分叉点：当前最后一句之后";
+    const userEvents = candidates.filter(item => item.event_type === "USER_MESSAGE");
+    return `分叉点：你的第 ${userEvents.indexOf(event) + 1} 次发言之后`;
+  }
+
+  function formalCharacters() {
+    return (view?.activity?.participants || []).filter(item => item.actor_type === "CHARACTER");
+  }
+
+  function branchCards() {
+    const branches = view.scenario.branches || [];
+    if (!branches.length) return "";
+    const adoption = view.scenario.adoption;
+    const canAdopt = review.status === "READY" && !adoption;
+    const formal = formalCharacters();
+    const characterPicker = canAdopt && formal.length > 1
+      ? `<label class="scenario-adopt-character">以谁的身份记住<select data-scenario-adopt-character>${formal.map(item => `<option value="${esc(item.character_id)}">${esc(participantName(item))}</option>`).join("")}</select></label>`
+      : "";
+    const cards = branches.map((branch, index) => {
+      const adopted = adoption?.branch_id === branch.branch_id;
+      const status = branch.status === "READY" ? "已完成" : branch.status === "PENDING" ? "生成中" : "没有完成";
+      const consequence = branch.status === "READY"
+        ? `<p class="scenario-consequence">${esc(branch.consequence || "这条分支没有记录后果。")}</p>`
+        : `<p class="scenario-consequence is-muted">${branch.status === "FAILED" ? "这一条没有生成伙伴观点，也没有补写后果。" : "结果还没有确认。"}</p>`;
+      const retryButton = branch.status === "FAILED" && currentStatus() === "ACTIVE"
+        ? `<button type="button" class="detail-button" data-scenario-branch-retry="${esc(branch.branch_id)}">重试这条分支</button>`
+        : "";
+      const adoptButton = canAdopt && branch.status === "READY"
+        ? `<button type="button" class="scenario-adopt" data-scenario-adopt="${esc(branch.branch_id)}" ${adoptBusy ? "disabled" : ""}>${adoptBusy ? "正在采用…" : "采用为共同记忆"}</button>`
+        : "";
+      return `<article class="scenario-branch-card is-${esc(branch.status.toLowerCase())}${adopted ? " is-adopted" : ""}">
+        <header><strong>分支 ${index + 1}</strong><span class="scenario-branch-status">${adopted ? "已采用" : status}</span></header>
+        ${consequence}
+        <div class="scenario-branch-actions">${retryButton}${adoptButton}</div>
+      </article>`;
+    }).join("");
+    return `<section class="scenario-branch-panel" aria-label="分支与后果">
+      <div class="scenario-branch-head"><h3>分支与后果</h3><span>换一种说法，只改变这条想象路径。</span></div>
+      ${characterPicker}
+      <div class="scenario-branch-cards">${cards}</div>
+    </section>`;
+  }
+
+  function branchForm() {
+    if (currentStatus() !== "ACTIVE") return "";
+    const point = branchAfter || latestEvent()?.id || null;
+    return `<section class="scenario-branch-panel scenario-branch-form" aria-label="创建分支">
+      <div class="scenario-branch-head"><h3>换一种说法试试</h3><span>${esc(branchPointLabel(point))}</span></div>
+      <textarea data-scenario-branch-message maxlength="4000" rows="2" placeholder="如果从这里换一种说法，你想说什么？">${esc(branchText)}</textarea>
+      <div class="scenario-branch-form-actions"><span>分支仍属于模拟情境，不会写入现实记忆。</span><button type="button" class="scenario-submit" data-scenario-branch-send ${branchBusy ? "disabled" : ""}>${branchBusy ? "正在生成分支…" : "生成分支"}</button></div>
+    </section>`;
+  }
+
+  function reviewPanel() {
+    if (currentStatus() !== "ENDED") return "";
+    const adoption = view.scenario.adoption;
+    const status = review.status || "NONE";
+    let content = "";
+    if (status === "READY") {
+      const item = review.review || {};
+      content = `<div class="scenario-review-grid">
+        <article><span>发生了什么</span><p>${esc(item.overview || "")}</p></article>
+        <article><span>你用了什么策略</span><p>${esc(item.strategy || "")}</p></article>
+        <article><span>收到什么反馈</span><p>${esc(item.feedback || "")}</p></article>
+        ${item.next_step ? `<article><span>下次可以试</span><p>${esc(item.next_step)}</p></article>` : ""}
+      </div>`;
+    } else if (status === "FAILED") {
+      content = `<p class="scenario-review-note is-error">这次复盘没有生成；没有伪造任何总结。可以重试。</p>
+        <button type="button" class="detail-button" data-scenario-review ${reviewBusy ? "disabled" : ""}>${reviewBusy ? "正在重试…" : "重试复盘"}</button>`;
+    } else if (status === "PENDING") {
+      content = '<p class="scenario-review-note">正在生成复盘…</p>';
+    } else {
+      content = `<p class="scenario-review-note">练习已经结束。复盘会总结你实际尝试的策略和收到的反馈。</p>
+        <button type="button" class="scenario-submit" data-scenario-review ${reviewBusy ? "disabled" : ""}>${reviewBusy ? "正在复盘…" : "生成复盘"}</button>`;
+    }
+    const adoptionNote = adoption
+      ? '<p class="scenario-adoption-note">已采用为共同记忆：之后的聊天会记得你练习过什么、用了什么策略、收到什么反馈。未采用的分支不会进入聊天。</p>'
+      : status === "READY"
+        ? '<p class="scenario-adoption-note is-hint">选一条已完成的分支，点“采用为共同记忆”，才会写入现实上下文；不采用的分支不会进入聊天。</p>'
+        : "";
+    return `<section class="scenario-review-panel" aria-label="复盘">
+      <div class="scenario-branch-head"><h3>复盘</h3><span>只看这次练习的记录，不补写现实后果。</span></div>
+      ${content}${adoptionNote}
+    </section>`;
+  }
+
   function render() {
     if (!view) return;
     const body = renderTurns(view.scenario);
-    CM.dom.chat.innerHTML = banner() + (body || '<div class="scenario-empty">先写下你在这个情境里想说的第一句话。</div>');
+    CM.dom.chat.innerHTML = banner()
+      + (body || '<div class="scenario-empty">先写下你在这个情境里想说的第一句话。</div>')
+      + branchForm() + branchCards() + reviewPanel();
     CM.scrollToBottom(false);
   }
 
@@ -152,9 +256,13 @@
     if (!id) return;
     const generation = ++loadGeneration;
     try {
-      const data = await CM.api(`/v2/scenarios/${encodeURIComponent(id)}`);
+      const [data, reviewData] = await Promise.all([
+        CM.api(`/v2/scenarios/${encodeURIComponent(id)}`),
+        CM.api(`/v2/scenarios/${encodeURIComponent(id)}/review`).catch(() => null),
+      ]);
       if (generation !== loadGeneration || !isActiveId(id)) return;
       view = data;
+      review = reviewData || {status:"NONE", review:null};
       if (view.activity.status !== "CREATED") resumeAttempt = null;
       render();
       CM.updateHeader();
@@ -209,6 +317,10 @@
     view = null;
     retry = null;
     resumeAttempt = null;
+    review = {status:"NONE", review:null};
+    branchAfter = null;
+    branchText = "";
+    pendingBranch = null;
     CM.state.conversation = {type:"DIRECT", groupId:null};
     document.body.classList.remove("scenario-mode");
     restoreHint();
@@ -225,6 +337,10 @@
     setHint();
     view = null;
     retry = null;
+    review = {status:"NONE", review:null};
+    branchAfter = null;
+    branchText = "";
+    pendingBranch = null;
     CM.closeDrawer();
     CM.features.stickers?.close?.();
     CM.features.images?.close?.();
@@ -545,7 +661,154 @@
     }
   }
 
+  async function endPractice() {
+    const id = activeId();
+    if (!id || !view || currentStatus() === "ENDED") return;
+    try {
+      await CM.api(`/v2/activities/${encodeURIComponent(id)}/end`, {
+        method:"POST",
+        body:JSON.stringify({request_id:crypto.randomUUID(),
+                             expected_version:view.activity.version}),
+      });
+      if (!isActiveId(id)) return;
+      await loadHistory();
+    } catch (error) {
+      if (!isActiveId(id)) return;
+      await loadHistory();
+      notify(statusOf(error) === 409
+        ? "练习状态刚刚变了，已经重新读取；再确认一次是否结束。"
+        : "没能确认练习是否结束，记录没有变化；可以再试一次。");
+    }
+  }
+
+  async function sendBranch() {
+    const id = activeId();
+    if (!id || !view || branchBusy) return;
+    const point = branchAfter || latestEvent()?.id || null;
+    const message = branchText.trim();
+    if (!point || !message) {
+      notify("先选一个分叉点，再写一句换一种说法的话。");
+      return;
+    }
+    const signature = JSON.stringify([point, message]);
+    if (!pendingBranch || pendingBranch.signature !== signature) {
+      pendingBranch = {signature, request_id:crypto.randomUUID()};
+    }
+    const request = pendingBranch;
+    branchBusy = true;
+    render();
+    notify("正在生成这条分支；它不会改写原来的对话。", {pending:true});
+    try {
+      await CM.api(`/v2/scenarios/${encodeURIComponent(id)}/branches`, {
+        method:"POST",
+        body:JSON.stringify({request_id:request.request_id, after_event_id:point,
+                             message}),
+      });
+      if (!isActiveId(id)) return;
+      pendingBranch = null;
+      branchText = "";
+      branchAfter = null;
+      await loadHistory();
+    } catch (error) {
+      if (!isActiveId(id)) return;
+      branchBusy = false;
+      if (statusOf(error) === 502) {
+        pendingBranch = null;
+        branchText = "";
+        await loadHistory();
+        notify("这条分支没有完成：只留下了你那句话，没有补写任何伙伴观点或后果。");
+        return;
+      }
+      render();
+      if (statusOf(error) === 409) {
+        await loadHistory();
+        notify("这次没有生成分支：练习状态或分叉点已经变化。");
+      } else {
+        notify("没能确认分支是否生成。再试会沿用同一个请求，不会重复。");
+      }
+    } finally {
+      if (isActiveId(id)) { branchBusy = false; render(); CM.updateComposerState(); }
+    }
+  }
+
+  async function retryBranch(branchId) {
+    const id = activeId();
+    if (!id || branchBusy) return;
+    branchBusy = true;
+    render();
+    try {
+      await CM.api(`/v2/scenarios/${encodeURIComponent(id)}/branches/${encodeURIComponent(branchId)}/retry`, {
+        method:"POST", body:JSON.stringify({request_id:crypto.randomUUID()}),
+      });
+      await loadHistory();
+    } catch (error) {
+      branchBusy = false;
+      await loadHistory();
+      notify(statusOf(error) === 502
+        ? "这条分支这次仍然没有生成；没有补写任何伙伴内容。"
+        : "没能重试这条分支，记录没有变化。");
+    } finally {
+      if (isActiveId(id)) { branchBusy = false; render(); CM.updateComposerState(); }
+    }
+  }
+
+  async function generateReview() {
+    const id = activeId();
+    if (!id || reviewBusy) return;
+    reviewBusy = true;
+    render();
+    try {
+      await CM.api(`/v2/scenarios/${encodeURIComponent(id)}/review`, {
+        method:"POST", body:JSON.stringify({request_id:crypto.randomUUID()}),
+      });
+      await loadHistory();
+    } catch (error) {
+      reviewBusy = false;
+      await loadHistory();
+      notify(statusOf(error) === 502
+        ? "这次复盘没有生成；没有伪造总结，可以重试。"
+        : "没能确认复盘结果，记录没有变化。");
+    } finally {
+      if (isActiveId(id)) { reviewBusy = false; render(); CM.updateComposerState(); }
+    }
+  }
+
+  async function adoptBranch(branchId) {
+    const id = activeId();
+    if (!id || adoptBusy) return;
+    const picker = CM.dom.chat.querySelector("[data-scenario-adopt-character]");
+    const characterId = picker?.value || null;
+    adoptBusy = true;
+    render();
+    try {
+      await CM.api(`/v2/scenarios/${encodeURIComponent(id)}/adopt`, {
+        method:"POST",
+        body:JSON.stringify({request_id:crypto.randomUUID(), branch_id:branchId,
+                             character_id:characterId}),
+      });
+      await loadHistory();
+    } catch (error) {
+      adoptBusy = false;
+      await loadHistory();
+      const detail = detailOf(error);
+      notify(detail === "SCENARIO_ALREADY_ADOPTED"
+        ? "这次练习已经采用过一条分支；不会再写入第二条现实记忆。"
+        : detail === "SCENARIO_REVIEW_NOT_READY"
+          ? "先完成复盘，才能采用分支为共同记忆。"
+          : "没有采用成功，现实记忆没有变化。");
+    } finally {
+      if (isActiveId(id)) { adoptBusy = false; render(); CM.updateComposerState(); }
+    }
+  }
+
   section.querySelector(".scenario-entry")?.addEventListener("click", () => openDrawer().catch(console.error));
+
+  CM.dom.chat.addEventListener("input", event => {
+    if (!CM.isScenarioConversation()) return;
+    if (event.target.matches?.("[data-scenario-branch-message]")) {
+      branchText = event.target.value;
+    }
+  });
 
   CM.dom.chat.addEventListener("click", event => {
     if (!CM.isScenarioConversation()) return;
@@ -553,6 +816,24 @@
     if (resume) { resumePractice().catch(console.error); return; }
     const exit = event.target.closest("[data-scenario-exit]");
     if (exit) { CM.switchCharacter(CM.state.characterId).catch(console.error); return; }
+    const end = event.target.closest("[data-scenario-end]");
+    if (end) { end.disabled = true; endPractice().catch(console.error); return; }
+    const branchAfterButton = event.target.closest("[data-scenario-branch-after]");
+    if (branchAfterButton) {
+      branchAfter = Number(branchAfterButton.dataset.scenarioBranchAfter);
+      render();
+      const input = CM.dom.chat.querySelector("[data-scenario-branch-message]");
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      return;
+    }
+    const branchSend = event.target.closest("[data-scenario-branch-send]");
+    if (branchSend) { sendBranch().catch(console.error); return; }
+    const branchRetry = event.target.closest("[data-scenario-branch-retry]");
+    if (branchRetry) { retryBranch(branchRetry.dataset.scenarioBranchRetry).catch(console.error); return; }
+    const reviewButton = event.target.closest("[data-scenario-review]");
+    if (reviewButton) { generateReview().catch(console.error); return; }
+    const adoptButton = event.target.closest("[data-scenario-adopt]");
+    if (adoptButton) { adoptBranch(adoptButton.dataset.scenarioAdopt).catch(console.error); return; }
     const abandon = event.target.closest("[data-scenario-abandon]");
     if (abandon) {
       const id = activeId();

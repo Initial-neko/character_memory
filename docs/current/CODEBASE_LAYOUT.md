@@ -38,7 +38,7 @@ src/character_memory/
 
 - `reply_suggestions.py` — 从用户可见Direct/Group事实生成草稿；画像/上下文失效，不读取私有Person记忆。
 
-- `relationship_scenario.py` — P11关系练习执行：复用Activity与建议批次，一次显式回合生成可辨认的伙伴观点和模拟回应；失败持久化，不伪造后果。
+- `relationship_scenario.py` — P11/P12关系练习执行：复用Activity与建议批次，一次显式回合生成可辨认的伙伴观点和模拟回应；分支生成与重试、结束后复盘、显式采用写入一条 REAL 事件与 SHARED 记忆；失败持久化，不伪造后果。
 - `fact_provenance.py` — Memory旧字段到严格FactRef的只读来源解析；不初始化schema或复制事实。
 - `chat_service.py` — direct application service / per-character lock。
 - `voice_message_materializer.py` / `voice_message_service.py` — durable Voice Message 的正式 TTS 请求、ready/failed 状态和事件更新。
@@ -58,7 +58,7 @@ src/character_memory/
 
 - `facts.py` — 不同权威事实域的不可变FactRef身份契约。
 - `activity.py` — Activity状态机、参与者身份（正式/活动局部）与冻结的SIMULATED scope；无模型调用。
-- `relationship_scenario.py` — 关系练习创建/回合契约：2–3位阵容、结构化的伙伴观点与模拟回应、观点差异校验；不拥有状态机。
+- `relationship_scenario.py` — 关系练习创建/回合/分支/复盘/采用契约：2–3位阵容、结构化的伙伴观点与模拟回应、观点差异校验、分支后果、复盘字段与显式采用；不拥有状态机。
 - `experience_profile.py` — 显式用户底色枚举、版本请求及独立Prompt区块；不属于人物Persona。
 - `experience_candidates.py` — 从明确反馈文本确定性解析可解释的偏好候选（长期/当前场景、命中短语、显式选择优先）；不调用模型，只允许既有三个维度。
 - `models.py` — `Event / Memory / PersonReaction / ActionDecision / ...`。
@@ -89,7 +89,7 @@ src/character_memory/
 - `experience_profiles.py` — 本地用户底色head/version、CAS、清除与恢复；无模型调用。
 - `experience_candidates.py` — 候选决定的持久列（复用 signal 表，不建新表）：采用/忽略/回退版本与清除时失效。
 - `activities.py` — Activity状态/参与者/幂等回执的同事务持久化；读取不加载模型，也不创建人物。
-- `scenarios.py` — 关系练习场景、描述、SIMULATED事件与回合状态的唯一持久化；每行事件校验冻结scope，不写Event/Memory/Conversation fact。
+- `scenarios.py` — 关系练习场景、描述、SIMULATED事件、回合、分支/尝试、复盘/尝试与采用回执的唯一持久化；每行事件校验冻结scope，只有显式采用会在同一事务内写一条REAL事件与一条REAL记忆。
 - `message_receipts.py` — Direct/Group async接受及逐人物认知执行回执；认知提交与队列交接分别记录，不声明可选外部效果完成。
 - `reaction_delivery.py` — async 来源待交接记录、冻结批次、owner/租约与持久认知交付状态；只引用现有事实和媒体。
 - `sqlite.py` — core tables、migration ledger、Event/Memory/Trace/Intent/Media persistence。
@@ -353,7 +353,7 @@ CLI 不提供 `day` / `simulate` / `tick`，AppBundle 不装配生活模拟器�
 | Stateless Claude World execution | `runtime_services.py` → `runtime/claude_process.py` / `claude_tools.py` / `process_tree.py` → `runtime/capability_execution.py` |
 | Character life / execution inspection | `character_life.py` / `life_conversation.py` → `character_life_web.py` → `web/life.js` / `web/app.js` |
 | Activity lifecycle (P10) | `domain/activity.py` → `storage/activities.py` → `activity_web.py`；契约见 [Activity](ACTIVITY.md) |
-| Relationship practice (P11) | `domain/relationship_scenario.py` → `storage/scenarios.py` → `application/relationship_scenario.py` → `scenario_web.py` → `web/scenarios.js`；建议复用 `reply_suggestions.py`，契约见 [Activity](ACTIVITY.md) |
+| Relationship practice + branches/review/adoption (P11/P12) | `domain/relationship_scenario.py` → `storage/scenarios.py` → `application/relationship_scenario.py` → `scenario_web.py` → `web/scenarios.js`；建议复用 `reply_suggestions.py`；显式采用写一条 REAL `PRACTICE_ADOPTED` 事件与 SHARED 记忆，契约见 [Activity](ACTIVITY.md) |
 | Avatar | `runtime_services.py` → `avatars.py` / `avatar_intent.py` → `avatar_web.py` → `web/avatars.js` |
 | Voice/ASR | `media_bootstrap.py` → `media_runtime.py` → `media_server.py` → `web/voice.js` |
 | Formal TTS | `config.py` → `media_server.py` → `tts_lab.py` → `web/voice.js` |

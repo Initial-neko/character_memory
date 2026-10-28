@@ -18,7 +18,13 @@ from uuid import uuid4
 
 from character_memory.domain.activity import activity_experience_scope, participant_id
 from character_memory.domain.relationship_scenario import (
+    ScenarioAdoptRequest,
+    ScenarioBranchCreate,
+    ScenarioBranchOutput,
+    ScenarioBranchRetry,
     ScenarioCreate,
+    ScenarioReviewOutput,
+    ScenarioReviewRequest,
     ScenarioRoundOutput,
     ScenarioRoundRequest,
     validate_round_output,
@@ -67,6 +73,11 @@ class ScenarioRepository:
         self.store = store
         if initialize:
             store.apply_schema_migration("scenario/001-practice", self._migrate, immediate=True)
+            # P12 extends the same store, not a second scenario runtime. The
+            # migration runs in its own ledger entry so P11 databases gain the
+            # branch column and review/adoption tables without re-running 001.
+            store.apply_schema_migration("scenario/002-branch-review",
+                                         self._migrate_branch_review, immediate=True)
 
     def _migrate(self) -> None:
         conn = self.store.conn
@@ -120,16 +131,114 @@ class ScenarioRepository:
             ")"
         )
 
+    def _migrate_branch_review(self) -> None:
+        conn = self.store.conn
+        columns = {str(row["name"]) for row in conn.execute(
+            "PRAGMA table_info(scenario_events)").fetchall()}
+        if "branch_id" not in columns:
+            # NULL is the main transcript. A branch id is server-generated and
+            # travels with every branch event, so one branch can never be read
+            # as another or as the main line.
+            conn.execute("ALTER TABLE scenario_events ADD COLUMN branch_id TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scenario_events_branch_order "
+            "ON scenario_events(activity_id,branch_id,id)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS scenario_branches("
+            "activity_id TEXT NOT NULL,"
+            "branch_id TEXT NOT NULL,"
+            "after_event_id INTEGER NOT NULL,"
+            "turn_id TEXT NOT NULL,"
+            "status TEXT NOT NULL CHECK(status IN ('PENDING','READY','FAILED')),"
+            "consequence TEXT,"
+            "failure_code TEXT,"
+            "created_at TEXT NOT NULL,"
+            "finished_at TEXT,"
+            "experience_scope_json TEXT NOT NULL,"
+            "PRIMARY KEY(activity_id,branch_id),"
+            "UNIQUE(activity_id,turn_id)"
+            ")"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS scenario_branch_attempts("
+            "activity_id TEXT NOT NULL,"
+            "branch_id TEXT NOT NULL,"
+            "request_id TEXT NOT NULL,"
+            "request_hash TEXT NOT NULL,"
+            "status TEXT NOT NULL CHECK(status IN ('PENDING','READY','FAILED')),"
+            "failure_code TEXT,"
+            "failure_detail TEXT,"
+            "created_at TEXT NOT NULL,"
+            "finished_at TEXT,"
+            "PRIMARY KEY(activity_id,request_id)"
+            ")"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scenario_branch_attempts_branch "
+            "ON scenario_branch_attempts(activity_id,branch_id)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS scenario_reviews("
+            "activity_id TEXT PRIMARY KEY,"
+            "status TEXT NOT NULL CHECK(status IN ('PENDING','READY','FAILED')),"
+            "request_id TEXT NOT NULL,"
+            "request_hash TEXT NOT NULL,"
+            "overview TEXT,"
+            "strategy TEXT,"
+            "feedback TEXT,"
+            "next_step TEXT,"
+            "failure_code TEXT,"
+            "created_at TEXT NOT NULL,"
+            "updated_at TEXT NOT NULL,"
+            "finished_at TEXT,"
+            "experience_scope_json TEXT NOT NULL"
+            ")"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS scenario_review_attempts("
+            "activity_id TEXT NOT NULL,"
+            "request_id TEXT NOT NULL,"
+            "request_hash TEXT NOT NULL,"
+            "status TEXT NOT NULL CHECK(status IN ('PENDING','READY','FAILED')),"
+            "failure_code TEXT,"
+            "failure_detail TEXT,"
+            "created_at TEXT NOT NULL,"
+            "finished_at TEXT,"
+            "PRIMARY KEY(activity_id,request_id)"
+            ")"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS scenario_adoptions("
+            "activity_id TEXT PRIMARY KEY,"
+            "branch_id TEXT NOT NULL,"
+            "character_id TEXT NOT NULL,"
+            "request_id TEXT NOT NULL,"
+            "request_hash TEXT NOT NULL,"
+            "event_id INTEGER NOT NULL,"
+            "memory_id INTEGER NOT NULL,"
+            "created_at TEXT NOT NULL,"
+            "source_scope_json TEXT NOT NULL,"
+            "result_scope_json TEXT NOT NULL"
+            ")"
+        )
+
     # -- reads -----------------------------------------------------------
 
     @staticmethod
     def _event(row) -> dict:
         scope = json.loads(row["experience_scope_json"])
-        if not isinstance(scope, dict) or scope.get("reality") != "SIMULATED":
+        branch_id = row["branch_id"]
+        expected = activity_experience_scope(
+            str(row["activity_id"]), branch_id=str(branch_id) if branch_id is not None else None)
+        # The scope is not decoration: a row whose stored scope no longer names
+        # its own activity/branch is corrupt, not "real enough to show".
+        if not isinstance(scope, dict) or scope != expected:
             raise ScenarioCorrupt("stored scenario event lost its simulated scope")
         return {
             "id": int(row["id"]),
             "turn_id": str(row["turn_id"]),
+            "branch_id": str(branch_id) if branch_id is not None else None,
             "actor_type": str(row["actor_type"]),
             "participant_key": str(row["participant_key"]),
             "event_type": str(row["event_type"]),
@@ -154,20 +263,34 @@ class ScenarioRepository:
         ).fetchall()
         return {str(row["participant_key"]): str(row["description"]) for row in rows}
 
-    def events(self, activity_id: str, *, limit: int | None = None) -> list[dict]:
+    def events(self, activity_id: str, *, limit: int | None = None,
+               branch_id: str | None = None) -> list[dict]:
+        """Read one transcript only.
+
+        ``branch_id=None`` is the main line. A branch read supplies its own id,
+        so the two never share a result set and cannot contaminate each other.
+        """
+        branch_sql = "branch_id IS NULL" if branch_id is None else "branch_id=?"
+        branch_args: list = [] if branch_id is None else [branch_id]
         with self.store._lock:
-            sql = "SELECT * FROM scenario_events WHERE activity_id=? ORDER BY id"
-            args: list = [activity_id]
+            sql = ("SELECT * FROM scenario_events WHERE activity_id=? AND "
+                   + branch_sql + " ORDER BY id")
+            args: list = [activity_id, *branch_args]
             if limit is not None:
-                sql = ("SELECT * FROM (SELECT * FROM scenario_events WHERE activity_id=? "
-                       "ORDER BY id DESC LIMIT ?) ORDER BY id")
-                args = [activity_id, int(limit)]
+                sql = ("SELECT * FROM (SELECT * FROM scenario_events WHERE activity_id=? AND "
+                       + branch_sql + " ORDER BY id DESC LIMIT ?) ORDER BY id")
+                args = [activity_id, *branch_args, int(limit)]
             return [self._event(row) for row in self.store.conn.execute(sql, args).fetchall()]
 
+    def branch_events(self, activity_id: str, branch_id: str) -> list[dict]:
+        return self.events(activity_id, branch_id=branch_id)
+
     def latest_event_id(self, activity_id: str) -> int | None:
+        """Watermark of the main transcript; branches never move it."""
         with self.store._lock:
             row = self.store.conn.execute(
-                "SELECT MAX(id) FROM scenario_events WHERE activity_id=?", (activity_id,)
+                "SELECT MAX(id) FROM scenario_events WHERE activity_id=? AND branch_id IS NULL",
+                (activity_id,),
             ).fetchone()
             return int(row[0]) if row and row[0] is not None else None
 
@@ -195,6 +318,8 @@ class ScenarioRepository:
                 "notes": notes,
                 "events": self.events(activity_id),
                 "rounds": self.rounds(activity_id),
+                "branches": self.branches(activity_id),
+                "adoption": self.adoption(activity_id),
             }
 
     def exists(self, activity_id: str) -> bool:
@@ -261,7 +386,8 @@ class ScenarioRepository:
 
     def _turn_events(self, activity_id: str, turn_id: str) -> list[dict]:
         rows = self.store.conn.execute(
-            "SELECT * FROM scenario_events WHERE activity_id=? AND turn_id=? ORDER BY id",
+            "SELECT * FROM scenario_events WHERE activity_id=? AND turn_id=? "
+            "AND branch_id IS NULL ORDER BY id",
             (activity_id, turn_id),
         ).fetchall()
         return [self._event(row) for row in rows]
@@ -403,7 +529,8 @@ class ScenarioRepository:
             if latest is None or latest != int(event_id):
                 raise ScenarioConflict("SCENARIO_CONTEXT_CHANGED")
             rows = self.store.conn.execute(
-                "SELECT * FROM scenario_events WHERE activity_id=? ORDER BY id DESC LIMIT 12",
+                "SELECT * FROM scenario_events WHERE activity_id=? AND branch_id IS NULL "
+                "ORDER BY id DESC LIMIT 12",
                 (activity_id,),
             ).fetchall()
             events = [self._event(item) for item in reversed(rows)]
@@ -431,3 +558,432 @@ class ScenarioRepository:
                 "events": events,
                 "watermark": latest,
             }
+
+    # -- branches --------------------------------------------------------
+
+    def _branch_summary(self, row) -> dict:
+        scope = json.loads(row["experience_scope_json"])
+        branch_id = str(row["branch_id"])
+        expected = activity_experience_scope(str(row["activity_id"]), branch_id=branch_id)
+        if not isinstance(scope, dict) or scope != expected:
+            raise ScenarioCorrupt("stored branch lost its simulated scope")
+        return {
+            "activity_id": str(row["activity_id"]),
+            "branch_id": branch_id,
+            "after_event_id": int(row["after_event_id"]),
+            "turn_id": str(row["turn_id"]),
+            "status": str(row["status"]),
+            "consequence": row["consequence"],
+            "failure_code": row["failure_code"],
+            "created_at": str(row["created_at"]),
+            "finished_at": row["finished_at"],
+            "experience_scope": scope,
+        }
+
+    def _branch_row(self, activity_id: str, branch_id: str):
+        row = self.store.conn.execute(
+            "SELECT * FROM scenario_branches WHERE activity_id=? AND branch_id=?",
+            (activity_id, branch_id),
+        ).fetchone()
+        if row is None:
+            raise ScenarioMissing("SCENARIO_BRANCH_NOT_FOUND")
+        return row
+
+    def branches(self, activity_id: str) -> list[dict]:
+        with self.store._lock:
+            rows = self.store.conn.execute(
+                "SELECT * FROM scenario_branches WHERE activity_id=? ORDER BY created_at,rowid",
+                (activity_id,),
+            ).fetchall()
+            return [self._branch_summary(row) for row in rows]
+
+    def branch(self, activity_id: str, branch_id: str) -> dict:
+        with self.store._lock:
+            row = self._branch_row(activity_id, branch_id)
+            return {**self._branch_summary(row),
+                    "events": self.events(activity_id, branch_id=branch_id)}
+
+    def _branch_attempt_row(self, activity_id: str, request_id: str):
+        return self.store.conn.execute(
+            "SELECT * FROM scenario_branch_attempts WHERE activity_id=? AND request_id=?",
+            (activity_id, request_id),
+        ).fetchone()
+
+    @staticmethod
+    def _branch_hash(activity_id: str, operation: str, payload: dict) -> str:
+        return _digest({"activity_id": activity_id, "operation": operation,
+                        "payload": payload})
+
+    def _branch_replay(self, activity_id: str, request_id: str, request_hash: str,
+                       *, expected_branch_id: str | None = None) -> dict | None:
+        row = self._branch_attempt_row(activity_id, request_id)
+        if row is None:
+            return None
+        if row["request_hash"] != request_hash:
+            raise ScenarioConflict("REQUEST_ID_CONFLICT")
+        branch_id = str(row["branch_id"])
+        if expected_branch_id is not None and branch_id != expected_branch_id:
+            raise ScenarioConflict("REQUEST_ID_CONFLICT")
+        if row["status"] == "FAILED":
+            raise ScenarioFailed(str(row["failure_code"] or "SCENARIO_BRANCH_GENERATION_FAILED"),
+                                 str(row["failure_detail"] or ""))
+        if row["status"] == "PENDING":
+            # The same request id never starts a second model call.
+            raise ScenarioConflict("SCENARIO_BRANCH_PENDING")
+        return {"claimed": False, "replayed": True,
+                **self.branch(activity_id, branch_id)}
+
+    def begin_branch(self, activity_id: str, request: ScenarioBranchCreate) -> dict:
+        """Claim one branch generation at an existing main-transcript event.
+
+        The branch row, its alternative user turn and the attempt receipt commit
+        together. Partner content is written only after the model result passes
+        validation, so a failed branch never leaves fabricated views behind.
+        """
+        request_hash = self._branch_hash(
+            activity_id, "CREATE_BRANCH",
+            {"after_event_id": int(request.after_event_id), "message": request.message})
+        with self.store.transaction(immediate=True):
+            replay = self._branch_replay(activity_id, request.request_id, request_hash)
+            if replay is not None:
+                return replay
+            if not self.exists(activity_id):
+                raise ScenarioMissing("SCENARIO_NOT_FOUND")
+            status, _ = self._activity_status(activity_id)
+            if status != "ACTIVE":
+                raise ScenarioConflict("SCENARIO_NOT_ACTIVE")
+            point = self.store.conn.execute(
+                "SELECT id FROM scenario_events WHERE activity_id=? AND branch_id IS NULL AND id=?",
+                (activity_id, int(request.after_event_id)),
+            ).fetchone()
+            if point is None:
+                raise ScenarioConflict("SCENARIO_BRANCH_POINT_INVALID")
+            branch_id = uuid4().hex
+            turn_id = uuid4().hex
+            scope_json = _canonical(activity_experience_scope(activity_id, branch_id=branch_id))
+            now = _stamp()
+            self.store.conn.execute(
+                "INSERT INTO scenario_branches(activity_id,branch_id,after_event_id,turn_id,status,"
+                "created_at,experience_scope_json) VALUES(?,?,?,?,?,?,?)",
+                (activity_id, branch_id, int(request.after_event_id), turn_id, "PENDING",
+                 now, scope_json),
+            )
+            self.store.conn.execute(
+                "INSERT INTO scenario_events(activity_id,branch_id,turn_id,actor_type,"
+                "participant_key,event_type,content,stance,created_at,experience_scope_json) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (activity_id, branch_id, turn_id, "USER", "user", "USER_MESSAGE",
+                 request.message, None, now, scope_json),
+            )
+            self.store.conn.execute(
+                "INSERT INTO scenario_branch_attempts(activity_id,branch_id,request_id,"
+                "request_hash,status,created_at) VALUES(?,?,?,?,?,?)",
+                (activity_id, branch_id, request.request_id, request_hash, "PENDING", now),
+            )
+            return {"claimed": True, "branch_id": branch_id, "turn_id": turn_id,
+                    "after_event_id": int(request.after_event_id),
+                    "message": request.message,
+                    "experience_scope": activity_experience_scope(activity_id, branch_id=branch_id)}
+
+    def begin_branch_retry(self, activity_id: str, branch_id: str,
+                           request: ScenarioBranchRetry) -> dict:
+        """Start a fresh attempt for a durably FAILED branch.
+
+        The alternative user turn is reused; only partner output is generated
+        again. The previously failed request id keeps returning its own failure.
+        """
+        request_hash = self._branch_hash(activity_id, "RETRY_BRANCH", {})
+        with self.store.transaction(immediate=True):
+            replay = self._branch_replay(activity_id, request.request_id, request_hash,
+                                         expected_branch_id=branch_id)
+            if replay is not None:
+                return replay
+            row = self._branch_row(activity_id, branch_id)
+            summary = self._branch_summary(row)
+            if summary["status"] == "READY":
+                return {"claimed": False, "replayed": True,
+                        **self.branch(activity_id, branch_id)}
+            if summary["status"] == "PENDING":
+                raise ScenarioConflict("SCENARIO_BRANCH_PENDING")
+            status, _ = self._activity_status(activity_id)
+            if status != "ACTIVE":
+                raise ScenarioConflict("SCENARIO_NOT_ACTIVE")
+            user = self.store.conn.execute(
+                "SELECT content FROM scenario_events WHERE activity_id=? AND branch_id=? "
+                "AND event_type='USER_MESSAGE' ORDER BY id LIMIT 1",
+                (activity_id, branch_id),
+            ).fetchone()
+            if user is None:
+                raise ScenarioCorrupt("stored branch lost its alternative user turn")
+            now = _stamp()
+            self.store.conn.execute(
+                "UPDATE scenario_branches SET status='PENDING',failure_code=NULL,finished_at=NULL "
+                "WHERE activity_id=? AND branch_id=? AND status='FAILED'",
+                (activity_id, branch_id),
+            )
+            self.store.conn.execute(
+                "INSERT INTO scenario_branch_attempts(activity_id,branch_id,request_id,"
+                "request_hash,status,created_at) VALUES(?,?,?,?,?,?)",
+                (activity_id, branch_id, request.request_id, request_hash, "PENDING", now),
+            )
+            return {"claimed": True, "branch_id": branch_id,
+                    "turn_id": summary["turn_id"],
+                    "after_event_id": summary["after_event_id"],
+                    "message": str(user["content"]),
+                    "experience_scope": activity_experience_scope(
+                        activity_id, branch_id=branch_id)}
+
+    def fail_branch(self, activity_id: str, branch_id: str, request_id: str, code: str,
+                    detail: str = "") -> None:
+        with self.store.transaction(immediate=True):
+            now = _stamp()
+            self.store.conn.execute(
+                "UPDATE scenario_branches SET status='FAILED',failure_code=?,finished_at=? "
+                "WHERE activity_id=? AND branch_id=? AND status='PENDING'",
+                (code, now, activity_id, branch_id),
+            )
+            self.store.conn.execute(
+                "UPDATE scenario_branch_attempts SET status='FAILED',failure_code=?,"
+                "failure_detail=?,finished_at=? WHERE activity_id=? AND branch_id=? "
+                "AND request_id=? AND status='PENDING'",
+                (code, detail[:2000], now, activity_id, branch_id, request_id),
+            )
+
+    def commit_branch(self, activity_id: str, branch_id: str, request_id: str, turn_id: str,
+                      output: ScenarioBranchOutput, *, participants: list[dict]) -> dict:
+        by_key = {str(item["participant_key"]): item for item in participants}
+        simulated = {key for key, item in by_key.items()
+                     if item["actor_type"] == "SIMULATED_CHARACTER"}
+        validate_round_output(output, participant_ids=list(by_key),
+                              simulated_ids=list(simulated))
+        with self.store.transaction(immediate=True):
+            summary = self._branch_summary(self._branch_row(activity_id, branch_id))
+            if summary["status"] != "PENDING":
+                raise ScenarioConflict("SCENARIO_BRANCH_PENDING")
+            status, _ = self._activity_status(activity_id)
+            if status != "ACTIVE":
+                raise ScenarioConflict("SCENARIO_STATE_CHANGED")
+            scope_json = _canonical(activity_experience_scope(
+                activity_id, branch_id=branch_id))
+            now = _stamp()
+            for perspective in output.perspectives:
+                participant = by_key[perspective.participant_id]
+                self.store.conn.execute(
+                    "INSERT INTO scenario_events(activity_id,branch_id,turn_id,actor_type,"
+                    "participant_key,event_type,content,stance,created_at,experience_scope_json) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (activity_id, branch_id, turn_id, participant["actor_type"],
+                     perspective.participant_id, "PERSPECTIVE", perspective.perspective,
+                     perspective.stance, now, scope_json),
+                )
+            for reply in output.replies:
+                participant = by_key[reply.participant_id]
+                self.store.conn.execute(
+                    "INSERT INTO scenario_events(activity_id,branch_id,turn_id,actor_type,"
+                    "participant_key,event_type,content,stance,created_at,experience_scope_json) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (activity_id, branch_id, turn_id, participant["actor_type"],
+                     reply.participant_id, "REPLY", reply.message, None, now, scope_json),
+                )
+            changed = self.store.conn.execute(
+                "UPDATE scenario_branches SET status='READY',consequence=?,finished_at=? "
+                "WHERE activity_id=? AND branch_id=? AND status='PENDING'",
+                (output.consequence, now, activity_id, branch_id),
+            )
+            if changed.rowcount != 1:
+                raise ScenarioConflict("SCENARIO_BRANCH_PENDING")
+            self.store.conn.execute(
+                "UPDATE scenario_branch_attempts SET status='READY',finished_at=? "
+                "WHERE activity_id=? AND branch_id=? AND request_id=? AND status='PENDING'",
+                (now, activity_id, branch_id, request_id),
+            )
+            return self.branch(activity_id, branch_id)
+
+    # -- review ----------------------------------------------------------
+
+    def _review_attempt_row(self, activity_id: str, request_id: str):
+        return self.store.conn.execute(
+            "SELECT * FROM scenario_review_attempts WHERE activity_id=? AND request_id=?",
+            (activity_id, request_id),
+        ).fetchone()
+
+    @staticmethod
+    def _review_hash(activity_id: str) -> str:
+        return _digest({"activity_id": activity_id, "operation": "REVIEW_SCENARIO"})
+
+    def _review_payload(self, row) -> dict:
+        scope = json.loads(row["experience_scope_json"])
+        expected = activity_experience_scope(str(row["activity_id"]))
+        if not isinstance(scope, dict) or scope != expected:
+            raise ScenarioCorrupt("stored review lost its simulated scope")
+        return {
+            "activity_id": str(row["activity_id"]),
+            "status": str(row["status"]),
+            "request_id": str(row["request_id"]),
+            "overview": row["overview"],
+            "strategy": row["strategy"],
+            "feedback": row["feedback"],
+            "next_step": row["next_step"],
+            "failure_code": row["failure_code"],
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+            "finished_at": row["finished_at"],
+            "experience_scope": scope,
+        }
+
+    def review(self, activity_id: str) -> dict:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM scenario_reviews WHERE activity_id=?", (activity_id,)
+            ).fetchone()
+            if row is None:
+                return {"activity_id": activity_id, "status": "NONE", "review": None,
+                        "experience_scope": activity_experience_scope(activity_id)}
+            payload = self._review_payload(row)
+            return {"activity_id": activity_id, "status": payload["status"],
+                    "review": payload, "experience_scope": payload["experience_scope"]}
+
+    def _review_replay(self, activity_id: str, request_id: str,
+                       request_hash: str) -> dict | None:
+        row = self._review_attempt_row(activity_id, request_id)
+        if row is None:
+            return None
+        if row["request_hash"] != request_hash:
+            raise ScenarioConflict("REQUEST_ID_CONFLICT")
+        if row["status"] == "FAILED":
+            raise ScenarioFailed(str(row["failure_code"] or "SCENARIO_REVIEW_FAILED"),
+                                 str(row["failure_detail"] or ""))
+        if row["status"] == "PENDING":
+            raise ScenarioConflict("SCENARIO_REVIEW_PENDING")
+        return {"claimed": False, "replayed": True, **self.review(activity_id)}
+
+    def begin_review(self, activity_id: str, request: ScenarioReviewRequest) -> dict:
+        request_hash = self._review_hash(activity_id)
+        with self.store.transaction(immediate=True):
+            replay = self._review_replay(activity_id, request.request_id, request_hash)
+            if replay is not None:
+                return replay
+            if not self.exists(activity_id):
+                raise ScenarioMissing("SCENARIO_NOT_FOUND")
+            current = self.review(activity_id)
+            if current["status"] == "READY":
+                # One durable review per scenario. A new request id reads the
+                # existing result instead of paying for another model call.
+                return {"claimed": False, "replayed": True, **current}
+            if current["status"] == "PENDING":
+                raise ScenarioConflict("SCENARIO_REVIEW_PENDING")
+            status, _ = self._activity_status(activity_id)
+            if status != "ENDED":
+                raise ScenarioConflict("SCENARIO_NOT_ENDED")
+            scope_json = _canonical(activity_experience_scope(activity_id))
+            now = _stamp()
+            if current["status"] == "NONE":
+                self.store.conn.execute(
+                    "INSERT INTO scenario_reviews(activity_id,status,request_id,request_hash,"
+                    "created_at,updated_at,experience_scope_json) VALUES(?,?,?,?,?,?,?)",
+                    (activity_id, "PENDING", request.request_id, request_hash, now, now,
+                     scope_json),
+                )
+            else:
+                self.store.conn.execute(
+                    "UPDATE scenario_reviews SET status='PENDING',request_id=?,request_hash=?,"
+                    "overview=NULL,strategy=NULL,feedback=NULL,next_step=NULL,failure_code=NULL,"
+                    "updated_at=?,finished_at=NULL WHERE activity_id=?",
+                    (request.request_id, request_hash, now, activity_id),
+                )
+            self.store.conn.execute(
+                "INSERT INTO scenario_review_attempts(activity_id,request_id,request_hash,"
+                "status,created_at) VALUES(?,?,?,?,?)",
+                (activity_id, request.request_id, request_hash, "PENDING", now),
+            )
+            return {"claimed": True, "experience_scope": activity_experience_scope(activity_id)}
+
+    def fail_review(self, activity_id: str, request_id: str, code: str, detail: str = "") -> None:
+        with self.store.transaction(immediate=True):
+            now = _stamp()
+            self.store.conn.execute(
+                "UPDATE scenario_reviews SET status='FAILED',failure_code=?,updated_at=?,"
+                "finished_at=? WHERE activity_id=? AND status='PENDING' AND request_id=?",
+                (code, now, now, activity_id, request_id),
+            )
+            self.store.conn.execute(
+                "UPDATE scenario_review_attempts SET status='FAILED',failure_code=?,"
+                "failure_detail=?,finished_at=? WHERE activity_id=? AND request_id=? "
+                "AND status='PENDING'",
+                (code, detail[:2000], now, activity_id, request_id),
+            )
+
+    def commit_review(self, activity_id: str, request_id: str,
+                      output: ScenarioReviewOutput) -> dict:
+        with self.store.transaction(immediate=True):
+            status, _ = self._activity_status(activity_id)
+            if status != "ENDED":
+                raise ScenarioConflict("SCENARIO_STATE_CHANGED")
+            now = _stamp()
+            changed = self.store.conn.execute(
+                "UPDATE scenario_reviews SET status='READY',overview=?,strategy=?,feedback=?,"
+                "next_step=?,failure_code=NULL,updated_at=?,finished_at=? "
+                "WHERE activity_id=? AND status='PENDING' AND request_id=?",
+                (output.overview, output.strategy, output.feedback, output.next_step,
+                 now, now, activity_id, request_id),
+            )
+            if changed.rowcount != 1:
+                raise ScenarioConflict("SCENARIO_REVIEW_PENDING")
+            self.store.conn.execute(
+                "UPDATE scenario_review_attempts SET status='READY',finished_at=? "
+                "WHERE activity_id=? AND request_id=? AND status='PENDING'",
+                (now, activity_id, request_id),
+            )
+            return self.review(activity_id)
+
+    # -- explicit adoption ----------------------------------------------
+
+    def adoption(self, activity_id: str) -> dict | None:
+        with self.store._lock:
+            row = self.store.conn.execute(
+                "SELECT * FROM scenario_adoptions WHERE activity_id=?", (activity_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            source = json.loads(row["source_scope_json"])
+            result = json.loads(row["result_scope_json"])
+            branch_id = str(row["branch_id"])
+            expected_source = activity_experience_scope(activity_id, branch_id=branch_id)
+            if (not isinstance(source, dict) or source != expected_source
+                    or result != {"schema_version": 1, "reality": "REAL"}):
+                raise ScenarioCorrupt("stored adoption scope is invalid")
+            return {
+                "activity_id": activity_id,
+                "branch_id": branch_id,
+                "character_id": str(row["character_id"]),
+                "request_id": str(row["request_id"]),
+                "event_id": int(row["event_id"]),
+                "memory_id": int(row["memory_id"]),
+                "created_at": str(row["created_at"]),
+                "source_scope": source,
+                "result_scope": result,
+            }
+
+    @staticmethod
+    def adoption_hash(activity_id: str, request: ScenarioAdoptRequest) -> str:
+        return _digest({"activity_id": activity_id, "operation": "ADOPT_BRANCH",
+                        "payload": request.model_dump(mode="json")})
+
+    def record_adoption(self, activity_id: str, request: ScenarioAdoptRequest, *,
+                        character_id: str, event_id: int, memory_id: int) -> dict:
+        """Persist the adoption receipt in the caller's open write transaction."""
+        branch_id = request.branch_id
+        request_hash = self.adoption_hash(activity_id, request)
+        self.store.conn.execute(
+            "INSERT INTO scenario_adoptions(activity_id,branch_id,character_id,request_id,"
+            "request_hash,event_id,memory_id,created_at,source_scope_json,result_scope_json) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (activity_id, branch_id, character_id, request.request_id, request_hash,
+             int(event_id), int(memory_id), _stamp(),
+             _canonical(activity_experience_scope(activity_id, branch_id=branch_id)),
+             _canonical({"schema_version": 1, "reality": "REAL"})),
+        )
+        return self.adoption(activity_id)
+
+    def adoption_hash_for(self, activity_id: str, request: ScenarioAdoptRequest) -> str:
+        return self.adoption_hash(activity_id, request)

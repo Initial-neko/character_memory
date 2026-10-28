@@ -36,6 +36,7 @@ MAX_PARTICIPANT_DESCRIPTION = 400
 ScenarioEventType = Literal["USER_MESSAGE", "PERSPECTIVE", "REPLY"]
 ScenarioActorType = Literal["USER", "CHARACTER", "SIMULATED_CHARACTER"]
 ScenarioRoundStatus = Literal["PENDING", "READY", "FAILED"]
+ScenarioReviewStatus = Literal["NONE", "PENDING", "READY", "FAILED"]
 
 
 def normalized_text(value: str) -> str:
@@ -196,3 +197,103 @@ def validate_round_output(output: ScenarioRoundOutput, *, participant_ids: list[
     if any(item.participant_id not in simulated_ids for item in output.replies):
         raise ValueError("only simulated participants may reply inside the practice")
     return output
+
+
+# ---------------------------------------------------------------------------
+# P12: branches, review and explicit adoption
+# ---------------------------------------------------------------------------
+
+class ScenarioBranchCreate(BaseModel):
+    """Create one imagined branch from an existing main-transcript event.
+
+    ``after_event_id`` is the branch point: the model sees the main transcript
+    only up to and including that event. The alternative message is the user's
+    imagined next turn; later main turns are deliberately invisible to it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: RequestId
+    after_event_id: int = Field(strict=True, ge=1, le=2**63 - 1)
+    message: StrictStr = Field(min_length=1, max_length=4000)
+
+    @field_validator("message")
+    @classmethod
+    def clean_branch_message(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("branch message must not be blank")
+        return value
+
+
+class ScenarioBranchRetry(BaseModel):
+    """Retry a durably failed branch with a fresh request id.
+
+    Retrying is explicit because a failed generation is stored as failed: the
+    same request id keeps returning the same failure, never a silent second
+    model call.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: RequestId
+
+
+class ScenarioBranchOutput(ScenarioRoundOutput):
+    """Partner views for the alternative turn plus an explicit consequence.
+
+    The consequence is model-generated and SIMULATED. It is stored on the
+    branch, never on a real Event/Memory, and it never claims the imagined path
+    actually happened.
+    """
+
+    consequence: StrictStr = Field(min_length=1, max_length=1200)
+
+    @field_validator("consequence")
+    @classmethod
+    def clean_consequence(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("branch consequence must not be blank")
+        return value
+
+
+class ScenarioReviewRequest(BaseModel):
+    """Generate (or retry) the review of one ended scenario."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: RequestId
+
+
+class ScenarioReviewOutput(BaseModel):
+    """The review is structured so adoption can quote it without inventing parts."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    overview: StrictStr = Field(min_length=1, max_length=1200)
+    strategy: StrictStr = Field(min_length=1, max_length=800)
+    feedback: StrictStr = Field(min_length=1, max_length=800)
+    next_step: StrictStr | None = Field(default=None, max_length=600)
+
+    @field_validator("next_step")
+    @classmethod
+    def clean_next_step(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class ScenarioAdoptRequest(BaseModel):
+    """Explicitly adopt one READY branch as a REAL shared experience.
+
+    Adoption is the only operation in this slice that may write a REAL Event or
+    Memory. ``character_id`` is optional when the scene has exactly one formal
+    participant; with two, the caller must name which Person remembers it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: RequestId
+    branch_id: StrictStr = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    character_id: StrictStr | None = Field(default=None, min_length=1, max_length=64)

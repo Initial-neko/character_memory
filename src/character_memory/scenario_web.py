@@ -12,7 +12,9 @@ import logging
 from fastapi import HTTPException, Query
 
 from character_memory.application.relationship_scenario import (
+    BranchUnavailable,
     RelationshipScenarioService,
+    ReviewUnavailable,
     ScenarioUnavailable,
 )
 from character_memory.application.reply_suggestion_signals import prepare_choice, record_choice
@@ -20,7 +22,14 @@ from character_memory.application.reply_suggestions import SuggestionStale
 from character_memory.config import load_persona, resolve_persona_path
 from character_memory.domain.activity import activity_experience_scope
 from character_memory.domain.facts import FactRef
-from character_memory.domain.relationship_scenario import ScenarioCreate, ScenarioRoundRequest
+from character_memory.domain.relationship_scenario import (
+    ScenarioAdoptRequest,
+    ScenarioBranchCreate,
+    ScenarioBranchRetry,
+    ScenarioCreate,
+    ScenarioReviewRequest,
+    ScenarioRoundRequest,
+)
 from character_memory.storage.activities import ActivityConflict, ActivityCorrupt, ActivityMissing
 from character_memory.storage.experience_profiles import ExperienceProfileRepository
 from character_memory.storage.scenarios import (
@@ -52,9 +61,13 @@ def attach_scenario_routes(app) -> None:
     def profile_for():
         return ExperienceProfileRepository(store).get()
 
+    def embed_for(text: str):
+        return access.require_bundle().embeddings.embed(text)
+
     def service() -> RelationshipScenarioService:
         return RelationshipScenarioService(
-            store, persona_for=persona_for, profile_for=profile_for, model_for=model_for)
+            store, persona_for=persona_for, profile_for=profile_for, model_for=model_for,
+            embed_for=embed_for)
 
     def call(operation, *args, **kwargs):
         try:
@@ -64,7 +77,7 @@ def attach_scenario_routes(app) -> None:
             raise HTTPException(404, code) from exc
         except ScenarioFailed as exc:
             raise HTTPException(502, exc.code) from exc
-        except ScenarioUnavailable as exc:
+        except (ScenarioUnavailable, BranchUnavailable, ReviewUnavailable) as exc:
             raise HTTPException(502, exc.code) from exc
         except SuggestionStale as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -134,6 +147,51 @@ def attach_scenario_routes(app) -> None:
         return {**result, **present(activity),
                 "suggestion_ref": ({"kind": "SCENARIO_EVENT", "id": max(item["id"] for item in events),
                                     "activity_id": activity_id} if events else None)}
+
+    @app.post("/v2/scenarios/{activity_id}/branches", status_code=201)
+    def create_branch(activity_id: str, body: ScenarioBranchCreate):
+        scenario_service = service()
+        result = call(scenario_service.create_branch, activity_id, body)
+        activity = call(scenario_service.activities.get, activity_id)
+        return {**result, "activity": activity,
+                "experience_scope": result.get("experience_scope", _scope(activity_id))}
+
+    @app.get("/v2/scenarios/{activity_id}/branches")
+    def list_branches(activity_id: str):
+        scenario_service = service()
+        if not scenario_service.scenarios.exists(activity_id):
+            raise HTTPException(404, "SCENARIO_NOT_FOUND")
+        return {"activity_id": activity_id,
+                "branches": call(scenario_service.scenarios.branches, activity_id),
+                "experience_scope": _scope(activity_id)}
+
+    @app.get("/v2/scenarios/{activity_id}/branches/{branch_id}")
+    def read_branch(activity_id: str, branch_id: str):
+        return call(service().read_branch, activity_id, branch_id)
+
+    @app.post("/v2/scenarios/{activity_id}/branches/{branch_id}/retry")
+    def retry_branch(activity_id: str, branch_id: str, body: ScenarioBranchRetry):
+        scenario_service = service()
+        result = call(scenario_service.retry_branch, activity_id, branch_id, body)
+        activity = call(scenario_service.activities.get, activity_id)
+        return {**result, "activity": activity,
+                "experience_scope": result.get("experience_scope", _scope(activity_id))}
+
+    @app.post("/v2/scenarios/{activity_id}/review")
+    def create_review(activity_id: str, body: ScenarioReviewRequest):
+        return call(service().review, activity_id, body)
+
+    @app.get("/v2/scenarios/{activity_id}/review")
+    def read_review(activity_id: str):
+        return call(service().read_review, activity_id)
+
+    @app.post("/v2/scenarios/{activity_id}/adopt")
+    def adopt_branch(activity_id: str, body: ScenarioAdoptRequest):
+        scenario_service = service()
+        result = call(scenario_service.adopt_branch, activity_id, body)
+        activity = call(scenario_service.activities.get, activity_id)
+        return {**result, "activity": activity,
+                "real_experience_scope": {"schema_version": 1, "reality": "REAL"}}
 
     @app.post("/v2/scenarios/{activity_id}/rounds/{request_id}/abandon")
     def abandon_round(activity_id: str, request_id: str):

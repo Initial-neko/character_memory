@@ -251,3 +251,113 @@ def test_create_practice_read_distinct_views_and_reuse_drafts(page, scenario_bro
     expect(page.locator("#messageInput")).to_be_enabled()
     expect(page.locator("body")).not_to_have_class("scenario-mode")
     assert not [item for item in errors if item.startswith("pageerror")], errors
+
+
+def test_branch_end_review_and_adopt_at_desktop_and_390(page, scenario_browser_server, tmp_path):
+    """P12 visual acceptance: create -> talk -> branch -> end -> review -> adopt.
+
+    The same page is exercised at 1440 and at 390. The adoption step is the only
+    point where a REAL memory exists; the audit and the visible adoption note
+    both show that unadopted branches stayed inside the simulation.
+    """
+    from playwright.sync_api import expect
+
+    base = scenario_browser_server
+    page.set_viewport_size({"width": 1440, "height": 1100})
+    errors = []
+    page.on("console", lambda message: errors.append(f"{message.type}: {message.text}")
+            if message.type == "error" else None)
+    page.on("pageerror", lambda error: errors.append(f"pageerror: {error}"))
+    _open_scenario(page, base)
+
+    page.locator(".scenario-entry").click()
+    expect(page.get_by_role("heading", name="创建一个情境")).to_be_visible()
+    page.locator('[data-scenario-field="title"]').fill("和妈妈谈换工作")
+    page.locator('[data-scenario-field="situation"]').fill(
+        "我正在考虑换一份收入不稳定但更喜欢的工作，今晚和妈妈吃饭。")
+    page.locator('[data-scenario-field="goal"]').fill("把计划说清楚，也听见她的担心。")
+    page.locator('[data-scenario-field="concern"]').fill("怕一开口就变成辩解。")
+    page.locator('[data-scenario-sim-name="0"]').fill("妈妈")
+    page.locator('[data-scenario-sim-description="0"]').fill(
+        "担心收入不稳定，习惯先问最坏的情况")
+    with page.expect_response(lambda r: r.url.endswith("/v2/scenarios")
+                              and r.request.method == "POST") as created:
+        page.get_by_role("button", name="创建并开始").click()
+    assert created.value.status == 201, created.value.text()
+    activity_id = created.value.json()["activity"]["id"]
+
+    page.locator("#messageInput").fill("我今晚想先讲我的计划，希望你先听我说完。")
+    with page.expect_response(lambda r: r.url.endswith("/messages")
+                              and "/v2/scenarios/" in r.url) as first:
+        page.locator("#sendButton").click()
+    assert first.value.status == 200, first.value.text()
+    expect(page.locator(".scenario-view")).to_have_count(2)
+
+    # --- branch from the user's own turn ------------------------------
+    page.locator("[data-scenario-branch-after]").last.click()
+    expect(page.locator("[data-scenario-branch-message]")).to_be_visible()
+    page.locator("[data-scenario-branch-message]").fill(
+        "如果我说不出口，只想先安静一会儿呢？")
+    with page.expect_response(lambda r: r.url.endswith(f"/v2/scenarios/{activity_id}/branches")
+                              and r.request.method == "POST") as branched:
+        page.locator("[data-scenario-branch-send]").click()
+    assert branched.value.status == 201, branched.value.text()
+    expect(page.locator(".scenario-branch-card.is-ready")).to_have_count(1)
+    expect(page.locator(".scenario-consequence")).to_contain_text("如果按")
+    expect(page.locator("[data-scenario-branch-send]")).to_have_text("生成分支")
+    page.locator(".scenario-branch-panel").first.scroll_into_view_if_needed()
+    page.wait_for_timeout(150)
+    shot(page, tmp_path, "desktop-branch", base)
+
+    # --- end, then review --------------------------------------------
+    with page.expect_response(lambda r: r.url.endswith(f"/v2/activities/{activity_id}/end")
+                              and r.request.method == "POST") as ended:
+        page.get_by_role("button", name="结束练习").click()
+    assert ended.value.status == 200, ended.value.text()
+    expect(page.locator(".scenario-status.is-ended").first).to_be_visible()
+    expect(page.locator("#messageInput")).to_be_disabled()
+    with page.expect_response(lambda r: r.url.endswith(f"/v2/scenarios/{activity_id}/review")
+                              and r.request.method == "POST") as reviewed:
+        page.get_by_role("button", name="生成复盘").click()
+    assert reviewed.value.status == 200, reviewed.value.text()
+    grid = page.locator(".scenario-review-grid")
+    expect(grid).to_be_visible()
+    expect(grid.get_by_text("发生了什么", exact=True)).to_be_visible()
+    expect(grid.get_by_text("你用了什么策略", exact=True)).to_be_visible()
+    expect(grid.get_by_text("收到什么反馈", exact=True)).to_be_visible()
+    expect(grid).to_contain_text("先说明自己的计划")
+    page.locator(".scenario-review-panel").scroll_into_view_if_needed()
+    page.wait_for_timeout(150)
+    shot(page, tmp_path, "desktop-review", base)
+
+    # --- explicit adoption only --------------------------------------
+    expect(page.get_by_role("button", name="采用为共同记忆")).to_be_visible()
+    with page.expect_response(lambda r: r.url.endswith(f"/v2/scenarios/{activity_id}/adopt")
+                              and r.request.method == "POST") as adopted:
+        page.get_by_role("button", name="采用为共同记忆").click()
+    assert adopted.value.status == 200, adopted.value.text()
+    expect(page.locator(".scenario-adoption-note")).to_contain_text("已采用为共同记忆")
+    expect(page.locator(".scenario-branch-card.is-adopted")).to_have_count(1)
+    audit = page.request.get(base + "/__e2e/audit").json()
+    assert audit["events"] == 1 and audit["memories"] == 1
+    assert audit["scenario_adoptions"] == 1
+    assert audit["bad_real_scope"] == 0
+    assert audit["scenario_events_bad_scope"] == 0
+    assert audit["unadopted_branch_leaks"] == {"memories": 0, "events": 0}
+    page.locator(".scenario-review-panel").scroll_into_view_if_needed()
+    page.wait_for_timeout(150)
+    shot(page, tmp_path, "desktop-adopted", base)
+
+    # --- the same ended/reviewed state at 390 -------------------------
+    page.set_viewport_size({"width": 390, "height": 900})
+    page.locator("#messageInput").blur()
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(300)
+    overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
+    assert overflow <= 1, f"horizontal overflow at 390: {overflow}px"
+    expect(page.locator(".scenario-review-grid")).to_be_visible()
+    expect(page.locator(".scenario-adoption-note")).to_be_visible()
+    page.locator(".scenario-review-panel").scroll_into_view_if_needed()
+    page.wait_for_timeout(150)
+    shot(page, tmp_path, "mobile-390-review-adopted", base)
+    assert not [item for item in errors if item.startswith("pageerror")], errors

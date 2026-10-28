@@ -150,10 +150,12 @@ class ActivityCreate(BaseModel):
 
 
 class ActivityAction(BaseModel):
-    """One operator/客户端 lifecycle action; the operation is carried by the URL.
+    """One lifecycle action from the local operator or another local client.
 
     ``expected_version`` is mandatory so a stale reader can never overwrite a
-    newer state; the service answers 409 instead of guessing.
+    newer state; the service answers 409 instead of guessing. The operation
+    itself is carried by the URL, so a request id and an operation cannot
+    disagree.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

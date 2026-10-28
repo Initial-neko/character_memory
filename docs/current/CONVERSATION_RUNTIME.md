@@ -153,6 +153,15 @@ Media is read through the existing MediaStorage; unavailable bytes are not repla
 with text-only input. A newer target supersedes the old owner and carries pending
 images/mentions forward while preserving all original facts.
 
+Supersession runs against the trusted server clock: a fact whose `event_time` is
+still in the future has not happened yet and cannot supersede a generation for the
+present, so controlled-clock or imported future timestamps cannot strand delivery.
+A SUPERSEDED batch whose sources are still PENDING stays reclaimable: the next
+claim re-freezes a fresh snapshot from the pending sources rather than raising
+forever, and a superseded generation with no newer waiting fact ends its cycle
+instead of retrying the same watermark. Restart resumes from the same durable
+source state without duplicating committed or superseded work.
+
 Delivery uses atomic batch owner tokens and the formal preparation lease. The
 BackgroundServices scanner resumes only pending new-protocol work or expired
 batch ownership; an empty scan never initializes a model. Person receipts prevent

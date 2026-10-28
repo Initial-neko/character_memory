@@ -75,7 +75,14 @@ class ReactionDeliveryRepository:
                 return None  # Legacy/transient path: never invent an outbox from history.
             existing = self.store.conn.execute('SELECT * FROM reaction_delivery_batches WHERE ref=?', (key,)).fetchone()
             token = uuid4().hex
-            if existing is not None:
+            # A superseded generation leaves its sources PENDING so the next
+            # claim can fold them into a fresh batch. That fold must be
+            # possible even when this ref already owns the SUPERSEDED batch,
+            # otherwise the source is unclaimable forever (P15-F1).
+            reclaim = (existing is not None and existing['state'] == 'SUPERSEDED'
+                and source['state'] == 'PENDING'
+                and source['batch_ref'] in (None, key))
+            if existing is not None and not reclaim:
                 if existing['state'] != 'RUNNING' or existing['deadline'] > now:
                     raise DeliveryUnavailable(existing['state'])
                 payload = json.loads(existing['snapshot_json'])
@@ -95,8 +102,13 @@ class ReactionDeliveryRepository:
             payload['plan'] = plan_factory(payload['mentions']) if plan_factory else None
             for prior in {row['batch_ref'] for row in rows if row['batch_ref']}:
                 self.store.conn.execute("UPDATE reaction_delivery_batches SET state='SUPERSEDED' WHERE ref=? AND state='RUNNING'", (prior,))
-            self.store.conn.execute('INSERT INTO reaction_delivery_batches VALUES(?,?,?,?,?,?,NULL)',
-                (key, source['channel'], json.dumps(payload, ensure_ascii=False), token, now + duration, 'RUNNING'))
+            if reclaim:
+                self.store.conn.execute('UPDATE reaction_delivery_batches SET channel=?,snapshot_json=?,owner_token=?,'
+                    "deadline=?,state='RUNNING',error_kind=NULL WHERE ref=?",
+                    (source['channel'], json.dumps(payload, ensure_ascii=False), token, now + duration, key))
+            else:
+                self.store.conn.execute('INSERT INTO reaction_delivery_batches VALUES(?,?,?,?,?,?,NULL)',
+                    (key, source['channel'], json.dumps(payload, ensure_ascii=False), token, now + duration, 'RUNNING'))
             self.store.conn.executemany('UPDATE reaction_delivery_sources SET batch_ref=? WHERE ref=?',
                 [(key, row['ref']) for row in rows])
             return DeliveryBatch(ref, token, payload)

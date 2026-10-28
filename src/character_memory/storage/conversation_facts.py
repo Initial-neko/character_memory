@@ -776,6 +776,7 @@ class ConversationFactReader:
         raw_conversation_id: str | None,
         *,
         visual: bool,
+        at: datetime | None = None,
     ) -> tuple[int, int, str] | None:
         """Newest Direct input that can supersede an in-flight reaction.
 
@@ -783,26 +784,42 @@ class ConversationFactReader:
         observation also wins. Chat facts and non-chat inputs live in different
         id spaces, so the cross-space comparison is by event time; within a space
         arrival order (id) breaks ties. Returned as ``(epoch, id, space)``.
+
+        When ``at`` is supplied it is the trusted server clock: facts dated after
+        it have not happened yet and cannot supersede a generation running now.
+        Caller-controlled future timestamps must not stall delivery (P15-F1).
         """
         canonical = canonical_direct_conversation_id(character_id, raw_conversation_id)
+        cutoff = epoch_us(at) if at is not None else None
         rows: list[tuple[int, int, str]] = []
         with self.store._lock:
-            row = self.store.conn.execute(
+            chat_sql = (
                 "SELECT e.id,e.event_time_epoch FROM conversation_events e "
                 "JOIN conversations c ON c.id=e.conversation_id "
                 "WHERE c.type='DIRECT' AND c.id=? AND e.event_type='USER_MESSAGE' "
-                "AND e.event_time_epoch IS NOT NULL ORDER BY e.event_time_epoch DESC,e.id DESC LIMIT 1",
-                (canonical,),
+                "AND e.event_time_epoch IS NOT NULL"
+            )
+            chat_params = [canonical]
+            if cutoff is not None:
+                chat_sql += " AND e.event_time_epoch<=?"
+                chat_params.append(cutoff)
+            row = self.store.conn.execute(
+                chat_sql + " ORDER BY e.event_time_epoch DESC,e.id DESC LIMIT 1", chat_params
             ).fetchone()
             if row is not None and row["event_time_epoch"] is not None:
                 rows.append((int(row["event_time_epoch"]), int(row["id"]), "CHAT"))
             if visual:
-                row = self.store.conn.execute(
+                visual_sql = (
                     "SELECT id,event_time_epoch FROM events WHERE character_id=? "
                     "AND event_type='VISUAL_OBSERVATION' AND event_time_epoch IS NOT NULL "
                     "AND json_extract(metadata_json,'$.conversation_id')=? "
-                    "ORDER BY event_time_epoch DESC,id DESC LIMIT 1",
-                    (character_id, raw_conversation_id),
+                )
+                visual_params = [character_id, raw_conversation_id]
+                if cutoff is not None:
+                    visual_sql += " AND event_time_epoch<=?"
+                    visual_params.append(cutoff)
+                row = self.store.conn.execute(
+                    visual_sql + " ORDER BY event_time_epoch DESC,id DESC LIMIT 1", visual_params
                 ).fetchone()
                 if row is not None and row["event_time_epoch"] is not None:
                     rows.append((int(row["event_time_epoch"]), int(row["id"]), "VISUAL"))

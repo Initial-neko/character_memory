@@ -545,14 +545,21 @@ class ReactionScheduler:
                 def current():
                     durable = self.delivery is None or self.delivery.guard(batch, character_id)
                     identity = self._input_identity(bundle.store, character_id, conversation_id, event.id)
+                    clock = getattr(bundle, "clock", None)
+                    at = clock.now() if clock is not None else None
                     newest = (bundle.store.fact_reader.newest_direct_input(
-                        character_id, conversation_id, visual=True)
+                        character_id, conversation_id, visual=True, at=at)
                         if event.event_type.value == "VISUAL_OBSERVATION"
                         else bundle.store.fact_reader.newest_direct_input(
-                            character_id, conversation_id, visual=False))
+                            character_id, conversation_id, visual=False, at=at))
                     # Compare (event_time, id, space): chat and non-chat inputs
                     # share neither table nor id space, and arrival order alone
-                    # cannot order them.
+                    # cannot order them. Inputs dated after the trusted server
+                    # clock have not happened yet and cannot supersede this
+                    # generation (P15-F1). If none is due, this event itself is
+                    # the only candidate.
+                    if newest is None:
+                        newest = identity
                     return durable and not self._closed.is_set() and identity is not None and newest is not None and newest <= identity
                 with bundle.chat._lock_for(character_id):
                     bundle.store.set_world_time(character_id, event.event_time)
@@ -593,8 +600,14 @@ class ReactionScheduler:
             if self.delivery is not None and batch is not None:
                 self.delivery.finish(batch, superseded=superseded, error=cycle_error)
             if superseded:
-                self._retry_superseded(state)
-                continue
+                # Retry only when a newer fact is actually waiting; retrying the
+                # same watermark would spin forever once the delivery batch can
+                # be reclaimed (P15-F1).
+                with state.condition:
+                    has_newer = state.latest_event is not None and int(state.latest_event.id) > watermark
+                if has_newer:
+                    self._retry_superseded(state)
+                    continue
             idle = self._finish_cycle(state, watermark)
             if idle:
                 self.hub.publish(channel, "reaction_status", {"state": "idle", "watermark": watermark})

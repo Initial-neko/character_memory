@@ -35,14 +35,14 @@ def test_review_combines_recent_real_interaction_and_current_user_plans_without_
     before = store.conn.total_changes
     data = CharacterRelationshipReader(store).review("a", "user", day="2026-10-14", offset=0, now=NOW)
     assert store.conn.total_changes == before
-    assert [item["key"] for item in data["interactions"]] == [f"direct:{old.id}"]
+    assert [item["key"] for item in data["interactions"]] == [f"events:{old.id}"]
     assert [item["source"]["id"] for item in data["pending_intents"]] == [intent]
     assert data["read_only"] and data["pending_scope"] == "CURRENT_USER_DIRECT_PENDING_ALL_CREATION_DATES"
     assert "未来消息" not in str(data) and "另一人物私聊" not in str(data)
     assert CharacterRelationshipReader(store).review("a", "b", day="2026-10-14", now=NOW)["pending_intents"] == []
     midnight = direct(store, content="所选日后一天午夜", at=datetime(2026, 10, 14, tzinfo=timezone.utc))
     prior_day = CharacterRelationshipReader(store).review("a", "user", day="2026-10-13", offset=0, now=NOW)
-    assert f"direct:{midnight.id}" not in [item["key"] for item in prior_day["interactions"]]
+    assert f"events:{midnight.id}" not in [item["key"] for item in prior_day["interactions"]]
     store.close()
 
 

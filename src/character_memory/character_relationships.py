@@ -80,7 +80,9 @@ class CharacterRelationshipReader:
                       OR e.actor_id=?)
                     ORDER BY e.event_time_epoch DESC,e.id DESC LIMIT 11"""
                 for row in self.store.conn.execute(chat, [character_id, *bounds, peer, peer]):
-                    interactions.append(self._fact("direct", row, "DIRECT", row["event_time"], row["event_time_epoch"]))
+                    # Physical table ≠ domain: Direct facts keep the EVENT kind and
+                    # the existing `events:<id>` source key (ADR §5.1).
+                    interactions.append(self._fact("events", row, "DIRECT", row["event_time"], row["event_time_epoch"]))
             if {"conversation_events", "conversation_runtime_traces", "conversation_members"} <= tables:
                 trace = "CASE WHEN json_valid(t.trace_json) THEN t.trace_json ELSE '{}' END"
                 recent_ids = f"CASE WHEN json_type({trace},'$.recent_group_event_ids')='array' THEN json_extract({trace},'$.recent_group_event_ids') ELSE '[]' END"

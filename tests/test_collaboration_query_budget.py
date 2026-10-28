@@ -41,7 +41,7 @@ def test_relationship_query_stays_within_instruction_budget(tmp_path):
             page = CharacterLifeReader(store).timeline('alice', view='relationships', peer='user', limit=4)
         except sqlite3.OperationalError as error:
             pytest.fail(f'relationship query exceeded instruction budget: {error}')
-        assert [item['key'] for item in page['items']] == [f'direct:{source.id}']
+        assert [item['key'] for item in page['items']] == [f'events:{source.id}']
         assert store.conn.total_changes == before
     finally:
         store.conn.set_progress_handler(None, 0)

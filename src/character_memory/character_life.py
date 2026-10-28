@@ -360,8 +360,12 @@ class CharacterLifeReader:
                     condition += f" AND {stamp}>=? AND {stamp}<?"
                     params += [epoch_us(start), epoch_us(end)]
                 if boundary:
+                    # The cursor key is the public namespace, which is not always
+                    # the scan source name: Direct facts scan as `direct` but keep
+                    # the EVENT domain and publish `events:<id>`.
+                    public_kind = 'events' if kind == 'direct' else kind
                     condition += f" AND ({stamp}<? OR ({stamp}=? AND ?||CAST({identity} AS TEXT)<?))"
-                    params += [boundary[0], boundary[0], kind+':', boundary[1]]
+                    params += [boundary[0], boundary[0], public_kind+':', boundary[1]]
                 condition += f" AND {stamp} IS NOT NULL AND julianday({time}) IS NOT NULL"
                 rows = self.store.conn.execute(sql.replace("SELECT e.*", f"SELECT {stamp} AS _stamp,e.*") + f" WHERE {condition} ORDER BY {stamp} DESC,CAST({identity} AS TEXT) DESC LIMIT ?", params+[limit+1]).fetchall()
                 for row in rows:
@@ -376,6 +380,11 @@ class CharacterLifeReader:
 
     def _project(self, kind, row, character, tables):
         metadata=obj(row.get('metadata_json'))
+        # `direct` is the scan source, not a new public namespace: Direct facts
+        # keep the EVENT domain (ADR §5.1), so their life-key stays `events:<id>`
+        # and the existing life-reference keys (events/group/post/comment) keep
+        # resolving them.
+        public_kind = 'events' if kind == 'direct' else kind
         event_id=row.get('id') if kind in ('events','direct') else None
         trace={}
         if kind=='events':
@@ -487,4 +496,4 @@ class CharacterLifeReader:
                 status='CALL_INVITATION_PROPOSED'
                 title='提出了通话邀请（不代表已经通话）'
                 decision['result']='仅邀请已提出；是否接通以独立邀请和实际语音消息为准'
-        return {'key':kind+':'+str(row.get('opportunity_id',row.get('id'))),'kind':kind,'time':row.get('event_time',row.get('created_at',row.get('started_at',row.get('decided_at')))),'title':title,'channel':channel,'status':status,'content':content,'source':{'kind':kind,'id':row.get('opportunity_id',row.get('id')),'event_id':event_id,'conversation_id':row.get('conversation_id'),'post_id':row.get('post_id') or metadata.get('post_id')},'decision':decision,'continuation':continuation,'state_change':state,'memories':memories,'participants':participants,'reading':{'scope':text(reading.get('content_scope'),80),'url':text(reading.get('url'),1000),'summary':text(metadata.get('world_summary')),'truncated':reading.get('truncated') if type(reading.get('truncated')) is bool else None,'read_characters':reading.get('read_characters') if type(reading.get('read_characters')) is int else None,'available_characters':reading.get('available_characters') if type(reading.get('available_characters')) is int else None} if reading else None,'intent':{'stored_status':row.get('status'),'earliest_at':row.get('earliest_at'),'expires_at':row.get('expires_at'),'audit':audit,'due':due,'past_expiry':past_expiry,'defer_count':row.get('deferral_count',0),'time_status':time_status} if kind=='intent' else None}
+        return {'key':public_kind+':'+str(row.get('opportunity_id',row.get('id'))),'kind':public_kind,'time':row.get('event_time',row.get('created_at',row.get('started_at',row.get('decided_at')))),'title':title,'channel':channel,'status':status,'content':content,'source':{'kind':public_kind,'id':row.get('opportunity_id',row.get('id')),'event_id':event_id,'conversation_id':row.get('conversation_id'),'post_id':row.get('post_id') or metadata.get('post_id')},'decision':decision,'continuation':continuation,'state_change':state,'memories':memories,'participants':participants,'reading':{'scope':text(reading.get('content_scope'),80),'url':text(reading.get('url'),1000),'summary':text(metadata.get('world_summary')),'truncated':reading.get('truncated') if type(reading.get('truncated')) is bool else None,'read_characters':reading.get('read_characters') if type(reading.get('read_characters')) is int else None,'available_characters':reading.get('available_characters') if type(reading.get('available_characters')) is int else None} if reading else None,'intent':{'stored_status':row.get('status'),'earliest_at':row.get('earliest_at'),'expires_at':row.get('expires_at'),'audit':audit,'due':due,'past_expiry':past_expiry,'defer_count':row.get('deferral_count',0),'time_status':time_status} if kind=='intent' else None}

@@ -15,6 +15,7 @@ from character_memory.dsh.admin_web import attach_dsh_admin_routes
 from character_memory.dsh.service import DshService
 from character_memory.history_web import attach_history_routes
 from character_memory.memory_web import attach_memory_routes
+from character_memory.reflection_runtime import attach_reflection_runtime
 from character_memory.search_web import attach_search_routes
 from character_memory.scenario_web import attach_scenario_routes
 from character_memory.space_web import attach_space_routes
@@ -64,6 +65,15 @@ def create_server_app(config_path: str):
     install_group_autonomous_visual(app)
     attach_visual_capture_routes(app)
     attach_wake_routes(app)
+    # Reflection registers last: it is a read-mostly ledger worker, and being
+    # newest means it stops first on shutdown, before any store it reads closes.
+    attach_reflection_runtime(
+        app,
+        app.state.character_memory.read_store,
+        app.state.background_services,
+        app.state.character_memory.settings,
+        own_bundle=True,
+    )
     return app
 
 

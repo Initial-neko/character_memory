@@ -1,8 +1,8 @@
 # 周期反思与证据水位契约 (P08)
 
-状态：**DESIGN FROZEN — NOT EXECUTED**。本文冻结 P08「证据水位与日/周/月反思」的可执行契约：水位维度、触发规则、Goal/Intent 语义边界、复用清单、三档差异、可解释性与验收断言。
+状态：**IMPLEMENTED (P08)**。本文冻结 P08「证据水位与日/周/月反思」的可执行契约：水位维度、触发规则、Goal/Intent 语义边界、复用清单、三档差异、可解释性与验收断言。
 
-本轮只读源码与现有文档，**不写实现、不建表、不改 schema、不调用模型、不写正式数据库**。当前 `main` 没有任何 reflection 表、scheduler、provider purpose 或 API；本文描述的是将来实施时必须满足的契约，不是已交付行为。
+实现位于 `reflection_store.py`（两张账本表）、`application/reflection_service.py`（窗口、证据签名、预算、调用）、`reflection_web.py`（只读投影）与 `reflection_runtime.py`（Scheduler 与 BackgroundServices 注册），在 `server.py` 中最后注册。默认 `reflection_enabled: false`；开启后同样受共享 `autonomous_model_daily_max` 约束。以下文字是当前行为的权威描述，第 10 节记录各默认决策的落地方式。
 
 依据：V2 工作包表中的 W10 行（`GOAL` issue #644 评论：长目标、日周月反思与成长版本；验收要求「无新数据 0 调用、重复周期幂等、证据完成、版本回滚」）、ADR-4（每日/周/月按新增证据 watermark 触发，不新增无条件付费 cron）、[MEMORY](MEMORY.md) §7「多粒度记忆方向」、以及现有 Goal/Intent/模型预算/收据实现。
 
@@ -85,7 +85,7 @@ signature = sha256(json({
 与权威事实同一个 Core SQLite，通过现有迁移账本建立（`storage/sqlite.py:86-95`），**不新建数据库、sidecar 或第二个记忆库**：
 
 ```sql
--- 提案；实际列名在实施 PR 冻结，本文件只约束语义
+-- 已实现；迁移名 reflection/001-watermarks-periods
 CREATE TABLE reflection_watermarks(
     character_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('DAILY','WEEKLY','MONTHLY')),
@@ -104,6 +104,7 @@ CREATE TABLE reflection_periods(
     kind TEXT NOT NULL,
     window_start TEXT NOT NULL,
     window_end TEXT NOT NULL,
+    offset_minutes INTEGER NOT NULL,
     policy_version INTEGER NOT NULL,
     status TEXT NOT NULL CHECK(status IN
         ('RUNNING','COMMITTED','SKIPPED_IDLE','BLOCKED_BUDGET','FAILED','UNKNOWN')),
@@ -117,7 +118,9 @@ CREATE TABLE reflection_periods(
 );
 ```
 
-`reflection_periods` 同时是运行账本与用户可读解释；不复制事实正文，`evidence_json` 只存 `FactRef` + memory id + 签名组成项。
+`reflection_periods` 同时是运行账本与用户可读解释；不复制事实正文，`evidence_json` 只存 `FactRef` + memory id + 签名组成项 + 每个引用的内容摘要（用于读取时判断 `CURRENT/CHANGED`）。
+
+水位里的 cursor 只用于便宜跳过，不参与资格判定：窗口证据按 `event_time` 选择，`event_cursor` / `conversation_cursor_json` / `memory_max_id` 只在同一个 `COMMITTED` 事务里按实际进入证据集合的 id 推进。因此迟到插入、时钟回拨或未来事件都不会让水位越过未处理证据。
 
 ## 3. 触发规则
 
@@ -199,7 +202,7 @@ CREATE TABLE reflection_periods(
 
 | 项 | DAILY | WEEKLY | MONTHLY |
 | --- | --- | --- | --- |
-| 窗口 | 一个已关闭本地日 `[local 00:00, +1d)` | 最近 7 个已关闭本地日 | 上一个已关闭日历月 |
+| 窗口 | 一个已关闭本地日 `[local 00:00, +1d)` | 上一个已关闭本地周（周一至周日，恰 7 天） | 上一个已关闭日历月 |
 | 触发时机 | 日界后；`window_end <= now` | 周界后 | 月界后 |
 | 证据量上限 | 最多 200 条事实引用 + 200 条 Memory | 最多 400 条事实 + 400 条 Memory | 最多 600 条事实 + 600 条 Memory |
 | 输入字符预算 | 6000 字符证据投影 | 8000 | 10000 |
@@ -240,7 +243,7 @@ CREATE TABLE reflection_periods(
 
 用户必须能回答两个问题：**为什么这次整理发生了**、**依据了哪些事实**。
 
-### 7.1 只读接口（提案，未实现）
+### 7.1 只读接口（已实现）
 
 ```text
 GET /v1/characters/{character_id}/reflections?kind=DAILY|WEEKLY|MONTHLY&limit=1..50
@@ -278,6 +281,7 @@ GET /v1/characters/{character_id}/reflections?kind=DAILY|WEEKLY|MONTHLY&limit=1.
 | `BUDGET_EXHAUSTED` | 共享日预算用尽 |
 | `LATE_EVIDENCE_OUTSIDE_WINDOW` | 证据时间落在已提交窗口；本切片不重开（D4） |
 | `MODEL_FAILED` / `MODEL_UNKNOWN` | 调用失败或结果未知 |
+| `IN_PROGRESS_OR_UNKNOWN` | 周期正被另一个 writer 认领，或 RUNNING 周期没有可重放的 receipt；本次不调用、不重试 |
 
 ### 7.3 观测
 
@@ -324,18 +328,18 @@ GET /v1/characters/{character_id}/reflections?kind=DAILY|WEEKLY|MONTHLY&limit=1.
 | A20 | 关闭进程时 worker 在共享 store 关闭前停止（`BackgroundServices.stop_all` 顺序），重复 start 不产生第二个线程 |
 | A21 | 反思运行不改变 World Browse、Space、Group autonomy 的任何 durable clock 或 run 行 |
 
-## 10. 需要用户拍板
+## 10. 决策落地状态
 
-以下是有真实产品/数据所有权影响的选择，本轮不自行决定。实施 PR 必须先得到结论；未决前相关分支保持未实现。
+以下选择按契约提议的默认实现交付；它们仍是产品决策，后续可以单独调整。
 
-- **D1 窗口时区**：日/周/月窗口用哪个本地 offset？Life API 用显式 `offset` 分钟（`character_life_web.py:56-66`，默认 480），而预算日固定 UTC（`model_execution.py:95`）。提案：窗口使用配置的固定 offset 并写入周期记录；代价是预算日与窗口日不是同一天。
-- **D2 反思输出是否进入 Memory**：是走现有 admission 成为 `DIARY`（`domain/models.py:213-228` 已有类型），还是只作为只读派生记录等运营者确认？提案：本切片只读；入 Memory 另开切片。
-- **D3 周/月能否引用日结果**：只读原始事实（可追溯但更贵更长），还是允许把 daily 输出当作有来源的二级材料（更省但存在误差累积）？提案：周可引用 daily，月只读周 + 原始事实引用。
-- **D4 已提交窗口是否可重开**：旧窗口在更正/迟到事实后是否允许付费重跑？提案：v1 不重开，只记录 `LATE_EVIDENCE_OUTSIDE_WINDOW`。
-- **D5 记录保留与可见性**：反思记录是否出现在 Life 时间线/Dev 面板、用户能否删除、保留多久。提案：只读接口 + Dev 可见，不删除。
-- **D6 预算归属**：共享 `autonomous_model_daily_max` 会让反思挤占浏览额度；是否新增独立日上限。提案：先共享，观察真实用量后再决定。
-- **D7 Goal 证据建议的归属**：反思发现某阶段似乎已完成时，是只展示线索，还是生成一条待运营者一键采纳的建议（仍不自动完成）？提案：只展示线索。
-- **D8 策略升级语义**：`policy_version` 变化会改变身份并产生一次付费重算；是否需要「重算前必须显式确认」？提案：需要。
+- **D1 窗口时区（已按默认实现）**：`reflection_offset_minutes` 固定 offset（默认 480=UTC+8），窗口边界写入 `reflection_periods.offset_minutes`。预算日仍按真实 UTC（`model_execution.py:95`），与窗口日不要求同一天。
+- **D2 反思输出是否进入 Memory（已按默认实现）**：只读派生记录，不写 `memories`；入 Memory 另开切片。
+- **D3 周/月引用日结果（已按默认实现）**：周 prompt 可引用窗口内已 `COMMITTED` 的 DAILY 输出，月只引用已 `COMMITTED` 的 WEEKLY 输出 + 原始事实引用；派生引用不进入证据签名。
+- **D4 已提交窗口是否重开（已按默认实现）**：v1 不重开。重复到达返回已存结果与 `PERIOD_ALREADY_COMMITTED`；迟到证据只影响之后的窗口。
+- **D5 记录保留与可见性（部分实现）**：已提供只读 `GET /v1/characters/{id}/reflections`，无删除接口；Life 时间线与 Dev 面板展示留待后续视觉验收。
+- **D6 预算归属（已按默认实现）**：共享 `autonomous_model_daily_max`，每角色每档每窗口最多 1 次；未新增独立日上限。
+- **D7 Goal 证据建议（已按默认实现）**：只展示线索。反思输出 schema 不含 Goal 字段，也不提供采纳建议 API。
+- **D8 策略升级语义（按代码审查确认）**：`policy_version` 固定为 1，不是配置项；升级只能通过一次经过审查的代码改动完成，因此不存在静默付费重算。未实现运行时「确认后重算」开关。
 
 ## 11. 源码索引
 

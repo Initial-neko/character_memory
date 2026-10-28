@@ -426,7 +426,8 @@ world_browse_max_pages: 2
 world_browse_daily_max: 10
 
 # Per-person outer structured model invocations per actual UTC day, currently
-# shared by Personal Browse planning, Web/RSS appraisal and continuation/vision.
+# shared by Personal Browse planning, Web/RSS appraisal, continuation/vision and
+# evidence-gated reflection (one call per level per closed period).
 # 0 disables these calls. Failed/unknown attempts consume slots across restarts;
 # simulated/business timestamps cannot change this budget day. Not a token/USD
 # or provider-internal retry limit; ordinary chat, World Pulse and Space excluded.
@@ -435,6 +436,24 @@ autonomous_model_daily_max: 30
 
 # World scheduler polling latency only; it does not change browse/pulse cadence.
 world_activity_poll_seconds: 60
+
+# -----------------------------------------------------------------------------
+# Evidence-gated reflection (daily / weekly / monthly)
+# -----------------------------------------------------------------------------
+
+# Off by default. When enabled, the scheduler only spends a paid call when a
+# closed window has new or changed evidence (facts, memories or memory
+# governance). No new evidence is a SKIPPED_IDLE period with zero calls. One
+# call per level per period, sharing autonomous_model_daily_max. Restart needed.
+reflection_enabled: false
+
+# Fixed UTC offset used for the local day/week/month boundaries, in minutes.
+# 480 = UTC+8. Windows are stored with the period so an offset change never
+# rewrites a committed window.
+reflection_offset_minutes: 480
+
+# Poll latency only. It does not force a call or change a window boundary.
+reflection_poll_seconds: 300
 
 # -----------------------------------------------------------------------------
 # Autonomous Group Chat / group conversation

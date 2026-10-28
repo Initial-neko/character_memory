@@ -298,9 +298,25 @@ class Settings(BaseModel):
     world_browse_daily_max: int = Field(default=10, ge=0, le=200)
     autonomous_model_daily_max: int = Field(
         default=30, ge=0, le=2000,
-        description="每人物每个实际UTC日的受控structured模型调用次数；当前覆盖Personal Browse规划、网页/RSS评估与continuation。0禁用；失败和未知结果占用，非token/美元或provider内部重试次数。重启生效。",
+        description="每人物每个实际UTC日的受控structured模型调用次数；当前覆盖Personal Browse规划、网页/RSS评估、continuation与日/周/月反思。0禁用；失败和未知结果占用，非token/美元或provider内部重试次数。重启生效。",
     )
     world_activity_poll_seconds: float = Field(default=60.0, ge=10.0, le=3600.0)
+
+    # Evidence-gated reflection. The scheduler is free to run often: every
+    # decision before a closed window with new evidence is a pure read. A real
+    # call shares autonomous_model_daily_max with the other structured callers.
+    reflection_enabled: bool = Field(
+        default=False,
+        description="日/周/月反思总开关。默认关闭；开启后仅在已关闭窗口出现新证据时调用模型，无新证据为 SKIPPED_IDLE 且零调用。重启生效。",
+    )
+    reflection_offset_minutes: int = Field(
+        default=480, ge=-840, le=840,
+        description="反思日/周/月窗口使用的固定 UTC 偏移分钟；默认 480=UTC+8。写入周期记录。",
+    )
+    reflection_poll_seconds: float = Field(
+        default=300.0, ge=30.0, le=3600.0,
+        description="反思 Scheduler 的轮询延迟；不改变窗口，也不强制调用。",
+    )
 
     # Autonomous Group Chat is intentionally sparse: an opportunity only asks
     # whether one rotating seed member naturally starts a short room exchange.

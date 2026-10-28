@@ -13,7 +13,24 @@ from pathlib import Path
 
 from character_memory.app import build_app, build_app_from_settings, build_embedding, build_model
 from character_memory.config import load_settings
-from character_memory.eval.runner import EvalRunner
+from character_memory.eval.offline import (
+    BudgetedModel,
+    TeeUsageRecorder,
+    build_offline_eval_bundle,
+    persona_versions_from_runtimes,
+)
+from character_memory.eval.report import (
+    apply_reviews,
+    build_metadata,
+    build_report,
+    compare_reports,
+    load_report,
+    load_reviews,
+    render_comparison_text,
+    render_report_text,
+    write_json,
+)
+from character_memory.eval.runner import EvalCostMeter, EvalRunner
 from character_memory.storage.sqlite import SQLiteStore
 
 
@@ -116,27 +133,139 @@ def _expire_intents(config_path: str, *, character: str | None, due_before: str 
         store.close()
 
 
-def _run_eval(config_path: str, path: str) -> int:
+def _run_eval(
+    config_path: str,
+    path: str,
+    *,
+    label: str = "local",
+    report_path: str | None = None,
+    live: bool = False,
+    max_paid_calls: int = 10,
+) -> int:
     settings = load_settings(config_path)
+    meter = EvalCostMeter(paid=live)
+    mode = "live" if live else "offline"
     with tempfile.TemporaryDirectory(prefix="character-memory-eval-") as tmp:
-        isolated = settings.model_copy(update={"db_path": str(Path(tmp) / "eval.db")})
-        bundle = build_app_from_settings(isolated)
+        # One HTTP attempt per logical eval call keeps the live budget honest:
+        # the pre-call guard then caps real provider requests, not just retries.
+        isolated = settings.model_copy(
+            update={"db_path": str(Path(tmp) / "eval.db"), "llm_attempts": 1}
+        )
+        if live:
+            try:
+                bundle = build_app_from_settings(isolated)
+            except Exception as exc:  # noqa: BLE001 - report a local setup gap
+                raise SystemExit(f"eval --live environment unavailable: {exc}") from exc
+            inner_model = bundle.model
+            inner_model.usage_recorder = TeeUsageRecorder(meter, inner_model.usage_recorder)
+            budgeted = BudgetedModel(inner_model, max_paid_calls)
+            bundle.model = budgeted
+            runtimes = getattr(bundle, "runtimes", None) or {"default": bundle.runtime}
+            if isinstance(runtimes, dict):
+                for runtime in runtimes.values():
+                    runtime.model = budgeted
+        else:
+            bundle = build_offline_eval_bundle(isolated)
+            runtimes = bundle.runtimes
         try:
-            runtimes = getattr(bundle, "runtimes", None) or bundle.runtime
-            results = EvalRunner(runtimes).run_jsonl(path)
+            results = EvalRunner(runtimes, meter=meter).run_jsonl(path)
         finally:
             bundle.close()
+
+    model_names = []
+    if isinstance(runtimes, dict):
+        model_names = [getattr(runtime.model, "model", "") for runtime in runtimes.values()]
+    metadata = build_metadata(
+        suite_path=path,
+        model_names=model_names,
+        persona_versions=persona_versions_from_runtimes(runtimes) if isinstance(runtimes, dict) else {},
+        mode=mode,
+        paid_calls_allowed=max_paid_calls,
+    )
+    report = build_report(results, label=label, metadata=metadata)
+    if report_path:
+        write_json(report_path, report)
 
     by_tag = {}
     for result in results:
         for tag in result.get("tags", []):
-            bucket = by_tag.setdefault(tag, {"passed": 0, "total": 0})
+            bucket = by_tag.setdefault(tag, {"passed": 0, "total": 0, "statuses": {}})
             bucket["total"] += 1
-            bucket["passed"] += int(result["pass"])
-    _print_json({"passed": sum(1 for r in results if r["pass"]), "total": len(results), "by_tag": by_tag, "results": results})
+            bucket["passed"] += int(result["status"] == "passed")
+            status = result.get("status") or "engineering"
+            bucket["statuses"][status] = bucket["statuses"].get(status, 0) + 1
+    summary = report["summary"]
+    _print_json(
+        {
+            "run_id": report["run_id"],
+            "label": report["label"],
+            "status_counts": summary["status_counts"],
+            "passed": summary["passed"],
+            "contract_passed": summary["contract_passed"],
+            "reviewed_passed": summary["reviewed_passed"],
+            "unscored": summary["unscored"],
+            "total": summary["total"],
+            "paid_calls": report["cost"]["paid_calls"],
+            "report": report_path,
+            "metadata": metadata,
+            "by_tag": by_tag,
+            "results": results,
+        }
+    )
     if not results:
         return 2
-    return 0 if all(result["pass"] for result in results) else 1
+    return 0 if summary["status_counts"].get("passed", 0) == len(results) else 1
+
+
+def _run_eval_report(report_path: str, *, case_id: str | None = None, as_json: bool = False) -> int:
+    report = load_report(report_path)
+    if as_json:
+        _print_json(report)
+    else:
+        print(render_report_text(report, case_id))
+    return 0
+
+
+def _run_eval_review(
+    report_path: str,
+    reviews_path: str,
+    *,
+    out_path: str | None = None,
+    as_json: bool = False,
+) -> int:
+    report = load_report(report_path)
+    reviews = load_reviews(reviews_path)
+    try:
+        merged = apply_reviews(report, reviews)
+    except ValueError as exc:
+        raise SystemExit(f"eval-review: {exc}") from exc
+    if out_path:
+        write_json(out_path, merged)
+    if as_json or not out_path:
+        _print_json(merged)
+    else:
+        print(render_report_text(merged))
+    return 0
+
+
+def _run_eval_compare(
+    baseline_path: str,
+    candidate_path: str,
+    *,
+    case_id: str | None = None,
+    out_path: str | None = None,
+    as_json: bool = False,
+) -> int:
+    baseline = load_report(baseline_path)
+    candidate = load_report(candidate_path)
+    comparison = compare_reports(baseline, candidate)
+    if out_path:
+        write_json(out_path, comparison)
+    if as_json:
+        _print_json(comparison)
+    else:
+        print(render_comparison_text(comparison, case_id))
+    return 1 if comparison["summary"]["regressed"] else 0
 
 
 def _run_server(config_path: str, host: str, port: int):
@@ -191,6 +320,34 @@ def main():
     expire.add_argument("--backup", action="store_true", help="take an online SQLite backup before writing")
     evaluate = sub.add_parser("eval")
     evaluate.add_argument("path", nargs="?", default="evals/smoke.jsonl")
+    evaluate.add_argument("--label", default="local", help="report label, e.g. baseline or candidate")
+    evaluate.add_argument("--report", default=None, help="write the full eval report JSON here")
+    evaluate.add_argument(
+        "--live",
+        action="store_true",
+        help="use the configured paid provider; default is the offline deterministic model",
+    )
+    evaluate.add_argument(
+        "--max-paid-calls",
+        type=int,
+        default=10,
+        help="hard cap for live provider calls (default and maximum 10)",
+    )
+    eval_report = sub.add_parser("eval-report", help="view an eval report by run or by case")
+    eval_report.add_argument("report")
+    eval_report.add_argument("--case", default=None)
+    eval_report.add_argument("--json", action="store_true")
+    eval_review = sub.add_parser("eval-review", help="merge an independent review artifact")
+    eval_review.add_argument("report")
+    eval_review.add_argument("--reviews", required=True)
+    eval_review.add_argument("--out", default=None)
+    eval_review.add_argument("--json", action="store_true")
+    eval_compare = sub.add_parser("eval-compare", help="compare baseline and candidate reports")
+    eval_compare.add_argument("baseline")
+    eval_compare.add_argument("candidate")
+    eval_compare.add_argument("--case", default=None)
+    eval_compare.add_argument("--out", default=None)
+    eval_compare.add_argument("--json", action="store_true")
 
     for name in ("serve", "web"):
         server = sub.add_parser(name)
@@ -228,7 +385,37 @@ def main():
         )
         return
     if args.cmd == "eval":
-        raise SystemExit(_run_eval(args.config, args.path))
+        raise SystemExit(
+            _run_eval(
+                args.config,
+                args.path,
+                label=args.label,
+                report_path=args.report,
+                live=args.live,
+                max_paid_calls=min(10, max(0, args.max_paid_calls)),
+            )
+        )
+    if args.cmd == "eval-report":
+        raise SystemExit(_run_eval_report(args.report, case_id=args.case, as_json=args.json))
+    if args.cmd == "eval-review":
+        raise SystemExit(
+            _run_eval_review(
+                args.report,
+                args.reviews,
+                out_path=args.out,
+                as_json=args.json,
+            )
+        )
+    if args.cmd == "eval-compare":
+        raise SystemExit(
+            _run_eval_compare(
+                args.baseline,
+                args.candidate,
+                case_id=args.case,
+                out_path=args.out,
+                as_json=args.json,
+            )
+        )
     if args.cmd in {"serve", "web"}:
         _run_server(args.config, args.host, args.port)
         return

@@ -51,7 +51,10 @@ def test_eval_seeds_sourced_memory_without_extra_reaction_and_preserves_review_g
     path.write_text(json.dumps(case,ensure_ascii=False),encoding='utf-8')
     try:
         result=EvalRunner(runtime).run_jsonl(path)[0]
-        assert result['pass'] is True
+        # Contract checks ran, but no independent semantic review was supplied.
+        assert result['status']=='unscored'
+        assert result['contract_passed'] is True
+        assert result['pass'] is False
         assert result['review_required'] is True
         assert result['review_criteria']==case['review_criteria']
         assert len(model.prompts)==1
@@ -78,8 +81,10 @@ def test_seed_embedding_failure_does_not_leave_partial_fixture(tmp_path):
         'seed_events':[{'event_type':'USER_MESSAGE','event_time':NOW.isoformat(),'content':'source',
             'memories':[{'content':'derived fact'}]}]}),encoding='utf-8')
     try:
-        with pytest.raises(RuntimeError,match='embedding unavailable'):
-            EvalRunner(runtime).run_jsonl(path)
+        result=EvalRunner(runtime).run_jsonl(path)[0]
+        assert result['status']=='environment'
+        assert result['failure']['class']=='environment'
+        assert 'embedding unavailable' in result['failure']['message']
         assert store.list_events('rin')==[]
         assert store.list_memories('rin')==[]
     finally:
@@ -116,7 +121,8 @@ def test_legacy_case_keeps_output_shape_and_needs_no_fixture_interface(tmp_path)
     path.write_text(json.dumps({'id':'legacy','event_time':NOW.isoformat(),'content':'image'}),encoding='utf-8')
     result=EvalRunner(ResourceEvalRuntime()).run_jsonl(path)[0]
     assert result['pass'] is True and result['actions']==['IMAGE']
-    assert 'seed_event_ids' not in result and 'review_required' not in result
+    assert 'seed_event_ids' not in result
+    assert result['review_required'] is False and result['review'] is None
 
 
 @pytest.mark.parametrize('actual,expected,passed', [

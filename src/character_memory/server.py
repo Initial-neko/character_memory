@@ -1,6 +1,7 @@
 import os
 
 from character_memory.call_invitation_web import attach_call_invitation_routes
+from character_memory.activity_web import attach_activity_routes
 from character_memory.api import create_api
 from character_memory.async_web import attach_async_routes
 from character_memory.avatar_web import attach_avatar_routes
@@ -30,6 +31,8 @@ def create_server_app(config_path: str):
     """
 
     app = create_api(config_path)
+    # Local-only lifecycle state; attaching it never warms up the model bundle.
+    attach_activity_routes(app)
     attach_history_routes(app)
     attach_memory_routes(app)
     # RuntimeServices are composed before any feature route attaches. World no

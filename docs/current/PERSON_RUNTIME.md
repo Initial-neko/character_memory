@@ -675,7 +675,9 @@ The existing Person runtime accepts legacy facts without `experience_scope` and
 explicit metadata `experience_scope: {schema_version: 1, reality: REAL}` only.
 The version must be an integer; extra scope fields, unknown versions, null and
 SIMULATED scopes fail closed before real cognition. This guard does not execute
-simulations or supply an Activity/branch overlay. Direct and Group check both
+simulations or supply an Activity/branch overlay; Activity lifecycle rows are a
+separate owner and any scope they expose is explicitly SIMULATED. See
+[ACTIVITY](ACTIVITY.md). Direct and Group check both
 the supplied event and authoritative source, then recheck inside the derived
 commit transaction. A scope changed after model entry prevents real state,
 Memory and visible output commit; the existing receipt retains the failed/unknown

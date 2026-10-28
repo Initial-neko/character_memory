@@ -21,6 +21,10 @@ class EventType(str, Enum):
     VISUAL_OBSERVATION = "VISUAL_OBSERVATION"
     PROACTIVE_INTENT = "PROACTIVE_INTENT"
     ACTION = "ACTION"
+    # A user explicitly adopted one simulated practice branch as a real shared
+    # experience. This is the only activity-derived event the real Person may
+    # read; unadopted branch facts stay in the scenario tables.
+    PRACTICE_ADOPTED = "PRACTICE_ADOPTED"
 
 
 class ActionType(str, Enum):

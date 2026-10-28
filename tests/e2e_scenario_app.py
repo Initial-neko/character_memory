@@ -19,6 +19,7 @@ from character_memory.avatar_web import attach_avatar_routes
 from character_memory.call_invitation_web import attach_call_invitation_routes
 from character_memory.application.clock import RealClock
 from character_memory.config import Settings, discover_character_profiles, load_persona
+from character_memory.domain.activity import activity_experience_scope
 from character_memory.domain.models import ActionDecision, ActionType, Event, EventType, PersonReaction
 from character_memory.domain.relationship_scenario import ScenarioRoundOutput
 from character_memory.history_web import attach_history_routes
@@ -43,12 +44,18 @@ def _log(kind: str, prompt: str = "") -> None:
                                 ensure_ascii=False) + "\n")
 
 
+# Test-only one-shot provider faults. They are armed over HTTP by the acceptance
+# test instead of being inferred from content, so a successful retry is possible
+# without changing the stored alternative turn.
+FAULTS = {"branch": 0, "review": 0}
+
+
 class ScenarioModel(PersonModel):
     model = "e2e-scenario-fake"
     vision_model = "e2e-scenario-fake"
 
     def react(self, context: str) -> PersonReaction:
-        _log("react")
+        _log("react", context)
         return PersonReaction(actions=[ActionDecision(type=ActionType.MESSAGE,
                                                       message="activity reply")])
 
@@ -60,6 +67,44 @@ class ScenarioModel(PersonModel):
                 {"intent": "表达感受", "text": "我有点怕一说就被否定，所以想慢慢讲。"},
                 {"intent": "提出计划", "text": "我们可以先一起算算最坏的情况。"},
             ]}))
+        if schema.__name__ == "ScenarioReviewOutput":
+            _log("review", prompt)
+            if FAULTS["review"] > 0:
+                FAULTS["review"] -= 1
+                raise RuntimeError("deterministic review provider failure")
+            if "分支" not in prompt:  # pragma: no cover - prompt contract guard
+                raise RuntimeError("review prompt lost its branch context")
+            return SimpleNamespace(value=schema.model_validate({
+                "overview": "你先讲了自己的计划，也听见了妈妈和姐姐不同的担心。",
+                "strategy": "先说明自己的计划，再逐个回应她们的担心。",
+                "feedback": "妈妈担心收入风险，姐姐要求一个具体的安排。",
+                "next_step": "下次先一起算清三个月的支出。",
+            }))
+        if schema.__name__ == "ScenarioBranchOutput":
+            _log("branch", prompt)
+            alternative = prompt.rsplit("# Alternative User Turn\n", 1)[-1].split(
+                "\n# Explicit User Experience Preferences", 1)[0]
+            if FAULTS["branch"] > 0:
+                FAULTS["branch"] -= 1
+                raise RuntimeError("deterministic branch provider failure")
+            body = prompt.split("# Scenario\n", 1)[1].split("\n# Branch Point", 1)[0]
+            scenario = json.loads(body)
+            perspectives = []
+            for index, item in enumerate(scenario["participants"]):
+                key = item["participant_key"]
+                stance = (("担心风险" if key.startswith("sim:") else "先照顾自己")
+                          + f"（分支{index}）")
+                perspectives.append({
+                    "participant_id": key, "stance": stance,
+                    "perspective": f"{item.get('display_name') or key} 在分支里仍然给出自己的看法。",
+                })
+            replies = [{"participant_id": item["participant_key"],
+                        "message": f"{item['display_name']}说：如果这样说，我需要一个具体安排。"}
+                       for item in scenario["participants"]
+                       if item["actor_type"] == "SIMULATED_CHARACTER"]
+            return SimpleNamespace(value=schema.model_validate({
+                "perspectives": perspectives, "replies": replies,
+                "consequence": f"如果按“{alternative[:30]}”走，对话会先停在钱和具体安排上。"}))
         _log("scenario", prompt)
         current_turn = prompt.rsplit("# User's current turn", 1)[-1]
         if "FAIL_SCENARIO" in current_turn:
@@ -155,6 +200,14 @@ def groups(archived: bool = False):
     return {"groups": []}
 
 
+@app.post("/__e2e/faults")
+def arm_faults(body: dict):
+    for kind in ("branch", "review"):
+        if kind in body:
+            FAULTS[kind] = max(0, int(body[kind]))
+    return dict(FAULTS)
+
+
 @app.get("/__e2e/scenario-runtime")
 def runtime():
     calls: list[dict] = []
@@ -162,7 +215,7 @@ def runtime():
         calls = [json.loads(line) for line in CALL_LOG.read_text(encoding="utf-8").splitlines()]
     return {"pid": os.getpid(), "calls": calls,
             "counts": {kind: sum(1 for item in calls if item["kind"] == kind)
-                       for kind in ("react", "suggestions", "scenario")}}
+                       for kind in ("react", "suggestions", "scenario", "branch", "review")}}
 
 
 @app.get("/__e2e/audit")
@@ -175,17 +228,26 @@ def audit():
         return int(read.conn.execute(sql, args).fetchone()[0])
 
     scope_rows = read.conn.execute(
-        "SELECT experience_scope_json FROM scenario_events").fetchall()
+        "SELECT activity_id,branch_id,experience_scope_json FROM scenario_events").fetchall()
     bad_scope = 0
     for row in scope_rows:
         try:
-            scope = json.loads(row[0])
+            scope = json.loads(row[2])
         except ValueError:
             bad_scope += 1
             continue
-        if not (isinstance(scope, dict) and scope.get("schema_version") == 1
-                and scope.get("reality") == "SIMULATED" and scope.get("activity_id")):
+        expected = activity_experience_scope(
+            str(row[0]), branch_id=str(row[1]) if row[1] is not None else None)
+        if scope != expected:
             bad_scope += 1
+    bad_real_scope = count(
+        "SELECT COUNT(*) FROM events WHERE event_type='PRACTICE_ADOPTED' AND "
+        "COALESCE(json_extract(metadata_json,'$.experience_scope.reality'),'')!='REAL'")
+    bad_real_scope += count(
+        "SELECT COUNT(*) FROM memories WHERE "
+        "COALESCE(json_extract(metadata_json,'$.experience_scope.reality'),'')!='REAL' "
+        "AND json_extract(metadata_json,'$.source.kind')='SCENARIO_ADOPTION'")
+    branch_unadopted = "%如果我直接拒绝呢%"
     return {
         "pid": os.getpid(),
         "memories": count("SELECT COUNT(*) FROM memories"),
@@ -194,12 +256,25 @@ def audit():
                                 if "conversation_events" in tables else 0),
         "scenario_events": count("SELECT COUNT(*) FROM scenario_events"),
         "scenario_events_bad_scope": bad_scope,
+        "scenario_branches": count("SELECT COUNT(*) FROM scenario_branches"),
+        "scenario_reviews": count("SELECT COUNT(*) FROM scenario_reviews"),
+        "scenario_review_attempts": count("SELECT COUNT(*) FROM scenario_review_attempts"),
+        "scenario_adoptions": count("SELECT COUNT(*) FROM scenario_adoptions"),
+        "practice_adopted_events": count(
+            "SELECT COUNT(*) FROM events WHERE event_type='PRACTICE_ADOPTED'"),
+        "bad_real_scope": bad_real_scope,
         "real_leaks": {
             "memories": count("SELECT COUNT(*) FROM memories WHERE content LIKE '%辞职换%'"),
             "events": count("SELECT COUNT(*) FROM events WHERE content LIKE '%辞职换%'"),
             "conversation_events": (count(
                 "SELECT COUNT(*) FROM conversation_events WHERE content LIKE '%辞职换%'")
                 if "conversation_events" in tables else 0),
+        },
+        "unadopted_branch_leaks": {
+            "memories": count(
+                "SELECT COUNT(*) FROM memories WHERE content LIKE ?", (branch_unadopted,)),
+            "events": count(
+                "SELECT COUNT(*) FROM events WHERE content LIKE ?", (branch_unadopted,)),
         },
         "personas_table": "personas" in tables,
     }

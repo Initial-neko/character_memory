@@ -136,6 +136,15 @@ def infer_usage_context(conversation_id: str | None) -> LlmUsageContext:
         parts = value.split(":", 2)
         character_id = parts[1] if len(parts) > 1 else ""
         return LlmUsageContext("WORLD", "WORLD_REACTION", character_id=character_id, conversation_id=value)
+    # reflection:{kind}:{character_id}:{window_start}; the explicit scope is
+    # always set by the reflection call site, and this prefix keeps a missed
+    # scope from degrading into OTHER.
+    if lower.startswith("reflection:"):
+        parts = value.split(":", 3)
+        kind = parts[1].upper() if len(parts) > 1 else ""
+        character_id = parts[2] if len(parts) > 2 else ""
+        purpose = f"REFLECTION_{kind}" if kind in {"DAILY", "WEEKLY", "MONTHLY"} else "REFLECTION_DAILY"
+        return LlmUsageContext("REFLECTION", purpose, character_id=character_id, conversation_id=value)
     if lower.startswith("avatar-intent:"):
         character_id = value.split(":", 1)[1] if ":" in value else ""
         return LlmUsageContext("AVATAR", "AVATAR_SEARCH_INTENT", character_id=character_id, conversation_id=value)

@@ -27,6 +27,7 @@ WORKERS_IN_START_ORDER = [
     "reaction_delivery",
     "group_autonomy",
     "wake_loop",
+    "reflection",
 ]
 
 

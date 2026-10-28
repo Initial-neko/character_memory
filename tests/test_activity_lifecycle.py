@@ -299,3 +299,43 @@ def test_list_order_is_monotonic_without_clock_resolution(tmp_path):
     finally:
         store.close()
 
+
+def test_revision_one_database_gains_the_order_key(tmp_path):
+    """A database that already recorded revision 001 must still be upgraded.
+
+    Revision 001 is marked applied there, so folding the column into it would
+    leave those databases without an order key; the separate ledger entry exists
+    for exactly that case.
+    """
+    path = tmp_path / "legacy.sqlite"
+    raw = sqlite3.connect(path)
+    raw.execute("CREATE TABLE schema_migrations(name TEXT PRIMARY KEY,applied_at TEXT NOT NULL)")
+    raw.execute("INSERT INTO schema_migrations VALUES('activity/001-lifecycle','2026-01-01')")
+    raw.execute("CREATE TABLE activities(id TEXT PRIMARY KEY,title TEXT NOT NULL,"
+                "status TEXT NOT NULL,version INTEGER NOT NULL,"
+                "created_at TEXT NOT NULL,updated_at TEXT NOT NULL)")
+    raw.execute("CREATE TABLE activity_participants(activity_id TEXT NOT NULL,"
+                "position INTEGER NOT NULL,participant_key TEXT NOT NULL,"
+                "actor_type TEXT NOT NULL,character_id TEXT,local_id TEXT,"
+                "display_name TEXT NOT NULL,PRIMARY KEY(activity_id,participant_key),"
+                "UNIQUE(activity_id,position))")
+    raw.execute("CREATE TABLE activity_receipts(request_id TEXT PRIMARY KEY,"
+                "request_hash TEXT NOT NULL,activity_id TEXT NOT NULL,"
+                "operation TEXT NOT NULL,version_applied INTEGER NOT NULL,"
+                "created_at TEXT NOT NULL)")
+    raw.execute("INSERT INTO activities VALUES('old','旧活动','CREATED',1,'2026-01-01','2026-01-01')")
+    raw.execute("INSERT INTO activity_participants VALUES('old',0,'rin','CHARACTER','rin',NULL,'rin')")
+    raw.commit()
+    raw.close()
+
+    store = SQLiteStore(path)
+    try:
+        repo = ActivityRepository(store)
+        created = repo.create(request(request_id="req-legacy-0001", title="新活动"))
+        assert [item["id"] for item in repo.list()][0] == created["activity"]["id"]
+        migrations = store.list_schema_migrations()
+        assert "activity/002-updated-seq" in migrations
+        assert repo.get("old")["title"] == "旧活动"
+    finally:
+        store.close()
+

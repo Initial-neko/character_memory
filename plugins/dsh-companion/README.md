@@ -14,11 +14,14 @@ It has been loaded in an isolated instance of the installed DSH runtime. The
 button, menu, configuration save, minimize and end were exercised in that actual
 host. Focused Node tests include loopback HTTP and SSE scope/cleanup.
 
-Complete real-provider acceptance is still in progress: existing ASR service
-session activation, real GSV playback, screen permission/vision submission,
-effective-persona change detection, and image/Live2D integration are not yet
-accepted. Image and avatar menu entries currently explain their unfinished
-state. Do not install this partial package into a production profile yet.
+The independent warm ASR service has executed real local recognition, including
+a fixed Chinese sample synthesized by GSV and then transcribed through the
+actual DSH plugin HTTP route. This proves that wiring, not general recognition
+quality. Real microphone-to-chat-to-GSV playback, interruption, screen
+permission/vision submission, effective-persona change detection and
+image/Live2D integration are not yet accepted. Image and avatar menu entries
+currently explain their unfinished state. Do not install this partial package
+into a production profile yet.
 
 ```sh
 node --test test/*.test.mjs
@@ -28,6 +31,8 @@ Tests start only temporary loopback HTTP servers. They do not load models,
 request microphone or screen access, change DSH configuration, or invoke Codex.
 Provider simulation is protocol evidence, not ASR accuracy, GSV quality or
 actual DSH acceptance.
+The same dependency-free command runs in Linux and Windows CI and uploads
+JUnit results. It does not start the optional ASR service or load model assets.
 
 During development the source directory may be linked into a disposable DSH
 profile using an isolated `DSH_HOME` and `DSH_AGENTS_HOME`. Do not link it into a

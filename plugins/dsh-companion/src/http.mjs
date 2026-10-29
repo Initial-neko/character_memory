@@ -6,7 +6,7 @@ const files=new Map(['call-controller','config','screen-capture','client-ui','au
 const json=(res,status,data)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))};
 async function bytes(req,max){let n=0;const list=[];for await(const b of req){n+=b.length;if(n>max)throw Object.assign(Error('request too large'),{status:413});list.push(b)}return Buffer.concat(list)}
 async function body(req){try{return JSON.parse((await bytes(req,16384)).toString('utf8'))}catch(e){if(e.status)throw e;throw Object.assign(Error('invalid JSON'),{status:400})}}
-function trusted(req){
+export function trusted(req){
   if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))return false;
   let host;try{host=new URL(`http://${req.headers.host}`).hostname}catch{return false}
   if(!['127.0.0.1','localhost','[::1]'].includes(host))return false;
@@ -36,7 +36,7 @@ export function createHandler({store,providers=defaults}={}){
       const config=store.snapshot.value;
       if(p===PREFIX+'/api/health'){
         if(req.method!=='POST')return json(res,405,{error:'POST required'});
-        const b=await body(req);if(b.capability!=='gsv')return json(res,400,{error:'unsupported health capability'});
+        const b=await body(req);if(b.capability==='asr')return json(res,200,await providers.checkAsr(config.asrEndpoint,{signal:abort.signal,protocol:config.asrProtocol}));if(b.capability!=='gsv')return json(res,400,{error:'unsupported health capability'});
         return json(res,200,await providers.checkGsv(config.gsvEndpoint,{signal:abort.signal}));
       }
       if(p===PREFIX+'/api/tts'){

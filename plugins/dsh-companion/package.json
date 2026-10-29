@@ -8,6 +8,6 @@
   "exports": { ".": "./index.mjs", "./client": "./client.js" },
   "scripts": { "test": "node --test test/*.test.mjs" },
   "peerDependencies": { "@deepseek-ai/schemastery": "^3.18.4" },
-  "files": ["src/", "index.mjs", "client.js", "cordis.patch.yml", "README.md"],
+  "files": ["src/", "tools/", "index.mjs", "client.js", "cordis.patch.yml", "README.md"],
   "dsh": { "bundle": {"patch": "./cordis.patch.yml"}, "client": {"platform": "web", "inject": [], "external": []} }
 }

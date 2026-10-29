@@ -36,6 +36,34 @@ test; the frontend's ESM assets are served without cache, so UI-only revisions
 can be checked by refreshing the browser. Backend revisions require reloading
 the plugin or the owned test host, and are not frontend HMR.
 
+## Optional independent ASR service
+
+This same package includes `tools/asr-server.mjs`. Run it only when ASR is
+needed, with an **already installed** `sherpa-onnx-node` module and an existing
+SenseVoice model directory containing `model.int8.onnx` and `tokens.txt`:
+
+```sh
+node tools/asr-server.mjs --module /absolute/path/sherpa-onnx.js --model-dir /absolute/path/sensevoice --port 50131
+```
+
+Configure `asrEndpoint` to that loopback URL and `asrProtocol` to
+`pcm16k-final`. No dependency installation, model download or other TTS engine
+is performed. The worker stays warm and each final utterance has a separate
+recognizer stream. One inference is admitted at a time; loading, busy, failed
+and unknown outcomes do not trigger retries. The service does not send chat
+messages or depend on the older voice plugin's global active session.
+
+`GET /health` does not infer. `POST /asr?sessionId=...&final=1` accepts at most
+60 seconds of mono 16 kHz Float32 little-endian PCM. Recognition appends to an
+unchanged native draft, ignores blank results, and requires user confirmation.
+The old `dsh-voice-mode` setting is retained for stored configurations but is
+not marked ready by the independent service preflight; explicitly select the
+new protocol when using this service.
+
+GSV readiness requires its explicit `ready: true`; HTTP liveness alone is not
+enough. Its first synthesis can still fail while loading or inferring. Use a
+writable temporary directory in isolated runtime tests, and retain failures.
+
 ## Design invariants
 
 - One install, one composer entry, one call owner and one audio playback owner.

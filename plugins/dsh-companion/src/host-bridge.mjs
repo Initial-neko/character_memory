@@ -9,9 +9,9 @@ export class HostBridge {
   }
   #matches(token){const current=this.current();return !!current.sessionId&&token?.sessionId===current.sessionId&&token?.draftRevision===current.draftRevision}
   applyTranscript(token,text){
-    if(!this.#matches(token)||typeof text!=='string')return false;
+    if(!this.#matches(token)||typeof text!=='string'||!text.trim())return false;
     const actions=this.#read().inputActions;if(typeof actions?.setDraft!=='function')return false;
-    actions.setDraft(text);this.current();return true;
+    const draft=this.current().draft;actions.setDraft(draft?draft+'\n'+text.trim():text.trim());this.current();return true;
   }
   async submit({token,text,files=[]}){
     if(!this.#matches(token))throw Error('native input or session changed; review before sending');

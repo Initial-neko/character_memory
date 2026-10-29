@@ -9,7 +9,12 @@ async function boundedBytes(response,max=20*1024*1024){
 }
 async function smallJson(response){return JSON.parse(new TextDecoder().decode(await boundedBytes(response,128*1024)))}
 export async function checkGsv(endpoint,{signal}={}){
-  try{const r=await fetch(base(endpoint)+'/health',{signal:requestSignal(signal,3000),redirect:'error'});if(!r.ok)return {ready:false,reason:`GSV HTTP ${r.status}`};const d=await smallJson(r);return {ready:d.ok!==false&&d.status!=='error',details:d}}catch(e){return {ready:false,reason:e.message}}
+  try{const r=await fetch(base(endpoint)+'/health',{signal:requestSignal(signal,3000),redirect:'error'});if(!r.ok)return {ready:false,reason:`GSV HTTP ${r.status}`};const d=await smallJson(r);const ready=d.ok===true&&d.ready===true;return {ready,...(!ready?{reason:typeof d.reason==='string'&&d.reason?d.reason:'GSV readiness not confirmed'}:{}),details:d}}catch(e){return {ready:false,reason:e.message}}
+}
+export async function checkAsr(endpoint,{signal,protocol='pcm16k-final'}={}){
+  if(!endpoint)return {ready:false,reason:'ASR尚未配置'};
+  if(protocol!=='pcm16k-final')return {ready:false,reason:'旧 voice-mode 协议依赖其独立激活状态；请使用 pcm16k-final 服务'};
+  try{const r=await fetch(base(endpoint)+'/health',{signal:requestSignal(signal,3000),redirect:'error'});if(!r.ok)return {ready:false,reason:`ASR HTTP ${r.status}`};const d=await smallJson(r);const ready=d.ok===true&&d.ready===true&&d.protocol===protocol&&d.sampleRate===16000&&d.channels===1&&d.format==='float32-le';return {ready,...(!ready?{reason:d.error||'ASR readiness or PCM protocol not confirmed'}:{}),details:d}}catch(e){return {ready:false,reason:e.message}}
 }
 export async function synthesizeGsv({endpoint,text,voice,language='zh',speed=1,signal}){
   if(typeof text!=='string'||!text.trim()||text.length>400)throw Error('invalid GSV text (1–400 characters)');

@@ -7,12 +7,18 @@ memory, prompt submission and model access. TTS uses the existing GSV service.
 
 ## Current verification boundary
 
-The initial implementation contains call/resource ownership, configuration
-validation with serialized compare-and-swap persistence, existing ASR/GSV HTTP
-adapters, and screen-capture lifecycle control. These modules have focused Node
-tests. The plugin entry point, actual DSH UI wiring and complete real-provider
-acceptance are still under implementation. Do not install this partial package
-into a production profile yet.
+The implementation contains the actual DSH entry points, native composer slot,
+call capsule, settings persistence, call/resource ownership, ASR/GSV HTTP
+adapters, explicit microphone capture, and screen-capture lifecycle control.
+It has been loaded in an isolated instance of the installed DSH runtime. The
+button, menu, configuration save, minimize and end were exercised in that actual
+host. Focused Node tests include loopback HTTP and SSE scope/cleanup.
+
+Complete real-provider acceptance is still in progress: existing ASR service
+session activation, real GSV playback, screen permission/vision submission,
+effective-persona change detection, and image/Live2D integration are not yet
+accepted. Image and avatar menu entries currently explain their unfinished
+state. Do not install this partial package into a production profile yet.
 
 ```sh
 node --test test/*.test.mjs
@@ -22,6 +28,13 @@ Tests start only temporary loopback HTTP servers. They do not load models,
 request microphone or screen access, change DSH configuration, or invoke Codex.
 Provider simulation is protocol evidence, not ASR accuracy, GSV quality or
 actual DSH acceptance.
+
+During development the source directory may be linked into a disposable DSH
+profile using an isolated `DSH_HOME` and `DSH_AGENTS_HOME`. Do not link it into a
+production profile as a shortcut. Initial registration needs a host lifecycle
+test; the frontend's ESM assets are served without cache, so UI-only revisions
+can be checked by refreshing the browser. Backend revisions require reloading
+the plugin or the owned test host, and are not frontend HMR.
 
 ## Design invariants
 

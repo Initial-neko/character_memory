@@ -1,0 +1,12 @@
+{
+  "name": "@local/dsh-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Non-invasive DSH companion capsule with existing media providers",
+  "main": "index.mjs",
+  "exports": { ".": "./index.mjs", "./client": "./client.js" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "files": ["src/", "index.mjs", "client.js", "cordis.patch.yml", "README.md"],
+  "dsh": { "bundle": {"patch": "./cordis.patch.yml"}, "client": {"platform": "web", "inject": [], "external": []} }
+}

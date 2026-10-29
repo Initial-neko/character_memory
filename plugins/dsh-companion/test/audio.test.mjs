@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+const m=await import('../src/audio-capture.mjs').catch(()=>({}));
+test('PCM conversion preserves duration and constant samples at 48k and 44.1k',()=>{assert.equal(typeof m.resample16k,'function','audio resampler must exist');for(const rate of [48000,44100]){const out=m.resample16k(new Float32Array(rate).fill(.25),rate);assert.equal(out.length,16000);assert.ok(out.every(x=>Math.abs(x-.25)<1e-6))}});
+test('invalid samples are rejected and downsampling averages high frequency alternation',()=>{assert.equal(typeof m.resample16k,'function');assert.throws(()=>m.resample16k(new Float32Array([NaN]),48000),/invalid/);assert.throws(()=>m.resample16k(new Float32Array([0]),0),/invalid/);const input=Float32Array.from({length:48000},(_,i)=>i%2?1:-1);const out=m.resample16k(input,48000);assert.ok(Math.abs(out.reduce((a,b)=>a+b,0))<.01)});

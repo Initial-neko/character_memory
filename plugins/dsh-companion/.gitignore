@@ -1,0 +1,4 @@
+node_modules/
+companion-junit.xml
+data/
+test-results/

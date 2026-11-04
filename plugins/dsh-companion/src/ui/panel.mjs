@@ -1,5 +1,5 @@
 /** Expanded call surface: same anchor side as the capsule, so it grows downward. */
-export function createPanel({React, store, call, actions}) {
+export function createPanel({React, store, call, actions, Stage}) {
   const h = React.createElement;
   const button = (label, fn, options = {}) => h('button', {
     type: 'button',
@@ -16,6 +16,7 @@ export function createPanel({React, store, call, actions}) {
       h('header', null,
         h('h2', null, state.mode === 'voice' ? '语音陪伴' : '屏幕陪伴'),
         button('收起', () => call.minimize())),
+      h(Stage),
       h('p', null, snap.screen === 'ON' ? `正在看：${snap.screenLabel}` : '画面还没开'),
       state.mode === 'screen' && snap.screen === 'ON' && state.watch && h('p', {className: 'dsh-companion-note'},
         `自动看：每 ${Math.round(state.watch.intervalMs / 1000)} 秒，已看 ${state.watch.reads}/${state.watch.maxReads}`,

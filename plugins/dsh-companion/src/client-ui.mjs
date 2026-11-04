@@ -7,6 +7,7 @@ import {createRequest, Orchestrator} from './ui/orchestrator.mjs';
 import {createTrigger} from './ui/trigger.mjs';
 import {createCapsule} from './ui/capsule.mjs';
 import {createPanel} from './ui/panel.mjs';
+import {createStage} from './ui/stage.mjs';
 import {createSettings} from './ui/settings.mjs';
 
 /** Wires the host surfaces to one call controller, one store and one orchestrator. */
@@ -74,7 +75,8 @@ export function createComponents(React) {
 
   const Trigger = createTrigger({React, store, refs});
   const Capsule = createCapsule({React, store, call, actions});
-  const Panel = createPanel({React, store, call, actions});
+  const Stage = createStage({React, store, call});
+  const Panel = createPanel({React, store, call, actions, Stage});
   const Settings = createSettings({React, store, request, actions, call});
 
   function Menu() {

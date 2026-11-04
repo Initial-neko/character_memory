@@ -37,6 +37,13 @@ export class ScreenCapture {
     const context=canvas.getContext('2d');if(!context)throw Error('frame encoder unavailable');context.drawImage(video,0,0,canvas.width,canvas.height);
     const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality));
     if(!this.accepts(token))throw Error('screen capture was stopped');if(!blob||blob.size>4*1024*1024)throw Error('invalid/oversized screen frame');
-    return {blob,width:canvas.width,height:canvas.height,capturedAt:new Date().toISOString(),token};
+    let fingerprint=null;
+    try{
+      const sample=document.createElement('canvas');sample.width=8;sample.height=8;
+      const sctx=sample.getContext('2d');sctx.drawImage(canvas,0,0,8,8);
+      const pixels=sctx.getImageData(0,0,8,8).data;
+      fingerprint=Array.from(pixels).filter((_,i)=>i%4!==3).reduce((out,value)=>out+Math.round(value/16).toString(16),'');
+    }catch{}
+    return {blob,width:canvas.width,height:canvas.height,capturedAt:new Date().toISOString(),token,fingerprint};
   }
 }

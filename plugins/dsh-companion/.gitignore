@@ -2,3 +2,7 @@ node_modules/
 companion-junit.xml
 data/
 test-results/
+
+# Local Live2D runtime/model assets (Cubism Core is not redistributable)
+assets/live2d/model/
+assets/live2d/vendor/

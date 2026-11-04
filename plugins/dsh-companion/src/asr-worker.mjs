@@ -4,7 +4,7 @@ import path from 'node:path';
 const require=createRequire(import.meta.url);
 try{
   const sherpa=require(workerData.modulePath),started=performance.now();
-  const recognizer=new sherpa.OfflineRecognizer({featConfig:{sampleRate:16000,featureDim:80},modelConfig:{senseVoice:{model:path.join(workerData.modelDir,'model.int8.onnx'),language:'auto',useInverseTextNormalization:1},tokens:path.join(workerData.modelDir,'tokens.txt'),numThreads:2,provider:'cpu',debug:0}});
+  const recognizer=new sherpa.OfflineRecognizer({featConfig:{sampleRate:16000,featureDim:80},modelConfig:{senseVoice:{model:path.join(workerData.modelDir,'model.int8.onnx'),language:workerData.language??'zh',useInverseTextNormalization:1},tokens:path.join(workerData.modelDir,'tokens.txt'),numThreads:2,provider:'cpu',debug:0}});
   parentPort.postMessage({type:'ready',loadMs:Math.round(performance.now()-started),version:sherpa.version});
   let busy=false;
   parentPort.on('message',async message=>{

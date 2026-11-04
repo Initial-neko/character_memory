@@ -20,7 +20,10 @@ export async function synthesizeGsv({endpoint,text,voice,language='zh',speed=1,s
   if(typeof text!=='string'||!text.trim()||text.length>400)throw Error('invalid GSV text (1–400 characters)');
   if(typeof voice!=='string'||!voice||voice.length>100||typeof speed!=='number'||speed<.5||speed>2)throw Error('invalid GSV voice/speed');
   const r=await fetch(base(endpoint)+'/v1/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,voice,language,speed}),signal:requestSignal(signal,180000),redirect:'error'});
-  if(!r.ok)throw Error(`GSV HTTP ${r.status}; not retried`);
+  if(!r.ok){
+    let reason='';try{reason=(await r.text()).slice(0,300)}catch{}
+    throw Error(`GSV HTTP ${r.status}${reason?`: ${reason}`:''}; not retried`);
+  }
   const bytes=await boundedBytes(r);
   if(bytes.length<44||new TextDecoder().decode(bytes.subarray(0,4))!=='RIFF'||new TextDecoder().decode(bytes.subarray(8,12))!=='WAVE')throw Error('invalid GSV WAV output');
   return {mime:'audio/wav',bytes,voice:r.headers.get('x-tts-voice')??voice};
@@ -35,4 +38,9 @@ export async function transcribeAsr({endpoint,sessionId,samples,epoch=0,offset=0
   if(!r.ok)throw Error(`ASR HTTP ${r.status}; current voice session and model readiness required; not retried`);
   const d=await smallJson(r);if(typeof d.text!=='string')throw Error('invalid ASR response');
   return {ready:true,text:d.text,endpoint:d.endpoint===true};
+}
+export async function listVoices(endpoint,{signal}={}){
+  const r=await fetch(base(endpoint)+'/health',{signal:requestSignal(signal,3000),redirect:'error'});if(!r.ok)throw Error(`GSV HTTP ${r.status}`);
+  const d=await smallJson(r);if(!Array.isArray(d.voices))throw Error('GSV did not return a voice list');
+  return {voices:d.voices.filter(v=>typeof v==='string'&&v.length<=100),defaultVoice:typeof d.default_voice==='string'?d.default_voice:null};
 }

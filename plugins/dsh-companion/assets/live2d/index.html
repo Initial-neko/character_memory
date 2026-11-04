@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 · Live2D 表现原型</title>
+<style>
+  :root{
+    --bg:#0a1220; --bg2:#0d1828; --line:#1d3350; --line2:#27476e;
+    --ink:#d7e6f7; --dim:#7d93ad; --accent:#4ea3ff; --accent2:#7ce0ff;
+    --ok:#3ddc97; --warn:#ffb454; --pink:#ff7bb0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:
+    radial-gradient(1100px 700px at 72% 18%, #12253c 0%, #0a1220 55%, #070d16 100%);
+    color:var(--ink);font:14px/1.55 "Segoe UI","Microsoft YaHei",sans-serif}
+  #app{display:flex;height:100%}
+  #panel{width:332px;flex:0 0 332px;height:100%;overflow-y:auto;padding:18px 16px 22px;
+    background:linear-gradient(180deg,rgba(13,24,40,.96),rgba(9,15,25,.98));
+    border-right:1px solid var(--line);backdrop-filter:blur(6px)}
+  #panel::-webkit-scrollbar{width:8px}
+  #panel::-webkit-scrollbar-thumb{background:#1d3350;border-radius:4px}
+  h1{margin:0 0 2px;font-size:15px;letter-spacing:.4px;font-weight:600;color:#eaf4ff}
+  .sub{color:var(--dim);font-size:11.5px;margin-bottom:14px;letter-spacing:.3px}
+  .grp{margin-bottom:14px}
+  .grp>label{display:block;font-size:11px;color:var(--dim);letter-spacing:1.2px;
+    text-transform:uppercase;margin-bottom:7px}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  button{font:inherit;font-size:12.5px;color:#bcd3ea;background:rgba(30,52,80,.55);
+    border:1px solid var(--line2);border-radius:8px;padding:7px 8px;cursor:pointer;
+    transition:.16s;text-align:center}
+  button:hover{background:rgba(46,80,124,.7);border-color:#3a6798;color:#e6f2ff}
+  button.on{background:linear-gradient(180deg,#1f5f9e,#17456f);border-color:var(--accent);
+    color:#fff;box-shadow:0 0 0 1px rgba(78,163,255,.35),0 6px 16px -8px #0af}
+  button.mini{padding:5px 7px;font-size:11.5px}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim)}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.off{background:#3a4658;box-shadow:none}
+  input[type=range]{width:100%;accent-color:var(--accent);height:18px}
+  .row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim)}
+  .row .v{color:var(--accent2);font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
+  #say{display:flex;gap:6px}
+  #say input{flex:1;min-width:0;background:rgba(8,14,24,.9);border:1px solid var(--line2);
+    border-radius:8px;color:var(--ink);padding:7px 9px;font:inherit;font-size:12.5px;outline:none}
+  #say input:focus{border-color:var(--accent)}
+  #log{margin-top:4px;font:11px/1.5 ui-monospace,monospace;color:#5f7690;white-space:pre-wrap;max-height:88px;overflow:hidden}
+  #stage{flex:1;position:relative;min-width:0}
+  #canvas-host{position:absolute;inset:0}
+  #badge{position:absolute;left:20px;top:18px;display:flex;align-items:center;gap:9px;
+    padding:7px 13px;border-radius:999px;background:rgba(10,20,34,.72);
+    border:1px solid var(--line2);font-size:12.5px;letter-spacing:.4px}
+  #badge b{color:var(--accent2);font-weight:600}
+  #stat{position:absolute;right:18px;bottom:16px;font:11px/1.5 ui-monospace,monospace;
+    color:#4d6684;text-align:right}
+  #load{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:12px;background:rgba(7,13,22,.9);z-index:5;transition:opacity .4s}
+  #load.gone{opacity:0;pointer-events:none}
+  .spin{width:30px;height:30px;border:2px solid #1d3350;border-top-color:var(--accent);
+    border-radius:50%;animation:sp .9s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  #err{color:var(--pink);font-size:12px;max-width:70%;text-align:center;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <h1>大肥鱼 · Live2D 表现原型</h1>
+    <div class="sub">状态驱动 / 表情 / 口型 / 耳朵 · 验证页</div>
+
+    <div class="grp">
+      <label>状态</label>
+      <div class="btns" id="states"></div>
+    </div>
+
+    <div class="grp">
+      <label>表情</label>
+      <div class="btns" id="exprs" style="grid-template-columns:1fr 1fr 1fr"></div>
+      <div style="margin-top:6px"><button class="mini" id="expr-off" style="width:100%">全部关掉</button></div>
+    </div>
+
+    <div class="grp">
+      <label>说话（模拟流式输出）</label>
+      <div id="say">
+        <input id="say-text" value="哥哥今天总算没把我忘了呢">
+        <button id="say-go" style="flex:0 0 58px">说</button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <label>开关</label>
+      <div class="row" style="justify-content:space-between;margin-bottom:6px">
+        <span class="chip" id="c-music"><i class="dot off"></i>音乐律动</span>
+        <div class="row"><input type="range" id="music-lv" min="0" max="1" step="0.05" value="0.55" style="width:90px"><span class="v" id="music-v">.55</span></div>
+      </div>
+      <div class="row" style="justify-content:space-between;margin-bottom:6px">
+        <span class="chip" id="c-gaze"><i class="dot off"></i>视线跟随鼠标</span>
+        <span style="font-size:11px;color:#4d6684">移动鼠标试试</span>
+      </div>
+      <div class="row" style="justify-content:space-between">
+        <span class="chip">缩放</span>
+        <div class="row"><input type="range" id="zoom" min="0.7" max="1.6" step="0.05" value="1.12"><span class="v" id="zoom-v">1.12</span></div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <label>日志</label>
+      <div id="log"></div>
+    </div>
+  </aside>
+
+  <main id="stage">
+    <div id="canvas-host"></div>
+    <div id="badge"><i class="dot"></i><span>状态</span><b id="badge-state">空闲</b></div>
+    <div id="stat"></div>
+    <div id="load"><div class="spin"></div><div style="color:#7d93ad;font-size:12px">加载模型…</div><div id="err"></div></div>
+  </main>
+</div>
+
+<script src="vendor/live2dcubismcore.min.js"></script>
+<script src="vendor/pixi.min.js"></script>
+<script src="vendor/cubism4.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const logEl = $('log');
+  const logLines = [];
+  const log = (m) => { logLines.push(m); if (logLines.length > 6) logLines.shift(); logEl.textContent = logLines.join('\n'); };
+
+  // ---------- expression table (derived from Exp3/*.exp3.json) ----------
+  const EXPR_GROUPS = { eyeShape: ['key3','key4','key5','key6'] };
+  const EXPRS = {
+    '脸红':   { key7: 1 },
+    '爱心眼': { key4: 1 },
+    '屑屑眼': { key3: 0, key5: 0, key6: 1, key4: 0 },
+    '＞＜':   { key3: 0, key4: 0, key5: 1, key6: 0 },
+    '圈圈眼': { key3: 1, key4: 0, key5: 0, key6: 0 },
+    '流泪':   { key2: 1 },
+    '兔牙':   { key9: 1 },
+    '加载':   { key8: 1 },
+    '黑框眼镜': { key11: 1 },
+    '单片眼镜': { key12: 1 },
+    '流冷汗': { key13: 1 },
+    '黑脸':   { key1: 1 },
+  };
+  const activeExprs = new Set();
+
+  // ---------- state definitions ----------
+  const S = Math.sin, C = Math.cos;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  const STATES = {
+    idle: { label: '空闲', pose: (t) => ({
+      ParamAngleX: S(t * 0.45) * 4, ParamAngleY: S(t * 0.62 + 0.8) * 2.6, ParamAngleZ: S(t * 0.33 + 0.4) * 3,
+      ParamBodyAngleX: S(t * 0.45) * 2.4, ParamBodyAngleZ: S(t * 0.33) * 1.2,
+      ParamBreath: 0.42 + 0.28 * S(t * 1.25),
+      ParamEyeBallX: S(t * 0.21) * 0.28, ParamEyeBallY: S(t * 0.17 + 1) * 0.14,
+      LEar1: S(t * 0.9) * 0.10, REar1: S(t * 0.95 + 1) * 0.10,
+    }) },
+    think: { label: '思考中', pose: (t) => ({
+      ParamAngleX: S(t * 0.5) * 6, ParamAngleY: 6 + S(t * 0.7) * 2, ParamAngleZ: -4 + S(t * 0.4) * 2,
+      ParamBodyAngleX: S(t * 0.4) * 2, ParamBreath: 0.38 + 0.2 * S(t * 1.1),
+      ParamEyeBallX: S(t * 0.3) * 0.22, ParamEyeBallY: 0.46,
+      ParamBrowLY: 0.18, ParamBrowRY: 0.18, BrowInnerUp: 0.22,
+      ParamMouthForm: -0.18, ParamEyeLOpen: 0.92, ParamEyeROpen: 0.92,
+      LEar1: S(t * 1.4) * 0.16, REar1: S(t * 1.4 + 0.6) * 0.16,
+    }) },
+    gen: { label: '生成中', pose: (t) => ({
+      ParamAngleX: -1 + S(t * 0.6) * 2, ParamAngleY: -5 + S(t * 0.5) * 1.5, ParamAngleZ: 2,
+      ParamBodyAngleX: -1.5 + S(t * 0.6) * 1, ParamBreath: 0.4 + 0.18 * S(t * 1.6),
+      ParamEyeBallY: -0.3, ParamEyeBallX: S(t * 0.55) * 0.14,
+      ParamEyeLOpen: 0.95, ParamEyeROpen: 0.95,
+      ParamBrowLY: -0.18, ParamBrowRY: -0.18,
+      ParamMouthOpenY: 0.06, ParamMouthForm: -0.05,
+      LEar1: -0.05, REar1: -0.05,
+    }) },
+    wait: { label: '等她回', pose: (t) => ({
+      ParamAngleX: S(t * 0.35) * 5, ParamAngleY: 1 + S(t * 0.4) * 1.5, ParamAngleZ: S(t * 0.25) * 4.5,
+      ParamBodyAngleX: S(t * 0.35) * 2.6, ParamBreath: 0.44 + 0.26 * S(t * 1.2),
+      ParamEyeBallX: -0.12 + S(t * 0.28) * 0.2, ParamEyeBallY: 0.1,
+      ParamEyeLOpen: 1.04, ParamEyeROpen: 1.04,
+      BrowInnerUp: 0.16, ParamMouthForm: 0.08,
+      LEar1: S(t * 1.1) * 0.13, REar1: S(t * 1.1 + 0.5) * 0.13,
+    }) },
+    speak: { label: '说话中', pose: (t) => ({
+      ParamAngleX: S(t * 1.15) * 3.2, ParamAngleY: S(t * 1.5) * 2, ParamAngleZ: S(t * 0.8) * 2,
+      ParamBodyAngleX: S(t * 1.15) * 1.4, ParamBreath: 0.46 + 0.16 * S(t * 1.9),
+      ParamEyeBallX: S(t * 0.5) * 0.2, ParamEyeBallY: 0.08,
+      ParamEyeLOpen: 1, ParamEyeROpen: 1,
+      EyeSmile: 0.22, ParamMouthForm: 0.32,
+      LEar1: S(t * 1.6) * 0.12, REar1: S(t * 1.6 + 0.7) * 0.12,
+    }) },
+    pat: { label: '被摸头', pose: (t) => ({
+      ParamAngleX: S(t * 2.2) * 3.4, ParamAngleY: 3, ParamAngleZ: 6 + S(t * 1.1) * 1.5,
+      ParamBodyAngleX: S(t * 2.2) * 1.6, ParamBreath: 0.5 + 0.24 * S(t * 2.1),
+      ParamEyeBallX: S(t * 1.3) * 0.3, ParamEyeBallY: 0.28,
+      ParamEyeLOpen: 0.56, ParamEyeROpen: 0.56,
+      EyeSmile: 0.85, ParamMouthForm: 0.55, ParamMouthOpenY: 0.08,
+      LEar1: S(t * 6.2) * 0.32, REar1: S(t * 6.2 + 0.4) * 0.32,
+      LEar2: S(t * 5.1) * 0.2, REar2: S(t * 5.1 + 0.3) * 0.2,
+      key7: 1,
+    }) },
+    tired: { label: '累了', pose: (t) => ({
+      ParamAngleX: S(t * 0.3) * 2, ParamAngleY: -6 + S(t * 0.28) * 1.4, ParamAngleZ: -5 + S(t * 0.22) * 1.6,
+      ParamBodyAngleX: -2 + S(t * 0.3) * 1, ParamBreath: 0.34 + 0.2 * S(t * 0.8),
+      ParamEyeLOpen: 0.4, ParamEyeROpen: 0.4,
+      ParamEyeBallY: -0.2, ParamEyeBallX: S(t * 0.2) * 0.12,
+      ParamBrowLY: -0.3, ParamBrowRY: -0.3, BrowInnerUp: -0.1,
+      ParamMouthForm: -0.25,
+      LEar1: -0.25, REar1: -0.25,
+    }) },
+  };
+
+  // ---------- runtime ----------
+  const rt = {
+    ready: false, core: null, idx: new Map(), defaults: new Float32Array(0),
+    state: 'idle', t0: performance.now(), t: 0,
+    mouth: 0, mouthTarget: 0, speaking: false,
+    music: false, musicLv: 0.55, gaze: false, zoom: 1.12,
+    mouse: { x: 0, y: 0 }, blink: { next: 2.2, phase: 0, v: 1 },
+    frames: 0, fpsT: 0, fps: 0,
+  };
+
+  const post = (id, v) => {
+    const i = rt.idx.get(id);
+    if (i === undefined) return;
+    rt.core.parameters.values[i] = v;
+  };
+
+  function applyExpressions() {
+    const keys = {};
+    for (const name of activeExprs) Object.assign(keys, EXPRS[name] || {});
+    // eye-shape group is mutually exclusive: clear ones not explicitly enabled this round
+    for (const k of EXPR_GROUPS.eyeShape) if (!(k in keys)) keys[k] = 0;
+    for (let i = 1; i <= 13; i++) {
+      const k = 'key' + i;
+      post(k, keys[k] ?? 0);
+    }
+  }
+
+  function blinkUpdate(dt) {
+    const b = rt.blink;
+    if (b.phase === 0) {
+      b.next -= dt;
+      if (b.next <= 0) { b.phase = 1; b.v = 1; }
+    } else if (b.phase === 1) {
+      b.v -= dt * 9;
+      if (b.v <= 0) { b.v = 0; b.phase = 2; }
+    } else if (b.phase === 2) {
+      b.v += dt * 6;
+      if (b.v >= 1) { b.v = 1; b.phase = 0; b.next = 2.4 + Math.random() * 3.4; }
+    }
+    return b.v;
+  }
+
+  function tick(dt) {
+    if (!rt.ready) return;
+    rt.t += dt;
+    const t = rt.t;
+    const st = STATES[rt.state];
+    const pose = st.pose(t);
+
+    // music groove: pulse on 2 Hz, swing on 120bpm
+    if (rt.music) {
+      const lv = rt.musicLv;
+      const beat = Math.exp(-((t * 2) % 1) * 6);
+      pose.ParamBodyAngleX = (pose.ParamBodyAngleX || 0) + S(t * 6.28) * 3.2 * lv;
+      pose.ParamBodyAngleZ = (pose.ParamBodyAngleZ || 0) + S(t * 3.14) * 2 * lv;
+      pose.ParamAngleZ = (pose.ParamAngleZ || 0) + S(t * 3.14 + 0.6) * 2.4 * lv;
+      pose.ParamAngleY = (pose.ParamAngleY || 0) + beat * 2.6 * lv;
+      pose.LEar1 = (pose.LEar1 || 0) + beat * 0.3 * lv;
+      pose.REar1 = (pose.REar1 || 0) + beat * 0.3 * lv;
+      pose.ParamBreath = (pose.ParamBreath || 0) + beat * 0.12 * lv;
+    }
+
+    // gaze follows pointer
+    if (rt.gaze) {
+      pose.ParamEyeBallX = clamp(rt.mouse.x * 1.1, -1, 1);
+      pose.ParamEyeBallY = clamp(-rt.mouse.y * 0.9, -1, 1);
+      pose.ParamAngleX = (pose.ParamAngleX || 0) + clamp(rt.mouse.x * 6, -6, 6);
+      pose.ParamAngleY = (pose.ParamAngleY || 0) + clamp(-rt.mouse.y * 5, -5, 5);
+    }
+
+    // mouth envelope
+    rt.mouth = lerp(rt.mouth, rt.mouthTarget, clamp(dt * 16, 0, 1));
+    if (rt.state === 'speak') pose.ParamMouthOpenY = rt.mouth;
+
+    // write pose params with a touch of smoothing on the big axes
+    for (const id in pose) post(id, pose[id]);
+
+    // blink overrides eye-open of the state, proportionally
+    const bv = blinkUpdate(dt);
+    if (bv < 1) {
+      const l = pose.ParamEyeLOpen ?? 1, r = pose.ParamEyeROpen ?? 1;
+      post('ParamEyeLOpen', l * bv);
+      post('ParamEyeROpen', r * bv);
+    }
+
+    applyExpressions();
+
+    // speaking head bob
+    if (rt.speaking) {
+      post('ParamAngleY', (pose.ParamAngleY || 0) + Math.sin(t * 9) * 1.6 * rt.mouth);
+    }
+
+    rt.frames++;
+    rt.fpsT += dt;
+    if (rt.fpsT > 0.5) {
+      rt.fps = Math.round(rt.frames / rt.fpsT);
+      rt.frames = 0; rt.fpsT = 0;
+      $('stat').textContent = `${rt.fps} fps · ${rt.idx.size} params`;
+    }
+  }
+
+  // ---------- boot ----------
+  (async () => {
+    try {
+      const modelPath = './model/' + encodeURIComponent('大肥鱼.model3.json');
+      const app = new PIXI.Application({ backgroundAlpha: 0, antialias: true, autoDensity: true,
+        resolution: Math.min(window.devicePixelRatio || 1, 2), resizeTo: $('canvas-host') });
+      $('canvas-host').appendChild(app.view);
+      window.__app = app;
+
+      const t0 = performance.now();
+      const model = await PIXI.live2d.Live2DModel.from(modelPath, { autoInteract: false });
+      log(`模型 ${(performance.now() - t0).toFixed(0)}ms 载入`);
+      app.stage.addChild(model);
+      window.__model = model;
+
+      const im = model.internalModel;
+      const core = im.coreModel._model || im.coreModel;
+      rt.core = core;
+      const ids = core.parameters.ids, n = core.parameters.count;
+      for (let i = 0; i < n; i++) rt.idx.set(ids[i], i);
+      rt.defaults = core.parameters.defaultValues;
+      log(`参数 ${n} · drawable ${core.drawables.count}`);
+
+      // disable built-in blink so our state machine owns the eyelids
+      if (im.eyeBlink) { im.eyeBlink = null; log('接管眨眼'); }
+
+      // ---- fit ----
+      const fit = () => {
+        const W = app.renderer.width / app.renderer.resolution;
+        const H = app.renderer.height / app.renderer.resolution;
+        const cw = im.originalWidth, ch = im.originalHeight;
+        const s = Math.min((W * 0.82 * rt.zoom) / cw, (H * 0.96 * rt.zoom) / ch);
+        model.scale.set(s);
+        model.x = (W - cw * s) / 2;
+        model.y = H - ch * s;
+      };
+      fit();
+      window.addEventListener('resize', fit);
+
+      rt.ready = true;
+      $('load').classList.add('gone');
+      log('就绪');
+
+      let last = performance.now();
+      app.ticker.add(() => {
+        const now = performance.now();
+        const dt = Math.min((now - last) / 1000, 0.1);
+        last = now;
+        tick(dt);
+      });
+
+      // expose for console poking
+      window.__rt = rt;
+      window.__setState = setState;
+      // Follow the companion session when served by the plugin.
+      let lastKey = '';
+      setInterval(async () => {
+        try {
+          const r = await fetch('/companion/api/state', {cache: 'no-store'});
+          if (!r.ok) return;
+          const st = await r.json();
+          const key = st.activity + '|' + (st.state ?? '');
+          if (key === lastKey) return;
+          lastKey = key;
+          const map = {listening: 'wait', thinking: 'idle', speaking: 'speak', idle: 'idle'};
+          const next = st.state || map[st.activity] || 'idle';
+          setState(next);
+          const note = document.getElementById('companion-note');
+          if (note) note.textContent = st.text || '';
+        } catch {}
+      }, 500);
+    } catch (e) {
+      console.error(e);
+      $('err').textContent = String(e && e.message || e);
+      log('FAIL ' + (e && e.message));
+    }
+  })();
+
+  // ---------- UI ----------
+  function setState(name) {
+    rt.state = name;
+    rt.speaking = name === 'speak';
+    if (name !== 'speak') rt.mouthTarget = 0;
+    for (const b of $('states').children) b.classList.toggle('on', b.dataset.s === name);
+    $('badge-state').textContent = STATES[name].label;
+    if (name !== 'pat') activeExprs.delete('脸红');
+    if (name === 'pat') activeExprs.add('脸红');
+    syncExprButtons();
+  }
+  function syncExprButtons() {
+    for (const b of $('exprs').children) b.classList.toggle('on', activeExprs.has(b.dataset.e));
+  }
+
+  for (const [k, v] of Object.entries(STATES)) {
+    const b = document.createElement('button');
+    b.textContent = v.label; b.dataset.s = k;
+    if (k === 'idle') b.classList.add('on');
+    b.onclick = () => setState(k);
+    $('states').appendChild(b);
+  }
+  for (const name of Object.keys(EXPRS)) {
+    const b = document.createElement('button');
+    b.textContent = name; b.dataset.e = name;
+    b.onclick = () => { activeExprs.has(name) ? activeExprs.delete(name) : activeExprs.add(name); syncExprButtons(); };
+    $('exprs').appendChild(b);
+  }
+  $('expr-off').onclick = () => { activeExprs.clear(); syncExprButtons(); };
+  window.__syncExpr = syncExprButtons;
+
+  // speaking simulation
+  $('say-go').onclick = () => {
+    const text = ($('say-text').value || '').trim();
+    if (!text) return;
+    setState('speak');
+    let i = 0;
+    const step = () => {
+      if (i >= text.length) {
+        rt.mouthTarget = 0; rt.speaking = false;
+        setTimeout(() => { if (rt.state === 'speak') setState('wait'); }, 260);
+        return;
+      }
+      const ch = text[i++];
+      const punct = '，。！？、…,.!?'.includes(ch);
+      rt.mouthTarget = punct ? 0 : 0.16 + Math.random() * 0.62;
+      const delay = punct ? 190 : 55 + Math.random() * 70;
+      setTimeout(step, delay);
+    };
+    step();
+  };
+
+  // toggles
+  const dotOf = (id) => $(id).querySelector('.dot');
+  $('c-music').onclick = () => { rt.music = !rt.music; dotOf('c-music').classList.toggle('off', !rt.music); };
+  $('music-lv').oninput = (e) => { rt.musicLv = +e.target.value; $('music-v').textContent = (+e.target.value).toFixed(2).slice(1); };
+  $('c-gaze').onclick = () => { rt.gaze = !rt.gaze; dotOf('c-gaze').classList.toggle('off', !rt.gaze); };
+  $('zoom').oninput = (e) => {
+    rt.zoom = +e.target.value; $('zoom-v').textContent = rt.zoom.toFixed(2);
+    window.dispatchEvent(new Event('resize'));
+  };
+  window.addEventListener('pointermove', (e) => {
+    rt.mouse.x = (e.clientX / innerWidth) * 2 - 1;
+    rt.mouse.y = (e.clientY / innerHeight) * 2 - 1;
+  });
+})();
+</script>
+</body>
+</html>

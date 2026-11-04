@@ -11,3 +11,20 @@ test('explicit TTS returns binary audio, never a global broadcast',async t=>{con
 test('unconfigured ASR health remains not ready and does not infer',async t=>{const store=new ConfigStore();const handler=m.createHandler({store});const server=createServer(handler);await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(async()=>{handler.dispose();server.closeAllConnections();await new Promise(r=>server.close(r))});const r=await fetch(`http://127.0.0.1:${server.address().port}/companion/api/health`,json({capability:'asr'}));assert.equal(r.status,200);const health=await r.json();assert.equal(health.ready,false);assert.match(health.reason,/未配置/)});
 test('assistant stream tap preserves original chunks and filters thought/tool data',async()=>{assert.equal(typeof m.tapReply,'function');const chunks=[{type:'reasoning-delta',text:'private thought'},{type:'text-delta',text:'你好'},{type:'tool-call-delta',arguments:'secret tool input'},{type:'finish'}];async function* input(){yield* chunks}const emitted=[];const out=[];for await(const c of m.tapReply(input(),x=>emitted.push(x)))out.push(c);assert.deepEqual(out,chunks);assert.deepEqual(emitted,['你好'])});
 test('actual event connection scopes reply delivery and disconnect releases interest',async t=>{const x=await setup(t);assert.equal(typeof x.handler.hasListeners,'function','inactive calls must not tap model output');assert.equal(x.handler.hasListeners('a'),false);const r=await fetch(x.base+'/api/events?sessionId=a');const reader=r.body.getReader();await reader.read();assert.equal(x.handler.hasListeners('a'),true);x.handler.emitReply('b','other session');x.handler.emitReply('a','our reply');const chunk=new TextDecoder().decode((await reader.read()).value);assert.ok(chunk.includes('our reply'));assert.ok(!chunk.includes('other session'));await reader.cancel();for(let i=0;i<20&&x.handler.hasListeners('a');i++)await new Promise(r=>setTimeout(r,5));assert.equal(x.handler.hasListeners('a'),false)});
+
+test('voice list comes from GSV and preview synthesizes only the chosen voice',async t=>{
+  const seen=[];const store=new ConfigStore();
+  const handler=m.createHandler({store,providers:{
+    checkGsv:async()=>({ready:true}),
+    listVoices:async()=>({voices:['cute','murasame'],defaultVoice:'murasame'}),
+    synthesizeGsv:async({voice})=>{seen.push(voice);return {bytes:new Uint8Array([1,2]),mime:'audio/wav'}}},
+  });
+  const server=createServer(handler);await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  t.after(async()=>{handler.dispose();server.closeAllConnections();await new Promise(r=>server.close(r))});
+  const base=`http://127.0.0.1:${server.address().port}/companion`;
+  const list=await (await fetch(base+'/api/voices')).json();assert.deepEqual(list.voices,['cute','murasame']);
+  const audio=await fetch(base+'/api/voice-test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({voice:'cute'})});
+  assert.equal(audio.status,200);assert.deepEqual(seen,['cute']);
+  const bad=await fetch(base+'/api/voice-test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({voice:''})});
+  assert.equal(bad.status,400);assert.deepEqual(seen,['cute']);
+});

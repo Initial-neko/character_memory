@@ -21,3 +21,25 @@ export async function recordMic({deviceId='',signal,onLimit=()=>{},mediaDevices=
     return {mute(value){for(const t of stream.getAudioTracks())t.enabled=!value},cancel,stop(){if(result)return result;const rate=context.sampleRate;cleanup();const all=new Float32Array(count);let offset=0;for(const chunk of chunks){all.set(chunk,offset);offset+=chunk.length}chunks.length=0;result=resample16k(all,rate);return result}};
   }catch(e){cancel();throw e}
 }
+
+/** Continuous capture for a call: every frame goes to the endpointer, no stop button. */
+export async function createMicStream({deviceId='',signal,onFrame=()=>{},mediaDevices=globalThis.navigator?.mediaDevices,AudioContext=globalThis.AudioContext}={}){
+  if(!mediaDevices?.getUserMedia||!AudioContext)throw Error('host microphone capture unavailable');
+  const stream=await mediaDevices.getUserMedia({audio:{...(deviceId?{deviceId:{exact:deviceId}}:{}),channelCount:1,echoCancellation:true,noiseSuppression:true},video:false});
+  const closeTracks=()=>stream.getTracks().forEach(t=>t.stop());
+  if(signal?.aborted){closeTracks();throw Error('recording cancelled')}
+  const context=new AudioContext();
+  let closed=false,source,node,gain;
+  const cleanup=()=>{if(closed)return;closed=true;signal?.removeEventListener('abort',cleanup);if(node)node.onaudioprocess=null;for(const x of [node,source,gain])try{x?.disconnect()}catch{}closeTracks();context.close().catch(()=>{})};
+  try{
+    await context.resume();
+    if(signal?.aborted){cleanup();throw Error('recording cancelled')}
+    source=context.createMediaStreamSource(stream);
+    node=context.createScriptProcessor(4096,1,1);
+    gain=context.createGain();gain.gain.value=0;
+    node.onaudioprocess=event=>{if(closed)return;onFrame(event.inputBuffer.getChannelData(0).slice())};
+    source.connect(node);node.connect(gain);gain.connect(context.destination);
+    signal?.addEventListener('abort',cleanup,{once:true});
+    return {sampleRate:context.sampleRate,mute(value){for(const t of stream.getAudioTracks())t.enabled=!value},stop:cleanup};
+  }catch(e){cleanup();throw e}
+}

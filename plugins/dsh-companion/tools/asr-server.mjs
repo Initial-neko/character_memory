@@ -3,11 +3,11 @@ import {access} from 'node:fs/promises';
 import path from 'node:path';
 import {parseArgs} from 'node:util';
 import {createAsrService} from '../src/asr-service.mjs';
-const {values}=parseArgs({options:{module:{type:'string'},'model-dir':{type:'string'},port:{type:'string',default:'50131'}}});
-const modulePath=values.module,modelDir=values['model-dir'],port=Number(values.port);
+const {values}=parseArgs({options:{module:{type:'string'},'model-dir':{type:'string'},language:{type:'string',default:'zh'},port:{type:'string',default:'50131'}}});
+const modulePath=values.module,modelDir=values['model-dir'],port=Number(values.port),language=String(values.language||'zh');
 if(!modulePath||!modelDir||!path.isAbsolute(modulePath)||!path.isAbsolute(modelDir)||!Number.isInteger(port)||port<0||port>65535)throw Error('Provide --module <existing sherpa-onnx-node file> --model-dir <existing SenseVoice directory> [--port 50131]');
 await Promise.all([modulePath,path.join(modelDir,'model.int8.onnx'),path.join(modelDir,'tokens.txt')].map(p=>access(p)));
-const worker=new Worker(new URL('../src/asr-worker.mjs',import.meta.url),{workerData:{modulePath,modelDir}});
+const worker=new Worker(new URL('../src/asr-worker.mjs',import.meta.url),{workerData:{modulePath,modelDir,language}});
 let ready=false,error=null,loadMs=null,version=null,pending=null,sequence=0;
 function fail(reason){ready=false;error=reason;pending?.reject(Error(reason));if(pending)clearTimeout(pending.timer);pending=null}
 worker.on('error',e=>fail(e.message));worker.on('exit',code=>fail(`ASR worker exited ${code}`));

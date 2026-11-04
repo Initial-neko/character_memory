@@ -1,8 +1,14 @@
 import {readFile} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {HELP} from './config.mjs';
 import * as defaults from './providers.mjs';
+import {ensureMicServer} from './local-mic-host.mjs';
 const PREFIX='/companion';
-const files=new Map(['call-controller','config','screen-capture','client-ui','audio-capture','host-bridge'].map(name=>[`${PREFIX}/assets/${name}.mjs`,new URL(`./${name}.mjs`,import.meta.url)]));
+const LIVE2D_ROOT=path.join(path.dirname(fileURLToPath(import.meta.url)),'..','assets','live2d');
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.moc3':'application/octet-stream','.wav':'audio/wav','.mp3':'audio/mpeg','.cdi3':'application/json','.physics3':'application/json','.model3':'application/json','.vtube':'application/json'};
+const modules=['call-controller','config','screen-capture','client-ui','audio-capture','host-bridge','ui/store','ui/styles','ui/orchestrator','ui/endpointer','ui/screen-watcher','ui/transcript-gate','ui/local-mic','ui/trigger','ui/capsule','ui/panel','ui/settings'];
+const files=new Map(modules.map(name=>[`${PREFIX}/assets/${name}.mjs`,new URL(`./${name}.mjs`,import.meta.url)]));
 const json=(res,status,data)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))};
 async function bytes(req,max){let n=0;const list=[];for await(const b of req){n+=b.length;if(n>max)throw Object.assign(Error('request too large'),{status:413});list.push(b)}return Buffer.concat(list)}
 async function body(req){try{return JSON.parse((await bytes(req,16384)).toString('utf8'))}catch(e){if(e.status)throw e;throw Object.assign(Error('invalid JSON'),{status:400})}}
@@ -14,6 +20,7 @@ export function trusted(req){
 }
 export function createHandler({store,providers=defaults}={}){
   const listeners=new Map();const controllers=new Set();let disposed=false;
+  const presence={activity:'idle',text:'',mood:0,updatedAt:0};
   const handler=async(req,res)=>{
     const abort=new AbortController();controllers.add(abort);res.on('close',()=>{abort.abort();controllers.delete(abort)});
     try{
@@ -21,10 +28,39 @@ export function createHandler({store,providers=defaults}={}){
       if(disposed)return json(res,503,{error:'plugin is disposed'});
       const url=new URL(req.url,`http://${req.headers.host}`),p=url.pathname;
       if(files.has(p)&&req.method==='GET'){res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});res.end(await readFile(files.get(p)));return}
+      if(p===PREFIX+'/live2d'||p===PREFIX+'/live2d/'){
+        if(req.method!=='GET')return json(res,405,{error:'GET required'});
+        try{const buf=await readFile(path.join(LIVE2D_ROOT,'index.html'));res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(buf);return}catch{return json(res,404,{error:'live2d page missing'})}
+      }
+      if(p.startsWith(PREFIX+'/live2d/')){
+        if(req.method!=='GET')return json(res,405,{error:'GET required'});
+        let rel;try{rel=decodeURIComponent(p.slice((PREFIX+'/live2d/').length))}catch{return json(res,400,{error:'bad path'})}
+        const target=path.resolve(LIVE2D_ROOT,rel);
+        if(target!==LIVE2D_ROOT&&!target.startsWith(LIVE2D_ROOT+path.sep))return json(res,403,{error:'forbidden'});
+        try{const buf=await readFile(target);res.writeHead(200,{'content-type':MIME[path.extname(target).toLowerCase()]??'application/octet-stream','cache-control':'no-store'});res.end(buf);return}catch{return json(res,404,{error:'not found'})}
+      }
+      if(p===PREFIX+'/api/state'){
+        if(req.method==='GET')return json(res,200,presence);
+        if(req.method==='POST'){
+          const b=await body(req);
+          presence.activity=String(b.activity??'idle').slice(0,24);
+          presence.text=String(b.text??'').slice(0,200);
+          presence.mood=Number(b.mood)||0;
+          presence.updatedAt=Date.now();
+          return json(res,200,{ok:true});
+        }
+        return json(res,405,{error:'GET or POST required'});
+      }
       if(p===PREFIX+'/api/config'){
         if(req.method==='GET')return json(res,200,{...store.snapshot,help:HELP});
         if(req.method==='PATCH'){const b=await body(req);return json(res,200,await store.update(b.expectedRevision,b.changes))}
         return json(res,405,{error:'GET or PATCH required'});
+      }
+      if(p===PREFIX+'/api/mic/ensure'){
+        if(req.method!=='POST')return json(res,405,{error:'POST required'});
+        const cfg=store.snapshot.value;
+        try{return json(res,200,await ensureMicServer({url:cfg.localMicUrl,python:cfg.localMicPython}))}
+        catch(e){return json(res,500,{error:String(e.message??e)})}
       }
       if(p===PREFIX+'/api/events'){
         if(req.method!=='GET')return json(res,405,{error:'GET required'});
@@ -38,6 +74,17 @@ export function createHandler({store,providers=defaults}={}){
         if(req.method!=='POST')return json(res,405,{error:'POST required'});
         const b=await body(req);if(b.capability==='asr')return json(res,200,await providers.checkAsr(config.asrEndpoint,{signal:abort.signal,protocol:config.asrProtocol}));if(b.capability!=='gsv')return json(res,400,{error:'unsupported health capability'});
         return json(res,200,await providers.checkGsv(config.gsvEndpoint,{signal:abort.signal}));
+      }
+      if(p===PREFIX+'/api/voices'){
+        if(req.method!=='GET')return json(res,405,{error:'GET required'});
+        return json(res,200,await providers.listVoices(config.gsvEndpoint,{signal:abort.signal}));
+      }
+      if(p===PREFIX+'/api/voice-test'){
+        if(req.method!=='POST')return json(res,405,{error:'POST required'});
+        const b=await body(req);
+        if(typeof b.voice!=='string'||!b.voice||b.voice.length>100)return json(res,400,{error:'invalid voice'});
+        const out=await providers.synthesizeGsv({endpoint:config.gsvEndpoint,text:'你好，我是小鱼，听得清吗？',voice:b.voice,language:config.gsvLanguage,speed:config.gsvSpeed,signal:abort.signal});
+        res.writeHead(200,{'content-type':out.mime,'cache-control':'no-store','x-content-type-options':'nosniff'});res.end(out.bytes);return;
       }
       if(p===PREFIX+'/api/tts'){
         if(req.method!=='POST')return json(res,405,{error:'POST required'});

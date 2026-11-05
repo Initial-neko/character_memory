@@ -72,10 +72,8 @@ export class Orchestrator {
   }
 
   async begin(mode) {
-    if (this.#call.snapshot.phase !== 'IDLE') {
-      if (this.#call.snapshot.phase === 'ERROR') this.#call.end('restart');
-      else throw Error('已经在通话中，先结束当前通话');
-    }
+    // Starting is authoritative: leftover CONNECTING/PAUSED/ERROR is reset instead of blocking.
+    if (this.#call.snapshot.phase !== 'IDLE') this.#call.end('restart');
     const config = await this.loadConfig();
     const current = this.#bridge.current();
     if (!current.sessionId) throw Error('请先打开一个原生 DSH 会话');

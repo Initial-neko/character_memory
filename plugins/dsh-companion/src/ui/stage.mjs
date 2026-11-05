@@ -26,7 +26,7 @@ export function createStage({React, store, call}) {
         .catch((failure) => { if (alive) setError(failure.message || String(failure)); });
       return () => {
         alive = false;
-        view.current?.destroy();
+        try { view.current?.destroy(); } catch {}
         view.current = null;
       };
     }, []);

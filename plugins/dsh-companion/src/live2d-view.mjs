@@ -290,11 +290,15 @@ export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, on
       if (destroyed) return;
       destroyed = true;
       runtime.ready = false;
-      window.removeEventListener('resize', fit);
+      let canvas = null;
+      try { canvas = app.view; } catch {}
+      try { window.removeEventListener('resize', fit); } catch {}
       try { app.ticker.remove(ticker); } catch {}
-      try { model.destroy(); } catch {}
-      try { app.destroy(true, { children: true, texture: true, baseTexture: true }); } catch {}
-      if (app.view?.parentNode) app.view.parentNode.removeChild(app.view);
+      try { model.destroy({ children: true, texture: true, baseTexture: true }); } catch {}
+      try { app.stage?.removeChildren(); } catch {}
+      try { app.renderer?.destroy(); } catch {}
+      try { app.ticker?.destroy(); } catch {}
+      try { if (canvas?.parentNode) canvas.parentNode.removeChild(canvas); } catch {}
     },
   };
 }

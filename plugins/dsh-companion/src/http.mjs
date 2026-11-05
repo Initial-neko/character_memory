@@ -4,10 +4,11 @@ import {fileURLToPath} from 'node:url';
 import {HELP} from './config.mjs';
 import * as defaults from './providers.mjs';
 import {ensureMicServer} from './local-mic-host.mjs';
+import {ensureScreenServer} from './local-screen-host.mjs';
 const PREFIX='/companion';
 const LIVE2D_ROOT=path.join(path.dirname(fileURLToPath(import.meta.url)),'..','assets','live2d');
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.moc3':'application/octet-stream','.wav':'audio/wav','.mp3':'audio/mpeg','.cdi3':'application/json','.physics3':'application/json','.model3':'application/json','.vtube':'application/json'};
-const modules=['call-controller','config','screen-capture','client-ui','audio-capture','host-bridge','ui/store','ui/styles','ui/orchestrator','ui/endpointer','ui/screen-watcher','ui/transcript-gate','ui/local-mic','ui/trigger','ui/capsule','ui/panel','ui/settings','live2d-view','ui/stage'];
+const modules=['call-controller','config','screen-capture','client-ui','audio-capture','host-bridge','ui/store','ui/styles','ui/orchestrator','ui/endpointer','ui/screen-watcher','ui/transcript-gate','ui/local-mic','ui/trigger','ui/capsule','ui/panel','ui/settings','live2d-view','ui/stage','local-screen','local-screen-host'];
 const files=new Map(modules.map(name=>[`${PREFIX}/assets/${name}.mjs`,new URL(`./${name}.mjs`,import.meta.url)]));
 const json=(res,status,data)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))};
 async function bytes(req,max){let n=0;const list=[];for await(const b of req){n+=b.length;if(n>max)throw Object.assign(Error('request too large'),{status:413});list.push(b)}return Buffer.concat(list)}
@@ -60,6 +61,12 @@ export function createHandler({store,providers=defaults}={}){
         if(req.method!=='POST')return json(res,405,{error:'POST required'});
         const cfg=store.snapshot.value;
         try{return json(res,200,await ensureMicServer({url:cfg.localMicUrl,python:cfg.localMicPython}))}
+        catch(e){return json(res,500,{error:String(e.message??e)})}
+      }
+      if(p===PREFIX+'/api/screen/ensure'){
+        if(req.method!=='POST')return json(res,405,{error:'POST required'});
+        const cfg=store.snapshot.value;
+        try{return json(res,200,await ensureScreenServer({url:cfg.localScreenUrl,python:cfg.localMicPython}))}
         catch(e){return json(res,500,{error:String(e.message??e)})}
       }
       if(p===PREFIX+'/api/events'){

@@ -10,6 +10,7 @@ export const DEFAULTS = Object.freeze({
   audioSource: 'local',
   localMicUrl: 'http://127.0.0.1:50132',
   localMicPython: 'python',
+  localScreenUrl: 'http://127.0.0.1:50134',
   screenMode: 'manual',
   screenMaxEdge: 1280,
   screenQuality: 0.8,
@@ -44,6 +45,7 @@ export const LABELS = Object.freeze({
   audioSource: '麦克风来源',
   localMicUrl: '本地麦克风服务',
   localMicPython: '启动用的 Python',
+  localScreenUrl: '本地截屏服务',
   screenMode: '屏幕读取模式',
   screenMaxEdge: '画面长边上限',
   screenQuality: '画面质量',
@@ -75,6 +77,7 @@ export const HELP = Object.freeze({
   audioSource: '本地设备服务绕开浏览器权限，桌面端推荐；浏览器麦克风留给网页端。',
   localMicUrl: '本地麦克风服务的 HTTP 地址，默认 50132；开始通话时插件会替你把它拉起来。',
   localMicPython: '启动本地麦克风服务用的解释器，默认 python。',
+  localScreenUrl: '桌面端拿不到浏览器屏幕授权时，从这里抓整屏；默认 50134。',
   screenMode: '当前只手动读取选定画面，不持续截屏。',
   screenMaxEdge: '发送前图片长边上限，256 到 1920。',
   screenQuality: 'JPEG 编码质量，0.3 到 1。',
@@ -112,7 +115,7 @@ export function validateConfig(input) {
   for (const key of Object.keys(DEFAULTS)) if (Object.hasOwn(input, key)) c[key] = input[key];
   c.gsvEndpoint = endpoint(c.gsvEndpoint, 'gsvEndpoint');
   c.asrEndpoint = endpoint(c.asrEndpoint, 'asrEndpoint', true);
-  for (const key of ['gsvVoice', 'gsvLanguage', 'inputDeviceId', 'localMicUrl', 'localMicPython']) {
+  for (const key of ['gsvVoice', 'gsvLanguage', 'inputDeviceId', 'localMicUrl', 'localMicPython', 'localScreenUrl']) {
     if (typeof c[key] !== 'string' || c[key].length > 2000 || /[\r\n\0]/.test(c[key])) throw Error(`invalid ${key}`);
   }
   if (!c.gsvVoice || c.gsvVoice.length > 100) throw Error('invalid gsvVoice');
@@ -136,6 +139,7 @@ export function validateConfig(input) {
   if (!Number.isInteger(c.screenMaxReads) || c.screenMaxReads < 1 || c.screenMaxReads > 100) throw Error('invalid screenMaxReads');
   if (!['local', 'browser'].includes(c.audioSource)) throw Error('invalid audioSource');
   c.localMicUrl = endpoint(c.localMicUrl, 'localMicUrl');
+  c.localScreenUrl = endpoint(c.localScreenUrl, 'localScreenUrl');
   if (typeof c.endpointThreshold !== 'number' || !Number.isFinite(c.endpointThreshold) || c.endpointThreshold < 0.001 || c.endpointThreshold > 0.1) throw Error('invalid endpointThreshold');
   if (c.confirmTranscript !== true || c.screenPreview !== true || c.screenMode !== 'manual' || !['dsh-voice-mode', 'pcm16k-final'].includes(c.asrProtocol)) {
     throw Error('unsupported automatic mode or provider protocol');

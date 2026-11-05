@@ -14,7 +14,7 @@ import {createSettings} from './ui/settings.mjs';
 export function createComponents(React) {
   const h = React.createElement;
   const call = new CallController();
-  const screen = new ScreenCapture({call});
+  const screen = new ScreenCapture({call, local: typeof globalThis.navigator?.mediaDevices?.getDisplayMedia === 'function' ? null : {url: 'http://127.0.0.1:50134'}});
   const store = createStore({
     menu: false,
     anchor: null,

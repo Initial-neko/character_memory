@@ -33,7 +33,13 @@ export function createStage({React, store, call}) {
 
     React.useEffect(() => {
       globalThis.__dshCompanionSetMouth = (level) => { view.current?.setMouth(level); };
-      return () => { delete globalThis.__dshCompanionSetMouth; };
+      globalThis.__dshCompanionPlayMotion = (group, index) => view.current?.playMotion(group, index);
+      globalThis.__dshCompanionSetExpression = (name, on) => view.current?.setExpression(name, on);
+      return () => {
+        delete globalThis.__dshCompanionSetMouth;
+        delete globalThis.__dshCompanionPlayMotion;
+        delete globalThis.__dshCompanionSetExpression;
+      };
     }, []);
 
     const activity = state.activity || 'idle';

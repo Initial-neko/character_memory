@@ -10,7 +10,7 @@ export function createPanel({React, store, call, actions, Stage}) {
   return function Panel() {
     const state = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
     const snap = React.useSyncExternalStore(call.subscribe, call.getSnapshot);
-    if (state.panel !== 'call' || snap.minimized || snap.phase === 'IDLE') return null;
+    if (state.panel !== 'call' || snap.minimized || snap.phase === 'IDLE' || state.bigchat) return null;
 
     return h('section', {className: 'dsh-companion-panel', role: 'dialog', 'aria-label': '陪伴'},
       h('header', null,

@@ -5,6 +5,7 @@ export function createBigChat({React, store, call, actions, Stage}) {
   const h = React.createElement;
   return function BigChat({sessionId}) {
     const state = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
+    const snap = React.useSyncExternalStore(call.subscribe, call.getSnapshot);
     const [draft, setDraft] = React.useState('');
     const [sending, setSending] = React.useState(false);
     const list = React.useRef(null);
@@ -48,6 +49,14 @@ export function createBigChat({React, store, call, actions, Stage}) {
       h('header', {className: 'dsh-companion-bigchat-bar'},
         h('strong', null, '陪着她'),
         h('span', {className: 'dsh-companion-bigchat-live'}, ACTIVITY_TEXT[state.activity] || '陪着'),
+        h('button', {
+          type: 'button',
+          className: 'dsh-companion-bigchat-voice',
+          onClick: () => {
+            const run = snap.phase === 'ACTIVE' ? actions.end() : actions.begin('voice');
+            Promise.resolve(run).catch(actions.reportError);
+          },
+        }, snap.phase === 'ACTIVE' ? '挂断语音' : '语音聊天'),
         h('button', {type: 'button', onClick: () => store.set({bigchat: false})}, '收起')),
       h('div', {className: 'dsh-companion-bigchat-body'},
         h('div', {className: 'dsh-companion-bigchat-stage'}, h(Stage)),

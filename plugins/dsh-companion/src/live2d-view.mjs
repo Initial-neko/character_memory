@@ -277,6 +277,9 @@ export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, on
       runtime.externalMouth = true;
       runtime.mouthTarget = clamp(Number(level) || 0, 0, 1);
     },
+    playMotion(group = 'Gesture', index = 0) {
+      try { model.motion(group, index); return true; } catch { return false; }
+    },
     setExpression(name, on = true) {
       if (!EXPRS[name]) return false;
       if (on) activeExprs.add(name); else activeExprs.delete(name);

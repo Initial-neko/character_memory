@@ -162,7 +162,10 @@ const [command = 'status', ...names] = process.argv.slice(2);
 if (command === 'status') await status();
 else if (command === 'up') await up(names);
 else if (command === 'down') down(names);
-else if (command === 'e2e') {
+else if (command === 'api') {
+  const child = spawn('node', ['tools/api-check.mjs', names[0] || 'http://127.0.0.1:50140'], {cwd: pluginRoot, stdio: 'inherit'});
+  child.on('exit', (code) => process.exit(code ?? 1));
+} else if (command === 'e2e') {
   if (!names[0]) { console.log('usage: node tools/stack.mjs e2e <url>'); process.exit(2); }
   const child = spawn('node', ['tools/e2e-check.mjs', names[0]], {cwd: pluginRoot, stdio: 'inherit'});
   child.on('exit', (code) => process.exit(code ?? 1));

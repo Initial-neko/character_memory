@@ -31,6 +31,11 @@ export function createStage({React, store, call}) {
       };
     }, []);
 
+    React.useEffect(() => {
+      globalThis.__dshCompanionSetMouth = (level) => { view.current?.setMouth(level); };
+      return () => { delete globalThis.__dshCompanionSetMouth; };
+    }, []);
+
     const activity = state.activity || 'idle';
     React.useEffect(() => {
       const instance = view.current;

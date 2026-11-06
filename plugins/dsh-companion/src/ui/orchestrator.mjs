@@ -16,6 +16,36 @@ export function createRequest(fetchImpl = (...args) => globalThis.fetch(...args)
   };
 }
 
+/** Feed the live model real TTS amplitude while a reply is playing. */
+function attachMouth(audio) {
+  const set = globalThis.__dshCompanionSetMouth;
+  if (typeof set !== 'function') return () => {};
+  const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (!Ctx) return () => {};
+  const ctx = new Ctx();
+  const source = ctx.createMediaElementSource(audio);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 256;
+  source.connect(analyser);
+  analyser.connect(ctx.destination);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  let raf = 0;
+  const tick = () => {
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (const value of data) { const x = (value - 128) / 128; sum += x * x; }
+    set(Math.min(1, Math.sqrt(sum / data.length) * 2.4));
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  return () => {
+    cancelAnimationFrame(raf);
+    set(0);
+    try { source.disconnect(); } catch {}
+    ctx.close().catch(() => {});
+  };
+}
+
 export const post = (data) => ({
   method: 'POST',
   headers: {'content-type': 'application/json'},
@@ -336,6 +366,8 @@ export class Orchestrator {
           const url = URL.createObjectURL(blob);
           try {
             audio = new Audio(url);
+            const detach = attachMouth(audio);
+            audio.addEventListener('ended', detach, {once: true});
             await new Promise((resolve, reject) => {
               audio.onended = resolve;
               audio.onerror = () => reject(Error('音频播放失败'));
@@ -454,6 +486,8 @@ export class Orchestrator {
     try {
       await new Promise((resolve, reject) => {
         const audio = new Audio(url);
+        const detach = attachMouth(audio);
+        audio.addEventListener('ended', detach, {once: true});
         audio.onended = resolve;
         audio.onerror = () => reject(Error('试听播放失败'));
         audio.play().catch(reject);

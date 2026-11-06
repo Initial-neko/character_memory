@@ -432,6 +432,16 @@ export class Orchestrator {
     this.#set({frame, preview: URL.createObjectURL(frame.blob), status: '本地预览。看完再决定要不要发。'});
   }
 
+  /** Text from the full-screen page: same native composer, same session. */
+  async sendText(text) {
+    const value = String(text ?? '').trim();
+    if (!value) throw Error('说点什么再发');
+    if (value.length > 4000) throw Error('一次说太多了，分几段吧');
+    const token = this.#bridge.current();
+    await this.#bridge.submit({token, text: value});
+    this.#set({messages: [...this.#store.get().messages, {role: 'user', text: value, at: Date.now()}]});
+  }
+
   async sendFrame() {
     const {frame, config} = this.#store.get();
     if (!config.value.visionEnabled) throw Error('先确认当前模型能看图，再在设置里打开视觉');

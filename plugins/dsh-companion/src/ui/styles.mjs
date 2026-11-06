@@ -42,4 +42,23 @@ export const css = `
 .dsh-companion-stage-badge:hover{background:#16263d}
 .dsh-companion-stage-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;margin:0;padding:16px;text-align:center;color:#9fb3cc;font-size:13px}
 .dsh-companion-stage-fps{position:absolute;right:10px;bottom:8px;color:#5f7592;font-size:11px}
+.dsh-companion-bigchat{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;background:#0b0f16;color:#e7edf6}
+.dsh-companion-bigchat-bar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #1d2635}
+.dsh-companion-bigchat-bar strong{font-size:15px}
+.dsh-companion-bigchat-live{font-size:12px;color:#7fa6d8;border:1px solid #26415f;border-radius:999px;padding:2px 8px}
+.dsh-companion-bigchat-bar button{margin-left:auto;border:1px solid #2c3a4f;background:#131b27;color:#cfe0f5;border-radius:8px;padding:6px 12px;cursor:pointer}
+.dsh-companion-bigchat-body{flex:1;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr);min-height:0}
+.dsh-companion-bigchat-stage{position:relative;min-height:0;background:radial-gradient(circle at 50% 35%,#17253c,#070b12 72%)}
+.dsh-companion-bigchat-stage .dsh-companion-stage{height:100%;margin:0;border:0;border-radius:0}
+.dsh-companion-bigchat-chat{display:flex;flex-direction:column;min-height:0;border-left:1px solid #1d2635;background:#0e131b}
+.dsh-companion-bigchat-list{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.dsh-companion-bigchat-empty{color:#5f7592;font-size:13px;margin:auto}
+.dsh-companion-bigchat-msg{max-width:88%;padding:8px 12px;border-radius:12px;font-size:14px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.dsh-companion-bigchat-msg.user{align-self:flex-end;background:#2b5f9e;color:#fff;border-bottom-right-radius:4px}
+.dsh-companion-bigchat-msg.assistant{align-self:flex-start;background:#1a2433;color:#dfe9f5;border-bottom-left-radius:4px}
+.dsh-companion-bigchat-input{display:flex;gap:8px;padding:12px;border-top:1px solid #1d2635}
+.dsh-companion-bigchat-input textarea{flex:1;resize:none;border:1px solid #2c3a4f;background:#101722;color:inherit;border-radius:10px;padding:8px 10px;font:inherit}
+.dsh-companion-bigchat-input button{border:1px solid transparent;background:#3b6fb6;color:#fff;border-radius:10px;padding:0 16px;cursor:pointer}
+.dsh-companion-bigchat-input button:disabled{opacity:.5;cursor:default}
+@media (max-width:760px){.dsh-companion-bigchat-body{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}.dsh-companion-bigchat-chat{border-left:0;border-top:1px solid #1d2635}}
 `;

@@ -8,6 +8,7 @@ import {createTrigger} from './ui/trigger.mjs';
 import {createCapsule} from './ui/capsule.mjs';
 import {createPanel} from './ui/panel.mjs';
 import {createStage} from './ui/stage.mjs';
+import {createBigChat} from './ui/bigchat.mjs';
 import {createSettings} from './ui/settings.mjs';
 
 /** Wires the host surfaces to one call controller, one store and one orchestrator. */
@@ -31,6 +32,8 @@ export function createComponents(React) {
     mode: 'voice',
     elapsed: 0,
     queued: 0,
+    bigchat: false,
+    messages: [],
   });
   const refs = {trigger: null, props: {}};
   const bridge = new HostBridge(() => refs.props);
@@ -71,12 +74,14 @@ export function createComponents(React) {
     mute: (muted) => orchestrator.muteInput(muted),
     reportError: (error) => store.set({status: error?.message ?? String(error)}),
     openLive2d: () => window.open('/companion/live2d/', '_blank', 'noopener'),
+    sendText: (text) => orchestrator.sendText(text),
   };
 
   const Trigger = createTrigger({React, store, refs});
   const Capsule = createCapsule({React, store, call, actions});
   const Stage = createStage({React, store, call});
   const Panel = createPanel({React, store, call, actions, Stage});
+  const BigChat = createBigChat({React, store, call, actions, Stage});
   const Settings = createSettings({React, store, request, actions, call});
 
   function Menu() {
@@ -93,6 +98,7 @@ export function createComponents(React) {
     return h('div', {className: 'dsh-companion-menu', role: 'menu', style},
       item('语音通话', () => actions.begin('voice')),
       item('视频 / 屏幕', () => actions.begin('screen')),
+      item('大屏聊天', () => store.set({bigchat: true})),
       item('设置', () => store.set({panel: 'settings'})));
   }
 
@@ -139,7 +145,8 @@ export function createComponents(React) {
       h(Menu),
       h(Capsule),
       state.panel === 'settings' && h(OverlaySettings),
-      expanded && h(Panel));
+      expanded && h(Panel),
+      h(BigChat, {sessionId: props.sessionId}));
   }
 
   return {

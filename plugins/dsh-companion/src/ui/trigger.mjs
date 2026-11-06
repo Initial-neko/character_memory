@@ -7,11 +7,7 @@ export function createTrigger({React, store, refs}) {
     const state = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
 
     function toggle() {
-      if (state.menu) { store.set({menu: false}); return; }
-      const rect = refs.trigger?.getBoundingClientRect();
-      if (!rect) { store.set({menu: true, anchor: null}); return; }
-      const left = Math.max(8, Math.min(rect.left, window.innerWidth - WIDTH - 8));
-      store.set({menu: true, anchor: {left, bottom: window.innerHeight - rect.top + 8}});
+      store.set({bigchat: true, menu: false});
     }
 
     return h('button', {

@@ -57,7 +57,9 @@ export function createBigChat({React, store, call, actions, Stage}) {
             Promise.resolve(run).catch(actions.reportError);
           },
         }, snap.phase === 'ACTIVE' ? '挂断语音' : '语音聊天'),
-        h('button', {type: 'button', onClick: () => store.set({bigchat: false})}, '收起')),
+        h('button', {type: 'button', onClick: () => Promise.resolve(actions.chooseScreen()).catch(actions.reportError)}, '屏幕'),
+        h('button', {type: 'button', onClick: () => store.set({bigchat: false, panel: 'settings'})}, '设置'),
+        h('button', {type: 'button', onClick: () => store.set({bigchat: false})}, '缩小')),
       h('div', {className: 'dsh-companion-bigchat-body'},
         h('div', {className: 'dsh-companion-bigchat-stage'}, h(Stage)),
         h('div', {className: 'dsh-companion-bigchat-chat'},

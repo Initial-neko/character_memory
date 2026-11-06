@@ -261,6 +261,11 @@ export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, on
   };
   app.ticker.add(ticker);
 
+  // Keep her breathing: replay the idle clip whenever the current one ends.
+  const idleLoop = () => { try { model.motion('Idle', 0); } catch {} };
+  idleLoop();
+  runtime.idleTimer = setInterval(idleLoop, 7000);
+
   let destroyed = false;
   return {
     get ready() { return runtime.ready; },
@@ -287,12 +292,22 @@ export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, on
         angry: {exprs: ['黑脸'], motion: ['Gesture', 1]},
         surprised: {exprs: ['圈圈眼']},
         thinking: {exprs: ['加载']},
+        smug: {exprs: ['屑屑眼']},
+        sad: {exprs: ['＞＜', '流泪']},
+        playful: {exprs: ['兔牙']},
+        awkward: {exprs: ['流冷汗']},
+        glasses: {exprs: ['黑框眼镜']},
+        monocle: {exprs: ['单片眼镜']},
         neutral: {exprs: []},
       };
       const plan = table[mood] || table.neutral;
       activeExprs.clear();
       for (const name of plan.exprs) activeExprs.add(name);
-      if (plan.motion) { try { model.motion(plan.motion[0], plan.motion[1]); } catch {} }
+      if (plan.motion) {
+        try { model.motion(plan.motion[0], plan.motion[1]); } catch {}
+        clearTimeout(runtime.resetTimer);
+        runtime.resetTimer = setTimeout(() => { try { model.motion('Reset', 0); } catch {} }, 2600);
+      }
       return true;
     },
     setExpression(name, on = true) {
@@ -308,6 +323,8 @@ export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, on
     },
     setZoom(value) { runtime.zoom = clamp(Number(value) || 1.12, 0.6, 2); fit(); },
     destroy() {
+      clearInterval(runtime.idleTimer);
+      clearTimeout(runtime.resetTimer);
       if (destroyed) return;
       destroyed = true;
       runtime.ready = false;

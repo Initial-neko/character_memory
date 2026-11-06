@@ -376,6 +376,11 @@ export class Orchestrator {
     else if (/害羞|脸红|讨厌啦|笨蛋|才不|哼/.test(value)) mood = 'shy';
     else if (/生气|坏蛋|不许|不行/.test(value)) mood = 'angry';
     else if (/诶|什么|真的吗|居然|竟然/.test(value)) mood = 'surprised';
+    else if (/得意|厉害吧|怎么样|崇拜/.test(value)) mood = 'smug';
+    else if (/委屈|难过|呜|想哭|伤心/.test(value)) mood = 'sad';
+    else if (/调皮|略略略|逗你|嘿嘿嘿/.test(value)) mood = 'playful';
+    else if (/尴尬|不好意思|呃/.test(value)) mood = 'awkward';
+    else if (/思考|想想|让我想/.test(value)) mood = 'thinking';
     if (/举手|举个手|招手/.test(value)) globalThis.__dshCompanionPlayMotion?.('Gesture', 0);
     else if (/竖手指|指一下/.test(value)) globalThis.__dshCompanionPlayMotion?.('Gesture', 1);
     else if (/狗尾草|摇尾巴/.test(value)) globalThis.__dshCompanionPlayMotion?.('Gesture', 2);

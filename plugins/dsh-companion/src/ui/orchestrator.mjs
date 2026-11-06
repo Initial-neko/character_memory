@@ -303,10 +303,20 @@ export class Orchestrator {
     this.#sending = true;
     this.#queued();
     try {
+      const cfg = this.#store.get().config?.value ?? {};
+      const files = [];
+      if (cfg.visionEnabled && this.#call.snapshot.screen === 'ON') {
+        let frame = this.#store.get().frame;
+        if (!frame || !this.#screen.accepts(frame.token)) {
+          try { frame = await this.#screen.captureFrame({maxEdge: cfg.screenMaxEdge, quality: cfg.screenQuality}); } catch { frame = null; }
+        }
+        if (frame?.blob) files.push(new File([frame.blob], 'screen.png', {type: 'image/png'}));
+      }
       this.#bridge.applyTranscript(this.#bridge.current(), text);
-      await this.#bridge.submit({token: this.#bridge.current(), text});
+      await this.#bridge.submit({token: this.#bridge.current(), text, files});
       this.#reactCommand(text);
       this.#set({messages: [...this.#store.get().messages, {role: 'user', text, at: Date.now()}]});
+      if (files.length) this.#set({frame: null});
       this.#status('发出去等回复了，你接着说。', 'thinking');
     } catch (error) {
       this.#sending = false;
@@ -466,7 +476,7 @@ export class Orchestrator {
   }
 
   async #autoLook() {
-    if (this.#sending || this.#playing) return;
+    if (this.#sending || this.#playing || this.#asrBusy) return;
     const cfg = this.#store.get().config?.value ?? {};
     let frame;
     try {

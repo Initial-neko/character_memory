@@ -305,6 +305,7 @@ export class Orchestrator {
     try {
       this.#bridge.applyTranscript(this.#bridge.current(), text);
       await this.#bridge.submit({token: this.#bridge.current(), text});
+      this.#set({messages: [...this.#store.get().messages, {role: 'user', text, at: Date.now()}]});
       this.#status('发出去等回复了，你接着说。', 'thinking');
     } catch (error) {
       this.#sending = false;

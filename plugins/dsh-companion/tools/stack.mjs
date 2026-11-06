@@ -120,13 +120,30 @@ async function up(names) {
     start(service);
     console.log(`${service.name}: started on ${service.port} (cold start may take up to 45s)`);
   }
-  for (let i = 0; i < 30; i += 1) {
+  for (let i = 0; i < 60; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const rows = [];
     for (const service of wanted) rows.push(await probe(service));
     if (rows.every((row) => row.state === 'up')) break;
   }
+  for (const service of wanted) await warmup(service);
   await status();
+}
+
+async function warmup(service) {
+  if (service.name !== 'gsv') return;
+  const started = Date.now();
+  try {
+    const response = await fetch(`http://127.0.0.1:${service.port}/v1/tts`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({text: '嗯，我在这儿。', voice: 'momo', language: 'zh'}),
+      signal: AbortSignal.timeout(120000),
+    });
+    console.log(response.ok ? `gsv: warmed up in ${Date.now() - started}ms` : `gsv: warmup HTTP ${response.status}`);
+  } catch (error) {
+    console.log(`gsv: warmup failed ${error.message}`);
+  }
 }
 
 function down(names) {

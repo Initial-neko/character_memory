@@ -38,8 +38,8 @@ export const css = `
 .dsh-companion-stage{position:relative;height:300px;margin:4px 0 12px;border-radius:14px;overflow:hidden;background:radial-gradient(circle at 50% 30%,#17253c,#0b1220 70%);border:1px solid #26374f}
 .dsh-companion-stage-host{position:absolute;inset:0}
 .dsh-companion-stage-host canvas{display:block;width:100%;height:100%}
-.dsh-companion-stage-badge{position:absolute;left:10px;top:10px;padding:3px 9px;border-radius:999px;border:1px solid #3b567a;background:#0f1b2dcc;color:#cfe0f5;font-size:12px;cursor:pointer}
-.dsh-companion-stage-badge:hover{background:#16263d}
+.dsh-companion-root .dsh-companion-stage-badge{position:absolute;left:10px;top:10px;padding:3px 9px;border-radius:999px;border:1px solid #3b567a;background:#0f1b2dcc;color:#cfe0f5;font-size:12px;cursor:pointer}
+.dsh-companion-root .dsh-companion-stage-badge:hover{background:#16263d}
 .dsh-companion-stage-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;margin:0;padding:16px;text-align:center;color:#9fb3cc;font-size:13px}
 .dsh-companion-stage-fps{position:absolute;right:10px;bottom:8px;color:#5f7592;font-size:11px}
 .dsh-companion-bigchat{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;background:#0b0f16;color:#e7edf6}

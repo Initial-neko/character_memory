@@ -310,7 +310,7 @@ export class Orchestrator {
         if (!frame || !this.#screen.accepts(frame.token)) {
           try { frame = await this.#screen.captureFrame({maxEdge: cfg.screenMaxEdge, quality: cfg.screenQuality}); } catch { frame = null; }
         }
-        if (frame?.blob) files.push(new File([frame.blob], 'screen.png', {type: 'image/png'}));
+        if (frame?.blob) files.push(new File([frame.blob], frame.blob.type?.includes('png') ? 'screen.png' : 'screen.jpg', {type: frame.blob.type || 'image/jpeg'}));
       }
       this.#bridge.applyTranscript(this.#bridge.current(), text);
       await this.#bridge.submit({token: this.#bridge.current(), text, files});
@@ -360,7 +360,7 @@ export class Orchestrator {
       if (!frame || !this.#screen.accepts(frame.token)) {
         try { frame = await this.#screen.captureFrame({maxEdge: cfg.screenMaxEdge, quality: cfg.screenQuality}); } catch { frame = null; }
       }
-      if (frame?.blob) files.push(new File([frame.blob], 'screen.png', {type: 'image/png'}));
+      if (frame?.blob) files.push(new File([frame.blob], frame.blob.type?.includes('png') ? 'screen.png' : 'screen.jpg', {type: frame.blob.type || 'image/jpeg'}));
     }
     await this.#bridge.submit({token: this.#bridge.current(), text: value, files});
     this.#set({messages: [...this.#store.get().messages, {role: 'user', text: value, at: Date.now()}]});

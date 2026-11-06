@@ -8,6 +8,7 @@ export function createBigChat({React, store, call, actions, Stage}) {
     const snap = React.useSyncExternalStore(call.subscribe, call.getSnapshot);
     const [draft, setDraft] = React.useState('');
     const [sending, setSending] = React.useState(false);
+    const [error, setError] = React.useState('');
     const list = React.useRef(null);
     const open = !!state.bigchat;
 
@@ -39,7 +40,7 @@ export function createBigChat({React, store, call, actions, Stage}) {
         await actions.sendText(text);
         setDraft('');
       } catch (error) {
-        actions.reportError(error);
+        setError(String(error?.message ?? error));
       } finally {
         setSending(false);
       }

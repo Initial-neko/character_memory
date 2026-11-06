@@ -104,6 +104,9 @@ try {
 
   const trigger = await clickText('陪伴');
   record('open trigger', trigger, trigger ? 'clicked 陪伴' : '陪伴 button missing');
+  await sleep(1200);
+  const menu = await clickText('大屏聊天', '[role=menuitem]');
+  record('menu opens', menu, menu ? 'clicked 大屏聊天' : 'menu item missing');
   await sleep(3500);
   const opened = await evaluate(`!!document.querySelector('.dsh-companion-bigchat')`);
   record('big screen opens', opened, opened ? 'big chat visible' : 'big chat missing');

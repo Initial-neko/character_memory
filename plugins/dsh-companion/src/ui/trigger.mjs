@@ -7,12 +7,8 @@ export function createTrigger({React, store, refs}) {
     const state = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
 
     function toggle() {
-      // Desktop (Electron) must never replace its own window with the stage.
-      if (/Electron/i.test(globalThis.navigator?.userAgent ?? '')) {
-        store.set({menu: !store.get().menu});
-        return;
-      }
-      store.set({bigchat: true, menu: false});
+      // Always the menu first: the stage must never take over the window by itself.
+      store.set({menu: !store.get().menu});
     }
 
     return h('button', {

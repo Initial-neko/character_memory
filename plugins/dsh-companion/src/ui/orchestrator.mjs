@@ -314,7 +314,6 @@ export class Orchestrator {
       }
       this.#bridge.applyTranscript(this.#bridge.current(), text);
       await this.#bridge.submit({token: this.#bridge.current(), text, files});
-      this.#reactCommand(text);
       this.#set({messages: [...this.#store.get().messages, {role: 'user', text, at: Date.now()}]});
       if (files.length) this.#set({frame: null});
       this.#status('发出去等回复了，你接着说。', 'thinking');
@@ -353,7 +352,6 @@ export class Orchestrator {
     const value = String(text ?? '').trim();
     if (!value) return;
     if (value.length > 4000) throw Error('一次最多 4000 字');
-    this.#reactCommand(value);
     this.#bridge.applyTranscript(this.#bridge.current(), value);
     const cfg = this.#store.get().config?.value ?? {};
     const files = [];
@@ -368,14 +366,6 @@ export class Orchestrator {
     this.#set({messages: [...this.#store.get().messages, {role: 'user', text: value, at: Date.now()}]});
   }
 
-  #reactCommand(text) {
-    const play = globalThis.__dshCompanionPlayMotion;
-    if (typeof play !== 'function') return;
-    const value = String(text ?? '');
-    if (/举手|举个手|招手|挥挥手|嗨/.test(value)) play('Gesture', 0);
-    else if (/竖手指|指一下|不行|拒绝|哼/.test(value)) play('Gesture', 1);
-    else if (/狗尾草|摇一摇|甩尾巴/.test(value)) play('Gesture', 2);
-  }
 
   #reactMood(text) {
     const set = globalThis.__dshCompanionSetMood;

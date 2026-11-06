@@ -50,6 +50,8 @@ const SERVICES = [
     args: ['tools/asr-server.mjs', '--module', ASR_MODULE, '--model-dir', ASR_MODEL, '--language', 'zh', '--port', '50131']},
   {name: 'mic', port: 50132, health: '/health', cwd: pluginRoot, cmd: PYTHON,
     args: ['tools/mic-server.py', '--port', '50132', '--device', '19']},
+  {name: 'screen', port: 50134, health: '/health', cwd: pluginRoot, cmd: PYTHON,
+    args: ['tools/screen-server.py', '--port', '50134']},
   {name: 'gsv', port: 9014, health: '/health', cwd: projectRoot, cmd: GSV_PYTHON,
     args: ['-m', 'character_memory.gsv_tts_runtime'], env: gsvEnv},
   {name: 'web', port: 50140, health: null, cwd: 'C:/Users/cute/Downloads/deepseek临时工作区', cmd: 'dsh',

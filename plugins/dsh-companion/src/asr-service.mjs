@@ -3,18 +3,31 @@ import {trusted} from './http.mjs';
 const json=(res,status,data)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))};
 /** A single warm recognizer behind HTTP; every utterance gets its own native stream. */
 export function createAsrService(engine){
-  let busy=false,requests=0;
+  let busy=false,requests=0,waiting=0,tail=Promise.resolve();
+  const MAX_WAITING=3;
+  // Bounded FIFO: up to three utterances wait for the single recognizer, the rest get 429.
+  function acquire(){
+    if(waiting>=MAX_WAITING)return null;
+    waiting++;
+    let release;
+    const hold=new Promise((resolve)=>{release=resolve});
+    const previous=tail;
+    tail=previous.then(()=>hold);
+    return previous.then(()=>()=>{waiting--;release()});
+  }
   return createServer(async(req,res)=>{
     try{
       if(!trusted(req)){req.resume();return json(res,403,{error:'loopback and same-origin access required'})}
       const url=new URL(req.url,`http://${req.headers.host}`),status=engine.status();
-      if(url.pathname==='/health'&&req.method==='GET')return json(res,200,{ok:true,...status,busy:busy||!!status.busy,requests,protocol:'pcm16k-final',sampleRate:16000,channels:1,format:'float32-le'});
+      if(url.pathname==='/health'&&req.method==='GET')return json(res,200,{ok:true,...status,busy:busy||!!status.busy,waiting,requests,protocol:'pcm16k-final',sampleRate:16000,channels:1,format:'float32-le'});
       if(url.pathname!=='/asr')return json(res,404,{error:'not found'});
       if(req.method!=='POST')return json(res,405,{error:'POST required'});
       const sid=url.searchParams.get('sessionId');
       if(!sid||sid.length>200||url.searchParams.get('final')!=='1'||req.headers['content-type']!=='application/octet-stream'){req.resume();return json(res,400,{error:'sessionId, final=1 and Float32 LE PCM required'})}
       if(!status.ready){req.resume();return json(res,status.error?503:202,{loading:!status.error,error:status.error??null})}
-      if(busy||status.busy){req.resume();return json(res,429,{error:'recognizer busy; not queued or retried'})}
+      const acquired=acquire();
+      if(!acquired){req.resume();return json(res,429,{error:`recognizer queue full (${MAX_WAITING}); retry later`})}
+      const release=await acquired;
       busy=true;
       try{
         let length=0;const chunks=[];
@@ -25,7 +38,7 @@ export function createAsrService(engine){
         requests++;const started=performance.now(),text=await engine.recognize(samples);
         if(typeof text!=='string')throw Error('recognizer returned invalid text');
         if(!res.destroyed)json(res,200,{text,elapsedMs:Math.round(performance.now()-started)});
-      }finally{busy=false}
+      }finally{busy=false;release()}
     }catch(e){if(!res.headersSent&&!res.destroyed)json(res,502,{error:String(e.message??e)});else res.destroy()}
   });
 }

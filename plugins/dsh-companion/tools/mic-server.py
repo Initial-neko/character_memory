@@ -15,6 +15,7 @@ import json
 import queue
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -28,7 +29,9 @@ _state = {
     "ready": False,
     "error": None,
     "muted": False,
+    "lastFrame": 0.0,
 }
+_stream = None
 _queues = []
 _queues_lock = threading.Lock()
 
@@ -50,6 +53,7 @@ def _resample_average(samples, rate):
 
 
 def _pusher(samples, rate):
+    _state["lastFrame"] = time.time()
     data = _resample_average(samples, rate)
     if data.size == 0 or _state["muted"]:
         return
@@ -90,11 +94,13 @@ def _open_stream(device_index):
 
 
 def start_capture(device_index):
+    global _stream
     try:
         stream, rate = _open_stream(device_index)
     except Exception as error:
         _state.update(ready=False, error=str(error))
         return None
+    _stream = stream
     _state.update(ready=True, error=None, rate=rate, device=device_index)
     return stream
 
@@ -117,12 +123,23 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         route = urlparse(self.path).path
         if route == "/health":
+            stale = _state["ready"] and _state["lastFrame"] and time.time() - _state["lastFrame"] > 5
+            if stale:
+                global _stream
+                try:
+                    if _stream is not None:
+                        _stream.close()
+                except Exception:
+                    pass
+                start_capture(_state["device"])
             self._json({
                 "ok": True,
                 "ready": _state["ready"],
                 "device": _state["device"],
                 "rate": _state["rate"],
                 "error": _state["error"],
+                "stale": bool(stale),
+                "lastFrameAge": round(time.time() - _state["lastFrame"], 2) if _state["lastFrame"] else None,
             })
             return
         if route == "/devices":

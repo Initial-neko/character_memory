@@ -70,6 +70,7 @@ export function createBigChat({React, store, call, actions, Stage}) {
               key: `${message.at}-${index}`,
               className: `dsh-companion-bigchat-msg ${message.role}`,
             }, message.text))),
+          error && h('div', {className: 'dsh-companion-bigchat-error'}, error),
           h('div', {className: 'dsh-companion-bigchat-input'},
             h('textarea', {
               value: draft,

@@ -81,6 +81,26 @@ export class Orchestrator {
     this.#fetch = (...args) => fetchImpl(...args);
   }
 
+  #stageWindow = null;
+
+  /** Open the standalone stage page; it talks back through postMessage. */
+  openStage() {
+    const win = globalThis.open?.('/companion/stage', 'companion-stage', 'width=1100,height=760');
+    if (win) {
+      this.#stageWindow = win;
+      globalThis.addEventListener?.('message', (event) => {
+        const data = event.data;
+        if (!data || data.source !== 'companion-stage' || data.type !== 'send') return;
+        Promise.resolve(this.sendText(String(data.text ?? ''))).catch(() => {});
+      });
+    }
+    return !!win;
+  }
+
+  #tellStage(type, text) {
+    try { this.#stageWindow?.postMessage?.({source: 'companion-host', type, text}, '*'); } catch {}
+  }
+
   #set(patch) { this.#store.set(patch); }
 
   #status(text, activity) {
@@ -405,6 +425,7 @@ export class Orchestrator {
       queue = queue.then(async () => {
         if (!this.#call.accepts(token)) return;
         const text = data.text.replace(/```[\s\S]*?```/g, '').trim();
+        this.#tellStage('reply', text);
         this.#reactMood(text);
         if (!text) return;
         this.#playStarted();

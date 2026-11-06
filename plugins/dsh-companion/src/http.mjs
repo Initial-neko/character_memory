@@ -8,7 +8,7 @@ import {ensureScreenServer} from './local-screen-host.mjs';
 const PREFIX='/companion';
 const LIVE2D_ROOT=path.join(path.dirname(fileURLToPath(import.meta.url)),'..','assets','live2d');
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.moc3':'application/octet-stream','.wav':'audio/wav','.mp3':'audio/mpeg','.cdi3':'application/json','.physics3':'application/json','.model3':'application/json','.vtube':'application/json'};
-const modules=['call-controller','config','screen-capture','client-ui','audio-capture','host-bridge','ui/store','ui/styles','ui/orchestrator','ui/endpointer','ui/screen-watcher','ui/transcript-gate','ui/local-mic','ui/trigger','ui/capsule','ui/panel','ui/settings','live2d-view','ui/stage','ui/bigchat','ui/pet','ui/live2d-owner','ui/voice-mouth','local-screen','local-screen-host'];
+const modules=['call-controller','config','screen-capture','client-ui','audio-capture','host-bridge','ui/store','ui/styles','ui/orchestrator','ui/endpointer','ui/screen-watcher','ui/transcript-gate','ui/local-mic','ui/trigger','ui/capsule','ui/panel','ui/settings','live2d-view','ui/stage','ui/bigchat','ui/pet','ui/float','ui/live2d-owner','ui/voice-mouth','local-screen','local-screen-host'];
 const files=new Map(modules.map(name=>[`${PREFIX}/assets/${name}.mjs`,new URL(`./${name}.mjs`,import.meta.url)]));
 const json=(res,status,data)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))};
 async function bytes(req,max){let n=0;const list=[];for await(const b of req){n+=b.length;if(n>max)throw Object.assign(Error('request too large'),{status:413});list.push(b)}return Buffer.concat(list)}
@@ -32,6 +32,10 @@ export function createHandler({store,providers=defaults}={}){
       if(p===PREFIX+'/live2d'||p===PREFIX+'/live2d/'){
         if(req.method!=='GET')return json(res,405,{error:'GET required'});
         try{const buf=await readFile(path.join(LIVE2D_ROOT,'index.html'));res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(buf);return}catch{return json(res,404,{error:'live2d page missing'})}
+      }
+      if(p===PREFIX+'/stage'){
+        if(req.method!=='GET')return json(res,405,{error:'GET required'});
+        try{const buf=await readFile(path.join(path.dirname(fileURLToPath(import.meta.url)),'..','assets','stage.html'));res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(buf);return}catch{return json(res,404,{error:'stage page missing'})}
       }
       if(p.startsWith(PREFIX+'/live2d/')){
         if(req.method!=='GET')return json(res,405,{error:'GET required'});

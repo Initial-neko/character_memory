@@ -10,6 +10,7 @@ import {createPanel} from './ui/panel.mjs';
 import {createStage} from './ui/stage.mjs';
 import {createBigChat} from './ui/bigchat.mjs';
 import {createPet} from './ui/pet.mjs';
+import {createFloat} from './ui/float.mjs';
 import {createSettings} from './ui/settings.mjs';
 
 /** Wires the host surfaces to one call controller, one store and one orchestrator. */
@@ -37,6 +38,7 @@ export function createComponents(React) {
     queued: 0,
     bigchat: false,
     pet: false,
+    float: false,
     messages: [],
   });
   const refs = {trigger: null, props: {}};
@@ -80,6 +82,7 @@ export function createComponents(React) {
     reportError: (error) => store.set({status: error?.message ?? String(error)}),
     openLive2d: () => window.open('/companion/live2d/', '_blank', 'noopener'),
     sendText: (text) => orchestrator.sendText(text),
+    openStage: () => orchestrator.openStage(),
   };
 
   const Trigger = createTrigger({React, store, refs});
@@ -88,6 +91,7 @@ export function createComponents(React) {
   const Panel = createPanel({React, store, call, actions, Stage});
   const BigChat = createBigChat({React, store, call, actions, Stage});
   const Pet = createPet({React, store, Stage});
+  const Float = createFloat({React, store, call, actions, Stage});
   const Settings = createSettings({React, store, request, actions, call});
 
   function Menu() {
@@ -104,6 +108,8 @@ export function createComponents(React) {
     return h('div', {className: 'dsh-companion-menu', role: 'menu', style},
       item('语音通话', () => actions.begin('voice')),
       item('视频 / 屏幕', () => actions.begin('screen')),
+      item('陪伴窗口', () => store.set({float: true, menu: false})),
+      item('独立窗口（网页）', () => { actions.openStage(); store.set({menu: false}); }),
       item('大屏聊天', () => store.set({bigchat: true})),
       item('设置', () => store.set({panel: 'settings'})));
   }
@@ -153,6 +159,7 @@ export function createComponents(React) {
       state.panel === 'settings' && h(OverlaySettings),
       expanded && h(Panel),
       h(BigChat, {sessionId: props.sessionId}),
+      h(Float),
       h(Pet));
   }
 

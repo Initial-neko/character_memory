@@ -355,7 +355,16 @@ export class Orchestrator {
     if (value.length > 4000) throw Error('一次最多 4000 字');
     this.#reactCommand(value);
     this.#bridge.applyTranscript(this.#bridge.current(), value);
-    await this.#bridge.submit({token: this.#bridge.current(), text: value});
+    const cfg = this.#store.get().config?.value ?? {};
+    const files = [];
+    if (cfg.visionEnabled && this.#call.snapshot.screen === 'ON') {
+      let frame = this.#store.get().frame;
+      if (!frame || !this.#screen.accepts(frame.token)) {
+        try { frame = await this.#screen.captureFrame({maxEdge: cfg.screenMaxEdge, quality: cfg.screenQuality}); } catch { frame = null; }
+      }
+      if (frame?.blob) files.push(new File([frame.blob], 'screen.png', {type: 'image/png'}));
+    }
+    await this.#bridge.submit({token: this.#bridge.current(), text: value, files});
     this.#set({messages: [...this.#store.get().messages, {role: 'user', text: value, at: Date.now()}]});
   }
 

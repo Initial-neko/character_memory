@@ -16,7 +16,9 @@ import {createSettings} from './ui/settings.mjs';
 export function createComponents(React) {
   const h = React.createElement;
   const call = new CallController();
-  const screen = new ScreenCapture({call, local: typeof globalThis.navigator?.mediaDevices?.getDisplayMedia === 'function' ? null : {url: 'http://127.0.0.1:50134'}});
+  const screenUrl = 'http://127.0.0.1:50134';
+  const forceLocal = globalThis.localStorage?.getItem('companionScreen') === 'local';
+  const screen = new ScreenCapture({call, localUrl: screenUrl, local: forceLocal ? {url: screenUrl} : null});
   const store = createStore({
     menu: false,
     anchor: null,
@@ -41,6 +43,7 @@ export function createComponents(React) {
   const bridge = new HostBridge(() => refs.props);
   const request = createRequest();
   const orchestrator = new Orchestrator({store, request, call, screen, bridge});
+  globalThis.__companionDebug = {store, call, screen, orchestrator};
 
   // Mirror the session state for the Live2D page (and anything else that wants it).
   let presenceTimer = null;

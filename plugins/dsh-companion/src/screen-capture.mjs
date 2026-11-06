@@ -2,11 +2,12 @@
 import {captureLocalScreen, ensureScreenServer} from './local-screen.mjs';
 
 export class ScreenCapture {
-  #call; #media; #revision = 0; #stream = null; #ended = null; #video = null; #local = null; #localActive = false;
-  constructor({call, mediaDevices = globalThis.navigator?.mediaDevices, local = null}) {
+  #call; #media; #revision = 0; #stream = null; #ended = null; #video = null; #local = null; #localActive = false; #localUrl = null;
+  constructor({call, mediaDevices = globalThis.navigator?.mediaDevices, local = null, localUrl = null}) {
     this.#call = call;
     this.#media = mediaDevices;
     this.#local = local;
+    this.#localUrl = localUrl;
   }
   get stream() { return this.#stream; }
   get localMode() { return !!this.#local; }
@@ -20,17 +21,27 @@ export class ScreenCapture {
     this.stop();
     const revision = ++this.#revision;
     const callToken = this.#call.token();
-    if (this.#local) {
-      await ensureScreenServer(this.#local);
-      if (revision !== this.#revision || !this.#call.accepts(callToken)) return null;
-      this.#localActive = true;
-      this.#call.own('screen', () => this.#clear(), callToken);
-      this.#call.screenStarted('整个屏幕（本地截屏）');
-      return {local: true, url: this.#local.url};
+    if (this.#local) return this.#chooseLocal(revision, callToken);
+    // Electron exposes getDisplayMedia but never resolves it; go local there.
+    if (/Electron/i.test(globalThis.navigator?.userAgent ?? '')) {
+      if (!this.#localUrl) throw Error('host screen picker unavailable');
+      this.#local = {url: this.#localUrl};
+      return this.#chooseLocal(revision, callToken);
     }
-    if (typeof this.#media?.getDisplayMedia !== 'function') throw Error('host screen picker unavailable');
+    if (typeof this.#media?.getDisplayMedia !== 'function') {
+      if (!this.#localUrl) throw Error('host screen picker unavailable');
+      this.#local = {url: this.#localUrl};
+      return this.#chooseLocal(revision, callToken);
+    }
     // Invoke before any await: browser transient user activation is required.
-    const stream = await this.#media.getDisplayMedia({video: true, audio: false});
+    let stream;
+    try {
+      stream = await this.#media.getDisplayMedia({video: true, audio: false});
+    } catch (error) {
+      if (!this.#localUrl) throw error;
+      this.#local = {url: this.#localUrl};
+      return this.#chooseLocal(revision, callToken);
+    }
     if (revision !== this.#revision || !this.#call.accepts(callToken)) {
       for (const track of stream.getTracks()) track.stop();
       return null;
@@ -46,6 +57,15 @@ export class ScreenCapture {
     this.#call.screenStarted(stream.getVideoTracks()[0].label || '选定画面');
     return stream;
   }
+  async #chooseLocal(revision, callToken) {
+    await ensureScreenServer(this.#local);
+    if (revision !== this.#revision || !this.#call.accepts(callToken)) return null;
+    this.#localActive = true;
+    this.#call.own('screen', () => this.#clear(), callToken);
+    this.#call.screenStarted('整个屏幕（本地截屏）');
+    return {local: true, url: this.#local.url};
+  }
+
   #clear() {
     this.#revision++;
     const stream = this.#stream;

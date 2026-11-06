@@ -372,9 +372,9 @@ export class Orchestrator {
     const play = globalThis.__dshCompanionPlayMotion;
     if (typeof play !== 'function') return;
     const value = String(text ?? '');
-    if (/举手|举个手/.test(value)) play('Gesture', 0);
-    else if (/竖手指|指一下/.test(value)) play('Gesture', 1);
-    else if (/狗尾草/.test(value)) play('Gesture', 2);
+    if (/举手|举个手|招手|挥挥手|嗨/.test(value)) play('Gesture', 0);
+    else if (/竖手指|指一下|不行|拒绝|哼/.test(value)) play('Gesture', 1);
+    else if (/狗尾草|摇一摇|甩尾巴/.test(value)) play('Gesture', 2);
   }
 
   #reactMood(text) {
@@ -386,6 +386,9 @@ export class Orchestrator {
     else if (/害羞|脸红|讨厌啦|笨蛋|才不|哼/.test(value)) mood = 'shy';
     else if (/生气|坏蛋|不许|不行/.test(value)) mood = 'angry';
     else if (/诶|什么|真的吗|居然|竟然/.test(value)) mood = 'surprised';
+    if (/举手|举个手|招手/.test(value)) globalThis.__dshCompanionPlayMotion?.('Gesture', 0);
+    else if (/竖手指|指一下/.test(value)) globalThis.__dshCompanionPlayMotion?.('Gesture', 1);
+    else if (/狗尾草|摇尾巴/.test(value)) globalThis.__dshCompanionPlayMotion?.('Gesture', 2);
     set(mood);
   }
 

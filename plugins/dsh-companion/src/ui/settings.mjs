@@ -5,6 +5,7 @@ const GROUPS = [
   {title: '语音', fields: ['gsvEndpoint', 'gsvVoice', 'gsvSpeed', 'gsvLanguage', 'asrEndpoint', 'asrProtocol', 'autoSend', 'requireChinese', 'minTranscriptChars', 'transcriptChineseRatio']},
   {title: '断句', fields: ['endpointSilenceMs', 'endpointMinSpeechMs', 'endpointMaxSpeechMs', 'endpointCalibrationMs', 'endpointThreshold']},
   {title: '屏幕与视觉', fields: ['screenMaxEdge', 'screenQuality', 'visionEnabled', 'screenAutoRead', 'screenIntervalMs', 'screenMaxReads']},
+  {title: '形象', fields: ['live2dQuality', 'live2dEnabled', 'live2dZoom', 'live2dMouthGain']},
   {title: '设备', fields: ['audioSource', 'localMicUrl', 'localMicPython', 'inputDeviceId']},
 ];
 

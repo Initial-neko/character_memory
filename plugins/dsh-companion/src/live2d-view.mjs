@@ -110,7 +110,7 @@ function loadScript(src) {
   });
 }
 
-export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, onStatus = () => {} } = {}) {
+export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, onStatus = () => {}, quality = 'high' } = {}) {
   if (!container) throw Error('Live2D container required');
   await loadScript(`${VENDOR}/live2dcubismcore.min.js`);
   await loadScript(`${VENDOR}/pixi.min.js`);
@@ -207,13 +207,16 @@ export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, on
     }
   }
 
+  const lowQuality = quality === 'low';
   const app = new PIXI.Application({
     backgroundAlpha: 0,
-    antialias: true,
+    antialias: !lowQuality,
     autoDensity: true,
-    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    resolution: lowQuality ? 1 : Math.min(window.devicePixelRatio || 1, 2),
+    powerPreference: lowQuality ? 'low-power' : 'high-performance',
     resizeTo: container,
   });
+  app.ticker.maxFPS = lowQuality ? 24 : 60;
   container.appendChild(app.view);
 
   let model;

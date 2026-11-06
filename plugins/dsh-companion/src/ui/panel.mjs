@@ -16,24 +16,15 @@ export function createPanel({React, store, call, actions, Stage}) {
       h('header', null,
         h('h2', null, state.mode === 'voice' ? '语音陪伴' : '屏幕陪伴'),
         button('收起', () => call.minimize())),
-      h(Stage),
       h('p', null, snap.screen === 'ON' ? `正在看：${snap.screenLabel}` : '画面还没开'),
       state.mode === 'screen' && snap.screen === 'ON' && state.watch && h('p', {className: 'dsh-companion-note'},
         `自动看：每 ${Math.round(state.watch.intervalMs / 1000)} 秒，已看 ${state.watch.reads}/${state.watch.maxReads}`,
         button(state.watch.active ? '暂停自动看' : '继续自动看', () => actions.toggleWatch())),
       h('footer', null,
         button('选窗口', () => actions.chooseScreen(), {disabled: snap.phase !== 'ACTIVE' || snap.screen === 'ON'}),
-        button('读一帧', () => actions.captureFrame(), {disabled: snap.screen !== 'ON'}),
-        button('发给她', () => actions.sendFrame(), {
-          className: 'dsh-companion-primary',
-          disabled: snap.screen !== 'ON' || !state.config?.value.visionEnabled,
-        }),
         button('不共享了', () => actions.stopScreen(), {disabled: snap.screen !== 'ON'}),
-        button('看她的形象', () => actions.openLive2d(), {className: 'dsh-companion-primary'})),
-      state.preview && h('div', null,
-        h('img', {src: state.preview, alt: '发送前的画面预览'}),
-        button('就发这张', () => actions.sendFrame())),
-      h('p', {className: 'dsh-companion-note'}, '收起只是缩小，结束才真的停；画面默认不发送。'),
+        button('大屏聊天', () => store.set({bigchat: true}), {className: 'dsh-companion-primary'})),
+      h('p', {className: 'dsh-companion-note'}, '收起只是缩小，结束才真的停；画面只在本地采样。'),
       h('p', {className: 'dsh-companion-status', role: 'status'}, state.status));
   };
 }

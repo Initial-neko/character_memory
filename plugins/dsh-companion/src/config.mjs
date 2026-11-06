@@ -25,9 +25,13 @@ export const DEFAULTS = Object.freeze({
   screenAutoRead: false,
   screenIntervalMs: 30000,
   screenMaxReads: 10,
+  live2dQuality: 'high',
   requireChinese: false,
   minTranscriptChars: 2,
   transcriptChineseRatio: 0.3,
+  live2dEnabled: true,
+  live2dZoom: 1.12,
+  live2dMouthGain: 1,
 });
 
 /** Fields that older snapshots still carry; read them, keep none of them. */
@@ -60,9 +64,13 @@ export const LABELS = Object.freeze({
   screenAutoRead: '自己周期看屏幕',
   screenIntervalMs: '看屏幕间隔',
   screenMaxReads: '每次最多看几次',
+  live2dQuality: '形象画质',
   requireChinese: '只发中文识别的结果',
   minTranscriptChars: '转写最短长度',
   transcriptChineseRatio: '中文占比下限',
+  live2dEnabled: '通话面板里显示形象',
+  live2dZoom: '形象缩放',
+  live2dMouthGain: '口型幅度',
 });
 
 export const HELP = Object.freeze({
@@ -92,9 +100,13 @@ export const HELP = Object.freeze({
   screenAutoRead: '共享开始后她自己按间隔看一眼，不用你点。',
   screenIntervalMs: '两次自动看之间隔多少毫秒，10000 到 600000。',
   screenMaxReads: '一轮共享最多自动看几次，看够就停，1 到 100。',
+  live2dQuality: 'high 用高分辨率和高帧率（显卡），low 省电降画质；卡顿时选 low。',
   requireChinese: '杂音常被识别成假名或英文，这种一律不发。',
   minTranscriptChars: '去空白后至少这么多字才算一句话，1 到 50。',
   transcriptChineseRatio: '汉字占非空白字符的最低比例，0.05 到 1。',
+  live2dEnabled: '打开后通话面板里直接有她的形象；关掉只留语音，省 WebGL。',
+  live2dZoom: '面板内形象缩放，0.6 到 2，只影响取景。',
+  live2dMouthGain: '真实语音振幅驱动口型的倍数，0 到 2；0 等于闭嘴。',
 });
 
 function endpoint(value, key, empty = false) {
@@ -125,6 +137,11 @@ export function validateConfig(input) {
   if (!Number.isInteger(c.screenMaxEdge)) throw Error('invalid screenMaxEdge');
   if (typeof c.visionEnabled !== 'boolean') throw Error('invalid visionEnabled');
   if (typeof c.autoSend !== 'boolean') throw Error('invalid autoSend');
+  if (typeof c.live2dEnabled !== 'boolean') throw Error('invalid live2dEnabled');
+  if (!['low','high'].includes(c.live2dQuality)) throw Error('invalid live2dQuality');
+  for (const [key, min, max] of [['live2dZoom', 0.6, 2], ['live2dMouthGain', 0, 2]]) {
+    if (typeof c[key] !== 'number' || !Number.isFinite(c[key]) || c[key] < min || c[key] > max) throw Error(`invalid ${key}`);
+  }
   for (const [key, min, max] of [
     ['endpointSilenceMs', 300, 3000], ['endpointMinSpeechMs', 100, 2000],
     ['endpointMaxSpeechMs', 2000, 60000], ['endpointCalibrationMs', 100, 2000],

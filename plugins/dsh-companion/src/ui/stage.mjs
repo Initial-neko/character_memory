@@ -17,7 +17,7 @@ export function createStage({React, store, call}) {
 
     React.useEffect(() => {
       let alive = true;
-      createLive2dView({container: host.current, onStatus: () => {}})
+      createLive2dView({container: host.current, onStatus: () => {}, quality: store.get().config?.value?.live2dQuality || 'high'})
         .then((instance) => {
           if (!alive) { instance.destroy(); return; }
           view.current = instance;

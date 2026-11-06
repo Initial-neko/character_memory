@@ -409,37 +409,12 @@ export class Orchestrator {
       return;
     }
     const n = this.#watcher?.state.reads ?? 0;
-    this.#set({watch: this.#watcher?.state ?? null});
-    if (this.#lastFrameHash && frame.fingerprint && frame.fingerprint === this.#lastFrameHash) {
-      this.#status(`第 ${n} 次看：画面没变，跳过。`);
-      return;
-    }
-    this.#lastFrameHash = frame.fingerprint ?? '';
-    const token = this.#bridge.current();
-    await this.#bridge.submit({
-      token,
-      text: '（自己看一眼共享画面）用一两句话说说现在画面里有什么变化。',
-      files: [new File([frame.blob], 'screen.jpg', {type: 'image/jpeg'})],
-    });
-    const left = this.#watcher?.state.remaining ?? 0;
-    this.#status(`第 ${n} 次看：画面变了，已经交给 DSH。${left ? `还剩 ${left} 次。` : '这一轮看够了。'}`, 'thinking');
-  }
-
-  async captureFrame() {
-    const {value} = this.#store.get().config;
-    const frame = await this.#screen.captureFrame({maxEdge: value.screenMaxEdge, quality: value.screenQuality});
-    this.#clearPreview();
-    this.#set({frame, preview: URL.createObjectURL(frame.blob), status: '本地预览。看完再决定要不要发。'});
-  }
-
-  /** Text from the full-screen page: same native composer, same session. */
-  async sendText(text) {
-    const value = String(text ?? '').trim();
-    if (!value) throw Error('说点什么再发');
-    if (value.length > 4000) throw Error('一次说太多了，分几段吧');
-    const token = this.#bridge.current();
-    await this.#bridge.submit({token, text: value});
-    this.#set({messages: [...this.#store.get().messages, {role: 'user', text: value, at: Date.now()}]});
+    const changed = !(this.#lastFrameHash && frame.fingerprint && frame.fingerprint === this.#lastFrameHash);
+    if (changed) this.#lastFrameHash = frame.fingerprint ?? '';
+    const {preview} = this.#store.get();
+    if (preview) URL.revokeObjectURL(preview);
+    this.#set({watch: this.#watcher?.state ?? null, frame, preview: URL.createObjectURL(frame.blob)});
+    this.#status(changed ? `第 ${n} 次采样：画面有变化，快照已经更新。` : `第 ${n} 次采样：画面没变，跳过。`);
   }
 
   async sendFrame() {

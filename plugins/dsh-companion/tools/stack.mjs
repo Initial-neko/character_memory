@@ -16,8 +16,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(here, '..');
 const projectRoot = process.env.CM_ROOT || 'C:/Users/cute/projects/character_memory';
 const runtimeHome = process.env.DSH_HOME || 'C:/Users/cute/Downloads/deepseek临时工作区/_runtime-home';
-const PYTHON = process.env.PYTHON || 'C:/Users/cute/miniconda3/python.exe';
-const GSV_PYTHON = path.join(projectRoot, '.external/GSV-TTS-Lite/.venv/Scripts/python.exe');
+const PYTHON = process.env.PYTHON || 'C:/Users/cute/miniconda3/pythonw.exe';
+const GSV_PYTHON = path.join(projectRoot, '.external/GSV-TTS-Lite/.venv/Scripts/pythonw.exe');
 const ASR_MODULE = process.env.ASR_MODULE || 'C:/Users/cute/.dsh/profiles/desktop/node_modules/sherpa-onnx-node/sherpa-onnx.js';
 const ASR_MODEL = process.env.ASR_MODEL || 'C:/Users/cute/AppData/Local/dsh-voice-mode/models/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17';
 
@@ -102,7 +102,7 @@ function start(service) {
     stdio: 'ignore',
     windowsHide: true,
     detached: true,
-    shell: process.platform === 'win32',
+    shell: service.name === 'web',
   });
   child.unref();
 }

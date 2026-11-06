@@ -19,6 +19,7 @@ Keep it short and stable. Detailed architecture, feature behavior, task state, a
 - **Visual acceptance is a separate required gate** for user-visible UI changes. The owning Issue holds approved reference images, real rendered desktop/mobile/device screenshots, exact tested commit, findings and explicit human sign-off; CI/Playwright/DOM PASS is not visual PASS. Backend-only work records VISUAL N/A with a reason. See `CONTRIBUTING.md` and acceptance Issue #121.
 - Maintained documentation describes the current project. Git, Issues, PRs, tags, and releases preserve history.
 - Configuration is a tested contract: every non-secret `Settings` field must appear in `config.example.yaml` with a human explanation; secrets stay in `.env`. Every Settings field/Secret must expose help text, and every Dev Console input/select/textarea/button must explain its scope/effect. Formal behavior belongs in Settings; Dev runtime overrides must stay explicitly temporary and off the first screen.
+- **Never hand over an untested change.** Every change to a plugin or user-visible flow must pass both suites before it reaches the user: the backend contract check (`node tools/api-check.mjs <base>` — JSON endpoints, SSE, and every client module returns 200) and the frontend flow check (`node tools/e2e-check.mjs "<url>"` — the real click-through a person would do). The agent then opens the produced screenshot and judges it before reporting. The user is the reviewer, not the test runner.
 
 ## Source precedence
 

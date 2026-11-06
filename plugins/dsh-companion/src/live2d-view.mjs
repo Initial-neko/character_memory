@@ -280,6 +280,21 @@ export async function createLive2dView({ container, modelUrl = DEFAULT_MODEL, on
     playMotion(group = 'Gesture', index = 0) {
       try { model.motion(group, index); return true; } catch { return false; }
     },
+    setMood(mood) {
+      const table = {
+        happy: {exprs: ['爱心眼'], motion: ['Gesture', 0]},
+        shy: {exprs: ['脸红'], motion: ['Gesture', 2]},
+        angry: {exprs: ['黑脸'], motion: ['Gesture', 1]},
+        surprised: {exprs: ['圈圈眼']},
+        thinking: {exprs: ['加载']},
+        neutral: {exprs: []},
+      };
+      const plan = table[mood] || table.neutral;
+      activeExprs.clear();
+      for (const name of plan.exprs) activeExprs.add(name);
+      if (plan.motion) { try { model.motion(plan.motion[0], plan.motion[1]); } catch {} }
+      return true;
+    },
     setExpression(name, on = true) {
       if (!EXPRS[name]) return false;
       if (on) activeExprs.add(name); else activeExprs.delete(name);

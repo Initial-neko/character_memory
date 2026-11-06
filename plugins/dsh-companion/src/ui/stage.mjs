@@ -35,10 +35,12 @@ export function createStage({React, store, call}) {
       globalThis.__dshCompanionSetMouth = (level) => { view.current?.setMouth(level); };
       globalThis.__dshCompanionPlayMotion = (group, index) => view.current?.playMotion(group, index);
       globalThis.__dshCompanionSetExpression = (name, on) => view.current?.setExpression(name, on);
+      globalThis.__dshCompanionSetMood = (mood) => view.current?.setMood(mood);
       return () => {
         delete globalThis.__dshCompanionSetMouth;
         delete globalThis.__dshCompanionPlayMotion;
         delete globalThis.__dshCompanionSetExpression;
+        delete globalThis.__dshCompanionSetMood;
       };
     }, []);
 
@@ -54,6 +56,20 @@ export function createStage({React, store, call}) {
       const timer = setInterval(() => setFps(view.current?.runtime?.fps || 0), 1000);
       return () => clearInterval(timer);
     }, [ready]);
+
+    React.useEffect(() => {
+      if (!ready) return undefined;
+      let timer = null;
+      const schedule = () => {
+        timer = setTimeout(() => {
+          const busy = snap.phase === 'ACTIVE' && (activity === 'thinking' || activity === 'speaking');
+          if (!busy) view.current?.playMotion('Gesture', Math.floor(Math.random() * 3));
+          schedule();
+        }, 18000 + Math.random() * 12000);
+      };
+      schedule();
+      return () => clearTimeout(timer);
+    }, [ready, activity, snap.phase]);
 
     const pat = () => view.current?.setState('pat');
     return h('div', {className: 'dsh-companion-stage'},

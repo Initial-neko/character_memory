@@ -305,6 +305,7 @@ export class Orchestrator {
     try {
       this.#bridge.applyTranscript(this.#bridge.current(), text);
       await this.#bridge.submit({token: this.#bridge.current(), text});
+      this.#reactCommand(text);
       this.#set({messages: [...this.#store.get().messages, {role: 'user', text, at: Date.now()}]});
       this.#status('发出去等回复了，你接着说。', 'thinking');
     } catch (error) {
@@ -335,6 +336,40 @@ export class Orchestrator {
     }
   }
 
+  /** Turn the reply text into an expression + gesture. Keyword based on purpose. */
+  /** User commands that map straight onto a gesture. */
+  /** Text typed in the big screen: same path as voice, minus ASR. */
+  async sendText(text) {
+    const value = String(text ?? '').trim();
+    if (!value) return;
+    if (value.length > 4000) throw Error('一次最多 4000 字');
+    this.#reactCommand(value);
+    this.#bridge.applyTranscript(this.#bridge.current(), value);
+    await this.#bridge.submit({token: this.#bridge.current(), text: value});
+    this.#set({messages: [...this.#store.get().messages, {role: 'user', text: value, at: Date.now()}]});
+  }
+
+  #reactCommand(text) {
+    const play = globalThis.__dshCompanionPlayMotion;
+    if (typeof play !== 'function') return;
+    const value = String(text ?? '');
+    if (/举手|举个手/.test(value)) play('Gesture', 0);
+    else if (/竖手指|指一下/.test(value)) play('Gesture', 1);
+    else if (/狗尾草/.test(value)) play('Gesture', 2);
+  }
+
+  #reactMood(text) {
+    const set = globalThis.__dshCompanionSetMood;
+    if (typeof set !== 'function') return;
+    const value = String(text ?? '');
+    let mood = 'neutral';
+    if (/哈哈|开心|喜欢|好耶|嘿嘿|爱你|可爱|欢迎/.test(value)) mood = 'happy';
+    else if (/害羞|脸红|讨厌啦|笨蛋|才不|哼/.test(value)) mood = 'shy';
+    else if (/生气|坏蛋|不许|不行/.test(value)) mood = 'angry';
+    else if (/诶|什么|真的吗|居然|竟然/.test(value)) mood = 'surprised';
+    set(mood);
+  }
+
   #replies(token) {
     const events = new EventSource(`${base}/events?sessionId=${encodeURIComponent(token.sessionId)}`);
     let queue = Promise.resolve();
@@ -353,6 +388,7 @@ export class Orchestrator {
       queue = queue.then(async () => {
         if (!this.#call.accepts(token)) return;
         const text = data.text.replace(/```[\s\S]*?```/g, '').trim();
+        this.#reactMood(text);
         if (!text) return;
         this.#playStarted();
         for (let i = 0; i < text.length; i += 380) {

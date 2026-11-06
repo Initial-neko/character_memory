@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>陪着她</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:#0a101c;color:#dbe7f5;font:14px/1.6 system-ui,"Segoe UI",sans-serif}
+  #app{display:grid;grid-template-columns:minmax(0,1fr) 380px;height:100%}
+  #stage{position:relative;min-width:0;background:radial-gradient(120% 90% at 50% 0%,#16233a,#080d16 70%)}
+  #stage iframe{width:100%;height:100%;border:0;display:block}
+  #chat{display:flex;flex-direction:column;min-width:0;border-left:1px solid #1d2a3d;background:#0b1220}
+  #chat header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1d2a3d;font-weight:600}
+  #chat header small{margin-left:auto;font-weight:400;color:#7f93b0;font-size:12px}
+  #log{flex:1;overflow:auto;padding:12px;display:grid;gap:8px;align-content:start}
+  .msg{max-width:88%;padding:8px 11px;border-radius:12px;white-space:pre-wrap;word-break:break-word}
+  .msg.user{margin-left:auto;background:#2a4a7a;color:#eaf3ff}
+  .msg.assistant{background:#16263d}
+  .empty{color:#6d7f99;font-size:13px;margin:4px 0}
+  form{display:flex;gap:8px;padding:10px;border-top:1px solid #1d2a3d}
+  textarea{flex:1;resize:none;min-height:38px;max-height:120px;padding:8px 10px;border-radius:10px;border:1px solid #26374f;background:#0f1b2d;color:#dbe7f5;font:inherit}
+  button{border:0;border-radius:10px;padding:0 14px;background:#3b6fd8;color:#fff;font:inherit;cursor:pointer}
+  button:disabled{opacity:.45;cursor:default}
+  .err{color:#ff9b9b;font-size:12px;padding:0 12px 8px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage"><iframe id="live" src="/companion/assets/live2d/index.html" title="形象"></iframe></div>
+  <div id="chat">
+    <header>陪着她<small id="state">连着</small></header>
+    <div id="log"><p class="empty">和她说点什么吧。</p></div>
+    <p class="err" id="err" hidden></p>
+    <form id="form">
+      <textarea id="text" rows="1" placeholder="和她说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button id="send" type="submit">发给她</button>
+    </form>
+  </div>
+</div>
+<script type="module">
+const log = document.querySelector('#log');
+const form = document.querySelector('#form');
+const input = document.querySelector('#text');
+const sendButton = document.querySelector('#send');
+const err = document.querySelector('#err');
+const stateLabel = document.querySelector('#state');
+let sending = false;
+
+function add(role, text) {
+  const empty = log.querySelector('.empty');
+  if (empty) empty.remove();
+  const node = document.createElement('div');
+  node.className = `msg ${role}`;
+  node.textContent = text;
+  log.append(node);
+  log.scrollTop = log.scrollHeight;
+}
+
+function fail(message) {
+  err.hidden = !message;
+  err.textContent = message || '';
+}
+
+function bridge(type, payload) {
+  if (window.opener && !window.opener.closed) {
+    window.opener.postMessage({ source: 'companion-stage', type, ...payload }, '*');
+    return true;
+  }
+  return false;
+}
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const text = input.value.trim();
+  if (!text || sending) return;
+  sending = true;
+  sendButton.disabled = true;
+  fail('');
+  add('user', text);
+  input.value = '';
+  if (!bridge('send', { text })) {
+    fail('请从陪伴菜单打开这个窗口，才能把消息转给 DSH。');
+  }
+  setTimeout(() => { sending = false; sendButton.disabled = false; }, 600);
+});
+
+input.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+window.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data || data.source !== 'companion-host') return;
+  if (data.type === 'reply') add('assistant', data.text);
+  else if (data.type === 'state') stateLabel.textContent = data.text;
+  else if (data.type === 'error') fail(data.text);
+  else if (data.type === 'mood' && window.__dshCompanionSetMood) window.__dshCompanionSetMood(data.mood);
+});
+
+const live = document.querySelector('#live');
+live.addEventListener('load', () => {
+  try {
+    const frame = live.contentWindow;
+    window.__dshCompanionSetMood = (mood) => frame.postMessage({ type: 'mood', mood }, '*');
+    window.__dshCompanionSetMouth = (level) => frame.postMessage({ type: 'mouth', level }, '*');
+    window.__dshCompanionPlayMotion = (group, index) => frame.postMessage({ type: 'motion', group, index }, '*');
+  } catch {}
+});
+</script>
+</body>
+</html>

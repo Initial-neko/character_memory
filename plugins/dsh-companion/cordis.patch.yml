@@ -1,0 +1,3 @@
+- insert:
+    - id: companion-capsule
+      name: '@local/dsh-companion'

@@ -9,6 +9,7 @@ import {createCapsule} from './ui/capsule.mjs';
 import {createPanel} from './ui/panel.mjs';
 import {createStage} from './ui/stage.mjs';
 import {createBigChat} from './ui/bigchat.mjs';
+import {createPet} from './ui/pet.mjs';
 import {createSettings} from './ui/settings.mjs';
 
 /** Wires the host surfaces to one call controller, one store and one orchestrator. */
@@ -33,6 +34,7 @@ export function createComponents(React) {
     elapsed: 0,
     queued: 0,
     bigchat: false,
+    pet: false,
     messages: [],
   });
   const refs = {trigger: null, props: {}};
@@ -82,6 +84,7 @@ export function createComponents(React) {
   const Stage = createStage({React, store, call});
   const Panel = createPanel({React, store, call, actions, Stage});
   const BigChat = createBigChat({React, store, call, actions, Stage});
+  const Pet = createPet({React, store, Stage});
   const Settings = createSettings({React, store, request, actions, call});
 
   function Menu() {
@@ -146,7 +149,8 @@ export function createComponents(React) {
       h(Capsule),
       state.panel === 'settings' && h(OverlaySettings),
       expanded && h(Panel),
-      h(BigChat, {sessionId: props.sessionId}));
+      h(BigChat, {sessionId: props.sessionId}),
+      h(Pet));
   }
 
   return {

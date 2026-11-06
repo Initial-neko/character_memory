@@ -61,4 +61,8 @@ export const css = `
 .dsh-companion-bigchat-input button{border:1px solid transparent;background:#3b6fb6;color:#fff;border-radius:10px;padding:0 16px;cursor:pointer}
 .dsh-companion-bigchat-input button:disabled{opacity:.5;cursor:default}
 @media (max-width:760px){.dsh-companion-bigchat-body{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}.dsh-companion-bigchat-chat{border-left:0;border-top:1px solid #1d2635}}
+.dsh-companion-pet{position:fixed;right:24px;bottom:24px;width:132px;height:176px;z-index:2147483000;cursor:grab;user-select:none;touch-action:none;filter:drop-shadow(0 10px 28px rgba(0,0,0,.5))}
+.dsh-companion-pet .dsh-companion-stage{height:100%;margin:0;border:0;border-radius:12px}
+.dsh-companion-pet-close{position:absolute;right:4px;top:4px;width:20px;height:20px;border-radius:50%;border:0;background:#00000099;color:#fff;font-size:12px;line-height:1;cursor:pointer;opacity:0;transition:opacity .15s}
+.dsh-companion-pet:hover .dsh-companion-pet-close{opacity:1}
 `;
